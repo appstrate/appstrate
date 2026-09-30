@@ -12,7 +12,10 @@
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
  *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
+ *   - `appstrate code`:    project the spaces' skills and the pinned space's agents into
+ *                           coding-agent tools (Claude Code plugin, `~/.claude/skills`, Codex).
+ *   - `appstrate packages`: pull a package into a folder, compare it, push it to its draft,
+ *                           publish it.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -50,7 +53,13 @@ import {
   spaceCurrentCommand,
   spaceCreateCommand,
 } from "./commands/space.ts";
-import { skillsSyncCommand } from "./commands/skills.ts";
+import { codeSyncCommand } from "./commands/code-sync.ts";
+import {
+  packagesPublishCommand,
+  packagesPullCommand,
+  packagesPushCommand,
+  packagesStatusCommand,
+} from "./commands/packages.ts";
 import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
@@ -81,6 +90,7 @@ import {
   shouldSkipDualInstallCheck,
 } from "./lib/dual-install-check.ts";
 import { installSignalHandlers, onShutdown } from "./lib/shutdown.ts";
+import { asksForVersion, showVersionFlagInHelp, valueFlagsOf } from "./lib/root-version.ts";
 import { exitWithError } from "./lib/ui.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
@@ -124,7 +134,7 @@ function collect(val: string, prev: string[]): string[] {
   return [...prev, val];
 }
 
-/** Repeatable `--target`. No commander default: the command owns that rule. */
+/** Repeatable `--target`. Required, enforced by the command rather than commander. */
 function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[] {
   if (!(SYNC_TARGETS as readonly string[]).includes(val)) {
     throw new InvalidArgumentError(`expected one of ${SYNC_TARGETS.join(", ")}, got "${val}"`);
@@ -132,7 +142,7 @@ function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[
   return [...(prev ?? []), val as SyncTarget];
 }
 
-/** `--source` on `appstrate skills sync`. */
+/** `--source` on `appstrate code sync`. */
 function parseSkillSource(val: string): SkillSource {
   if (val !== "published" && val !== "draft") {
     throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
@@ -151,7 +161,6 @@ const program = new Command();
 program
   .name("appstrate")
   .description("Official CLI for the Appstrate platform")
-  .version(CLI_VERSION)
   .option(
     "-p, --profile <name>",
     "Profile to use (overrides APPSTRATE_PROFILE / defaultProfile / 'default').",
@@ -525,20 +534,22 @@ spaceGroup
     });
   });
 
-// ─── `appstrate skills …` — sync org skills to Claude Code / Codex ─────
+// ─── `appstrate code …` — skills and agent commands into coding-agent tools ──
 
-const skillsGroup = program
-  .command("skills")
-  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
+const codeGroup = program
+  .command("code")
+  .description(
+    "Coding-agent tools on this machine: project your spaces' skills and the pinned space's agents into Claude Code and Codex",
+  );
 
-skillsGroup
+codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the pinned space's agents as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
-    `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
+    `Destination to write (required, repeatable): ${SYNC_TARGETS.join(" | ")}.`,
     collectTarget,
   )
   .option(
@@ -561,7 +572,7 @@ skillsGroup
       dryRun?: boolean;
     }) => {
       const globalOpts = program.opts<{ profile?: string }>();
-      await skillsSyncCommand({
+      await codeSyncCommand({
         profile: globalOpts.profile,
         target: opts.target,
         space: opts.space,
@@ -571,6 +582,94 @@ skillsGroup
       });
     },
   );
+
+// ─── `appstrate packages …` — the authoring loop ────────
+
+const packagesGroup = program
+  .command("packages")
+  .description(
+    "Edit a package (skill, agent, integration, MCP server) in a local folder: pull it, compare it, push it back to its draft, publish it",
+  );
+
+packagesGroup
+  .command("pull <package> [dir]")
+  .description(
+    "Bring a package into a local working folder: its draft when you may write it, else its published version (read-only). <package>@<spec> pulls a published version (latest, exact, range, tag), or @draft the draft. Default folder: <workDir>/<org>/packages/<type segment>/@<scope>/<name>.",
+  )
+  .option(
+    "--force",
+    "Pull into a folder that already has files: it then mirrors the package, and files the package does not have are deleted",
+  )
+  .action(async (pkg: string, dir: string | undefined, opts: { force?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesPullCommand({
+      profile: globalOpts.profile,
+      package: pkg,
+      dir,
+      force: opts.force,
+    });
+  });
+
+packagesGroup
+  .command("status <dir>")
+  .description(
+    "Show what a working folder would change in the draft (folder path, or a package name in the work dir)",
+  )
+  .option("--diff", "Print a line diff for each modified text file")
+  .action(async (dir: string, opts: { diff?: boolean }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesStatusCommand({ profile: globalOpts.profile, dir, diff: opts.diff });
+  });
+
+packagesGroup
+  .command("push <dir>")
+  .description(
+    "Write a working folder to the package's draft in one atomic update, under the lock this folder last saw. Nobody else sees it until you publish.",
+  )
+  .option(
+    "--create",
+    "Create the package when it does not exist (this publishes its first version)",
+  )
+  .option(
+    "--space <id>",
+    "With --create only: the space that becomes its home (default: the pinned space)",
+  )
+  .option("--force", "Replace the draft with this folder, even if this folder did not see it")
+  .option("--dry-run", "Show what would be sent and send nothing")
+  .action(
+    async (
+      dir: string,
+      opts: { create?: boolean; space?: string; force?: boolean; dryRun?: boolean },
+    ) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await packagesPushCommand({
+        profile: globalOpts.profile,
+        dir,
+        create: opts.create,
+        space: opts.space,
+        force: opts.force,
+        dryRun: opts.dryRun,
+      });
+    },
+  );
+
+packagesGroup
+  .command("publish <package-or-dir>")
+  .description(
+    "Publish the draft as a new version, by the dashboard's version rule. Sharing and activation stay in their own routes.",
+  )
+  .option(
+    "--bump <segment>",
+    "patch, minor or major: bumped from the latest version when the draft still carries it (default: patch)",
+  )
+  .action(async (target: string, opts: { bump?: string }) => {
+    const globalOpts = program.opts<{ profile?: string }>();
+    await packagesPublishCommand({
+      profile: globalOpts.profile,
+      package: target,
+      bump: opts.bump,
+    });
+  });
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 
@@ -932,7 +1031,7 @@ program
   .description("Upgrade the running appstrate binary in place (curl channel only — issue #249).")
   .option(
     "--release <version>",
-    "Pin a specific release version (default: latest from GitHub Releases).",
+    "Pin a specific release version (default: latest, from the signed channel manifest).",
   )
   .option("-f, --force", "Reinstall even if the current version equals the target.")
   .action(async (opts) => {
@@ -972,7 +1071,7 @@ program
     "Integration credential resolution: remote (default, via Appstrate instance), local (creds file), or none. --local execution path only.",
   )
   .option("--creds-file <path>", "JSON credentials file for --integrations=local")
-  .option("--api-key <key>", "Appstrate API key (ask_...) for --integrations=remote")
+  .option("--api-key <key>", "Appstrate API key (apst_...) for --integrations=remote")
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
   .option(
@@ -1084,6 +1183,13 @@ function parseSinkTtl(raw: unknown): number | undefined {
     throw new Error(`Invalid --sink-ttl "${raw}" (expected a positive integer number of seconds)`);
   }
   return n;
+}
+
+// Top-level only — see `lib/root-version.ts`.
+showVersionFlagInHelp(program);
+if (asksForVersion(process.argv.slice(2), valueFlagsOf(program))) {
+  process.stdout.write(`${CLI_VERSION}\n`);
+  process.exit(0);
 }
 
 program.parseAsync(process.argv).catch((err) => exitWithError(err));

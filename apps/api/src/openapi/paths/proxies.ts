@@ -172,12 +172,12 @@ export const proxiesPaths = {
     },
   },
   "/api/proxies/{id}": {
-    put: {
+    patch: {
       operationId: "updateProxy",
       tags: ["Proxies"],
       summary: "Update a custom proxy",
       description:
-        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified.",
+        "Update a custom proxy (label, url, enabled). Built-in proxies cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

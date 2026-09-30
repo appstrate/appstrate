@@ -7,7 +7,7 @@ import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
-import { lockOrgMemberForSpaceGrant } from "./space-members.ts";
+import { lockOrgMember } from "./space-members.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
@@ -41,7 +41,7 @@ export async function assertSpaceAssignmentsValid(
   }
   if (assignments.length === 0) return;
 
-  const spaceIds = [...new Set(assignments.map((a) => a.space_id))];
+  const spaceIds = [...new Set(assignments.map((a) => a.spaceId))];
   const liveSpaces = await tx
     .select({ id: spaces.id, ownerUserId: spaces.ownerUserId })
     .from(spaces)
@@ -100,7 +100,7 @@ export async function applySpaceAssignments(
   if (assignments.length === 0) return [];
 
   // An existing member may have been promoted since the grants were configured.
-  const member = await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+  const member = await lockOrgMember(tx, orgId, userId);
   if (!member) throw notFound("User is not a member of this organization");
   const orgRole = member.role;
   if (orgRole === "owner" || orgRole === "admin") {
@@ -123,7 +123,7 @@ export async function applySpaceAssignments(
       .where(
         and(
           eq(spaces.orgId, orgId),
-          inArray(spaces.id, [...new Set(assignments.map((a) => a.space_id))]),
+          inArray(spaces.id, [...new Set(assignments.map((a) => a.spaceId))]),
           // Backstop on the WRITE side of "a personal space is never
           // assignable" (RBAC spec §3.6). `assertSpaceAssignmentsValid`
           // already refuses one when the invitation or the signup policy is
@@ -148,7 +148,7 @@ export async function applySpaceAssignments(
 
   const applied: SpaceAssignment[] = [];
   for (const assignment of assignments) {
-    const gone = !spaceIds.has(assignment.space_id)
+    const gone = !spaceIds.has(assignment.spaceId)
       ? "space"
       : assignment.custom_role_id && !roleIds.has(assignment.custom_role_id)
         ? "custom role"
@@ -171,7 +171,7 @@ export async function applySpaceAssignments(
       : { presetRole: null, customRoleId: assignment.custom_role_id! };
     await tx
       .insert(spaceMembers)
-      .values({ spaceId: assignment.space_id, userId, addedBy, ...values })
+      .values({ spaceId: assignment.spaceId, userId, addedBy, ...values })
       .onConflictDoUpdate({ target: [spaceMembers.spaceId, spaceMembers.userId], set: values });
     applied.push(assignment);
   }

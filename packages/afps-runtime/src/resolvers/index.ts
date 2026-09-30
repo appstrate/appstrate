@@ -54,6 +54,16 @@ export {
 // renderer, and the portable integration resolver.
 export { substituteVars } from "./template-vars.ts";
 
+// Credential-exfiltration guard shared by the three `api_call` paths.
+export {
+  allowlistUnrendered,
+  credentialUrlPolicy,
+  exfiltrationRefusal,
+  redactionFields,
+  UNRENDERED_ALLOWLIST_REFUSAL,
+  type CredentialUrlPolicy,
+} from "./credential-guard.ts";
+
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
   ABSOLUTE_BODY_CEILING,
@@ -63,10 +73,14 @@ export {
   STREAMING_THRESHOLD,
   makeApiCallTool,
   matchesAuthorizedUriSpec,
+  hostLiterallyAllowlisted,
+  compileEgressPolicy,
   apiCallRequestJsonSchema,
+  apiCallTargetJsonSchema,
   resolveSafeFile,
   resolveSafePath,
   resolveWorkspaceFile,
+  type EgressPolicy,
   type MakeApiCallToolOptions,
   type ApiCallContext,
   type ApiCallFn,
@@ -86,14 +100,17 @@ export {
 export {
   MAX_REDIRECTS,
   matchesAuthorizedUri,
-  hostLiterallyAllowlisted,
   stripUserInfoAndFragment,
   redactHost,
-  mergeSetCookieIntoJar,
+  redactCredentialHost,
+  scrubTransportError,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,
 } from "./api-call-engine.ts";
+
+// Sticky-cookie jar shared by both credential proxies and the redirect follower.
+export { cookieScope, type CookieJar, type CookieScope } from "./cookie-jar.ts";
 
 // Integration `api_call` surface — the portable equivalent of the platform's
 // `{ns}__api_call` MCP tool. Reuses the same HTTP core (`makeApiCallTool`) as
@@ -103,6 +120,7 @@ export {
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  readIntegrationManifest,
   type IntegrationApiCallResolver,
   type IntegrationRef,
 } from "./integration-api-call.ts";

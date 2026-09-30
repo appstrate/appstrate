@@ -270,10 +270,7 @@ describe("findMissingRequired", () => {
     // self-hosting one. Mutation caught: merging the per-file sets into one
     // population reports this as covered.
     const missing = findMissingRequired(
-      new Map([
-        [".env.example", new Set(["CONNECT_SESSION_SECRET"])],
-        ["examples/self-hosting/.env.example", new Set(["CONNECT_SESSION_SECRET"])],
-      ]),
+      new Set(["CONNECT_SESSION_SECRET"]),
       new Map([
         [".env.example", new Set(["CONNECT_SESSION_SECRET"])],
         ["examples/self-hosting/.env.example", new Set(["BETTER_AUTH_SECRET"])],
@@ -287,10 +284,7 @@ describe("findMissingRequired", () => {
   it("reports nothing when every file has every required key — the other half", () => {
     expect(
       findMissingRequired(
-        new Map([
-          [".env.example", new Set(["A", "B"])],
-          ["examples/self-hosting/.env.example", new Set(["A", "B"])],
-        ]),
+        new Set(["A", "B"]),
         new Map([
           [".env.example", new Set(["A", "B", "C"])],
           ["examples/self-hosting/.env.example", new Set(["A", "B"])],
@@ -303,31 +297,7 @@ describe("findMissingRequired", () => {
     // A defaulted key exists precisely so an operator need not write it down.
     // Forcing all 94 of them into every example would be noise, and a rule that
     // did it would be turned off rather than fixed.
-    expect(
-      findMissingRequired(
-        new Map([[".env.example", new Set()]]),
-        new Map([[".env.example", new Set()]]),
-      ),
-    ).toEqual([]);
-  });
-
-  it("demands of ONE file what only that file's compose boots", () => {
-    // The shape `deploy/` introduced: two example files, the same platform
-    // keys, and a module key owed by only one of them because only one sibling
-    // compose names the module in its `MODULES` default. A single merged demand
-    // gets this wrong in both directions at once — it either lets the deployment
-    // ship without a Stripe key, or it demands one of every self-hoster.
-    const missing = findMissingRequired(
-      new Map([
-        [".env.example", new Set(["BETTER_AUTH_SECRET"])],
-        ["deploy/.env.example", new Set(["BETTER_AUTH_SECRET", "STRIPE_WEBHOOK_SECRET"])],
-      ]),
-      new Map([
-        [".env.example", new Set(["BETTER_AUTH_SECRET"])],
-        ["deploy/.env.example", new Set(["BETTER_AUTH_SECRET"])],
-      ]),
-    );
-    expect(missing).toEqual([{ name: "STRIPE_WEBHOOK_SECRET", file: "deploy/.env.example" }]);
+    expect(findMissingRequired(new Set(), new Map([[".env.example", new Set()]]))).toEqual([]);
   });
 });
 

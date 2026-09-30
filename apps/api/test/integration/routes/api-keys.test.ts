@@ -12,6 +12,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedSpace } from "../../helpers/seed.ts";
 import { apiKeys } from "@appstrate/db/schema";
+import { hashApiKey } from "../../../src/services/api-keys.ts";
 
 const app = getTestApp();
 
@@ -84,7 +85,7 @@ describe("API Keys API", () => {
       expect(body.keyPrefix).toBeDefined();
     });
 
-    it("created key has ask_ prefix", async () => {
+    it("created key is checksummed apst_ and shows a 13-char display prefix", async () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -95,8 +96,13 @@ describe("API Keys API", () => {
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.key).toStartWith("ask_");
-      expect(body.keyPrefix).toStartWith("ask_");
+      expect(body.key).toMatch(/^apst_[0-9A-Za-z]{36}$/);
+      expect(body.keyPrefix).toBe(body.key.slice(0, 13));
+
+      const authed = await app.request("/api/orgs", {
+        headers: { Authorization: `Bearer ${body.key}` },
+      });
+      expect(authed.status).toBe(200);
     });
   });
 
@@ -358,6 +364,25 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx) },
       });
       expect(res.status).toBe(204);
+    });
+  });
+
+  describe("retired ask_ key format", () => {
+    it("is refused with a 401 even when its hash is stored", async () => {
+      const rawKey = `ask_${"a1".repeat(24)}`;
+      await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        keyHash: await hashApiKey(rawKey),
+        keyPrefix: rawKey.slice(0, 8),
+      });
+
+      const res = await app.request("/api/orgs", {
+        headers: { Authorization: `Bearer ${rawKey}` },
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("content-type")).toContain("application/problem+json");
     });
   });
 

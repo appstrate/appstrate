@@ -16,7 +16,11 @@ import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { openAsModal } from "../lib/modal-route";
 import { usePermissions } from "../hooks/use-permissions";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import {
+  PACKAGE_WRITE_PERMISSIONS,
+  packagePermission,
+  spacePackagePermission,
+} from "@appstrate/core/permissions";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -53,10 +57,12 @@ export function ItemTab({
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  // Creating and importing are writes on the package type, as their routes are.
-  const canCreate = can(type === "skill" ? "skills:write" : "mcp-servers:write");
+  // Creating is a write on the package type, as its route is.
+  const canCreate = can(packagePermission(type, "write"));
+  // Import is type-agnostic: any package write opens it, the door re-checks the type.
+  const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
   const creation = useCreationHandoff(type, canCreate);
-  const canActivate = can(PACKAGE_PERMISSIONS[type].activate);
+  const canActivate = can(spacePackagePermission(type, "activate"));
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -82,7 +88,7 @@ export function ItemTab({
         emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={presentation.emptyIcon}
         extraActions={
-          canCreate || canActivate ? (
+          canCreate || canImport || canActivate ? (
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
@@ -96,17 +102,17 @@ export function ItemTab({
                   </Link>
                 </DropdownMenuItem>
               )}
+              {canImport && (
+                <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                  <Upload />
+                  {t("nav.import", { ns: "common" })}
+                </DropdownMenuItem>
+              )}
               {canCreate && (
-                <>
-                  <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
-                    <Upload />
-                    {t("nav.import", { ns: "common" })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                    <Plus />
-                    {t("list.createItem", { ns: "agents", type: typeLabel })}
-                  </DropdownMenuItem>
-                </>
+                <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
+                  <Plus />
+                  {t("list.createItem", { ns: "agents", type: typeLabel })}
+                </DropdownMenuItem>
               )}
             </PageActionsMenu>
           ) : undefined

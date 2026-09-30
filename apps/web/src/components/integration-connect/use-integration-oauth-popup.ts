@@ -35,7 +35,9 @@ const POPUP_FEATURES = "width=600,height=700";
  * Completion is event-driven: both the OAuth callback page and the hosted form
  * broadcast `appstrate:integration_connection` on success (postMessage +
  * BroadcastChannel). The promise resolves on that signal OR when the popup
- * closes (cancel fallback) and rejects on timeout / kickoff failure.
+ * closes (cancel fallback) and rejects on timeout / kickoff failure. A success
+ * does not close the popup: completion pages close themselves, and one that
+ * shows an install block (SSH) stays open until the user dismisses it.
  */
 export function useHostedConnectPopup() {
   const { t } = useTranslation("settings");
@@ -78,11 +80,6 @@ export function useHostedConnectPopup() {
             };
             const onHit = () => {
               cleanup();
-              try {
-                popup.close();
-              } catch {
-                /* ignore */
-              }
               resolve();
             };
             // Which completion this popup is waiting for. Both carriers fan
@@ -147,10 +144,7 @@ export function useHostedConnectPopup() {
         // Invalidate the integration + user-connection caches so every consumer
         // (status cards, pickers, the connections page) reflects the new
         // connection without waiting for a window-focus refetch.
-        await Promise.all([
-          invalidateIntegrationQueries(qc),
-          qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] }),
-        ]);
+        await invalidateIntegrationQueries(qc);
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
           toast.error(t("integration.popup.blocked"));

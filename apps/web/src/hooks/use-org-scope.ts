@@ -29,8 +29,10 @@ export function useOrgScope() {
  */
 export function useOrgOnlyScope() {
   const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    header: { "X-Org-Id": orgId ?? undefined },
-  };
+  return { enabled: !!orgId, header: orgOnlyHeader(orgId) };
+}
+
+/** {@link useOrgOnlyScope}'s header, for a caller outside React that must hit the same key. */
+export function orgOnlyHeader(orgId: string | null) {
+  return { "X-Org-Id": orgId ?? undefined };
 }

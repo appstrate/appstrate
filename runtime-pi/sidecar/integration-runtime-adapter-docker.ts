@@ -3,7 +3,7 @@
 /**
  * Docker-backed integration runtime adapter.
  *
- * One runner container per integration, on the per-run user-defined
+ * One runner container per bound connection, on the per-run user-defined
  * bridge network (`appstrate-exec-<runId>`, created by the platform
  * launcher with the sidecar joined under the `sidecar` DNS alias).
  * MITM listeners bind 0.0.0.0 so the runner reaches them via
@@ -18,12 +18,22 @@ import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
-import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
-import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
+import {
+  startTransparentEgressPlane,
+  type TransparentEgressPlane,
+} from "./integration-transparent-listener.ts";
+import {
+  createRunnerPeers,
+  noRunnerPeers,
+  policyForRunnerPeer,
+  runnerKeyOf,
+  type RunnerPeers,
+} from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -686,73 +696,25 @@ export async function writeSecretEnvFile(
 }
 
 /**
- * Per-run transparent egress infrastructure (#779): the sidecar's IP on
- * the per-run bridge, the DNS responder that resolves every external name
- * to it, and the SNI-passthrough splicers on :443/:80. `null` when the
- * setup failed or doesn't apply — spawn() then omits `--dns` and the
- * runner degrades to the proxy-env-only contract (pre-#779 behaviour).
+ * The sidecar's own IPv4 on the per-run network, where the transparent egress
+ * plane (#779) binds. Binding to that specific IP (not 0.0.0.0) keeps
+ * :53/:443/:80 off the sidecar's other interfaces (the shared egress network) —
+ * only this run's containers can reach them. Low-port binds require the
+ * platform to have granted `net.ipv4.ip_unprivileged_port_start=0` on the
+ * sidecar container (it does whenever the run declares integrations).
  */
-interface TransparentEgressInfra {
-  readonly dnsIp: string;
-  readonly handles: ReadonlyArray<{ close(): Promise<void> }>;
-}
-
-/**
- * Discover the sidecar's own IPv4 on the per-run network and mount the
- * transparent egress plane on it. Binding to that specific IP (not
- * 0.0.0.0) keeps :53/:443/:80 off the sidecar's other interfaces (the
- * shared egress network) — only this run's containers can reach them.
- *
- * Low-port binds require the platform to have granted
- * `net.ipv4.ip_unprivileged_port_start=0` on the sidecar container (it
- * does whenever the run declares integrations). Any failure — inspect,
- * bind, older daemon — is logged and swallowed: transparent egress is an
- * interop layer, not a security boundary, so degrading to the CONNECT
- * proxy contract is always safe.
- *
- * The splicers use the default DNS resolver for their resolve-and-pin
- * floor — deliberately NOT `bundleFetchOpts.resolveHostFn`, which is a
- * test-injection seam (always `undefined` in production; see the
- * `bootIntegrations` call in server.ts) and isn't threaded through the
- * adapter interface. If a production resolver override ever lands,
- * revisit so both egress planes resolve identically.
- */
-async function setupTransparentEgress(runNetwork: string): Promise<TransparentEgressInfra | null> {
-  const handles: Array<{ close(): Promise<void> }> = [];
-  try {
-    // `hostname()` inside a container is the container ID — inspect self.
-    const ip = await dockerExec([
-      "inspect",
-      "--format",
-      `{{(index .NetworkSettings.Networks "${runNetwork}").IPAddress}}`,
-      hostname(),
-    ]);
-    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
-      throw new Error(`could not resolve sidecar IP on ${runNetwork} (got '${ip}')`);
-    }
-    const onEvent = (event: { kind: string; target: string; reason?: string }) => {
-      const log = event.kind === "tunnel-opened" ? logger.info : logger.warn;
-      log.call(logger, "transparent egress event", event);
-    };
-    const dns = createIntegrationDnsResponder({ answerIpv4: ip, host: ip, port: 53 });
-    handles.push(dns);
-    const tls = createTransparentEgressListener({ host: ip, port: 443, onEvent });
-    handles.push(tls);
-    const http = createTransparentEgressListener({ host: ip, port: 80, onEvent });
-    handles.push(http);
-    await Promise.all([dns.ready, tls.ready, http.ready]);
-    logger.info("transparent egress ready", { dnsIp: ip });
-    return { dnsIp: ip, handles };
-  } catch (err) {
-    for (const h of handles) {
-      await h.close().catch(() => {});
-    }
-    logger.warn(
-      "transparent egress unavailable — env-delivery runners fall back to the CONNECT proxy contract (proxy-unaware HTTP clients will fail, #779)",
-      { error: err instanceof Error ? err.message : String(err) },
-    );
-    return null;
+async function sidecarIpOn(runNetwork: string): Promise<string> {
+  // `hostname()` inside a container is the container ID — inspect self.
+  const ip = await dockerExec([
+    "inspect",
+    "--format",
+    `{{(index .NetworkSettings.Networks "${runNetwork}").IPAddress}}`,
+    hostname(),
+  ]);
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    throw new Error(`could not resolve sidecar IP on ${runNetwork} (got '${ip}')`);
   }
+  return ip;
 }
 
 function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
@@ -760,7 +722,13 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   /** Per-spawn host temp directories holding decoded fileMounts bytes. */
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
-  let transparentEgress: TransparentEgressInfra | null = null;
+  /**
+   * #779 — `null` when the setup failed or doesn't apply: spawn() then omits
+   * `--dns` and the runner degrades to the proxy-env-only contract.
+   */
+  let transparentEgress: TransparentEgressPlane | null = null;
+  let peers: RunnerPeers | null = null;
+  const transparentPolicies = new Map<string, EgressPolicy>();
 
   return {
     id: "docker",
@@ -774,10 +742,23 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // the platform launcher's path — dev / tests), we fall back to
       // the default bridge with loopback URLs and skip the alias path.
       const envRunId = process.env.RUN_ID;
-      runNetwork = envRunId ? `appstrate-exec-${envRunId}` : null;
+      const network = envRunId ? `appstrate-exec-${envRunId}` : null;
+      runNetwork = network;
+      peers = network
+        ? createRunnerPeers({
+            network,
+            inspect: (name) => dockerExec(["network", "inspect", name]),
+          })
+        : null;
       // #779 — transparent egress plane for proxy-unaware HTTP clients.
       // Only meaningful on a per-run bridge (a routable sidecar IP exists).
-      transparentEgress = runNetwork ? await setupTransparentEgress(runNetwork) : null;
+      transparentEgress =
+        network && peers
+          ? await startTransparentEgressPlane({
+              ipv4: () => sidecarIpOn(network),
+              policyForPeer: policyForRunnerPeer(peers.runnerOf, transparentPolicies),
+            })
+          : null;
       logger.info("docker integration adapter ready", { runId, runNetwork });
       return {
         // Bind 0.0.0.0 when we have a per-run network — the runner
@@ -794,7 +775,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-      const containerName = `appstrate-integ-${safeNs}-${runId.slice(0, 8)}-${Date.now()}`;
+      // Every connection of one integration shares `namespace`; its uuid prefix does not.
+      const safeConn = spec.connection ? `${spec.connection.id.slice(0, 8)}-` : "";
+      const containerName = `appstrate-integ-${safeNs}-${safeConn}${runId.slice(0, 8)}-${Date.now()}`;
 
       // Only NON-secret routing env rides `-e` on the command line. The
       // integration credentials (`spec.spawnEnv`) are delivered via a 0600
@@ -867,8 +850,8 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
 
       const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
 
-      // #779 — transparent egress for `delivery.env` runners (plain CONNECT
-      // egress, `caCertHostPath === null`). `--dns` points the embedded DNS
+      // #779 — transparent egress for plain-CONNECT egress runners
+      // (`caCertHostPath === null`). `--dns` points the embedded DNS
       // forwarder (127.0.0.11) at the sidecar's responder, so external names
       // resolve to the sidecar's SNI-passthrough splicer and proxy-unaware
       // HTTP clients (undici/fetch, axios) get egress without cooperating.
@@ -878,7 +861,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // credential injection; their contract stays proxy-env + CA trust.
       const dnsFlags: string[] =
         egress && egress.caCertHostPath === null && transparentEgress
-          ? ["--dns", transparentEgress.dnsIp]
+          ? ["--dns", transparentEgress.ipv4]
           : [];
 
       // Deliver integration credentials off-argv via a 0600 env-file. `docker
@@ -926,6 +909,10 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       containerIds.push(containerId);
+      peers?.register(containerName, runnerKeyOf(spec));
+      if (egress && egress.caCertHostPath === null) {
+        transparentPolicies.set(runnerKeyOf(spec), egress.policy);
+      }
 
       // docker cp <src>/. <id>:/<dst>/  — the trailing `/.` semantics
       // copy the directory's *contents* into /bundle (already exists in
@@ -975,6 +962,12 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       return { transport, diagnosticId: containerId.slice(0, 12) };
     },
 
+    peerAttribution() {
+      // No per-run network (dev / tests): the listeners bind loopback, which no
+      // runner container can reach, so no peer is a runner.
+      return peers ? peers.runnerOf : noRunnerPeers;
+    },
+
     async shutdown(): Promise<void> {
       // Container kill is best-effort — `--rm` will clean up after
       // SubprocessTransport closes the docker-attach stdio anyway. This
@@ -995,12 +988,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // #779 — tear down the transparent egress plane (DNS responder +
       // SNI-passthrough splicers). Idempotent: close() resolves even when
       // the underlying socket already died.
-      if (transparentEgress) {
-        for (const h of transparentEgress.handles) {
-          await h.close().catch(() => {});
-        }
-        transparentEgress = null;
-      }
+      await transparentEgress?.close();
+      transparentEgress = null;
+      transparentPolicies.clear();
     },
   };
 }

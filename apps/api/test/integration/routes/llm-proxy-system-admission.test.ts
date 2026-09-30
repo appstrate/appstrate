@@ -43,6 +43,7 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
@@ -184,8 +185,9 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     globalThis.fetch = originalFetch;
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
     initSystemModelProviderKeys([]);
     seedTestModelProviders();
   });
@@ -242,10 +244,10 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
   it("refuses the quota bypass that borrows a live platform run's X-Run-Id", async () => {
     // The bypass: an org past its quota (every new run/turn rejected) stamps
     // `X-Run-Id` of a still-alive platform-origin, system-model run onto raw
-    // proxy calls. `assertRunAttributable` only binds an API-key principal to
-    // org + space, so ANY key of the space can borrow ANY live run — and
-    // the proxy used to skip admission entirely for that run shape, buying
-    // unbounded platform-paid spend until the borrowed run expired.
+    // proxy calls. `requireAttributableRun` only binds an API-key principal to
+    // org + space, so ANY key of the space can borrow ANY live run — and a
+    // proxy that skipped admission for that run shape would buy unbounded
+    // platform-paid spend until the borrowed run expired.
     //
     // The run LAUNCH the preflight gate admitted and a raw proxy call are two
     // different billable units (the launch's inference goes through the

@@ -7,43 +7,40 @@
  * a persisted DB row that the resolver sees on every run (cascade layer 4),
  * not an ephemeral browser-local value.
  *
- * One pin per (agent, integration, member-scope). The pin's connection
- * carries its own authKey; OAuth and api_key connections are
- * interchangeable at runtime.
+ * One pin per (agent, integration, member-scope), holding the WHOLE bound
+ * SET: `PUT` replaces it, `DELETE` clears it. Each connection carries its own
+ * authKey; OAuth and api_key connections are interchangeable at runtime.
  *
  * These are write-only mutations: the picker reads pin state off the
- * server-authoritative agent-resolution verdict (`member_pinned_connection_id`)
- * and refetches it itself after a pick, so the only invalidation needed here is
- * the typed `/api/me/integration-pins` path. Member pins are private per actor —
- * the API endpoint filters by the caller's user_id, so we never see other
- * users' pins client-side.
+ * server-authoritative agent-resolution verdict (`member_pinned_connection_ids`)
+ * and refetches it itself after a pick, so nothing is invalidated here. Member
+ * pins are private per actor — the API endpoint filters by the caller's
+ * user_id, so we never see other users' pins client-side.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { onMutationError } from "../lib/mutation-error";
 
 interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
-  connectionId: string;
+  connectionIds: string[];
 }
 
 export function useUpsertMemberIntegrationPin() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpsertMemberPinInput) => {
       const { data } = await client.PUT("/api/me/integration-pins", {
         body: {
           agent_package_id: input.agentPackageId,
           integration_package_id: input.integrationId,
-          connection_id: input.connectionId,
+          connection_ids: input.connectionIds,
         },
       });
       return data;
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
-    },
+    onError: onMutationError,
   });
 }
 
@@ -53,7 +50,6 @@ interface DeleteMemberPinInput {
 }
 
 export function useDeleteMemberIntegrationPin() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: DeleteMemberPinInput) => {
       await client.DELETE("/api/me/integration-pins", {
@@ -65,8 +61,6 @@ export function useDeleteMemberIntegrationPin() {
         },
       });
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
-    },
+    onError: onMutationError,
   });
 }

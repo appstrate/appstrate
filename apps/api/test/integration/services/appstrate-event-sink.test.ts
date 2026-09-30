@@ -97,7 +97,7 @@ describe("persistRunEvent", () => {
     expect(await loadLogs()).toHaveLength(0);
   });
 
-  // `file.published` / `file_id` is the ONE published-file spelling. The
+  // `file.published` / `fileId` is the ONE published-file spelling. The
   // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
   //
   // The "producer and acceptor are the same build, so there is no version
@@ -123,7 +123,7 @@ describe("persistRunEvent", () => {
   it("ingests file.published and drops the retired document.published", async () => {
     await persist(
       event("file.published", {
-        file_id: "file_canonical",
+        fileId: "file_canonical",
         name: "a.md",
         mime: "text/markdown",
         size: 3,
@@ -194,7 +194,8 @@ describe("persistRunEvent", () => {
   function persistPlatformMetric(usage: Record<string, number>, cost: number) {
     return persist(event("appstrate.metric", { usage, cost }), {
       writeLedger: true,
-      modelSource: "system",
+      inferenceRoute: null,
+      modelSource: "org",
       modelCost: UPSERT_RATES,
     });
   }
@@ -324,7 +325,7 @@ describe("persistRunEvent", () => {
       e: RunEvent,
       opts: { modelSource: string | null; modelCost: ModelCost | null },
     ) {
-      return persist(e, { writeLedger: true, ...opts });
+      return persist(e, { writeLedger: true, inferenceRoute: null, ...opts });
     }
 
     async function runnerRow() {
@@ -338,7 +339,7 @@ describe("persistRunEvent", () => {
     it("platform run whose model resolved NO pricing → `unpriced`, not a silent $0", async () => {
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -354,7 +355,7 @@ describe("persistRunEvent", () => {
       // snapshot nobody can read is treated as no snapshot at all.
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 900, output_tokens: 300 }, cost: 0 }),
-        { modelSource: "system", modelCost: {} as unknown as ModelCost },
+        { modelSource: "org", modelCost: {} as unknown as ModelCost },
       );
 
       const row = await runnerRow();
@@ -379,7 +380,7 @@ describe("persistRunEvent", () => {
           usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 4000 },
           cost: 0.001,
         }),
-        { modelSource: "system", modelCost: { input: 3, output: 15 } },
+        { modelSource: "org", modelCost: { input: 3, output: 15 } },
       );
 
       expect((await runnerRow())!.pricingStatus).toBe("partial");
@@ -406,7 +407,7 @@ describe("persistRunEvent", () => {
       // to qualify.
       await persistLedger(
         event("appstrate.metric", { usage: { input_tokens: 42, output_tokens: 7 } }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -435,7 +436,7 @@ describe("persistRunEvent", () => {
       e: RunEvent,
       opts: { modelSource: string | null; modelCost: ModelCost | null },
     ) {
-      return persist(e, { writeLedger: true, ...opts });
+      return persist(e, { writeLedger: true, inferenceRoute: null, ...opts });
     }
 
     async function runnerRow() {
@@ -459,7 +460,7 @@ describe("persistRunEvent", () => {
           // server-computed it would have been billed verbatim.
           cost: 999,
         }),
-        { modelSource: "system", modelCost: rates },
+        { modelSource: "org", modelCost: rates },
       );
 
       // 1M×3 + 0.2M×15 + 0.5M×0.3 + 0.1M×3.75 = 3 + 3 + 0.15 + 0.375
@@ -486,6 +487,47 @@ describe("persistRunEvent", () => {
       expect((await runnerRow())!.costUsd).toBeCloseTo(2.7, 9);
     });
 
+    it("a tiered rate card prices the run at the BASE rate, even past the tier threshold", async () => {
+      // The counters are summed over the run's requests; a tier keys on ONE
+      // request's input, which a sum no longer carries. Pi's `openai/gpt-5.4`
+      // rate card, copied by hand.
+      const tiered: ModelCost = {
+        input: 2.5,
+        output: 15,
+        cacheRead: 0.25,
+        cacheWrite: 0,
+        tiers: [
+          { inputTokensAbove: 272_000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 },
+        ],
+      };
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        // The container prices each request with the tiers stripped too
+        // (`runtime-pi/env.ts`), so its figure is the same 4.0: no divergence line.
+        await writeRunnerLedgerRow(
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          runId,
+          {
+            cost: 4,
+            usage: { input_tokens: 1_000_000, output_tokens: 100_000 },
+            modelSource: "org",
+            inferenceRoute: null,
+            modelCost: tiered,
+          },
+          { required: true },
+        );
+        // 1M×2.5 + 0.1M×15 = 2.5 + 1.5 — never the tier's 5 + 2.25.
+        expect((await runnerRow())!.costUsd).toBeCloseTo(4, 9);
+        expect(
+          warnSpy.mock.calls.filter(([message]) =>
+            message.includes("runner-reported cost diverges"),
+          ),
+        ).toHaveLength(0);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     it("tokens but NO rate snapshot → costUsd 0 classified `unpriced`, whatever the container claimed", async () => {
       // The absent-pricing zero, and the reason `pricing_status` exists: the
       // platform cannot price this run, so it records a 0 that says so rather
@@ -495,7 +537,7 @@ describe("persistRunEvent", () => {
           usage: { input_tokens: 900, output_tokens: 300 },
           cost: 0.42,
         }),
-        { modelSource: "system", modelCost: null },
+        { modelSource: "org", modelCost: null },
       );
 
       const row = await runnerRow();
@@ -510,14 +552,14 @@ describe("persistRunEvent", () => {
     it("a malformed rate snapshot prices at 0, never NaN", async () => {
       // `runs.model_cost` is JSONB. The same `modelCostSchema` narrowing that
       // keeps a malformed snapshot from claiming `priced` must also feed the
-      // arithmetic — otherwise `computeTokenCost` multiplies by an absent
+      // arithmetic — otherwise the price multiplies by an absent
       // `input` rate and writes NaN into a billing column.
       await persistLedger(
         event("appstrate.metric", {
           usage: { input_tokens: 1_000, output_tokens: 500 },
           cost: 0.01,
         }),
-        { modelSource: "system", modelCost: {} as unknown as ModelCost },
+        { modelSource: "org", modelCost: {} as unknown as ModelCost },
       );
 
       const row = await runnerRow();
@@ -550,20 +592,19 @@ describe("persistRunEvent", () => {
       // from. With no usage snapshot the recompute is exactly 0, so the row
       // would be all-zero and pin no accounting fact.
       await persistLedger(event("appstrate.metric", { cost: 0.5 }), {
-        modelSource: "system",
+        modelSource: "org",
         modelCost: rates,
       });
 
       expect(await runnerRow()).toBeUndefined();
     });
 
-    // The cutover instrument: while the container still reports a cost of its
-    // own, a disagreement with the server's number is the only way a formula
-    // divergence becomes visible on real traffic. Its FIRING POLICY is the
-    // tested part — one line per run, at the terminal write, carrying the full
-    // gap — because the alternative (one per metric event) buries the very
-    // incident it reports: a broken formula diverges on every platform run at
-    // once.
+    // The standing runner-vs-server parity monitor: on a server-priced run whose
+    // container reports a cost (org-credential runs — platform-model runs are
+    // metered by the LLM proxy), a disagreement is the only live sign the two
+    // formulas drifted. Its FIRING POLICY is the tested part — one line per
+    // run, at the terminal write, carrying the full gap — because one per
+    // metric event would bury the incident under its own repeats.
     describe("reported-cost divergence warn", () => {
       const DIVERGENCE_MESSAGE =
         "llm_usage: runner-reported cost diverges from the server-computed cost";
@@ -589,7 +630,7 @@ describe("persistRunEvent", () => {
                 usage: { input_tokens: inputTokens, output_tokens: 0 },
                 cost: claimed,
               }),
-              { modelSource: "system", modelCost: { input: 3, output: 15 } },
+              { modelSource: "org", modelCost: { input: 3, output: 15 } },
             );
           }
 
@@ -605,7 +646,8 @@ describe("persistRunEvent", () => {
             {
               cost: 3,
               usage: { input_tokens: 300_000, output_tokens: 0 },
-              modelSource: "system",
+              modelSource: "org",
+              inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
             { required: true },
@@ -635,7 +677,8 @@ describe("persistRunEvent", () => {
             {
               cost: 0.3,
               usage: { input_tokens: 100_000, output_tokens: 0 },
-              modelSource: "system",
+              modelSource: "org",
+              inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
             { required: true },
@@ -651,6 +694,7 @@ describe("persistRunEvent", () => {
               cost: 99,
               usage: { input_tokens: 500_000, output_tokens: 0 },
               modelSource: null,
+              inferenceRoute: null,
               modelCost: null,
             },
             { required: true },

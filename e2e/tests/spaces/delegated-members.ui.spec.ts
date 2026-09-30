@@ -19,7 +19,7 @@ test("Guest space admins assign preset roles by email without an organization di
     const invited = await orgOnlyClient.post(`/orgs/${browserCtx.org.orgId}/members`, {
       email: user.email,
       role,
-      space_assignments: role === "guest" ? [{ space_id: spaceId, preset_role: "admin" }] : [],
+      space_assignments: role === "guest" ? [{ spaceId, preset_role: "admin" }] : [],
     });
     expect(invited.status()).toBe(201);
     const { token } = await invited.json();
@@ -75,7 +75,7 @@ test("resetting an explicit viewer explains and confirms the default operator ac
   const invited = await orgOnlyClient.post(`/orgs/${browserCtx.org.orgId}/members`, {
     email: target.email,
     role: "member",
-    space_assignments: [{ space_id: spaceId, preset_role: "viewer" }],
+    space_assignments: [{ spaceId, preset_role: "viewer" }],
   });
   expect(invited.status()).toBe(201);
   const { token } = await invited.json();
@@ -168,7 +168,7 @@ test("organization administrators invite an external guest directly into the sel
   expect(await response.json()).toMatchObject({
     email: address,
     role: "guest",
-    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
+    space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
   });
   await expect(dialog.getByRole("button", { name: /Copier le lien|Copy link/i })).toBeVisible();
   const manage = dialog.getByRole("link", {
@@ -181,7 +181,7 @@ test("organization administrators invite an external guest directly into the sel
     (await persisted.json()).invitations.find((item: { email: string }) => item.email === address),
   ).toMatchObject({
     role: "guest",
-    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
+    space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
   });
   await page.keyboard.press("Escape");
   await page.getByTestId("add-space-member-button").click();
@@ -200,7 +200,7 @@ test("a pending guest invitation shows in the space and a second invite for the 
   const created = await orgOnlyClient.post(`/orgs/${browserCtx.org.orgId}/members`, {
     email: address,
     role: "guest",
-    space_assignments: [{ space_id: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
+    space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
   });
   expect(created.status()).toBe(201);
   const invitation = await created.json();
@@ -252,7 +252,7 @@ async function joinSpace(
   orgOnlyClient: ReturnType<typeof createOrgOnlyClient>,
   orgId: string,
   user: AuthResult,
-  spaceAssignments: Array<{ space_id: string; preset_role: SpaceRolePreset }>,
+  spaceAssignments: Array<{ spaceId: string; preset_role: SpaceRolePreset }>,
 ): Promise<void> {
   const invited = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
     email: user.email,
@@ -281,7 +281,7 @@ test("a runner lands on the agents page, can run, and cannot read what it runs",
 
   const runner = await registerUser(request);
   await joinSpace(request, orgOnlyClient, browserCtx.org.orgId, runner, [
-    { space_id: spaceId, preset_role: "runner" },
+    { spaceId, preset_role: "runner" },
   ]);
 
   const context = await createAuthedContext(browser, runner, browserCtx.org.orgId, spaceId);
@@ -335,7 +335,7 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   const [alice, bob] = [await registerUser(request), await registerUser(request)];
   for (const member of [alice, bob]) {
     await joinSpace(request, orgOnlyClient, browserCtx.org.orgId, member, [
-      { space_id: spaceId, preset_role: "operator" },
+      { spaceId, preset_role: "operator" },
     ]);
   }
   // A launch resolves a model before it creates the run row, so the org needs
@@ -343,7 +343,7 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   // and a failed run is still a run these two must not read across.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status()).toBe(201);
   const model = await apiClient.post("/models", {

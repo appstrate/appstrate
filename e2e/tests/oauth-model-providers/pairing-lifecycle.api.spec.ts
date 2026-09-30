@@ -43,7 +43,7 @@ import { test, expect } from "../../fixtures/api.fixture.ts";
 
 interface ProviderCase {
   id: string;
-  // `accountId` is only forwarded for providers that declare an
+  // `account_id` is only forwarded for providers that declare an
   // `extractTokenIdentity` hook + `requiredIdentityClaims: ["accountId"]`
   // (codex). Hook-less providers (claude-code) reject the import if a
   // body field they don't understand is required, so we omit it.
@@ -65,7 +65,7 @@ interface PairingMintResponse {
 interface PairingStatusResponse {
   id: string;
   status: "pending" | "consumed" | "expired";
-  consumedAt: string | null;
+  consumed_at: string | null;
   expiresAt: string;
   credentialId: string | null;
 }
@@ -73,7 +73,7 @@ interface PairingStatusResponse {
 interface ImportResponse {
   credentialId: string;
   providerId: string;
-  availableModelIds: string[];
+  available_model_ids: string[];
   email?: string;
 }
 
@@ -100,7 +100,7 @@ for (const provider of PROVIDER_CASES) {
       const mint = (await mintRes.json()) as PairingMintResponse;
       expect(mint.id).toMatch(/^pair_[A-Za-z0-9_-]+$/);
       expect(mint.token).toMatch(/^appp_/);
-      expect(mint.command).toContain("npx @appstrate/connect-helper@latest ");
+      expect(mint.command).toContain("npx @appstrate/connect-helper@0.3.x ");
       expect(mint.command).toContain(mint.token);
       expect(new Date(mint.expiresAt).getTime()).toBeGreaterThan(Date.now());
 
@@ -109,7 +109,7 @@ for (const provider of PROVIDER_CASES) {
       expect(pendingRes.status()).toBe(200);
       const pending = (await pendingRes.json()) as PairingStatusResponse;
       expect(pending.status).toBe("pending");
-      expect(pending.consumedAt).toBeNull();
+      expect(pending.consumed_at).toBeNull();
       expect(pending.credentialId).toBeNull();
 
       // 3. Replay-proof bearer: a token-shaped string that didn't come from
@@ -122,14 +122,14 @@ for (const provider of PROVIDER_CASES) {
         data: {
           providerId: provider.id,
           label: "should fail",
-          accessToken: "x",
-          refreshToken: "y",
+          access_token: "x",
+          refresh_token: "y",
         },
       });
       expect(replayBadRes.status()).toBe(410);
 
       // 4. Helper sim — bearer-only, no cookie/X-Org-Id/X-Space-Id.
-      //    Body carries `email` and (for hook-bearing providers) `accountId`,
+      //    Body carries `email` and (for hook-bearing providers) `account_id`,
       //    which take precedence over the module's JWT identity hook (the
       //    helper does this when the OAuth response body already surfaces
       //    the identity slots).
@@ -138,13 +138,13 @@ for (const provider of PROVIDER_CASES) {
       const importBody: Record<string, unknown> = {
         providerId: provider.id,
         label: `E2E ${provider.id} pairing`,
-        accessToken: `fake-${provider.id}-access-token`,
-        refreshToken: `fake-${provider.id}-refresh-token`,
+        access_token: `fake-${provider.id}-access-token`,
+        refresh_token: `fake-${provider.id}-refresh-token`,
         expiresAt: Date.now() + 3600_000,
         email: SYNTHETIC_EMAIL,
       };
       if (provider.requiresAccountId) {
-        importBody.accountId = SYNTHETIC_ACCOUNT_ID;
+        importBody.account_id = SYNTHETIC_ACCOUNT_ID;
       }
       const importRes = await request.post("/api/model-providers-oauth/pair/redeem", {
         headers: {
@@ -157,8 +157,8 @@ for (const provider of PROVIDER_CASES) {
       const imported = (await importRes.json()) as ImportResponse;
       expect(imported.providerId).toBe(provider.id);
       expect(imported.credentialId).toBeTruthy();
-      expect(Array.isArray(imported.availableModelIds)).toBe(true);
-      expect(imported.availableModelIds.length).toBeGreaterThan(0);
+      expect(Array.isArray(imported.available_model_ids)).toBe(true);
+      expect(imported.available_model_ids.length).toBeGreaterThan(0);
 
       try {
         // 5. Status flips to `consumed` and the credential id is linked back.
@@ -166,7 +166,7 @@ for (const provider of PROVIDER_CASES) {
         expect(consumedRes.status()).toBe(200);
         const consumed = (await consumedRes.json()) as PairingStatusResponse;
         expect(consumed.status).toBe("consumed");
-        expect(consumed.consumedAt).not.toBeNull();
+        expect(consumed.consumed_at).not.toBeNull();
         expect(consumed.credentialId).toBe(imported.credentialId);
 
         // 6. The credential surfaces in the org-wide list with the OAuth-extended
@@ -186,11 +186,11 @@ for (const provider of PROVIDER_CASES) {
         const replayBody: Record<string, unknown> = {
           providerId: provider.id,
           label: "replay attempt",
-          accessToken: "fake",
-          refreshToken: "fake",
+          access_token: "fake",
+          refresh_token: "fake",
         };
         if (provider.requiresAccountId) {
-          replayBody.accountId = SYNTHETIC_ACCOUNT_ID;
+          replayBody.account_id = SYNTHETIC_ACCOUNT_ID;
         }
         const replayConsumedRes = await request.post("/api/model-providers-oauth/pair/redeem", {
           headers: {

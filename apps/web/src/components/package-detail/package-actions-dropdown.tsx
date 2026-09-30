@@ -29,7 +29,8 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
-import { maySetPackageActive, PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
+import { packagePermission } from "@appstrate/core/permissions";
+import { maySetPackageActive } from "../../lib/package-permissions";
 import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 import { SharePackageDialog } from "./share-package-dialog";
@@ -179,15 +180,12 @@ export function PackageActionsDropdown({
   const [shareOpen, setShareOpen] = useState(false);
 
   const isAgent = type === "agent";
-  // Each package family is its own permission resource, so every gate below
-  // asks for the string the matching route checks.
-  const resource = PACKAGE_PERMISSIONS[type].resource;
   // The server's own verdict, not a re-derivation of it.
   const canWrite = homeWritable === true;
   // The exports carry the manifest and every authored file, so the two download
   // routes ask for `<type>:read` — the permission a summary-only caller (an
   // `agents:run` runner) does not hold. Without this the items 403 on click.
-  const canRead = can(`${resource}:read`);
+  const canRead = can(packagePermission(type, "read"));
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
   // INDEPENDENT permission string, and a custom space role is an arbitrary
@@ -209,25 +207,32 @@ export function PackageActionsDropdown({
   const showActivate =
     !!canActivate && !!onActivate && !showDeactivate && maySetPackageActive(spaceGrant, type, true);
   const showDelete = !isBuiltIn && isOwned && canDelete;
-  const hasAgentBuildActions = isAgent && (isMutable || (canWrite && !isOwned && Boolean(onFork)));
+  // Forking writes a NEW package in the current space, so it asks the current
+  // space's write, not the home's verdict on a package it never writes.
+  const showFork = can(packagePermission(type, "write")) && !isOwned && Boolean(onFork);
+  // Clearing runs deletes every member's runs of this agent, so the route asks
+  // `runs:read-all` on top of `runs:delete`; clearing memories is its own verb.
+  const showDeleteRuns =
+    can("runs:delete") && can("runs:read-all") && !!hasRuns && Boolean(onDeleteRuns);
+  const showDeleteMemories =
+    can("persistence:delete") && !!hasMemories && Boolean(onDeleteMemories);
+  const hasAgentBuildActions = isAgent && (isMutable || showFork);
   const hasAgentExecutionActions =
     isAgent &&
     ((can("agents:run") && Boolean(onRunWithOptions)) ||
       (can("schedules:write") && !hasFileInput && Boolean(onAddSchedule)));
   const hasAgentExportActions =
     isAgent && canRead && Boolean((downloadVersion && onDownload) || onDownloadBundle);
+  // Every item below carries its own verdict; the group exists when one does.
   const hasAgentAdministrationActions =
     isAgent &&
-    canDelete &&
-    Boolean(
-      (hasRuns && onDeleteRuns) ||
-      (hasMemories && onDeleteMemories) ||
-      (showActivate && onActivate) ||
-      (showDeactivate && onDeactivate) ||
+    (showDeleteRuns ||
+      showDeleteMemories ||
+      showActivate ||
+      showDeactivate ||
       isMutable ||
       canShare ||
-      (showDelete && onDeleteAgent),
-    );
+      (showDelete && Boolean(onDeleteAgent)));
 
   // The manifest is no longer reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
@@ -278,7 +283,7 @@ export function PackageActionsDropdown({
                       {t("version.createVersion")}
                     </DropdownMenuItem>
                   )}
-                  {canWrite && !isOwned && onFork && (
+                  {showFork && (
                     <DropdownMenuItem onSelect={onFork}>
                       <GitFork size={14} />
                       {t("fork.button")}
@@ -339,7 +344,7 @@ export function PackageActionsDropdown({
                     <DropdownMenuSeparator />
                   )}
                   <DropdownMenuLabel>{t("detail.actions.administration")}</DropdownMenuLabel>
-                  {hasRuns && onDeleteRuns && (
+                  {showDeleteRuns && (
                     <DropdownMenuItem
                       onSelect={onDeleteRuns}
                       disabled={runningRuns > 0}
@@ -349,7 +354,7 @@ export function PackageActionsDropdown({
                       {t("detail.clearRuns")}
                     </DropdownMenuItem>
                   )}
-                  {hasMemories && onDeleteMemories && (
+                  {showDeleteMemories && (
                     <DropdownMenuItem
                       onSelect={onDeleteMemories}
                       className="text-destructive focus:text-destructive"
@@ -386,7 +391,7 @@ export function PackageActionsDropdown({
                       {t("packages.share", { ns: "settings" })}
                     </DropdownMenuItem>
                   )}
-                  {!isBuiltIn && isOwned && onDeleteAgent && (
+                  {showDelete && onDeleteAgent && (
                     <DropdownMenuItem
                       onSelect={onDeleteAgent}
                       disabled={runningRuns > 0}
@@ -401,7 +406,7 @@ export function PackageActionsDropdown({
             </>
           ) : (
             <>
-              {downloadVersion && onDownload && (
+              {canRead && downloadVersion && onDownload && (
                 <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
                   <Download size={14} />
                   {t("btn.download", { ns: "common" })}
@@ -421,7 +426,7 @@ export function PackageActionsDropdown({
                   {editLabel ?? t("btn.edit")}
                 </DropdownMenuItem>
               )}
-              {canWrite && !isOwned && onFork && (
+              {showFork && (
                 <DropdownMenuItem onSelect={onFork}>
                   <GitFork size={14} />
                   {t("fork.button")}
@@ -458,7 +463,7 @@ export function PackageActionsDropdown({
                       {t("packages.share", { ns: "settings" })}
                     </DropdownMenuItem>
                   )}
-                  {!isBuiltIn && isOwned && canDeletePackage && onDeletePackage && (
+                  {showDelete && canDeletePackage && onDeletePackage && (
                     <DropdownMenuItem
                       onSelect={onDeletePackage}
                       className="text-destructive focus:text-destructive"

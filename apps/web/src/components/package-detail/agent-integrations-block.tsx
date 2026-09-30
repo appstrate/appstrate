@@ -20,9 +20,8 @@ import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
-import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
+import { describeResolution } from "../integration-connect/integration-run-readiness";
 import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 
@@ -44,7 +43,7 @@ interface AgentIntegrationsBlockProps {
  * pick, disambiguate, connect, reconnect, upgrade, add-another — driven by the
  * server-authoritative `IntegrationAgentResolution`, selected from the bulk
  * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
- * the launch-button readiness badge and the run-kickoff 412 consume, so the
+ * the launch-button readiness badge and the run-kickoff 409 consume, so the
  * three can never disagree.
  *
  * The picker renders for EVERY declared integration, independent of whether the
@@ -290,15 +289,17 @@ function ManagedIntegrationCard({
   const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
-  // R5 — reuse hint: the resolved connection is shared across every agent in
+  // R5 — reuse hint: the resolved connections are shared across every agent in
   // the space that consumes this integration, killing the "do I need one
   // connection per agent?" confusion. Only when resolved AND not blocking — a
   // blocking state is the picker's warning foreground, not a reassuring line.
-  const resolvedConnection =
-    resolution?.candidates.find((c) => c.id === resolution.resolved_connection_id) ?? null;
+  const resolvedConnections =
+    resolution?.resolved_connection_ids
+      .map((id) => resolution.candidates.find((c) => c.id === id))
+      .filter((c): c is IntegrationCandidate => !!c) ?? [];
   const reuseInfo =
-    resolution && resolvedConnection && !resolutionBlocksRun(resolution)
-      ? buildReuseInfo(resolvedConnection, consumingAgents?.length ?? 0, t)
+    resolution && describeResolution(resolution).resolved
+      ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
 
   return (
@@ -321,15 +322,15 @@ function ManagedIntegrationCard({
 }
 
 function buildReuseInfo(
-  connection: IntegrationCandidate,
+  connections: IntegrationCandidate[],
   agentCount: number,
   t: (k: string, opts?: Record<string, unknown>) => string,
 ): string {
   // `label` is the connection's display name (identity or "Connexion N"),
   // always set at creation.
-  const account = connectionDisplayLabel(connection);
+  const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {
-    return t("detail.integrationReuseSingle", { account });
+    return t("detail.integrationReuseSingle", { account, count: connections.length });
   }
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
@@ -386,9 +387,9 @@ function IntegrationStatusCell({
   if (!agentPackageId || isPending || !resolution) {
     return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
-  return resolutionBlocksRun(resolution) ? (
-    <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
-  ) : (
+  return describeResolution(resolution).resolved ? (
     <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>
+  ) : (
+    <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
   );
 }

@@ -45,7 +45,10 @@ import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
-import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  DEFAULT_MODEL_REASONING_LEVEL,
+  type ModelGenerationSettings,
+} from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import {
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
@@ -61,6 +64,12 @@ export interface PiChatInput {
   modelBinding: ResolvedPiChatModelBinding;
   /** Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
+  /**
+   * Display name of that preset (`label ?? modelId`, the value the picker
+   * renders). Frozen into the turn's closing metadata so a transcript still
+   * names the model after the org row is gone; never resolved back to a model.
+   */
+  modelLabel: string;
   orgId: string;
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
@@ -74,11 +83,16 @@ export interface PiChatInput {
    * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
    *
    * `fetch` is the transport for that handshake: production hands in the
-   * platform's in-process dispatch so the three JSON-RPC hops re-enter the Hono
+   * platform's in-process dispatch so the JSON-RPC hops re-enter the Hono
    * app directly rather than opening real loopback sockets to this same process.
    * Omitted → global `fetch`.
    */
-  platformMcp: { url: string; headers: Record<string, string>; fetch?: typeof fetch };
+  platformMcp: {
+    url: string;
+    headers: Record<string, string>;
+    fetch?: typeof fetch;
+    surfaceKey?: string;
+  };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
@@ -296,7 +310,7 @@ export function runPiChat(input: PiChatInput): Response {
         // and the Pi SDK's value graph. They are independent — the SDK import
         // reads no MCP result — so they run together rather than back to back.
         // The SDK module evaluation is the expensive half on a cold process
-        // (~200 ms, see `pi-sdk.ts`); the handshake is three JSON-RPC hops.
+        // (~200 ms, see `pi-sdk.ts`); the handshake is two JSON-RPC hops, or none.
         //
         // A MCP failure is a genuine misconfiguration (the chat's value IS the
         // tools) — let it propagate to `onError`.
@@ -308,11 +322,9 @@ export function runPiChat(input: PiChatInput): Response {
         const construction = Promise.allSettled([
           timed(
             buildMcpTools({
-              url: platformMcp.url,
-              headers: platformMcp.headers,
+              ...platformMcp,
               writeChunk: write,
               signal: turnAbort.signal,
-              ...(platformMcp.fetch ? { fetch: platformMcp.fetch } : {}),
               // Budget seam: the turn deadline bounds every run_and_wait, and the
               // live step count feeds the per-step budget note the model reads.
               turnBudget: {
@@ -364,7 +376,8 @@ export function runPiChat(input: PiChatInput): Response {
         } = sdk;
 
         const piModel = model;
-        const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
+        const requestedThinkingLevel =
+          input.generation.reasoning_level ?? DEFAULT_MODEL_REASONING_LEVEL;
         const {
           model: sessionModel,
           thinkingLevel,
@@ -434,9 +447,6 @@ export function runPiChat(input: PiChatInput): Response {
         // `baseUrl`: pi-ai builds every request URL from `model.baseUrl` (which
         // already points at the llm-proxy) and picks the serializer from
         // `model.api`, so declaring either on the provider would be dead weight.
-        // `registerProvider` (not `setRuntimeApiKey`) keeps that placeholder
-        // synchronous and purely in-memory — no credential-state sync on the
-        // turn's critical path.
         // Every remaining construction await is bounded the same way. The MCP
         // client is adopted by now, so the outer `finally` still tears it down
         // on an abort here; what `untilAborted` adds is that the abort is
@@ -445,15 +455,9 @@ export function runPiChat(input: PiChatInput): Response {
         const modelRuntime = await untilAborted(
           ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS),
         );
-        if (modelBinding.authMode === "proxy") {
-          modelRuntime.registerProvider(modelBinding.provider, {
-            apiKey: modelBinding.runtimeApiKey,
-          });
-        } else {
-          await untilAborted(
-            setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
-          );
-        }
+        await untilAborted(
+          setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
+        );
         timings.runtimeMs = Date.now() - runtimeStartedAt;
 
         const generationExtensions =
@@ -610,6 +614,8 @@ export function runPiChat(input: PiChatInput): Response {
           // model-call count to the ceiling.
           stepCapReached: stepCap.fired(),
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+          modelId: input.presetId,
+          modelLabel: input.modelLabel,
         });
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
@@ -666,6 +672,8 @@ export function runPiChat(input: PiChatInput): Response {
             stepCount: mapper.stepCount(),
             stepCapReached: stepCap?.fired() ?? false,
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
+            modelId: input.presetId,
+            modelLabel: input.modelLabel,
           });
           for (const chunk of closing.chunks) write(chunk);
         }
@@ -675,7 +683,11 @@ export function runPiChat(input: PiChatInput): Response {
         unsubscribe?.();
         // Once per turn, on every exit, so a turn that died in construction
         // still reports how far it got (`null` past that point).
-        logger.info("chat turn construction", { chatSessionId: input.chatSessionId, ...timings });
+        logger.info("chat turn construction", {
+          chatSessionId: input.chatSessionId,
+          mcpSurfaceCached: mcpTools?.surfaceCached ?? null,
+          ...timings,
+        });
         // BOUNDED, for the same reason the session abort above is: this is the
         // last await between the producer and its return, so an MCP close that
         // never settles (a transport whose teardown waits on a peer that is

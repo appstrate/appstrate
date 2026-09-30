@@ -48,15 +48,16 @@ Instead of `mock.module()` (banned, see root `AGENTS.md`), use dependency inject
 
 ## Helpers (`apps/api/test/helpers/`)
 
-| Helper            | Purpose                                                                                                                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.ts`          | `getTestApp()` — full Hono replica (production middleware chain, no boot/Docker/scheduler)                                                            |
-| `auth.ts`         | `createTestUser/Org/Context()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up. `authHeaders()` auto-injects `X-Space-Id`             |
-| `db.ts`           | `truncateAll()` — DELETE FROM all tables in FK-safe order                                                                                             |
-| `seed.ts`         | Factories: `seedPackage()`, `seedInstalledPackage()`, `seedRun()`, `seedApiKey()`, `seedSpace()`, `seedEndUser()`, … (space-scoped require `spaceId`) |
-| `assertions.ts`   | `assertDbHas/Missing/Count()`, `getDbRow()`                                                                                                           |
-| `redis.ts`        | `flushRedis()`, `closeRedis()`                                                                                                                        |
-| `sse.ts`          | SSE stream parsing                                                                                                                                    |
-| `oauth-server.ts` | Mock OAuth2 provider                                                                                                                                  |
+| Helper              | Purpose                                                                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.ts`            | `getTestApp()` — full Hono replica (production middleware chain, no boot/Docker/scheduler)                                                            |
+| `auth.ts`           | `createTestUser/Org/Context()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up. `authHeaders()` auto-injects `X-Space-Id`             |
+| `db.ts`             | `truncateAll()` — DELETE FROM all tables in FK-safe order                                                                                             |
+| `seed.ts`           | Factories: `seedPackage()`, `seedInstalledPackage()`, `seedRun()`, `seedApiKey()`, `seedSpace()`, `seedEndUser()`, … (space-scoped require `spaceId`) |
+| `assertions.ts`     | `assertDbHas/Missing/Count()`, `getDbRow()`                                                                                                           |
+| `redis.ts`          | `flushRedis()`, `closeRedis()`                                                                                                                        |
+| `sse.ts`            | SSE stream parsing                                                                                                                                    |
+| `oauth-server.ts`   | Mock OAuth2 provider                                                                                                                                  |
+| `run-logs-fault.ts` | `failRunLogsInsert()` / `clearRunLogsFault()` — trigger that fails `run_logs` INSERTs with a chosen SQLSTATE                                          |
 
 To write a new test, copy the nearest existing one in the matching directory (unit = pure, integration = `getTestApp()` + `truncateAll()` + `createTestContext()`).

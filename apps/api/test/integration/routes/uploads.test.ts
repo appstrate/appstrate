@@ -14,10 +14,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { auditEvents } from "@appstrate/db/schema";
+import { auditEvents, uploads } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -95,5 +96,49 @@ describe("POST /api/uploads", () => {
       body: JSON.stringify({ name: "report.pdf", size: 1024, mime: "application/pdf" }),
     });
     expect(res.status).toBe(401);
+  });
+
+  describe("credential ceiling", () => {
+    // A staged upload is consumed only as a run input, so a delegated
+    // credential is capped by `agents:run`; the owner is asked no role grant.
+    const body = JSON.stringify({ name: "input.txt", size: 16, mime: "text/plain" });
+
+    async function create(headers: Record<string, string>): Promise<number> {
+      const res = await app.request("/api/uploads", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body,
+      });
+      return res.status;
+    }
+
+    async function keyHeaders(scopes: string[]): Promise<Record<string, string>> {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}` };
+    }
+
+    async function uploadCount(): Promise<number> {
+      return (await db.select({ id: uploads.id }).from(uploads)).length;
+    }
+
+    it("a key without agents:run is refused and books nothing", async () => {
+      expect(await create(await keyHeaders(["runs:read", "files:read"]))).toBe(403);
+      expect(await uploadCount()).toBe(0);
+    });
+
+    it("a key with agents:run creates the upload", async () => {
+      expect(await create(await keyHeaders(["agents:run"]))).toBe(201);
+      expect(await uploadCount()).toBe(1);
+    });
+
+    it("a cookie session, which carries no ceiling, creates the upload", async () => {
+      expect(await create(authHeaders(ctx))).toBe(201);
+      expect(await uploadCount()).toBe(1);
+    });
   });
 });

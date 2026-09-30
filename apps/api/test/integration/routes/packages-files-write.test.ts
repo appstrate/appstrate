@@ -2,14 +2,28 @@
 
 /** One manifest/file update, one optimistic token, all package types. */
 
+import { etagVersion, ifMatch } from "../../helpers/etag.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { auditEvents, packages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import { seedApiKey, seedSpacePackage, seedPackage, seedPackageShare } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpaceMember,
+  seedSpacePackage,
+  seedPackage,
+  seedPackageShare,
+} from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
   downloadPackageFiles,
@@ -24,7 +38,10 @@ import {
   packageItemKey,
 } from "../../../src/services/package-items/config.ts";
 import { zipArtifact } from "@appstrate/core/zip";
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import {
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_TYPE_ROUTE_SEGMENT,
+} from "@appstrate/core/package-files";
 
 const app = getTestApp();
 const encoder = new TextEncoder();
@@ -61,7 +78,7 @@ function base64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
 }
 
-describe("PUT /api/packages/{type}/{scope}/{name}", () => {
+describe("PATCH /api/packages/{type}/{scope}/{name}", () => {
   let ctx: TestContext;
 
   /** The package's stored ZIP, as the next reader would unzip it. */
@@ -85,8 +102,8 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
   ): Promise<{ res: Response; entries: FileEntry[]; etag: string }> {
     const res = await app.request(`/api/packages/${id}/files`, { headers: authHeaders(ctx) });
     expect(res.status).toBe(200);
-    const body = (await res.clone().json()) as { entries: FileEntry[] };
-    return { res, entries: body.entries, etag: res.headers.get("ETag")! };
+    const body = (await res.clone().json()) as { data: FileEntry[] };
+    return { res, entries: body.data, etag: res.headers.get("ETag")! };
   }
 
   async function fileBytes(path: string, id = SKILL_ID): Promise<Uint8Array> {
@@ -113,21 +130,17 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       .from(packages)
       .where(eq(packages.id, id))
       .limit(1);
-    const path =
-      row?.type === "mcp-server"
-        ? "mcp-servers"
-        : row?.type === "integration"
-          ? "integrations"
-          : row?.type === "agent"
-            ? "agents"
-            : "skills";
+    const path = row ? PACKAGE_TYPE_ROUTE_SEGMENT[row.type] : "skills";
     const version = opts.lockVersion === undefined ? row?.lockVersion : opts.lockVersion;
     return app.request(`/api/packages/${path}/${id}`, {
-      method: "PUT",
-      headers: { ...(opts.headers ?? authHeaders(ctx)), "Content-Type": "application/json" },
+      method: "PATCH",
+      headers: {
+        ...(opts.headers ?? authHeaders(ctx)),
+        "Content-Type": "application/json",
+        ...(version != null ? ifMatch(version) : {}),
+      },
       body: JSON.stringify({
         operations,
-        ...(version !== null ? { lock_version: version } : {}),
         ...(opts.manifest ? { manifest: opts.manifest } : {}),
       }),
     });
@@ -198,11 +211,8 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
           lockVersion: before.lockVersion,
         });
         expect(res.status).toBe(200);
-        const saved = (await res.json()) as {
-          lock_version: number;
-          manifest: { description: string };
-        };
-        expect(saved.lock_version).toBe(before.lockVersion + 1);
+        const saved = (await res.json()) as { manifest: { description: string } };
+        expect(etagVersion(res)).toBe(before.lockVersion + 1);
         expect(saved.manifest.description).toBe("Updated metadata");
         expect(decoder.decode(await fileBytes("notes.md", id))).toBe("Shared editor");
       });
@@ -278,7 +288,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
           }),
         ),
       );
-      expect(answers.map((response) => response.status).sort()).toEqual([200, 409]);
+      expect(answers.map((response) => response.status).sort()).toEqual([200, 412]);
       const winner = (await answers.find((response) => response.status === 200)!.json()) as {
         manifest: { description: string };
       };
@@ -385,8 +395,6 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         { lockVersion: before.lockVersion },
       );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { entries: FileEntry[]; lock_version: number };
-
       const after = await listFiles();
       expect(after.entries.map((e) => e.path)).toEqual([
         "SKILL.md",
@@ -395,7 +403,26 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         "manifest.json",
         "scripts/main.py",
       ]);
-      expect(body.lock_version).toBe((await packageRow()).lockVersion);
+      expect(etagVersion(res)).toBe((await packageRow()).lockVersion);
+    });
+
+    it("writes a whole working folder in ONE batch — no operation count cap", async () => {
+      // A folder pushed file by file across several requests would need a
+      // `lock_version` per request and could stop halfway; the count is not a
+      // bound, the bytes are (body limit, per-file and tree ceilings).
+      const before = await packageRow();
+      const operations: WriteOperation[] = Array.from({ length: 250 }, (_, i) => ({
+        op: "write",
+        path: `docs/n${i}.md`,
+        text: `note ${i}`,
+      }));
+      const res = await saveFiles(operations, { lockVersion: before.lockVersion });
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const stored = await storedTree();
+      expect(Object.keys(stored).filter((path) => path.startsWith("docs/"))).toHaveLength(250);
+      expect(decoder.decode(stored["docs/n249.md"]!)).toBe("note 249");
+      expect((await packageRow()).lockVersion).toBe(before.lockVersion + 1);
     });
   });
 
@@ -478,6 +505,82 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
 
   // ─── Refusals ──────────────────────────────────────────────────────────────
 
+  // ─── The draft as one archive: what a local checkout starts from ──────────
+
+  describe("GET /api/packages/{scope}/{name}/draft/download", () => {
+    const downloadDraft = (headers: Record<string, string> = authHeaders(ctx)) =>
+      app.request(`/api/packages/${SKILL_ID}/draft/download`, { headers });
+
+    /** A viewer of the home space: reads the skill, may not write it. */
+    async function viewerHeaders(): Promise<Record<string, string>> {
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, "guest");
+      await seedSpaceMember({ spaceId: ctx.defaultSpaceId, userId: user.id, presetRole: "viewer" });
+      return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId };
+    }
+
+    it("serves the author the draft tree as a ZIP — manifest, content entry and annexes", async () => {
+      const res = await downloadDraft();
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("application/afps+zip");
+      expect(res.headers.get("Content-Disposition")).toContain("-edit-skill-draft.afps");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+      expect(res.headers.get("X-Integrity")).toBeNull();
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(res.headers.get("Content-Length")).toBe(String(bytes.byteLength));
+
+      const archive = unzipPackageArchive(bytes);
+      expect(Object.keys(archive).sort()).toEqual([
+        "SKILL.md",
+        "assets/logo.bin",
+        "manifest.json",
+        "scripts/run.py",
+      ]);
+      // The manifest and the content entry are the DB-authoritative draft, the
+      // annexes the stored tree — the binary one byte for byte.
+      expect(JSON.parse(decoder.decode(archive["manifest.json"]!))).toEqual(skillManifest());
+      expect(decoder.decode(archive["SKILL.md"]!)).toBe(SKILL_MD);
+      expect(decoder.decode(archive["scripts/run.py"]!)).toBe("print(1)");
+      expect(Array.from(archive["assets/logo.bin"]!)).toEqual(Array.from(LOGO_BYTES));
+
+      // The same tree the file explorer lists for the draft.
+      const { entries } = await listFiles();
+      expect(entries.map((entry) => entry.path)).toEqual(Object.keys(archive).sort());
+    });
+
+    it("refuses a reader who cannot write the package — the draft is an author's", async () => {
+      await expectProblem(await downloadDraft(await viewerHeaders()), 403, {
+        code: "draft_not_writable",
+      });
+    });
+
+    it("refuses a non-writer before any 304, so a validator confirms nothing", async () => {
+      const etag = (await downloadDraft()).headers.get("ETag")!;
+      const headers = { ...(await viewerHeaders()), "If-None-Match": etag };
+      await expectProblem(await downloadDraft(headers), 403, { code: "draft_not_writable" });
+    });
+
+    it("tags the archive with its content, so a save changes the ETag and a match is a 304", async () => {
+      const first = await downloadDraft();
+      expect(first.status).toBe(200);
+      const etag = first.headers.get("ETag")!;
+      expect(etag).toMatch(/^"z-/);
+      // Its own representation: never the index's tag for the same bytes.
+      expect(etag).not.toBe((await listFiles()).etag);
+
+      const unchanged = await downloadDraft(authHeaders(ctx, { "If-None-Match": etag }));
+      expect(unchanged.status).toBe(304);
+
+      const saved = await saveFiles([{ op: "write", path: "docs/notes.md", text: "# Notes" }]);
+      expect(saved.status).toBe(200);
+      const after = await downloadDraft(authHeaders(ctx, { "If-None-Match": etag }));
+      expect(after.status).toBe(200);
+      expect(after.headers.get("ETag")).not.toBe(etag);
+      const archive = unzipPackageArchive(new Uint8Array(await after.arrayBuffer()));
+      expect(decoder.decode(archive["docs/notes.md"]!)).toBe("# Notes");
+    });
+  });
+
   describe("refusals", () => {
     /** Neither store moved: the fixture's tree and draft column, unchanged. */
     async function expectNothingWritten(): Promise<void> {
@@ -534,7 +637,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
 
     it("refuses a name only a case-insensitive filesystem would merge with another", async () => {
       // `skill.md` beside `SKILL.md` is two entries in a ZIP and ONE file once
-      // `skills sync` writes it to APFS — where `skill.md` lands last by sort
+      // `code sync` writes it to APFS — where `skill.md` lands last by sort
       // order, so the runtime would load a body this route never gated.
       const res = await saveFiles([{ op: "write", path: "skill.md", text: "not the real one" }]);
       expect(res.status).toBe(400);
@@ -555,17 +658,6 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       ]);
       expect(res.status).toBe(413);
       expect((await problem(res)).code).toBe("file_too_large");
-      await expectNothingWritten();
-    });
-
-    it("refuses more than 200 operations in one request", async () => {
-      const operations: WriteOperation[] = Array.from({ length: 201 }, (_, i) => ({
-        op: "write",
-        path: `docs/n${i}.md`,
-        text: "x",
-      }));
-      const res = await saveFiles(operations);
-      expect(res.status).toBe(400);
       await expectNothingWritten();
     });
 
@@ -603,17 +695,18 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
   describe("preconditions", () => {
     async function putSkill(content: string, lockVersion: number): Promise<Response> {
       return app.request(`/api/packages/skills/${SKILL_ID}`, {
-        method: "PUT",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({ content, lock_version: lockVersion }),
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json", ...ifMatch(lockVersion) }),
+        body: JSON.stringify({ content }),
       });
     }
 
-    it("rejects a write without lock_version", async () => {
+    it("rejects a write without If-Match (428)", async () => {
       const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         lockVersion: null,
       });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(428);
+      expect((await problem(res)).code).toBe("precondition_required");
       expect(Object.keys(await storedTree())).not.toContain("docs/a.md");
     });
 
@@ -624,22 +717,23 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       const res = await saveFiles([{ op: "write", path: "docs/b.md", text: "y" }], {
         lockVersion: stale,
       });
-      expect(res.status).toBe(409);
-      expect((await problem(res)).code).toBe("conflict");
+      expect(res.status).toBe(412);
+      expect((await problem(res)).code).toBe("precondition_failed");
+      // The refusal names the current version to re-read against.
+      expect(etagVersion(res)).toBe((await packageRow()).lockVersion);
       expect(Object.keys(await storedTree())).not.toContain("docs/b.md");
     });
 
-    it("moves the row's lock_version, so a PUT holding the pre-batch token is refused", async () => {
+    it("moves the draft's ETag, so a save holding the pre-batch one is refused", async () => {
       const before = (await packageRow()).lockVersion;
       const patched = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }]);
       expect(patched.status).toBe(200);
-      const { lock_version } = (await patched.json()) as { lock_version: number };
 
       const next = "---\nname: edit-skill\ndescription: An edited skill.\n---\n\nVia PUT.";
       const stale = await putSkill(next, before);
-      expect(stale.status).toBe(409);
+      expect(stale.status).toBe(412);
 
-      const fresh = await putSkill(next, lock_version);
+      const fresh = await putSkill(next, etagVersion(patched));
       expect(fresh.status).toBe(200);
     });
 
@@ -651,7 +745,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         lockVersion: stale,
       });
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(412);
       expect(Object.keys(await storedTree())).not.toContain("docs/a.md");
     });
   });
@@ -687,7 +781,6 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         { op: "write", path: "SKILL.md", text: rewritten },
       ]);
       expect(patched.status).toBe(200);
-      const afterPatch = (await patched.json()) as { lock_version: number };
 
       expect((await restore("1.0.0")).status).toBe(200);
 
@@ -707,7 +800,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       // and the index the explorer serves is built from the same pair.
       const row = await packageRow();
       expect(row.draftContent).toBe(SKILL_MD);
-      expect(row.lockVersion).toBeGreaterThan(afterPatch.lock_version);
+      expect(row.lockVersion).toBeGreaterThan(etagVersion(patched));
       const { entries } = await listFiles();
       expect(entries.map((e) => e.path)).toEqual([
         "SKILL.md",
@@ -733,7 +826,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       const res = await saveFiles([{ op: "write", path: "docs/late.md", text: "late" }], {
         lockVersion: stale,
       });
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(412);
       expect(Object.keys(await storedTree())).not.toContain("docs/late.md");
     });
   });
@@ -820,7 +913,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
 
     it("401s without a credential", async () => {
       const res = await app.request(`/api/packages/skills/${SKILL_ID}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operations: [{ op: "write", path: "docs/a.md", text: "x" }] }),
       });
@@ -873,14 +966,14 @@ describe("file operations at package creation", () => {
           headers: authHeaders(ctx),
         });
         expect(index.status, await index.clone().text()).toBe(200);
-        const body = (await index.json()) as { entries: FileEntry[] };
-        expect(body.entries.map((entry) => entry.path)).toEqual(
+        const body = (await index.json()) as { data: FileEntry[] };
+        expect(body.data.map((entry) => entry.path)).toEqual(
           expect.arrayContaining(["manifest.json", "docs/README.md", "asset.bin"]),
         );
-        expect(body.entries.map((entry) => entry.path)).not.toContain("removed.txt");
-        expect(body.entries.find((entry) => entry.path === "docs/README.md")?.inline).toBe("Notes");
+        expect(body.data.map((entry) => entry.path)).not.toContain("removed.txt");
+        expect(body.data.find((entry) => entry.path === "docs/README.md")?.inline).toBe("Notes");
         if (type === "integration")
-          expect(body.entries.find((entry) => entry.path === "INTEGRATION.md")?.inline).toBe(
+          expect(body.data.find((entry) => entry.path === "INTEGRATION.md")?.inline).toBe(
             "Integration docs",
           );
         const binary = await app.request(

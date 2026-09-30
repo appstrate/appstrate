@@ -46,10 +46,6 @@ export interface ParsedTokenResponse {
   refreshToken?: string;
   expiresAt: string | null;
   scopesGranted: string[];
-  /** Requested scopes that the provider did not grant (RFC 6749 §3.3 narrowing). */
-  scopeShortfall: string[];
-  /** Scopes granted that were never requested (provider over-grant). */
-  scopeCreep: string[];
 }
 
 /**
@@ -155,18 +151,13 @@ export function parseTokenErrorResponse(status: number, body: string): TokenErro
  * Scope parsing is universal: splits by comma, space, or %20 to handle all
  * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
  *
- * Scope validation: when `requestedScopes` is provided, the response is compared
- * against it to surface `scopeShortfall` (provider granted fewer scopes than
- * requested — caller should flag the connection as `needsReconnection: true` or
- * present a warning to the user) and `scopeCreep` (provider returned more than
- * requested — typically benign, log only). Some providers (Slack, GitHub legacy)
- * always return all owner scopes regardless of the request, so creep is not a
- * blocking signal.
+ * Scope comparison against the request is not done here: it needs the
+ * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
+ * `…/auth/userinfo.email`), which only the platform layer knows.
  *
  * @param tokenData - Raw JSON response from the token endpoint
  * @param requestedScopes - Scopes that were sent in the authorize / refresh call. Used
- *   both as a fallback when the response omits `scope` and as the reference for
- *   shortfall / creep comparison.
+ *   as the granted set when the response omits `scope` (RFC 6749 §5.1).
  * @param fallbackRefreshToken - Refresh token to preserve if not present in response
  */
 export function parseTokenResponse(
@@ -201,13 +192,7 @@ export function parseTokenResponse(
   const responseScopes = scopeStr ? scopeStr.split(/[\s,]+|%20/).filter(Boolean) : [];
   const scopesGranted = responseScopes.length > 0 ? responseScopes : (requestedScopes ?? []);
 
-  const requested = requestedScopes ?? [];
-  const grantedSet = new Set(scopesGranted);
-  const requestedSet = new Set(requested);
-  const scopeShortfall = requested.filter((s) => !grantedSet.has(s));
-  const scopeCreep = scopesGranted.filter((s) => !requestedSet.has(s));
-
-  return { accessToken, refreshToken, expiresAt, scopesGranted, scopeShortfall, scopeCreep };
+  return { accessToken, refreshToken, expiresAt, scopesGranted };
 }
 
 /**

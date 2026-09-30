@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { orgRoleEnum } from "@appstrate/db/schema";
+import {
+  orgRoleEnum,
+  packageSourceValues,
+  packageTypeValues,
+  runOriginValues,
+} from "@appstrate/db/schema";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -24,7 +33,7 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 /**
  * The org-settings members, shared by the READ component (`OrgSettings`, below)
- * and the CLOSED write body of `PUT /api/orgs/{orgId}/settings`
+ * and the CLOSED write body of `PATCH /api/orgs/{orgId}/settings`
  * (`openapi/paths/organizations.ts`).
  *
  * The two cannot be one schema: `orgSettingsPatchSchema`
@@ -38,7 +47,8 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 /**
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
  * group, on every shape that carries a package's home (`AgentDetail`,
- * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`). ONE
+ * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`,
+ * `PackageHome`). ONE
  * definition: the server computes all four in one place (`homeWireForCaller`),
  * and four hand-copied descriptions drifted the moment the contract changed.
  */
@@ -69,7 +79,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
     description:
-      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `code sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
   },
   api_version: {
     type: "string",
@@ -141,12 +151,13 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["id", "label", "account_id", "owned_by_actor"],
+          required: ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
           properties: {
             id: { type: "string" },
             label: {
-              type: ["string", "null"],
-              description: "User-given name; `null` when the connection was never labelled.",
+              type: "string",
+              description:
+                "User-given name. Always present — the column is NOT NULL, because a run binding several connections addresses each by its label.",
             },
             account_id: {
               type: "string",
@@ -157,15 +168,20 @@ export const schemas = {
               description:
                 "True when the connection is the caller's own, false when inherited via org sharing.",
             },
+            needs_reconnection: {
+              type: "boolean",
+              description:
+                "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected.",
+            },
           },
         },
         description:
-          "Populated on `must_choose_connection`. The connections the caller may pick from, each carrying the fields that tell them apart; pass one `id` back via the request body's `connection_overrides` map to retry the run.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`).",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -192,7 +208,7 @@ export const schemas = {
       required_auth_key: {
         type: "string",
         description:
-          "Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1.",
+          "Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
       },
       available_auth_keys: {
         type: "array",
@@ -204,13 +220,14 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
-      expires_at: {
-        type: "integer",
-        description: "Absolute expiry of `connect_url`, epoch ms.",
+      expiresAt: {
+        type: "string",
+        format: "date-time",
+        description: "Absolute expiry of `connect_url` (RFC 3339).",
       },
-      package_id: {
+      packageId: {
         type: "string",
         description: "Integration package id `connect_url` connects (`@scope/name`).",
       },
@@ -219,7 +236,7 @@ export const schemas = {
   ProblemDetail: {
     type: "object",
     description: "RFC 9457 Problem Details for HTTP APIs",
-    required: ["type", "title", "status", "detail", "code", "requestId"],
+    required: ["type", "title", "status", "detail", "code", "request_id"],
     properties: {
       type: { type: "string", format: "uri", description: "URI reference to error documentation" },
       title: { type: "string", description: "Short summary of the error type" },
@@ -230,9 +247,12 @@ export const schemas = {
         description: "URI reference identifying this specific occurrence",
       },
       code: { type: "string", description: "Machine-readable error code (snake_case)" },
-      requestId: { type: "string", description: "Unique request identifier (req_ prefix)" },
+      request_id: { type: "string", description: "Unique request identifier (req_ prefix)" },
       param: { type: "string", description: "Parameter that caused the error" },
-      retryAfter: { type: "integer", description: "Seconds before retry (on 429)" },
+      retry_after: {
+        type: "integer",
+        description: "Seconds before retry; mirrored in the `Retry-After` header",
+      },
       errors: {
         type: "array",
         description: "Field-level validation errors",
@@ -253,11 +273,25 @@ export const schemas = {
         description:
           "Provider sampling temperature; null or omission inherits the runtime default.",
       },
-      reasoningLevel: {
+      reasoning_level: {
         type: ["string", "null"],
         enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
-        description: "Portable reasoning effort normalized across providers.",
+        description:
+          "Portable reasoning effort normalized across providers; null or omission inherits the next lower-precedence layer, and `medium` applies when no layer sets one. `off` sends the provider an explicit disable.",
       },
+    },
+  },
+  ModelCostTier: {
+    type: "object",
+    required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
+    description:
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+    properties: {
+      inputTokensAbove: { type: "number" },
+      input: { type: "number" },
+      output: { type: "number" },
+      cacheRead: { type: "number" },
+      cacheWrite: { type: "number" },
     },
   },
   ModelGenerationCapabilities: {
@@ -265,7 +299,7 @@ export const schemas = {
     additionalProperties: false,
     required: ["temperature", "reasoning"],
     description:
-      "Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+      "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
     properties: {
       temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
       reasoning: {
@@ -274,7 +308,7 @@ export const schemas = {
         required: ["supported", "adaptive", "levels"],
         properties: {
           supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
-          temperatureCompatible: {
+          temperature_compatible: {
             type: "string",
             enum: ["supported", "unsupported", "unknown"],
             description:
@@ -286,18 +320,6 @@ export const schemas = {
             additionalProperties: {
               type: "string",
               enum: ["supported", "unsupported", "unknown"],
-            },
-            propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-            },
-          },
-          nativeLevels: {
-            type: "object",
-            description:
-              "Optional provider-native values for portable levels (for example off to none).",
-            additionalProperties: {
-              type: "string",
-              enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
             propertyNames: {
               enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -344,10 +366,11 @@ export const schemas = {
     //     not reach — the column is data, renamed by a migration or not at all.
     required: [
       "packageId",
-      "generationConfig",
+      "generation_config",
       "modelId",
       "proxyId",
       "enabled",
+      "chat_enforced",
       "installed_at",
       "updatedAt",
       "package_type",
@@ -357,16 +380,21 @@ export const schemas = {
     properties: {
       object: { type: "string", enum: ["space_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
-      generationConfig: {
+      generation_config: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
       modelId: { type: ["string", "null"], description: "Model override for this space" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
       enabled: { type: "boolean" },
+      chat_enforced: {
+        type: "boolean",
+        description:
+          "Skills only: while the skill is active here, its latest published `SKILL.md` is injected in every chat conversation held in this space, whatever the member's `skills:*` grants. Kept across deactivation. Always `false` for other types.",
+      },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
-      package_type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
-      package_source: { type: "string", enum: ["system", "local"] },
+      package_type: { type: "string", enum: [...packageTypeValues] },
+      package_source: { type: "string", enum: [...packageSourceValues] },
       draft_manifest: {
         type: ["object", "null"],
         description: "Raw draft manifest JSONB for the placed package.",
@@ -374,7 +402,7 @@ export const schemas = {
     },
   },
   // READ shape — deliberately open, see ORG_SETTINGS_PROPERTIES above. The
-  // write body of PUT /api/orgs/{orgId}/settings is the closed twin.
+  // write body of PATCH /api/orgs/{orgId}/settings is the closed twin.
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
@@ -449,10 +477,10 @@ export const schemas = {
     type: "object",
     description:
       "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
-    required: ["space_id"],
+    required: ["spaceId"],
     oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }],
     properties: {
-      space_id: { type: "string" },
+      spaceId: { type: "string" },
       preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
       custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
     },
@@ -573,7 +601,7 @@ export const schemas = {
       schema_version: { type: "string" },
       author: { type: "string" },
       keywords: { type: "array", items: { type: "string" } },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       scope: {
         type: ["string", "null"],
         description:
@@ -583,7 +611,7 @@ export const schemas = {
       type: {
         type: "string",
         description: "Package type from manifest",
-        enum: ["agent", "skill", "mcp-server", "integration"],
+        enum: [...packageTypeValues],
       },
       running_runs: { type: "integer" },
       dependencies: {
@@ -623,7 +651,7 @@ export const schemas = {
   AgentDetail: {
     type: "object",
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
-    // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
+    // `updatedAt` stay optional: system agents omit `updatedAt`,
     // and the manifest-derived display_name/description may be absent (the
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
@@ -661,7 +689,7 @@ export const schemas = {
       },
       display_name: { type: "string" },
       description: { type: "string" },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       scope: {
         type: ["string", "null"],
         description:
@@ -683,10 +711,6 @@ export const schemas = {
         type: "string",
         format: "date-time",
         description: "Last updated timestamp (user agents only)",
-      },
-      lock_version: {
-        type: "integer",
-        description: "Optimistic lock version (user agents only)",
       },
       input: {
         // Stated explicitly alongside `allOf`: the branches below are a
@@ -898,12 +922,17 @@ export const schemas = {
   },
   PackageFileIndex: {
     type: "object",
-    required: ["entries"],
+    required: ["object", "data", "hasMore"],
     properties: {
-      entries: {
+      object: { type: "string", enum: ["list"] },
+      data: {
         type: "array",
         items: { $ref: "#/components/schemas/PackageFileEntry" },
         description: "Files in the artifact, sorted by `path`.",
+      },
+      hasMore: {
+        type: "boolean",
+        description: "Always `false`: the index is never paginated.",
       },
     },
   },
@@ -1058,7 +1087,7 @@ export const schemas = {
       orgId: { type: "string" },
       status: {
         type: "string",
-        enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
+        enum: [...runStatusValues],
       },
       input: {
         type: ["object", "null"],
@@ -1272,7 +1301,7 @@ export const schemas = {
       // (spec==runtime invariant). Do not rename without changing the serializer.
       runOrigin: {
         type: ["string", "null"],
-        enum: ["platform", "remote", null],
+        enum: [...runOriginValues, null],
         description:
           "Which runner drives this run: 'platform' (server-managed Docker container) or 'remote' (caller's host via signed events).",
       },
@@ -1289,9 +1318,8 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description:
-          'Per-integration connection picks for this run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (#1).',
-        additionalProperties: { type: "string" },
+        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
+        additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -1302,12 +1330,14 @@ export const schemas = {
       connections_used: {
         type: ["array", "null"],
         description:
-          "Connections resolved for this run, projected from the internal snapshot for display. Null when the agent declares no integrations.",
+          "Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations.",
         items: {
           type: "object",
           required: ["integration_id", "label", "account_id", "source"],
           properties: {
             integration_id: { type: "string" },
+            // Nullable although the column is NOT NULL: this is a kickoff-time
+            // audit copy, and a snapshot need not carry it.
             label: { type: ["string", "null"] },
             account_id: { type: ["string", "null"] },
             source: { type: "string" },
@@ -1320,7 +1350,7 @@ export const schemas = {
     type: "object",
     required: ["id", "runId", "type", "level", "createdAt"],
     properties: {
-      id: { type: "integer" },
+      id: { type: "integer", format: "int64" },
       runId: { type: "string" },
       orgId: { type: "string" },
       type: { type: "string" },
@@ -1387,7 +1417,7 @@ export const schemas = {
       name: { type: ["string", "null"] },
       enabled: { type: "boolean" },
       cron_expression: { type: "string" },
-      timezone: { type: ["string", "null"] },
+      timezone: { type: "string" },
       input: { type: ["object", "null"], additionalProperties: true },
       generation_config_override: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
@@ -1397,9 +1427,8 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description:
-          'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Flat map: `{ "@scope/integration": "<connection_id>" }`. Replayed on every fire; loses to admin pins (#1), beats actor-fallback (#4).',
-        additionalProperties: { type: "string" },
+        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
         type: ["object", "null"],
@@ -1450,7 +1479,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       name: { type: "string" },
-      keyPrefix: { type: "string", description: "First 8 chars of the key for identification" },
+      keyPrefix: {
+        type: "string",
+        description: "The first characters of the key, for identification: `apst_` + 8.",
+      },
       scopes: {
         type: "array",
         items: { type: "string" },
@@ -1507,7 +1539,7 @@ export const schemas = {
         description:
           "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
       },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
       used_by_agents: { type: "integer" },
@@ -1563,10 +1595,9 @@ export const schemas = {
         description:
           "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
       },
-      source: { type: "string", enum: ["system", "local"] },
+      source: { type: "string", enum: [...packageSourceValues] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
-      lock_version: { type: "integer", description: "Optimistic lock version" },
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       manifest: { type: "object", additionalProperties: true, description: "Full manifest object" },
       manifest_name: {
@@ -1604,7 +1635,7 @@ export const schemas = {
       "id",
       "label",
       "apiShape",
-      "baseUrl",
+      "base_url",
       "source",
       "authMode",
       "created_by",
@@ -1619,7 +1650,7 @@ export const schemas = {
         description:
           "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
-      baseUrl: {
+      base_url: {
         type: ["string", "null"],
         description:
           "Endpoint base URL. `null` for a managed-only built-in credential (see apiShape).",
@@ -1633,12 +1664,6 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
-      available_model_ids: {
-        type: ["array", "null"],
-        items: { type: "string" },
-        description:
-          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
-      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1651,8 +1676,9 @@ export const schemas = {
       "label",
       "apiShape",
       "providerId",
-      "providerName",
-      "baseUrl",
+      "provider_name",
+      "pi_provider",
+      "base_url",
       "modelId",
       "generation",
       "enabled",
@@ -1679,12 +1705,17 @@ export const schemas = {
         description:
           "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
       },
-      providerName: {
+      provider_name: {
         type: ["string", "null"],
         description:
           "The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry.",
       },
-      baseUrl: {
+      pi_provider: {
+        type: ["string", "null"],
+        description:
+          "Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed.",
+      },
+      base_url: {
         type: ["string", "null"],
         description: "Provider endpoint. `null` for managed models — binding not exposed.",
       },
@@ -1697,7 +1728,10 @@ export const schemas = {
         description:
           "Generation controls supported by the backing model. Null for managed aliases whose binding is hidden.",
       },
-      input: { type: ["array", "null"], items: { type: "string" } },
+      input: {
+        type: ["array", "null"],
+        items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+      },
       contextWindow: { type: ["integer", "null"] },
       maxTokens: { type: ["integer", "null"] },
       reasoning: { type: ["boolean", "null"] },
@@ -1711,12 +1745,12 @@ export const schemas = {
       aliased: {
         type: "boolean",
         description:
-          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `baseUrl`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
+          "Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge.",
       },
       iconUrl: {
         type: ["string", "null"],
         description:
-          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`baseUrl`, or fall back to a generic icon.",
+          "Display-icon key for the UI (a client provider-icon key, e.g. `anthropic`, `openai`). A deliberate public choice on the model — decoupled from the provider, so a managed model can show an icon without exposing its binding. `null` means resolve the icon from the (visible) `apiShape`/`base_url`, or fall back to a generic icon.",
       },
       source: { type: "string", enum: ["built-in", "custom"] },
       credentialId: {
@@ -1732,6 +1766,7 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
+          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
         },
       },
       created_by: { type: ["string", "null"] },
@@ -1758,17 +1793,17 @@ export const schemas = {
     type: "object",
     description:
       "Resolved access token returned by `GET /internal/oauth-token/{id}` and `POST .../refresh`. Carries only the fields that change per refresh — provider invariants (baseUrl, …) live in the sidecar's boot-time `LlmProxyOauthConfig`. Wire-equivalent to the `OAuthTokenResponse` TS interface in `@appstrate/core/sidecar-types`.",
-    required: ["accessToken", "expiresAt"],
+    required: ["access_token", "expiresAt"],
     properties: {
-      accessToken: { type: "string" },
+      access_token: { type: "string" },
       expiresAt: {
         type: ["integer", "null"],
         description: "Epoch milliseconds. null when expiry is unknown.",
       },
-      accountId: {
+      account_id: {
         type: "string",
         description:
-          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
+          "Abstract account/tenant identifier surfaced by the provider's `extractTokenIdentity` hook. Omitted when the provider surfaced none. The sidecar's identity layer (keyed by providerId from the boot config) decides which routing header to echo it as.",
       },
     },
   },
@@ -1820,42 +1855,91 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connection the next run uses (admin pin → run/schedule override → member pin → fallback + scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses.",
+      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source` + `error_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
     required: [
-      "status",
-      "resolved_connection_id",
+      "source",
+      "error_code",
+      "resolved_connection_ids",
       "resolved_missing_scopes",
-      "resolved_owned_by_actor",
-      "admin_pinned_connection_id",
-      "member_pinned_connection_id",
-      "org_default_connection_id",
+      "admin_pinned_connection_ids",
+      "member_pinned_connection_ids",
+      "org_default_connection_ids",
       "org_default_enforced",
       "can_add_connection",
       "candidates",
     ],
     properties: {
-      status: {
-        type: "string",
+      source: {
+        type: ["string", "null"],
         enum: [
-          "admin_locked",
-          "pinned",
-          "auto",
-          "must_choose",
-          "none",
-          "stale",
-          "needs_reconnection",
+          "admin_pin",
+          "org_default_enforced",
+          "run_override",
+          "schedule_override",
+          "member_pin",
+          "org_default",
+          "fallback_auto",
+          null,
         ],
+        description:
+          "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
-      resolved_connection_id: { type: ["string", "null"] },
-      resolved_missing_scopes: { type: "array", items: { type: "string" } },
-      resolved_owned_by_actor: { type: "boolean" },
-      admin_pinned_connection_id: { type: ["string", "null"] },
-      member_pinned_connection_id: { type: ["string", "null"] },
-      org_default_connection_id: { type: ["string", "null"] },
+      error_code: {
+        type: ["string", "null"],
+        enum: [
+          "not_connected",
+          "needs_reconnection",
+          "pinned_connection_unavailable",
+          "override_connection_unavailable",
+          "override_outranked",
+          "must_choose_connection",
+          "insufficient_scopes",
+          "auth_key_mismatch",
+          "auth_serves_no_selected_tool",
+          "auth_key_serves_no_selected_tool",
+          null,
+        ],
+        description:
+          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.",
+      },
+      resolved_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description:
+          "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise.",
+      },
+      resolved_missing_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise.",
+      },
+      admin_pinned_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
+      member_pinned_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
+      org_default_connection_ids: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+      },
       org_default_enforced: { type: "boolean" },
-      can_add_connection: { type: "boolean" },
+      can_add_connection: {
+        type: "boolean",
+        description:
+          "Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections.",
+      },
       candidates: {
         type: "array",
+        description:
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [
@@ -1876,7 +1960,11 @@ export const schemas = {
             id: { type: "string", format: "uuid" },
             auth_key: { type: "string" },
             account_id: { type: "string" },
-            label: { type: ["string", "null"] },
+            label: {
+              type: "string",
+              description:
+                "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
+            },
             owner_user_id: { type: ["string", "null"] },
             owner_end_user_id: { type: ["string", "null"] },
             owner_name: { type: ["string", "null"] },
@@ -1893,18 +1981,18 @@ export const schemas = {
   AgentConnectionReadiness: {
     type: "object",
     description:
-      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 409, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
     required: ["blocks_run", "errors", "integrations"],
     properties: {
       blocks_run: {
         type: "boolean",
         description:
-          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
+          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
       },
       errors: {
         type: "array",
         description:
-          'What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 412 error items.',
+          'What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 409 error items.',
         items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
       integrations: {
@@ -1990,21 +2078,71 @@ export const schemas = {
       },
     },
   },
+  // A block to run on the target.
+  HandoffCommandStep: {
+    type: "object",
+    required: ["kind", "id", "label", "shell"],
+    properties: {
+      kind: { type: "string", enum: ["command"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
+      label: { type: "string" },
+      shell: {
+        type: "string",
+        description: "Shell to run on the target. The platform never runs it.",
+      },
+      note: { type: "string" },
+      deferred: {
+        type: "boolean",
+        description:
+          "Due when the connection is deleted, not now. Only on `submitIntegrationConnect`; `getMyConnectionHandoff` omits it.",
+      },
+    },
+  },
+  // A value to read or compare — a fingerprint, an identifier.
+  HandoffValueStep: {
+    type: "object",
+    required: ["kind", "id", "label", "value"],
+    properties: {
+      kind: { type: "string", enum: ["value"] },
+      id: {
+        type: "string",
+        description:
+          "Stable identifier a client can key a translation on; `label`/`note` are the English default.",
+      },
+      label: { type: "string" },
+      value: { type: "string" },
+      note: { type: "string" },
+    },
+  },
+  // One step a user runs or checks on their own machine for a minted credential.
+  HandoffStep: {
+    oneOf: [
+      { $ref: "#/components/schemas/HandoffCommandStep" },
+      { $ref: "#/components/schemas/HandoffValueStep" },
+    ],
+    discriminator: {
+      propertyName: "kind",
+      mapping: {
+        command: "#/components/schemas/HandoffCommandStep",
+        value: "#/components/schemas/HandoffValueStep",
+      },
+    },
+  },
+
   IntegrationPin: {
     type: "object",
-    required: [
-      "packageId",
-      "integration_package_id",
-      "auth_key",
-      "connection_id",
-      "createdAt",
-      "updatedAt",
-    ],
+    required: ["packageId", "integration_package_id", "connection_ids", "createdAt", "updatedAt"],
     properties: {
       packageId: { type: "string" },
       integration_package_id: { type: "string" },
-      auth_key: { type: "string" },
-      connection_id: { type: "string", format: "uuid" },
+      connection_ids: {
+        ...connectionIdSetJsonSchema,
+        description: "The whole pinned set, in the order it was written. A write replaces it.",
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -2036,10 +2174,10 @@ export const schemas = {
   },
   SpaceSweepResult: {
     type: "object",
-    required: ["object", "space_id", "rehomed_packages", "deleted_packages"],
+    required: ["object", "spaceId", "rehomed_packages", "deleted_packages"],
     properties: {
       object: { type: "string", enum: ["space_sweep"] },
-      space_id: { type: "string", description: "The personal space that was swept and deleted" },
+      spaceId: { type: "string", description: "The personal space that was swept and deleted" },
       rehomed_packages: {
         type: "integer",
         description:
@@ -2238,13 +2376,22 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["permission", "action", "api_key_grantable"],
+          required: ["permission", "action", "api_key_grantable", "requires_one_of"],
           properties: {
             permission: { type: "string" },
             action: { type: "string" },
             api_key_grantable: {
               type: "boolean",
               description: "Can also be carried by an API key.",
+            },
+            requires_one_of: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "The reads a role holding this permission must also hold, any one of them sufficing; " +
+                "the first is the canonical one to add. Usually the resource's own `read`, not always " +
+                "(`agents:run` needs a runs read). Empty when the permission needs none. " +
+                "The authority on the rule: a create or update breaking it is a 400.",
             },
           },
         },
@@ -2372,11 +2519,12 @@ export const schemas = {
         "home_writable",
         "home_deletable",
         "home_shareable",
+        "published",
         "placements",
       ],
       properties: {
         id: { type: "string", description: "Package id (`@scope/name`)." },
-        type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+        type: { type: "string", enum: [...packageTypeValues] },
         source: {
           type: "string",
           description:
@@ -2393,6 +2541,11 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
+        published: {
+          type: "boolean",
+          description:
+            "Whether the package has a published version (a `latest` dist-tag), or is a system package. A skill can be enforced in a space's chat only when it is published.",
+        },
         placements: {
           type: "array",
           description:
@@ -2408,7 +2561,7 @@ export const schemas = {
     type: "object",
     description:
       "One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it.",
-    required: ["space_id", "via", "state", "shared_by"],
+    required: ["space_id", "via", "state", "chat_enforced", "shared_by"],
     properties: {
       space_id: {
         type: "string",
@@ -2425,6 +2578,11 @@ export const schemas = {
         enum: ["active", "inactive", "none"],
         description:
           "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+      },
+      chat_enforced: {
+        type: "boolean",
+        description:
+          "Whether this space enforces the skill in its chat (`SpacePackage.chat_enforced`). `false` with no placement row, and for every type but `skill`.",
       },
       shared_by: {
         type: ["object", "null"],
@@ -2446,19 +2604,19 @@ export const schemas = {
     oneOf: [
       {
         type: "object",
-        required: ["kind", "user_id"],
+        required: ["kind", "userId"],
         properties: {
           kind: { type: "string", enum: ["user"] },
-          user_id: { type: "string", description: "Organization member's user id." },
+          userId: { type: "string", description: "Organization member's user id." },
         },
         additionalProperties: false,
       },
       {
         type: "object",
-        required: ["kind", "space_id"],
+        required: ["kind", "spaceId"],
         properties: {
           kind: { type: "string", enum: ["space"] },
-          space_id: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
+          spaceId: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
         },
         additionalProperties: false,
       },
@@ -2471,8 +2629,8 @@ export const schemas = {
     required: ["kind", "name"],
     properties: {
       kind: { type: "string", enum: ["user", "space"] },
-      user_id: { type: "string", description: "Present when `kind` is `user`." },
-      space_id: { type: "string", description: "Present when `kind` is `space`." },
+      userId: { type: "string", description: "Present when `kind` is `user`." },
+      spaceId: { type: "string", description: "Present when `kind` is `space`." },
       name: {
         type: "string",
         description: "The member's display name, or the space's name.",
@@ -2483,7 +2641,7 @@ export const schemas = {
     type: "object",
     description:
       "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-    required: ["object", "target", "shared_by", "created_at"],
+    required: ["object", "target", "shared_by", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
@@ -2497,7 +2655,32 @@ export const schemas = {
           name: { type: "string" },
         },
       },
-      created_at: { type: "string", format: "date-time" },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  PackageHome: {
+    type: "object",
+    description:
+      "Where a package lives and where this caller reads it from, resolved across EVERY space the caller reaches rather than the one in `X-Space-Id` — the answer a client holding only a package id needs to know which space to address.",
+    required: [
+      "id",
+      "type",
+      "home_space_id",
+      "home_writable",
+      "home_deletable",
+      "home_shareable",
+      "read_space_ids",
+    ],
+    properties: {
+      id: { type: "string", description: "Package id (`@scope/name`)." },
+      type: { type: "string", enum: [...packageTypeValues] },
+      ...PACKAGE_HOME_PROPERTIES,
+      read_space_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
+      },
     },
   },
 } as const;

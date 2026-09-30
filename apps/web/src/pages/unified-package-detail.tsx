@@ -7,6 +7,8 @@ import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
+import { Button } from "@appstrate/ui/components/button";
+import { TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -16,12 +18,15 @@ import {
   usePackageDownload,
   useDeletePackage,
   useVersionInfo,
+  type Versioned,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
+import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState } from "../components/page-states";
+import { LoadingState, EmptyState } from "../components/page-states";
+import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -157,6 +162,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
+  // Each tab below is fed by a read of its own, none implied by this route.
+  const tabReads = {
+    runs: canReadRuns(can),
+    memory: can("persistence:read"),
+    usedBy: packageSightPermissions("agent").some(can),
+  };
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
@@ -166,8 +177,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Agents list for "Used by" tab enrichment
 
   // Type-narrowed aliases for type-specific branches
-  const agentDetail = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
-  const pkgDetail = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
+  const agentDetail = type === "agent" ? (detail as Versioned<AgentDetail> | undefined) : undefined;
+  const pkgDetail =
+    type !== "agent" ? (detail as Versioned<OrgPackageItemDetail> | undefined) : undefined;
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
@@ -184,13 +196,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const { data: versionDetail, isLoading: versionLoading } = useVersionDetail(
-    type,
-    packageId,
-    versionParam,
-  );
+  const {
+    data: versionDetail,
+    isLoading: versionLoading,
+    error: versionError,
+  } = useVersionDetail(type, packageId, versionParam);
 
-  // Diff: fetch latest version when timestamps suggest changes
+  // The server's own flag gates publishing (the header badge and the publish
+  // dialog), as it does for `appstrate packages publish`: the server judges the
+  // content itself — annexes included, which the manifest/prompt comparison
+  // below cannot see — and answers `409 no_changes` when nothing moved. The
+  // comparison only decides whether a diff tab has anything to show.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
   const { data: latestVersionForDiff } = useVersionDetail(
     type,
@@ -235,13 +251,33 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } | null>(null);
 
   // ── State ──
+  // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
+  // falls back to the default tab for a hash naming anything outside the list
+  // and the panels below key on its answer. The summary is withheld from an
+  // `agents:run` caller without `agents:read`: it is fed by fields the summary
+  // read omits (manifest, prompt, authoring history).
+  const agentTabVisible = (id: (typeof AGENT_DETAIL_TABS)[number]) =>
+    id === "overview"
+      ? fullRead
+      : id === "runs"
+        ? tabReads.runs
+        : id === "memory"
+          ? tabReads.memory
+          : true;
   const allValidTabs: DetailTab[] =
     type === "agent"
-      ? AGENT_DETAIL_TABS.filter((id) => fullRead || id !== "overview")
+      ? AGENT_DETAIL_TABS.filter(agentTabVisible)
       : // `content` stays valid only to redirect old links to Paramètres.
-        ["overview", "versions", "diff", "settings", "content", "usedBy"];
+        [
+          "overview",
+          "versions",
+          "diff",
+          "settings",
+          "content",
+          ...(tabReads.usedBy ? (["usedBy"] as const) : []),
+        ];
   // Every detail has a useful summary; explicit file/version deep links still win.
-  const defaultTab: DetailTab = fullRead ? "overview" : "runs";
+  const defaultTab: DetailTab = fullRead ? "overview" : tabReads.runs ? "runs" : "settings";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const openAgentSettings = (section: "map" | "files" | "model") => {
     const search = new URLSearchParams(location.search);
@@ -303,6 +339,28 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) {
     return <Navigate to="/" replace />;
+  }
+
+  // A published version whose stored archive is unavailable EXISTS — redirecting
+  // to the live page (what any other version failure does) would hide that it
+  // is broken. Say so, and leave the way back to the live page one click away.
+  if (
+    isVersionView &&
+    versionError instanceof ApiError &&
+    versionError.code === "version_artifact_unavailable"
+  ) {
+    return (
+      <EmptyState
+        message={t("error.generic", { ns: "common" })}
+        hint={t("files.errorMissingArtifact")}
+        icon={TriangleAlert}
+        tone="danger"
+      >
+        <Button asChild variant="outline" size="sm">
+          <Link to={packageDetailPath(type, packageId)}>{t("btn.back", { ns: "common" })}</Link>
+        </Button>
+      </EmptyState>
+    );
   }
 
   // ── Version redirect ──
@@ -380,7 +438,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     settings: t("detail.tabSettings"),
   };
   const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.filter(
-    (id) => fullRead || id !== "overview",
+    agentTabVisible,
   ).map((id) => ({
     id,
     label: agentTabLabels[id],
@@ -389,14 +447,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
     { id: "settings", label: t("detail.tabSettings") },
-    { id: "usedBy", label: t("packages.usedBy") },
+    ...(tabReads.usedBy ? [{ id: "usedBy" as DetailTab, label: t("packages.usedBy") }] : []),
   ];
 
   const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
   // Versions live in Paramètres › Explorer for every type.
   const versionsProps = {
-    isOwned: !isBuiltIn,
+    // Restoring writes the draft, deleting removes a version: both are judged
+    // in the package's HOME space, never in the space being browsed.
+    canRestore: !isBuiltIn && !!homeWritable,
+    canDelete: !isBuiltIn && !!homeDeletable,
     latestVersion: latestVersionForDiff,
     currentManifest,
     currentContent,
@@ -410,7 +471,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        hasUnarchivedChanges={hasArchivableChanges}
+        // The server's own flag, as for the publish dialog below.
+        hasUnarchivedChanges={hasTimestampChanges}
         latestPublishedVersion={versionInfo?.latest_published_version}
         activeSubpage={{
           label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
@@ -679,7 +741,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         onClose={() => setCreateVersionOpen(false)}
         type={type}
         packageId={packageId}
-        hasUnarchivedChanges={hasArchivableChanges}
+        hasUnarchivedChanges={hasTimestampChanges}
+        etag={(agentDetail ?? pkgDetail)?.etag}
       />
 
       <ForkPackageModal

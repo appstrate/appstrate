@@ -32,9 +32,19 @@ import {
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
+import {
+  cookieScope,
+  credentialUrlPolicy,
+  exfiltrationRefusal,
+  redactCredentialHost,
+  redactionFields,
+  scrubTransportError,
+  type CookieJar,
+} from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
+import type { RunBoundSelection } from "../integration-connections.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -55,13 +65,8 @@ const OUTBOUND_TIMEOUT_MS = 30_000;
  * narrow contract here so the core stays free of infra imports.
  */
 interface CookieJarAdapter {
-  get(sessionId: string, integrationKey: string): Promise<string[]>;
-  set(
-    sessionId: string,
-    integrationKey: string,
-    cookies: string[],
-    ttlSeconds: number,
-  ): Promise<void>;
+  get(sessionId: string, connectionId: string): Promise<CookieJar>;
+  set(sessionId: string, connectionId: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
 }
 
 interface ProxyCallInput {
@@ -79,6 +84,8 @@ interface ProxyCallInput {
    * against the actor's accessible set).
    */
   connectionId?: string;
+  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
+  run?: RunBoundSelection;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -115,8 +122,8 @@ interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`). Combined with `integrationId` to
-   * scope cookies per-integration within one session.
+   * Jar lookup key (usually `sessionId`). Combined with the resolved connection id, so two
+   * connections driven by one session never share cookies.
    */
   jarSessionId?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
@@ -160,7 +167,7 @@ interface ProxyCallResult {
  * Authorization failure for a proxy call. The route reflects `message` to the
  * caller (403 body) and logs it, so it MUST NEVER contain a substituted
  * credential value — build messages from the REDACTED target representation
- * only (see {@link redactCredentialValues}), never from the substituted one.
+ * only (see {@link redactCredentialHost}), never from the substituted one.
  */
 export class ProxyAuthorizationError extends Error {
   readonly code = "UNAUTHORIZED_TARGET";
@@ -199,51 +206,29 @@ export class ProxySubstitutionError extends Error {
 // it up. Local helpers removed in Phase A.4.
 
 /**
- * Restore `{{field}}` placeholders for every decrypted credential value that
- * appears in `value`. A caller-supplied template like
- * `https://{{access_token}}.evil.example` interpolates the DECRYPTED token
- * into the target before validation — any error message, log field or wrapped
- * transport error that echoes the substituted string would leak the secret to
- * the caller (the route reflects error messages in 403 bodies) and into logs.
- * This is the ONLY representation of a substituted string allowed to leave
- * this module other than on the wire to the validated upstream.
- *
- * Empty values are skipped (replacing `""` is meaningless), but there is
- * deliberately no minimum length: even a 1-char credential fragment must not
- * be echoed.
- */
-function redactCredentialValues(value: string, fields: Record<string, string>): string {
-  let out = value;
-  for (const [name, fieldValue] of Object.entries(fields)) {
-    if (typeof fieldValue !== "string" || fieldValue.length === 0) continue;
-    out = out.split(fieldValue).join(`{{${name}}}`);
-    // URL normalization (WHATWG parsing inside the egress guard / fetch)
-    // percent-encodes reserved characters — scrub the encoded form too, or a
-    // secret containing e.g. `/` or `+` would survive redaction inside a
-    // normalized URL echoed by a transport error.
-    const encoded = encodeURIComponent(fieldValue);
-    if (encoded !== fieldValue) {
-      out = out.split(encoded).join(`{{${name}}}`);
-    }
-  }
-  return out;
-}
-
-/**
  * Execute one authenticated proxy call. Credentials never leak into the
  * caller's response — the only thing that crosses the boundary is the
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
+  const selection = {
+    integrationId: input.integrationId,
+    spaceId: input.spaceId,
+    actor: input.actor,
+    ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    ...(input.run ? { run: input.run } : {}),
+  };
   let resolved;
+  let declaredUris: readonly string[];
+  // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
+  let refreshSelection;
+  let connectionId: string;
   try {
-    const result = await resolveIntegrationProxyCredentials({
-      integrationId: input.integrationId,
-      spaceId: input.spaceId,
-      actor: input.actor,
-      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-    });
+    const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
+    declaredUris = result.declaredUris;
+    connectionId = result.connectionId;
+    refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCredentialError(err.message);
@@ -262,11 +247,29 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
     );
   }
-  // Redacted twin of `target`, computed ONCE. `target` carries decrypted
-  // credential values (the substitution above) — it goes on the wire and
-  // NOWHERE else. Every error message / log-bound string below must use
-  // `redactedTarget` instead.
-  const redactedTarget = redactCredentialValues(target, fields);
+  // `Bearer{{token}}` is repaired on the TEMPLATE: a raw secret reaches the upstream as-is (#988).
+  const headerTemplates = Object.entries(input.headers ?? {}).map(
+    ([k, v]) => [k, normalizeAuthSchemeTemplate(k, v)] as const,
+  );
+  const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
+
+  const authorizedUris = resolved.authorizedUris ?? [];
+  const policy = credentialUrlPolicy({
+    templates: [
+      input.target,
+      ...headerTemplates.map(([, template]) => template),
+      ...(bodyTemplate !== null ? [bodyTemplate] : []),
+    ],
+    fields,
+    allowAllUris: resolved.allowAllUris,
+    authorizedUris,
+  });
+  // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
+  const redactFields = redactionFields(policy, fields);
+  const redactedHost = redactCredentialHost(target, redactFields);
+  if (policy.refuse) {
+    throw new ProxyAuthorizationError(exfiltrationRefusal(input.integrationId));
+  }
 
   // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
   // When `allow_all_uris` is set we still block private/internal network
@@ -285,17 +288,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // interpolated credential (vendor puts the token in a path, or echoes it
   // in a Location header).
   const assertHopAuthorized = (hopTarget: string): void => {
-    if (resolved.allowAllUris) return;
-    const allowlist = resolved.authorizedUris ?? [];
-    const ok = allowlist.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
+    if (policy.allowAllUris) return;
+    const ok = authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
-        `Target ${redactCredentialValues(hopTarget, fields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
+        `Target host ${redactCredentialHost(hopTarget, redactFields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
-    // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
-    // `false` for `[]`, so the `!ok` guard above already threw. (The former
-    // `allowlist.length === 0 && isBlockedUrl(target)` branch was dead.)
   };
   assertHopAuthorized(target);
 
@@ -308,7 +307,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const egress = await checkEgressUrl(target);
   if (!egress.ok) {
     throw new ProxyAuthorizationError(
-      `Target ${redactedTarget} resolves to a blocked network range`,
+      `Target host ${redactedHost} resolves to a blocked network range`,
     );
   }
 
@@ -324,11 +323,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // cross-origin redirect strips these exactly like `Authorization`.
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
-  for (const [k, v] of Object.entries(input.headers ?? {})) {
-    // Repair `Bearer{{token}}` → `Bearer {{token}}` on the TEMPLATE, never on
-    // the resolved value: a raw secret starting with a scheme name must reach
-    // the upstream byte-identical (#988).
-    const template = normalizeAuthSchemeTemplate(k, v);
+  for (const [k, template] of headerTemplates) {
     const substituted = substituteVars(template, fields);
     const unresolved = findUnresolvedPlaceholders(substituted);
     if (unresolved.length > 0) {
@@ -354,8 +349,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (input.body !== undefined && input.body !== null) {
     if (isStreamBody) {
       body = input.body as ReadableStream<Uint8Array>;
-    } else if (typeof input.body === "string" && input.substituteBody) {
-      const substituted = substituteVars(input.body, fields);
+    } else if (bodyTemplate !== null) {
+      const substituted = substituteVars(bodyTemplate, fields);
       const unresolved = findUnresolvedPlaceholders(substituted);
       if (unresolved.length > 0) {
         throw new ProxySubstitutionError(
@@ -368,16 +363,29 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   }
 
-  // Cookie jar — inject stored cookies, capture any Set-Cookie.
-  const jar = input.cookieJar;
+  const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  if (jar && jarSessionId) {
-    const cookies = await jar.get(jarSessionId, input.integrationId);
-    if (cookies.length > 0) {
-      headers.set("Cookie", cookies.join("; "));
-    }
-  }
+  // Siblings share cookies only across hosts the manifest names literally, never a rendered one.
+  const literalAllowlist = policy.allowAllUris ? null : declaredUris;
+  // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
+  // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
+  const captured: Array<[string, string[]]> = [];
+  const scope =
+    jarStore && jarSessionId
+      ? cookieScope(
+          await jarStore.get(jarSessionId, connectionId),
+          input.integrationId,
+          literalAllowlist,
+        )
+      : null;
+  const cookies = scope && {
+    header: (url: string, base: string | null) => scope.header(url, base),
+    capture: (url: string, setCookies: string[]) => {
+      scope.capture(url, setCookies);
+      if (setCookies.length) captured.push([url, setCookies]);
+    },
+  };
 
   const fetchInit: RequestInit & { duplex?: string } = {
     method: input.method,
@@ -414,6 +422,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         ...(input.fetch ? { fetchImpl: input.fetch } : {}),
         validateHop: (url) => assertHopAuthorized(url.toString()),
         sensitiveHeaders: [...sensitiveHeaderNames],
+        ...(cookies ? { cookies } : {}),
       });
     } catch (err) {
       if (err instanceof ProxyAuthorizationError) {
@@ -421,79 +430,71 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       }
       if (err instanceof SsrfBlockedError) {
         throw new ProxyAuthorizationError(
-          `Target ${redactedTarget} was blocked by the egress guard (${err.reason})`,
+          `Target host ${redactedHost} was blocked by the egress guard (${err.reason})`,
         );
       }
-      if (err instanceof Error) {
-        const redacted = redactCredentialValues(err.message, fields);
-        if (redacted !== err.message) {
-          // The message embedded a credential value (Bun fetch errors carry
-          // the request URL). Re-wrap with the scrubbed message; keep the
-          // name so callers can still discriminate (e.g. TimeoutError). The
-          // original error is deliberately NOT chained as `cause`.
-          const clean = new Error(redacted);
-          clean.name = err.name;
-          throw clean;
-        }
-      }
-      throw err;
+      throw scrubTransportError(err, redactFields);
     }
   };
 
-  let res = await performFetch(fetchInit as RequestInit);
+  // Re-read first: narrows (not closes) a concurrent lost update to one get/set round trip.
+  const persistJar = async () => {
+    if (!jarStore || !jarSessionId || !jarTtl || jarTtl <= 0 || captured.length === 0) return;
+    const latest = await jarStore.get(jarSessionId, connectionId);
+    const fresh = cookieScope(latest, input.integrationId, literalAllowlist);
+    for (const [url, setCookies] of captured) fresh.capture(url, setCookies);
+    await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
+  };
 
-  // Reactive 401-refresh-retry — mirror of the sidecar
-  // (runtime-pi/sidecar/credential-proxy.ts:259-285). The public route is
-  // used by CLI / GitHub Action / self-hosted runners, which were silently
-  // 401-ing whenever the stored OAuth access_token expired because the
-  // refresh logic only fired on streaming bodies. Buffered bodies can be
-  // replayed safely → refresh + retry once. Streaming bodies fall through
-  // to the authRefreshed escape-hatch below (caller must re-issue with a
-  // fresh body stream).
-  if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
-    try {
-      const refreshedResult = await forceRefreshIntegrationProxyCredentials({
-        integrationId: input.integrationId,
-        spaceId: input.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      });
-      const refreshed = refreshedResult?.payload ?? null;
-      if (refreshed) {
-        // Rebuild the credential header from the rotated token. Drop the
-        // previous platform-injected value first so the refreshed delivery
-        // plan can install its current header name and value cleanly.
-        headers.delete(credentialInjection.header.name);
-        if (refreshed.credentialHeaderName) {
-          // Keep the strip set in sync — the refreshed payload may name a
-          // different header than the original resolution.
-          sensitiveHeaderNames.add(refreshed.credentialHeaderName);
+  // `finally`: hops received before a throw (off-allowlist redirect, SSRF, timeout) keep
+  // their Set-Cookie, as in the sidecar.
+  let res: Response;
+  try {
+    res = await performFetch(fetchInit as RequestInit);
+
+    // Reactive 401-refresh-retry — mirror of the sidecar
+    // (`executeApiCall`, runtime-pi/sidecar/credential-proxy.ts). The public route is
+    // used by CLI / GitHub Action / self-hosted runners, which were silently
+    // 401-ing whenever the stored OAuth access_token expired because the
+    // refresh logic only fired on streaming bodies. Buffered bodies can be
+    // replayed safely → refresh + retry once. Streaming bodies fall through
+    // to the authRefreshed escape-hatch below (caller must re-issue with a
+    // fresh body stream).
+    if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
+      try {
+        const refreshedResult = await forceRefreshIntegrationProxyCredentials(refreshSelection);
+        const refreshed = refreshedResult?.payload ?? null;
+        if (refreshed) {
+          // Rebuild the credential header from the rotated token. Drop the
+          // previous platform-injected value first so the refreshed delivery
+          // plan can install its current header name and value cleanly.
+          headers.delete(credentialInjection.header.name);
+          if (refreshed.credentialHeaderName) {
+            // Keep the strip set in sync — the refreshed payload may name a
+            // different header than the original resolution.
+            sensitiveHeaderNames.add(refreshed.credentialHeaderName);
+          }
+          credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+          res = await performFetch({
+            ...fetchInit,
+            headers,
+          } as RequestInit);
         }
-        credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
-        res = await performFetch({
-          ...fetchInit,
-          headers,
-        } as RequestInit);
+      } catch {
+        // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
+        // — surface the original 401 as-is; the caller will
+        // handle re-authentication. `forceRefresh` flips `needsReconnection`
+        // on BOTH terminal shapes before it gets here: a revoked refresh token
+        // and an unrefreshable OAuth client. Both now return `null` rather
+        // than throwing (the dedicated error class had one throw site whose
+        // only catch was unreachable), so the flag is what separates TERMINAL
+        // from transient — not the two terminal shapes from each other.
+        // Transient failures deliberately leave the row untouched — nothing is
+        // marked, and the next call retries.
       }
-    } catch {
-      // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
-      // — surface the original 401 as-is; the caller will
-      // handle re-authentication. `forceRefresh` flips `needsReconnection`
-      // on BOTH terminal shapes before it gets here: a revoked refresh token
-      // and an unrefreshable OAuth client. Both now return `null` rather
-      // than throwing (the dedicated error class had one throw site whose
-      // only catch was unreachable), so the flag is what separates TERMINAL
-      // from transient — not the two terminal shapes from each other.
-      // Transient failures deliberately leave the row untouched — nothing is
-      // marked, and the next call retries.
     }
-  }
-
-  if (jar && jarSessionId && jarTtl && jarTtl > 0) {
-    const setCookies = res.headers.getSetCookie?.();
-    if (setCookies && setCookies.length > 0) {
-      await jar.set(jarSessionId, input.integrationId, setCookies, jarTtl);
-    }
+  } finally {
+    await persistJar();
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them
@@ -502,12 +503,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // can signal the client to retry itself with a fresh body stream.
   if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
     try {
-      await forceRefreshIntegrationProxyCredentials({
-        integrationId: input.integrationId,
-        spaceId: input.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      });
+      await forceRefreshIntegrationProxyCredentials(refreshSelection);
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.

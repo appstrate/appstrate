@@ -40,8 +40,13 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AuthStrategy, AuthResolution } from "@appstrate/core/module";
+import {
+  CHAT_LOOPBACK_AUTH_METHOD,
+  INJECTED_SKILLS_AUTH_EXTRA,
+  injectedSkillsSchema,
+  type InjectedSkills,
+} from "@appstrate/core/chat-contract";
 
-export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 /**
  * Deliberately NOT parsed with `parseBearer` (@appstrate/core/bearer), unlike
  * every externally-reachable bearer surface on the platform. RFC 6750 scheme
@@ -89,6 +94,8 @@ interface LoopbackClaims extends LoopbackIdentity {
    * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
    */
   chatSessionId?: string | null;
+  /** The skills the turn's prompt injected, as served; MCP bearer only (→ `read_skill`). */
+  injectedSkills?: InjectedSkills;
 }
 
 function sign(payload: string): string {
@@ -103,6 +110,7 @@ function mint(
   ttlMs: number,
   chatSessionId?: string | null,
   viewAs?: unknown,
+  injectedSkills?: InjectedSkills,
 ): string {
   const payload = Buffer.from(
     JSON.stringify({
@@ -112,6 +120,9 @@ function mint(
       firstPartyLoopback,
       ...(chatSessionId ? { chatSessionId } : {}),
       ...(viewAs !== undefined ? { viewAs } : {}),
+      ...(injectedSkills && Object.keys(injectedSkills.skills).length > 0
+        ? { injectedSkills }
+        : {}),
     } satisfies LoopbackClaims),
   ).toString("base64url");
   return `chatloop_${payload}.${sign(payload)}`;
@@ -153,8 +164,9 @@ export function mintLoopbackToken(
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process
  * and re-authorize each underlying operation against exactly this set, so
- * carrying the caller's own permissions preserves full RBAC fidelity WITHOUT
- * amplifying beyond what the caller could already do over REST. The token does
+ * carrying the caller's own permissions (narrowed by `turnPermissions` when the
+ * turn may not author agents) never amplifies beyond what the caller could
+ * already do over REST. The token does
  * NOT grant `firstPartyLoopback`, so — unlike the inference bearer — it can
  * never be replayed against the inference proxy.
  *
@@ -162,11 +174,15 @@ export function mintLoopbackToken(
  * callers pass a `ttlMs` that spans the whole turn.
  */
 export function mintMcpLoopbackToken(
-  identity: LoopbackIdentity & { permissions: readonly string[]; viewAs?: unknown },
+  identity: LoopbackIdentity & {
+    permissions: readonly string[];
+    viewAs?: unknown;
+    injectedSkills?: InjectedSkills;
+  },
   opts?: { ttlMs?: number },
 ): string {
-  const { permissions, viewAs, ...rest } = identity;
-  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs);
+  const { permissions, viewAs, injectedSkills, ...rest } = identity;
+  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs, injectedSkills);
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {
@@ -198,6 +214,9 @@ export const chatLoopbackStrategy: AuthStrategy = {
     // malformed and refused like any other invalid token (fail closed).
     if (!Array.isArray(claims.permissions)) return null;
     const permissions = claims.permissions;
+    // A malformed map widens nothing: dropped, `read_skill` falls back to `skills:read`.
+    const injected = injectedSkillsSchema.safeParse(claims.injectedSkills);
+    const injectedSkills = injected.success ? injected.data : undefined;
 
     return {
       user: { id: claims.userId, email: claims.email, name: claims.name },
@@ -214,13 +233,18 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
       // the preview). `chatSessionId` is stamped on the usage row by the
       // llm-proxy; `viewAs` is re-published before any permission is resolved.
-      ...(claims.chatSessionId !== undefined || claims.viewAs !== undefined
+      ...(claims.chatSessionId !== undefined ||
+      claims.viewAs !== undefined ||
+      injectedSkills !== undefined
         ? {
             extra: {
               ...(typeof claims.chatSessionId === "string"
                 ? { chatSessionId: claims.chatSessionId }
                 : {}),
               ...(claims.viewAs !== undefined ? { viewAs: claims.viewAs } : {}),
+              ...(injectedSkills !== undefined
+                ? { [INJECTED_SKILLS_AUTH_EXTRA]: injectedSkills }
+                : {}),
             },
           }
         : {}),

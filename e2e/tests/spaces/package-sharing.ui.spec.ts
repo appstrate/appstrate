@@ -68,7 +68,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   // fails in the background, which is all the version assertions need.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {
@@ -219,8 +219,17 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect(guestDraft.status(), await guestDraft.text()).toBe(403);
   expect((await guestDraft.json()).code).toBe("draft_not_writable");
 
-  // The author ships a fix. Nobody accepts anything again, nobody re-pins:
-  // the next run the guest starts carries the new version.
+  // The author ships a fix — a changed prompt, published as the next version
+  // (the same content under a new number is `409 no_changes`). Nobody accepts
+  // anything again, nobody re-pins: the next run the guest starts carries it.
+  const draft = await apiClient.get(`/packages/agents/${scope}/${name}`);
+  expect(draft.status(), await draft.text()).toBe(200);
+  const fixed = await apiClient.patch(
+    `/packages/agents/${scope}/${name}`,
+    { content: "Fixed prompt." },
+    { "If-Match": draft.headers()["etag"]! },
+  );
+  expect(fixed.status(), await fixed.text()).toBe(200);
   const republished = await apiClient.post(`/packages/agents/${scope}/${name}/versions`, {
     version: "0.2.0",
   });
@@ -279,7 +288,7 @@ test("an offer is taken up from the library and lands on an already visited inde
   expect(joined.status()).toBe(200);
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
   const shared = await authorClient.post(`/packages/${scope}/${name}/shares`, {
-    target: { kind: "user", user_id: member.userId },
+    target: { kind: "user", userId: member.userId },
   });
   expect(shared.status(), await shared.text()).toBe(200);
 
@@ -444,7 +453,7 @@ test("a non-admin builder switches a team offer on and off from the space packag
   const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
     email: member.email,
     role: "guest",
-    space_assignments: [{ space_id: spaceId, preset_role: "builder" }],
+    space_assignments: [{ spaceId, preset_role: "builder" }],
   });
   expect(invite.status()).toBe(201);
   expect(
@@ -457,7 +466,7 @@ test("a non-admin builder switches a team offer on and off from the space packag
   expect(
     (
       await author.post(`/packages/${scope}/${name}/shares`, {
-        target: { kind: "space", space_id: spaceId },
+        target: { kind: "space", spaceId },
       })
     ).status(),
   ).toBe(200);

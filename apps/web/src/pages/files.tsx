@@ -22,6 +22,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useDocumentViewStore } from "../stores/list-view-store";
+import { useCanReach } from "../hooks/use-can-reach";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
@@ -65,6 +66,7 @@ function DocumentsCollection({
   onReset: () => void;
 }) {
   const { t } = useTranslation(["files", "common"]);
+  const canReach = useCanReach();
   const view = useDocumentViewStore((state) => state.view);
   const setView = useDocumentViewStore((state) => state.setView);
   const searchPlaceholder = useSearchPlaceholder(t("page.title"));
@@ -179,7 +181,7 @@ function DocumentsCollection({
             ? { message: t("page.noMatch"), compact: true }
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
-        showRunLink
+        showRunLink={canReach("/agents/:scope/:name/runs/:runId")}
         onDeleted={(id) =>
           setPaging((previous) => ({
             signature,

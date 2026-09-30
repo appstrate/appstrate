@@ -51,11 +51,7 @@ async function runsOfSchedule() {
 }
 
 async function fire() {
-  await triggerScheduledRun(scheduleId, AGENT, actor, ctx.orgId, ctx.defaultSpaceId, undefined, {
-    // The agent is a never-published draft; `draft` is what the schedule's
-    // author selected, so version resolution is not what this suite measures.
-    versionOverride: "draft",
-  });
+  await triggerScheduledRun(scheduleId);
 }
 
 beforeEach(async () => {
@@ -75,6 +71,7 @@ beforeEach(async () => {
     actor,
     {
       cronExpression: "0 3 * * *",
+      // A never-published draft: version resolution is not what this suite measures.
       versionOverride: "draft",
     },
   );

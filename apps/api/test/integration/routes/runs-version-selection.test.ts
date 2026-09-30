@@ -36,6 +36,7 @@ import {
   seedPackageShare,
   seedPackageVersion,
   seedPublishedVersion,
+  seedEndUser,
   seedRun,
   seedSpace,
   seedSpaceMember,
@@ -489,6 +490,9 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       headers: Record<string, string>,
       versionOverride?: string,
     ): Promise<string> {
+      // Run as an end user: a schedule running as another MEMBER is written by org owners/admins
+      // only, which would refuse the schedule writer before the selector is judged.
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: teamId });
       const res = await app.request(`/api/agents/${DRAFT_AGENT}/schedules`, {
         method: "POST",
         headers: { ...headers, "X-Space-Id": teamId, "Content-Type": "application/json" },
@@ -496,6 +500,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
           name: "nightly",
           cron_expression: "0 3 * * *",
           timezone: "UTC",
+          actor: { endUserId: endUser.id },
           ...(versionOverride ? { version_override: versionOverride } : {}),
         }),
       });
@@ -505,7 +510,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
 
     const patch = (headers: Record<string, string>, id: string, body: Record<string, unknown>) =>
       app.request(`/api/schedules/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...headers, "X-Space-Id": teamId, "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

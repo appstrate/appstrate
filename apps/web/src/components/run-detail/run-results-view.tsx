@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { Button } from "@appstrate/ui/components/button";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useFiles } from "../../hooks/use-files";
+import { usePermissions } from "../../hooks/use-permissions";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
 import { AgentDetailSectionHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
@@ -16,7 +17,7 @@ import { JsonView } from "../json-view";
 import { EmptyState } from "../page-states";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { RailButton } from "../settings/rail-link";
-import { featuredRunFile } from "../../lib/files";
+import { featuredRunFile, producedRunFiles } from "../../lib/files";
 import { RunDeliverableTab } from "../run-deliverable-tab";
 
 const keepUnavailableDocumentVisible = () => undefined;
@@ -39,6 +40,10 @@ export function RunResultsView({
   const { t } = useTranslation("agents");
   const [requestedSection, setRequestedSection] = useState<ResultsSectionId>("production");
   const documentsQuery = useFiles({ runId: run.id, limit: 100 });
+  // The caller may not list files (`files:read`), so none were fetched: the
+  // run's count still says files were produced, so the section stays and says
+  // why it is empty.
+  const filesDenied = !usePermissions().can("files:read");
   // The labels of the structured output: an inline run carries its manifest,
   // an agent run reads its package (the same query the page already made, so
   // this is a cache hit, and skipped for inline shadows, which would 404).
@@ -47,10 +52,12 @@ export function RunResultsView({
   const outputSchema = isInline
     ? (run.inline_manifest?.output as { schema?: unknown } | undefined)?.schema
     : agent?.output?.schema;
+  // What the run PRODUCED: the query answers the run's whole container, so a
+  // file chained in from an earlier run arrives carrying `agent_output` and is
+  // told apart only by its own `runId` (`producedRunFiles`).
   const outputDocuments = useMemo(
-    () =>
-      (documentsQuery.data?.data ?? []).filter((document) => document.purpose === "agent_output"),
-    [documentsQuery.data?.data],
+    () => producedRunFiles(documentsQuery.data?.data ?? [], run.id),
+    [documentsQuery.data?.data, run.id],
   );
   const { hasStructuredOutput, shouldRenderDocuments, hasProduction, isPartial } =
     classifyRunResults({
@@ -130,7 +137,10 @@ export function RunResultsView({
           documents={outputDocuments}
           isLoading={documentsQuery.isLoading}
           error={documentsQuery.error}
-          empty={{ message: t("run.resultsNoFiles"), compact: true }}
+          empty={{
+            message: filesDenied ? t("run.noAccess", { ns: "files" }) : t("run.resultsNoFiles"),
+            compact: true,
+          }}
           runId={run.id}
           showPurposeTabs={false}
           display="table"

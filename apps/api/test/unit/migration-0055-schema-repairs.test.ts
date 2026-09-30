@@ -13,8 +13,8 @@
  * checking that the shipped `.sql` converges it. Same split as
  * `migration-index-parity.test.ts` and `0041`.
  *
- * The pre-0055 state is built by UNDOING 0055 against a fully replayed database
- * rather than by stopping the journal one entry short. Stopping short would
+ * The pre-0055 state is built by UNDOING 0055 against a database replayed
+ * through `REPLAY_THROUGH` rather than by stopping the journal one entry short. Stopping short would
  * only reproduce a FRESH install's starting state; production's differs, and
  * the difference is the point — see below.
  *
@@ -41,7 +41,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { applyCorePGliteMigrations } from "../../src/lib/pglite-migrate.ts";
+import { replayJournal } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
@@ -88,6 +88,12 @@ const FKEY_SPELLING = {
   modelProviderPairings: "model_provider_pairings_credential_id_fkey",
 } as const;
 
+/**
+ * A migration whose catalog still holds both FKs: `0077` folds
+ * `integration_org_defaults.connection_id` into an array and drops it.
+ */
+const REPLAY_THROUGH = "0068_packages_org_home_validate";
+
 const pg = new PGlite();
 
 /** Run the migration the way the runner does — whole file, breakpoints stripped. */
@@ -130,8 +136,8 @@ async function columnNames(table: string): Promise<Set<string>> {
 }
 
 beforeAll(async () => {
-  await applyCorePGliteMigrations(MIGRATIONS_DIR, pg);
-});
+  await replayJournal(pg, REPLAY_THROUGH);
+}, 300_000);
 
 afterAll(async () => {
   await pg.close();

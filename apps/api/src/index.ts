@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono } from "hono";
-import { cors } from "hono/cors";
+import { Hono, type Context } from "hono";
 import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
@@ -19,7 +18,6 @@ import { createRunsRouter } from "./routes/runs.ts";
 import { createRunsRemoteRouter } from "./routes/runs-remote.ts";
 import { createRunsEventsRouter } from "./routes/runs-events.ts";
 import { createSchedulesRouter } from "./routes/schedules.ts";
-import { createUserAgentsRouter } from "./routes/user-agents.ts";
 import { createApiKeysRouter } from "./routes/api-keys.ts";
 import { createProxiesRouter } from "./routes/proxies.ts";
 import { createModelsRouter } from "./routes/models.ts";
@@ -39,8 +37,10 @@ import { createSpaFallbackHandler } from "./routes/spa.ts";
 import { staticCacheControl } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
+import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
 import { createCredentialProxyRouter } from "./routes/credential-proxy.ts";
-import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
+import { createLlmProxyRouter, createRunLlmProxyRouter } from "./routes/llm-proxy.ts";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
@@ -51,22 +51,21 @@ import invitationsRouter from "./routes/invitations.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
-import { buildOpenApiSpec } from "./openapi/index.ts";
 import {
   getModulePublicPaths,
   getModuleAuthStrategies,
-  getModuleOpenApiPaths,
-  getModuleOpenApiComponentSchemas,
-  getModuleOpenApiTags,
   registerModuleRoutes,
 } from "./lib/modules/module-loader.ts";
 import { ApiError, notFound } from "./lib/errors.ts";
+import { markFallback } from "./lib/route-requirements.ts";
+import { getPlatformOperations, registerPlatformApp } from "./lib/platform-app.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
+import { apiCors } from "./lib/cors.ts";
 
 // Fail-fast: validate all env vars at startup
 const env = getEnv();
@@ -95,7 +94,7 @@ app.use("*", clientIp());
 // Middleware
 const trustedOrigins = env.TRUSTED_ORIGINS;
 
-app.use("*", cors({ origin: trustedOrigins, credentials: true }));
+app.use("*", apiCors(trustedOrigins));
 
 // Global body-size cap. Skipped for the public FS upload sink — that route
 // authenticates via a signed token whose payload encodes its own size limit
@@ -108,6 +107,9 @@ const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
 const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/files$/;
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();
+  // A run's own inference is capped by `LLM_PROXY_LIMITS.max_request_bytes`
+  // on its router, so one knob sizes it.
+  if (c.req.path.startsWith(`${RUN_LLM_PROXY_MOUNT}/`)) return next();
   if (c.req.method === "POST" && RUN_FILE_UPLOAD_PATH.test(c.req.path)) return next();
   return globalBodyLimit(c, next);
 });
@@ -121,20 +123,14 @@ app.use("*", bootGate());
 // Health check — before auth middleware (no auth required)
 app.route("/", healthRouter);
 
-// OpenAPI docs — public (before auth middleware)
-// Spec is built lazily on first request (after modules are initialized at boot).
-let _openApiSpec: ReturnType<typeof buildOpenApiSpec> | null = null;
-function getOpenApiSpec() {
-  if (!_openApiSpec)
-    _openApiSpec = buildOpenApiSpec(
-      getModuleOpenApiPaths(),
-      getModuleOpenApiComponentSchemas(),
-      getModuleOpenApiTags(),
-    );
-  return _openApiSpec;
-}
-// Serialized once + ETag/304 revalidation — see routes/openapi-spec.ts.
-app.route("/", createOpenApiSpecRouter(getOpenApiSpec));
+// OpenAPI docs — public (before auth middleware). Serves the spec
+// `registerPlatformApp()` builds at the bottom of this file; the router reads
+// it on the first request, after registration. Serialized once + ETag/304
+// revalidation — see routes/openapi-spec.ts.
+app.route(
+  "/",
+  createOpenApiSpecRouter(() => getPlatformOperations().spec),
+);
 app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Public llms.txt — points AI coding agents at the CLI + OpenAPI entry
@@ -179,6 +175,7 @@ let shuttingDown = false;
 // arriving mid-shutdown would otherwise slip past the gate and race the
 // in-flight wait, leaving a half-applied write behind.
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const SHUTDOWN_RETRY_AFTER_SECONDS = 5;
 
 app.use("*", async (c, next) => {
   if (shuttingDown && MUTATING_METHODS.has(c.req.method)) {
@@ -187,6 +184,9 @@ app.use("*", async (c, next) => {
       code: "shutting_down",
       title: "Service Unavailable",
       detail: "Server is shutting down",
+      // Short on purpose: behind a load balancer the retry lands on a live
+      // replica (or this one's successor) within seconds, not after the drain.
+      retryAfter: SHUTDOWN_RETRY_AFTER_SECONDS,
     });
   }
   return next();
@@ -325,7 +325,6 @@ process.on("uncaughtException", (err, origin) => {
 });
 
 // Routes
-const userAgentsRouter = createUserAgentsRouter();
 const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
@@ -344,7 +343,6 @@ app.route("/api/orgs", orgsRouter);
 // inside org (or space) context.
 app.route("/api/me", meRouter);
 
-app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
 app.route("/api/agents", agentsRouter);
 app.route("/api", createNotificationsRouter());
 // Unified-runner event ingestion — HMAC-authenticated, no user principal.
@@ -375,8 +373,9 @@ app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
 app.route("/api/integrations", createIntegrationsRouter());
+app.route("/api/org-integrations", createOrgIntegrationsRouter());
 app.route("/api/credential-proxy", createCredentialProxyRouter());
-app.route("/api/llm-proxy", createLlmProxyRouter());
+app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
@@ -387,6 +386,8 @@ app.route("/api", welcomeRouter);
 // Internal routes (container-to-host, auth via run token — no JWT)
 const internalRouter = createInternalRouter();
 app.route("/internal", internalRouter);
+// A platform run's own inference, metered by the llm-proxy (auth via run token).
+app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());
 
 // Module routes — mounted at root. Modules declare full paths (typically
 // `/api/<name>/*` for business endpoints, plus `/.well-known/*` for any
@@ -398,10 +399,13 @@ registerModuleRoutes(app);
 // Unknown /api/* → 404 problem+json. Without this the SPA fallback below would
 // match every unknown API path and return index.html with a 200, breaking
 // pass-through clients (CLI, curl, SDKs).
-app.all("/api/*", (c) => {
-  const pathname = new URL(c.req.url).pathname;
-  throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
-});
+app.all(
+  "/api/*",
+  markFallback((c: Context<AppEnv>) => {
+    const pathname = new URL(c.req.url).pathname;
+    throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+  }),
+);
 
 // Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below).
 // `onFound` attaches the caching policy: Hono's static middleware emits no
@@ -423,7 +427,12 @@ app.use(
 // routes. This is the ONLY response that carries the SPA document, and so the
 // only place the parent-side `frame-src` containment of agent-HTML previews can
 // be attached. Definition + rationale: `routes/spa.ts`.
-app.get("/*", createSpaFallbackHandler(buildAppConfigScript));
+app.get("/*", markFallback(createSpaFallbackHandler(buildAppConfigScript)));
+
+// Registered only now that every route is mounted: registration joins each
+// documented operation onto its route and throws on one no route serves, so a
+// spec/route mismatch refuses the boot. In-process dispatch reads it too.
+registerPlatformApp(app);
 
 // Start server — bind 0.0.0.0 so both IPv4 and IPv6 clients can connect
 export default {
@@ -447,8 +456,8 @@ logger.info("Server listening (starting up)", { port: env.PORT });
 // missing durable recovery channel can lose billable spend permanently.
 const bootStartedAt = Date.now();
 void bootBackground()
-  .then(({ agentsHealthy }) => {
-    markServerReady({ agentsHealthy });
+  .then(() => {
+    markServerReady();
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
     // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
     // Never awaited, never fatal; runs after readiness so it can't race the

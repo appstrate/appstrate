@@ -12,12 +12,10 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
-import i18n from "../i18n";
 import { $api, client } from "../api/client";
-import { onMutationError } from "./use-mutations";
+import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { invalidateSchedules } from "./use-schedules";
 
 /**
  * Unified user-scope connection list (integration connections), grouped by
@@ -50,18 +48,19 @@ function scopedHeaders({ orgId, spaceId }: OrgSpaceHeaders) {
  */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();
-  return $api.useMutation("delete", "/api/me/connections/{connectionId}", {
+  return useMutation({
+    mutationFn: async (vars: { params: { path: { connectionId: string } } }) => {
+      await client.DELETE("/api/me/connections/{connectionId}", vars);
+    },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-      // Member pins anywhere referencing the deleted connection cascaded
-      // server-side; refresh their cache so the picker re-fetches.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/integration-pins"] });
-      // The agent page's reuse hints + accessible-connection lists live under
-      // the typed `/api/integrations…` keys — refresh the whole subtree.
+      // The caller's own schedule overrides drop the connection; a colleague's keep
+      // its id and show it unavailable in their picker.
+      invalidateSchedules(qc);
+      // The connection list, the agent page's reuse hints and accessible-connection lists.
       void invalidateIntegrationQueries(qc);
     },
-    onError: (err: unknown) =>
-      toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) })),
+    // `connection_pinned` while an admin pin or the space default names it.
+    onError: onMutationError,
   });
 }
 
@@ -84,7 +83,7 @@ export function useUpdateMeIntegrationConnection() {
     }: OrgSpaceHeaders & {
       packageId: string;
       connectionId: string;
-      label?: string | null;
+      label?: string;
       sharedWithOrg?: boolean;
     }) => {
       const { data } = await client.PATCH(
@@ -103,7 +102,6 @@ export function useUpdateMeIntegrationConnection() {
       return data;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
       void invalidateIntegrationQueries(qc);
     },
     onError: onMutationError,

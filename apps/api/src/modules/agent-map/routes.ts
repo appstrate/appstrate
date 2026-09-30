@@ -26,8 +26,8 @@ export function createAgentMapRouter() {
   // belong to. Read-only — owns no data and adds no verdict of its own.
   router.get(
     `/api/agents/${SCOPED_PACKAGE_ROUTE}/map`,
-    requireAgent(),
     requirePermission("agents", "read"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const version = c.req.query("version");

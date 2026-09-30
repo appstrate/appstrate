@@ -16,6 +16,7 @@ import {
   type JSONSchema7,
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
+import { usePermissions } from "../../hooks/use-permissions";
 import { RunList } from "../run-list";
 import { SchedulesTable, useScheduleColumns } from "../schedules-table";
 import { RunAgentButton } from "../run-agent-button";
@@ -24,7 +25,7 @@ import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { openAsModal } from "../../lib/modal-route";
-import { runStatusValues, type RunStatus } from "@appstrate/shared-types";
+import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 
 export function AgentRunsTab({
   packageId,
@@ -112,6 +113,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const [search, setSearch] = useState("");
   const [states, setStates] = useState<string[]>([]);
   const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
+  const { can } = usePermissions();
 
   if (!detail) return null;
 
@@ -146,9 +148,11 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
     <>
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-          <Button asChild>
-            <Link to="/schedules/new">{t("btn.add")}</Link>
-          </Button>
+          {can("schedules:write") && (
+            <Button asChild>
+              <Link to="/schedules/new">{t("btn.add")}</Link>
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <>
@@ -280,6 +284,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
+  const { can } = usePermissions();
 
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -295,7 +300,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   if (rawKey) {
     authToken = rawKey;
   } else if (firstKey) {
-    authToken = `${firstKey.keyPrefix}${"•".repeat(44)}`;
+    authToken = `${firstKey.keyPrefix}${"•".repeat(28)}`;
   } else {
     authToken = "<your-api-key>";
   }
@@ -334,16 +339,18 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
     <div className="border-border bg-card space-y-5 rounded-lg border p-5">
       <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
 
-      {/* API Key section */}
-      {keysLoading ? (
+      {/* API Key section — the curl below stands on its own without it */}
+      {!can("api-keys:read") ? null : keysLoading ? (
         <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
         <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">
           <p className="text-warning text-sm">{t("api.noKey")}</p>
           <p className="text-muted-foreground mt-1 text-xs">{t("api.noKeyHint")}</p>
-          <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
-            {t("api.createKey")}
-          </Button>
+          {can("api-keys:create") && (
+            <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
+              {t("api.createKey")}
+            </Button>
+          )}
         </div>
       ) : (
         <div className="space-y-2 text-sm">
@@ -351,13 +358,13 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
             <span className="text-muted-foreground shrink-0">{t("api.selectKey")} :</span>
             {rawKey ? (
               <code className="truncate rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-xs text-emerald-400">
-                {rawKey.slice(0, 12)}
+                {rawKey.slice(0, 13)}
                 {"•".repeat(20)}
               </code>
             ) : firstKey ? (
               <code className="bg-muted/50 text-foreground truncate rounded px-2 py-0.5 font-mono text-xs">
                 {firstKey.keyPrefix}
-                {"•".repeat(44)}
+                {"•".repeat(28)}
               </code>
             ) : null}
             {!rawKey && (

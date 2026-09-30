@@ -18,6 +18,7 @@ import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
+import { deleteUnlessReclaimed } from "./package-storage-deletion.ts";
 
 // Bucket + key layout live in a LEAF module so the deletion outbox and the
 // orphan scanner can derive the exact same keys without importing this file's
@@ -30,20 +31,12 @@ const ZIP_COMPRESSION_LEVEL = 6;
 /**
  * Download a versioned package ZIP from Storage.
  *
- * Two orthogonal integrity checks are applied when the inputs are
- * present:
+ * When `expectedIntegrity` (SRI sha256 over the raw ZIP bytes, stored in
+ * `package_versions.integrity` at publish) is given, a mismatch throws —
+ * storage corruption or tampering at rest. The signature policy is NOT
+ * applied here: see {@link downloadVersionZipForExecution}.
  *
- *   1. `expectedIntegrity` (SRI sha256 over the raw ZIP bytes, stored in
- *      `package_versions.integrity` when the version was published) —
- *      detects storage corruption and tampering of the artifact at
- *      rest.
- *   2. AFPS bundle signature (`signature.sig` inside the ZIP, verified
- *      against the `AFPS_TRUST_ROOT` + `AFPS_SIGNATURE_POLICY` env
- *      config) — detects tampering by anyone who could have written
- *      the ZIP since it was signed by the publisher.
- *
- * Returns `null` if the object does not exist. Throws on integrity or
- * (under policy=required) signature failure.
+ * Returns `null` if the object does not exist.
  */
 export async function downloadVersionZip(
   packageId: string,
@@ -76,16 +69,26 @@ export async function downloadVersionZip(
     }
   }
 
-  // Signature policy is applied here (and not inside the unzip path)
-  // so every code path that pulls a bundle from storage goes through
-  // the same gate: run path, re-publish, dependency resolution, etc.
-  await loadAndVerifyBundle(bytes, packageId);
-
   return Buffer.from(data);
 }
 
 /**
- * Delete a versioned package ZIP from Storage. Swallows errors (best-effort).
+ * {@link downloadVersionZip} plus the AFPS signature policy, for bytes about
+ * to be EXECUTED. Display/copy/export reads use the plain download.
+ */
+export async function downloadVersionZipForExecution(
+  packageId: string,
+  version: string,
+  expectedIntegrity?: string | null,
+): Promise<Buffer | null> {
+  const zip = await downloadVersionZip(packageId, version, expectedIntegrity);
+  if (zip) await loadAndVerifyBundle(new Uint8Array(zip), packageId);
+  return zip;
+}
+
+/**
+ * Delete a versioned package ZIP from Storage unless a version row claims it.
+ * Swallows errors (best-effort).
  *
  * The row-delete path no longer uses this — `deletePackageVersion` enqueues the
  * purge on the transactional outbox inside its own transaction. What remains is
@@ -94,12 +97,13 @@ export async function downloadVersionZip(
  * a standalone insert would not buy the atomicity the outbox exists for. If
  * this best-effort delete fails, the bytes sit unreferenced until the
  * reconciliation scanner (`scripts/storage-orphans.ts`, which now covers
- * `agent-packages`) finds them.
+ * `agent-packages`) finds them. A concurrent publish of the same version that
+ * committed in the meantime owns the key, so the delete keeps it.
  */
 export async function deleteVersionZip(packageId: string, version: string): Promise<void> {
   const path = versionZipKey(packageId, version);
   try {
-    await storage.deleteFile(BUCKET, path);
+    await deleteUnlessReclaimed(BUCKET, path, () => storage.deleteFile(BUCKET, path));
   } catch (error) {
     logger.warn("Failed to delete version ZIP (best-effort)", {
       packageId,

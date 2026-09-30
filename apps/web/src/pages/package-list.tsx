@@ -6,6 +6,7 @@ import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
+import { PACKAGE_WRITE_PERMISSIONS, spacePackagePermission } from "@appstrate/core/permissions";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
@@ -17,7 +18,6 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { openAsModal } from "../lib/modal-route";
@@ -119,7 +119,8 @@ export function PackageList() {
   const location = useLocation();
 
   const creation = useCreationHandoff("agent", can("agents:write"));
-  const canActivate = can(PACKAGE_PERMISSIONS.agent.activate);
+  const canActivate = can(spacePackagePermission("agent", "activate"));
+  const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -146,7 +147,7 @@ export function PackageList() {
         emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
         extraActions={
-          can("agents:write") || canActivate ? (
+          can("agents:write") || canActivate || canImport ? (
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
@@ -156,17 +157,19 @@ export function PackageList() {
                   </Link>
                 </DropdownMenuItem>
               )}
+              {/* An import may carry any package type, so any authoring grant
+                  opens it; the server re-checks the type it finds. */}
+              {canImport && (
+                <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                  <Upload />
+                  {t("nav.import", { ns: "common" })}
+                </DropdownMenuItem>
+              )}
               {can("agents:write") && (
-                <>
-                  <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
-                    <Upload />
-                    {t("nav.import", { ns: "common" })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                    <Plus />
-                    {t("list.create")}
-                  </DropdownMenuItem>
-                </>
+                <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
+                  <Plus />
+                  {t("list.create")}
+                </DropdownMenuItem>
               )}
             </PageActionsMenu>
           ) : undefined

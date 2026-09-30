@@ -34,7 +34,6 @@ import {
 } from "../apps/cli/src/lib/compose-defaults.ts";
 import { moduleEnvSchemas } from "./lib/module-env-schemas.ts";
 import { COMPOSE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
-import { modulesEnabledByDefault } from "./lib/compose-modules.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -193,13 +192,9 @@ const COMPOSE_ENV_ENTRY = /^\s*-\s*([A-Z][A-Z0-9_]*)\s*(?:=|$)/gm;
  * the gap: the block is a hand-copied list, and a name dropped from it never reaches the
  * container.
  *
- * Forwarding NONE of them is not a gap, and the reason is no longer the obvious one. It used to
- * read "that file simply does not run the module", which was true while every compose file passed
- * `MODULES` through from the environment. `deploy/docker-compose.yml` now pins a default that
- * names a module AND forwards none of its variables — deliberately, since #1464: it delivers them
- * through `env_file`, because the orchestrator materialises every key an `environment:` block
- * names and a bare one arrives as `''`. So "forwards none" means one of two things, and this rule
- * is out of scope for both. `findUnroutedModules` below is what tells them apart.
+ * Forwarding NONE of them is not a gap: either the file does not run the module, or — like
+ * `deploy/docker-compose.yml` — it delivers the operator's variables wholesale through `env_file`,
+ * because its orchestrator materialises every key an `environment:` block names (Class 5).
  */
 export function findPassThroughGaps(
   content: string,
@@ -216,48 +211,6 @@ export function findPassThroughGaps(
     gaps.push({ module: module.id, declaredIn: module.file, missing, present });
   }
   return gaps;
-}
-
-/** A module a compose file boots while giving its variables no way in. */
-export interface UnroutedModule {
-  file: string;
-  module: string;
-  declaredIn: string;
-  keys: number;
-}
-
-/**
- * Modules this file turns on BY DEFAULT and then leaves unconfigurable.
- *
- * The half of "forwards none of a module's variables" that is a defect. A file whose `MODULES`
- * default names a module boots it for anyone who runs the file as shipped, so the module's
- * variables have to arrive somehow: either forwarded one by one in `environment:`, or delivered
- * wholesale by `env_file`. Neither, and every one of them is `undefined` at boot — which for a
- * module with hard-required keys is a crash with the operator's own file as the cause.
- *
- * Deliberately blind to the orchestrator: a deployment platform that injects its own configuration
- * into every container would satisfy this too, and there is no way to see that from the file. What
- * it holds is that the file is self-sufficient as written, which is the property a `docker compose
- * up` from that directory actually depends on.
- */
-export function findUnroutedModules(
-  content: string,
-  modules: readonly { id: string; file: string; keys: readonly string[] }[],
-): Omit<UnroutedModule, "file">[] {
-  if (/^\s*env_file:/m.test(content)) return [];
-
-  const forwarded = new Set<string>();
-  for (const match of content.matchAll(COMPOSE_ENV_ENTRY)) forwarded.add(match[1]!);
-  const enabled = new Set(modulesEnabledByDefault(content));
-
-  return modules
-    .filter(
-      (module) =>
-        enabled.has(module.id) &&
-        module.keys.length > 0 &&
-        module.keys.every((name) => !forwarded.has(name)),
-    )
-    .map((module) => ({ module: module.id, declaredIn: module.file, keys: module.keys.length }));
 }
 
 /**
@@ -311,7 +264,6 @@ async function main(): Promise<number> {
   const findings: FileFinding[] = [];
   const gaps: TableGapFinding[] = [];
   const passThrough: PassThroughGap[] = [];
-  const unrouted: UnroutedModule[] = [];
   const bare: BareNameFinding[] = [];
 
   const { keys: platformKeys, defaulted: platformDefaulted } = readSchemaDefaults();
@@ -353,9 +305,6 @@ async function main(): Promise<number> {
     for (const gap of findPassThroughGaps(content, modules)) {
       passThrough.push({ ...gap, file });
     }
-    for (const module of findUnroutedModules(content, modules)) {
-      unrouted.push({ ...module, file });
-    }
     if (ORCHESTRATED_COMPOSE_FILES.includes(file as (typeof ORCHESTRATED_COMPOSE_FILES)[number])) {
       for (const finding of findMaterialisableBareNames(content)) {
         bare.push({ ...finding, file });
@@ -363,13 +312,7 @@ async function main(): Promise<number> {
     }
   }
 
-  if (
-    findings.length === 0 &&
-    gaps.length === 0 &&
-    passThrough.length === 0 &&
-    unrouted.length === 0 &&
-    bare.length === 0
-  ) {
+  if (findings.length === 0 && gaps.length === 0 && passThrough.length === 0 && bare.length === 0) {
     // What was compared, so a reader can tell at a glance which two populations
     // met: the compose files scanned, and the schema vars they were checked
     // against. Not a diagnostic — nothing here is load-bearing for correctness.
@@ -378,8 +321,8 @@ async function main(): Promise<number> {
       `\x1b[32m✓\x1b[0m verify-compose-defaults: no duplicated env defaults across ${COMPOSE_FILES.length} compose files ` +
         `(${schemaDefaulted.size} of ${schemaKeys.size} env vars carry a schema default — ` +
         `${SCHEMA_SOURCE} plus ${moduleKeyCount} var(s) from ${modules.length} module schema(s); ` +
-        `all compose-pinned vars covered by the table, every module pass-through block complete, ` +
-        `every module a compose file enables by default reachable from it; no bare name in the ` +
+        `all compose-pinned vars covered by the table, every module pass-through block complete; ` +
+        `no bare name in the ` +
         `${ORCHESTRATED_COMPOSE_FILES.length} orchestrated file(s)).`,
     );
     return 0;
@@ -390,15 +333,15 @@ async function main(): Promise<number> {
 
   console.error(
     `\x1b[31m✗\x1b[0m verify-compose-defaults: ` +
-      `${findings.length + gaps.length + passThrough.length + unrouted.length + bare.length} ` +
+      `${findings.length + gaps.length + passThrough.length + bare.length} ` +
       `issue(s) found (${duplicates.length} duplicates, ${drifts.length} ALLOWLIST drift, ` +
       `${gaps.length} table gap, ${passThrough.length} incomplete module pass-through, ` +
-      `${unrouted.length} unroutable module, ${bare.length} materialisable bare name).\n`,
+      `${bare.length} materialisable bare name).\n`,
   );
 
   if (bare.length > 0) {
     console.error(
-      `\x1b[1m── Class 6: bare name under an orchestrator that materialises keys ──\x1b[0m`,
+      `\x1b[1m── Class 5: bare name under an orchestrator that materialises keys ──\x1b[0m`,
     );
     console.error(
       `These files are deployed by an orchestrator that rewrites every key an \`environment:\`\n` +
@@ -412,26 +355,6 @@ async function main(): Promise<number> {
     );
     for (const b of bare) {
       console.error(`  \x1b[1m${b.file}:${b.line}\x1b[0m  ${b.varName}`);
-    }
-    console.error("");
-  }
-
-  if (unrouted.length > 0) {
-    console.error(`\x1b[1m── Class 5: module enabled with no way to configure it ──\x1b[0m`);
-    console.error(
-      `These compose files name a module in the DEFAULT of \`MODULES\`, so running the file as\n` +
-        `shipped boots it — and then give its environment variables no route in: nothing forwarded\n` +
-        `in \`environment:\`, no \`env_file:\`. Every one of them is undefined at boot, which for a\n` +
-        `module with hard-required keys is a crash whose cause is the compose file itself.\n` +
-        `Fix: add \`env_file:\` (the whole contract at once, and the only form that survives an\n` +
-        `orchestrator that materialises bare keys), forward the names explicitly, or take the\n` +
-        `module out of the \`MODULES\` default so it is opt-in again.\n`,
-    );
-    for (const u of unrouted) {
-      console.error(
-        `  \x1b[1m${u.file}\x1b[0m  module \`${u.module}\` (${u.declaredIn}): ` +
-          `${u.keys} var(s), none reachable`,
-      );
     }
     console.error("");
   }

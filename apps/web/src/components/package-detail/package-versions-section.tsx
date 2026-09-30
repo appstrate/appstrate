@@ -27,7 +27,8 @@ type LatestVersion = Parameters<typeof DiffTab>[0]["latestVersion"];
 export function PackageVersionsSection({
   type,
   packageId,
-  isOwned,
+  canRestore,
+  canDelete,
   latestVersion,
   currentManifest,
   currentContent,
@@ -35,7 +36,8 @@ export function PackageVersionsSection({
 }: {
   type: PackageType;
   packageId: string;
-  isOwned: boolean;
+  canRestore: boolean;
+  canDelete: boolean;
   latestVersion?: LatestVersion;
   currentManifest?: Record<string, unknown>;
   currentContent?: string | null;
@@ -69,7 +71,8 @@ export function PackageVersionsSection({
       <VersionHistory
         packageId={packageId}
         type={type}
-        isOwned={isOwned}
+        canRestore={canRestore}
+        canDelete={canDelete}
         onCompare={(version) => setCompare(version)}
       />
 

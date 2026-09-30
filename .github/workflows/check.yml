@@ -177,3 +177,51 @@ jobs:
       # workspace install is precisely the environment that hides the defect.
       - name: Verify ${{ matrix.package }} resolves in a clean consumer install
         run: bun scripts/verify-package-resolves.ts ${{ matrix.package }}
+
+  # The schema the migration chain builds, as a committed fingerprint
+  # (`packages/db/schema-catalog.txt`, produced by `scripts/schema-catalog.sql`).
+  # Its purpose is the check it enables OUTSIDE CI: production created before the
+  # `0000_init.sql` squash sat at the full journal while differing from the chain
+  # on 60 columns, an enum, 19 constraint names and 6 missing constraints (#1507), and only a catalog diff saw
+  # it. Running the same query on production against this fingerprint is that
+  # diff (release runbook, Phase 2a). This job keeps the fingerprint honest: it
+  # builds a database from the chain alone and fails when a migration changed the
+  # schema without the fingerprint being regenerated. Postgres 16, like
+  # production — the fingerprint is Postgres' own formatting.
+  schema-catalog:
+    name: Schema catalog matches the migration chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: appstrate
+          POSTGRES_PASSWORD: appstrate
+          POSTGRES_DB: appstrate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appstrate -d appstrate"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://appstrate:appstrate@localhost:5432/appstrate
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # rationale for a plain install: see .github/actions/bun-setup/action.yml
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build the schema from the migration chain alone
+        run: bun packages/db/src/migrate.ts
+
+      - name: Compare with the committed fingerprint
+        run: bun run verify:schema-catalog

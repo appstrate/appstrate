@@ -526,8 +526,25 @@ describe("Internal API", () => {
       // provider invariants (providerId, baseUrl) — those live
       // in the LlmProxyOauthConfig delivered to the sidecar via env at
       // boot and never change per refresh. See packages/core/src/sidecar-types.ts.
-      const body = (await res.json()) as { accessToken: string };
-      expect(body.accessToken).toBe("test-access-token");
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.access_token).toBe("test-access-token");
+      expect(body).not.toHaveProperty("accessToken");
+      // No identity surfaced → the key is omitted, never `null`.
+      expect(body).not.toHaveProperty("account_id");
+    });
+
+    it("emits the stored account id as snake_case `account_id`", async () => {
+      const row = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, accountId: "acct-42" });
+      const token = await seedPinnedRun(row.id);
+
+      const res = await app.request(`/internal/oauth-token/${row.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.account_id).toBe("acct-42");
+      expect(body).not.toHaveProperty("accountId");
+      expect(typeof body.expiresAt).toBe("number");
     });
 
     it("rejects api_key credentials (only OAuth rows are valid here)", async () => {

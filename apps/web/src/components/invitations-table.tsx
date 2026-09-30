@@ -54,7 +54,7 @@ export function InvitationsTable({
   const canEdit = currentOrg?.id === orgId && can("members:change-role");
   const visible = spaceId
     ? invitations.filter((invitation) =>
-        invitation.space_assignments.some((assignment) => assignment.space_id === spaceId),
+        invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
       )
     : invitations;
   const editing = visible.find((invitation) => invitation.id === editParam.value);
@@ -75,7 +75,7 @@ export function InvitationsTable({
     assignments: (invitation) =>
       invitation.space_assignments.map(
         (assignment) =>
-          `${spaceName(assignment.space_id)} · ${
+          `${spaceName(assignment.spaceId)} · ${
             roles.find((role) => role.value === spaceRoleValue(assignment))?.label ??
             t("orgSettings.assignmentUnavailableRole")
           }`,
@@ -136,7 +136,7 @@ export function InvitationsTable({
                 {
                   email: canceling.email,
                   spaces: canceling.space_assignments
-                    .map((assignment) => spaceName(assignment.space_id))
+                    .map((assignment) => spaceName(assignment.spaceId))
                     .join(", "),
                 },
               )

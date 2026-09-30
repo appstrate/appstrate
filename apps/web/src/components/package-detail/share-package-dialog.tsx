@@ -43,7 +43,7 @@ import {
 } from "../../hooks/use-package-shares";
 
 /** The subject of one offer, as the picker encodes it. */
-type ShareTarget = { kind: "user"; user_id: string } | { kind: "space"; space_id: string };
+type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
 
 /**
  * One `<SelectItem>` value carrying both halves of a target. A space id is
@@ -51,7 +51,7 @@ type ShareTarget = { kind: "user"; user_id: string } | { kind: "space"; space_id
  * there so a value can never be read as the other kind by accident.
  */
 function targetValue(target: ShareTarget): string {
-  return target.kind === "user" ? `user:${target.user_id}` : `space:${target.space_id}`;
+  return target.kind === "user" ? `user:${target.userId}` : `space:${target.spaceId}`;
 }
 
 function parseTargetValue(value: string): ShareTarget | null {
@@ -60,8 +60,8 @@ function parseTargetValue(value: string): ShareTarget | null {
   const kind = value.slice(0, separator);
   const id = value.slice(separator + 1);
   if (!id) return null;
-  if (kind === "user") return { kind: "user", user_id: id };
-  if (kind === "space") return { kind: "space", space_id: id };
+  if (kind === "user") return { kind: "user", userId: id };
+  if (kind === "space") return { kind: "space", spaceId: id };
   return null;
 }
 
@@ -213,7 +213,7 @@ export function SharePackageDialog({
     const offer = needsVersion;
     if (!offer) return;
     try {
-      const created = await publish.mutateAsync(undefined);
+      const created = await publish.mutateAsync({});
       toast.success(t("packages.sharePublished", { version: created.version }));
       setNeedsVersion(null);
       submit(offer);
@@ -254,7 +254,7 @@ export function SharePackageDialog({
                     {members.map((member) => (
                       <SelectItem
                         key={member.userId}
-                        value={targetValue({ kind: "user", user_id: member.userId })}
+                        value={targetValue({ kind: "user", userId: member.userId })}
                       >
                         {member.displayName || member.email || member.userId}
                       </SelectItem>
@@ -267,7 +267,7 @@ export function SharePackageDialog({
                     {destinations.map((candidate) => (
                       <SelectItem
                         key={candidate.id}
-                        value={targetValue({ kind: "space", space_id: candidate.id })}
+                        value={targetValue({ kind: "space", spaceId: candidate.id })}
                       >
                         {candidate.name}
                       </SelectItem>

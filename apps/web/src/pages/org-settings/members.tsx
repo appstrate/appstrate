@@ -7,11 +7,12 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
-import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
+import { hasFullOrgAccess } from "../../lib/org-role";
+import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { useAuth } from "../../hooks/use-auth";
-import { usePermissions } from "../../hooks/use-permissions";
+import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
@@ -25,13 +26,16 @@ import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
 import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
-import {
-  assignableRolesForMember,
-  canRemoveMember,
-  type AssignableOrgRole,
-} from "@appstrate/shared-types";
+import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
+
+/**
+ * Implicit space reach per role: a drop ends access, and the server then unshares connections.
+ * Exhaustive, so a new role must be placed here rather than read as one that revokes access.
+ */
+const ROLE_REACH = { owner: 2, admin: 2, member: 1, guest: 0 } satisfies Record<OrgRole, number>;
+
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
@@ -47,6 +51,15 @@ export function OrgSettingsMembersPage() {
   const canInvite = can("members:invite");
   const canChangeRole = can("members:change-role");
 
+  // Ownership changes confirm first (a new owner can remove whoever named them), and so do
+  // demotions that end space access.
+  const [roleChange, setRoleChange] = useState<{
+    label: string;
+    id: string;
+    role: OrgRole;
+    from: OrgRole;
+  } | null>(null);
+
   const {
     data: orgData,
     isLoading,
@@ -60,18 +73,23 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
+  // A removal or a role drop that ends space access unshares the member's connections.
   const invalidateOrg = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
+    void invalidateIntegrationQueries(queryClient);
   };
+
+  const toastMemberError = (err: unknown) =>
+    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
+    onError: toastMemberError,
   });
 
   const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
+    onError: toastMemberError,
   });
 
   const handleRemove = (member: OrgMember) => {
@@ -79,17 +97,30 @@ export function OrgSettingsMembersPage() {
     setConfirmState({ label, id: member.userId });
   };
 
-  const handleRoleChange = (userId: string, newRole: AssignableOrgRole) => {
+  const changeRole = (userId: string, role: OrgRole, onSuccess?: () => void) => {
     if (!orgId) return;
-    changeRoleMutation.mutate({
-      params: { path: { orgId, userId } },
-      body: { role: newRole },
-    });
+    changeRoleMutation.mutate(
+      { params: { path: { orgId, userId } }, body: { role } },
+      { onSuccess },
+    );
+  };
+
+  const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
+    if (newRole === "owner" || member.role === "owner" || revokesAccess(member.role, newRole)) {
+      setRoleChange({
+        label: member.displayName || member.email || member.userId,
+        id: member.userId,
+        role: newRole,
+        from: member.role,
+      });
+      return;
+    }
+    changeRole(member.userId, newRole);
   };
 
   // Which spaces a person reaches, and as what: one shared query set for the
   // column and for the detail, so opening a person costs nothing more.
-  const seesEverySpace = (ORG_ROLES_WITH_FULL_ACCESS as readonly string[]).includes(orgRole ?? "");
+  const seesEverySpace = hasFullOrgAccess(orgRole);
   const { byUser: spacesByUser } = useSpaceMembershipsByUser(seesEverySpace);
 
   const memberColumns = useMemberColumns({
@@ -186,7 +217,7 @@ export function OrgSettingsMembersPage() {
               : []
           }
           isChangingOrgRole={changeRoleMutation.isPending}
-          onChangeOrgRole={(role) => handleRoleChange(openedUser.userId, role)}
+          onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
           onClose={userParam.close}
         />
       )}
@@ -201,6 +232,50 @@ export function OrgSettingsMembersPage() {
           compact
         />
       )}
+
+      <ConfirmModal
+        open={!!roleChange}
+        onClose={() => setRoleChange(null)}
+        title={t(
+          roleChange?.role === "owner"
+            ? "orgSettings.promoteOwnerTitle"
+            : roleChange?.from === "owner"
+              ? "orgSettings.demoteOwnerTitle"
+              : "orgSettings.demoteTitle",
+        )}
+        description={
+          !roleChange
+            ? ""
+            : roleChange.role === "owner"
+              ? t("orgSettings.promoteOwnerConfirm", { name: roleChange.label })
+              : [
+                  t(
+                    roleChange.from === "owner"
+                      ? "orgSettings.demoteOwnerConfirm"
+                      : "orgSettings.demoteConfirm",
+                    { name: roleChange.label, role: t(roleI18nKey(roleChange.role)) },
+                  ),
+                  revokesAccess(roleChange.from, roleChange.role)
+                    ? t("orgSettings.demotionUnsharesConnections")
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+        }
+        confirmLabel={t(
+          roleChange?.role === "owner"
+            ? "orgSettings.promoteOwner"
+            : roleChange?.from === "owner"
+              ? "orgSettings.demoteOwner"
+              : "orgSettings.demote",
+        )}
+        isPending={changeRoleMutation.isPending}
+        onConfirm={() => {
+          if (roleChange) {
+            changeRole(roleChange.id, roleChange.role, () => setRoleChange(null));
+          }
+        }}
+      />
 
       <ConfirmModal
         open={!!confirmState}
@@ -221,4 +296,8 @@ export function OrgSettingsMembersPage() {
       />
     </>
   );
+}
+
+function revokesAccess(from: OrgRole, to: OrgRole): boolean {
+  return ROLE_REACH[to] < ROLE_REACH[from];
 }

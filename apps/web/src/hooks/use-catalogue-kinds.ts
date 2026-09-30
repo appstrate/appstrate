@@ -8,12 +8,12 @@
  * entry at all.
  */
 import type { PackageType } from "@appstrate/core/validation";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import { spacePackagePermission } from "@appstrate/core/permissions";
 import { usePermissions } from "./use-permissions";
 
 const CATALOGUE_KINDS: PackageType[] = ["agent", "skill", "mcp-server", "integration"];
 
 export function useCatalogueKinds(): PackageType[] {
   const { can } = usePermissions();
-  return CATALOGUE_KINDS.filter((type) => can(PACKAGE_PERMISSIONS[type].activate));
+  return CATALOGUE_KINDS.filter((type) => can(spacePackagePermission(type, "activate")));
 }

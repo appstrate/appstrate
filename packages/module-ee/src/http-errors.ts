@@ -8,7 +8,7 @@ import { ApiError } from "@appstrate/core/api-errors";
  * matching the platform's core error contract.
  *
  * EE routes mount into the SAME Hono app as core routes, so emitting the
- * same shape (type/title/status/detail/code/requestId + `Request-Id` header)
+ * same shape (type/title/status/detail/code/request_id + `Request-Id` header)
  * keeps the API surface uniform — a client gets the same error envelope from
  * `/api/billing` as from `/api/runs`. We render locally rather than throwing
  * for the platform's error handler so the behavior is identical with or without

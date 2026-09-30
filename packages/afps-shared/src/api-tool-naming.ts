@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import { MCP_TOOL_NAME_MAX_LENGTH, MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH } from "./mcp-naming.ts";
+import {
+  fnv1a64Hex,
+  MCP_TOOL_NAME_MAX_LENGTH,
+  MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH,
+} from "./mcp-naming.ts";
 
 /** Canonical unprefixed name of the credential-injecting API tool. */
 export const API_CALL_TOOL_NAME = "api_call";
@@ -36,7 +40,7 @@ const API_TOOL_AUTH_HASH_HEX_LENGTH = API_TOOL_AUTH_TOKEN_LENGTH - 2;
  */
 export function apiToolAuthToken(authKey: string): string {
   if (authKey.length <= API_TOOL_RAW_AUTH_KEY_MAX_LENGTH) return authKey;
-  return `h0${fnv1a64(authKey).slice(0, API_TOOL_AUTH_HASH_HEX_LENGTH)}`;
+  return `h0${fnv1a64Hex(authKey).slice(0, API_TOOL_AUTH_HASH_HEX_LENGTH)}`;
 }
 
 /** Throw when two distinct auth keys collapse onto the same bounded token. */
@@ -52,17 +56,6 @@ export function assertUniqueApiToolAuthTokens(authKeys: readonly string[]): void
     }
     owners.set(token, authKey);
   }
-}
-
-function fnv1a64(value: string): string {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
-  for (const byte of new TextEncoder().encode(value)) {
-    hash ^= BigInt(byte);
-    hash = (hash * prime) & mask;
-  }
-  return hash.toString(16).padStart(16, "0");
 }
 
 /** Derive the unprefixed api_call name for one auth surface. */

@@ -29,7 +29,6 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { useServedModels } from "../hooks/use-served-models";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
@@ -46,7 +45,6 @@ import {
   catalogRows,
   discoveredRows,
   filterRows,
-  idOnlyRow,
   modelSource,
   searchRows,
   type ModelPickRow,
@@ -123,7 +121,7 @@ function ModelForm({
     defaultValues: {
       label: model?.label ?? "",
       apiShape: model?.apiShape ?? "",
-      baseUrl: model?.baseUrl ?? "",
+      baseUrl: model?.base_url ?? "",
       modelId: model?.modelId ?? "",
       credentialId: model?.credentialId ?? "",
       inlineApiKey: "",
@@ -188,7 +186,6 @@ function ModelForm({
   const discoveryKey = [providerId, baseUrl.trim(), credentialId, inlineApiKey.trim()].join("|");
   const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
 
-  const served = useServedModels(!model && isOauth && source === "catalog" ? credentialId : null);
   const search = useOpenRouterSearch(source === "search");
 
   const allRows = useMemo((): ModelPickRow[] => {
@@ -197,12 +194,8 @@ function ModelForm({
     if (source === "discover") {
       return freshDiscovery?.outcome === "ok" ? discoveredRows(freshDiscovery.models) : [];
     }
-    const rows = catalogRows(selectedProvider.models);
-    if (!isOauth) return rows;
-    // Exactly what the plan serves; an id the catalog lacks stays offered id-only.
-    const byId = new Map(rows.map((r) => [r.id, r]));
-    return (served.modelIds ?? []).map((id) => byId.get(id) ?? idOnlyRow(id));
-  }, [selectedProvider, source, isOauth, search.models, freshDiscovery, served.modelIds]);
+    return catalogRows(selectedProvider.models);
+  }, [selectedProvider, source, search.models, freshDiscovery]);
 
   const rows = source === "search" ? allRows : filterRows(allRows, search.search);
 
@@ -301,7 +294,7 @@ function ModelForm({
       bindCredential(id);
       // The key carries the endpoint it was saved against; the form follows it there.
       const key = availableCredentials.find((k) => k.id === id);
-      if (key?.baseUrl) setValue("baseUrl", key.baseUrl);
+      if (key?.base_url) setValue("baseUrl", key.base_url);
       dropListing();
     },
     onClear: () => {
@@ -403,7 +396,7 @@ function ModelForm({
     }
   });
 
-  // Creating, an empty name lets the server derive one. Editing, PUT reads an
+  // Creating, an empty name lets the server derive one. Editing, PATCH reads an
   // absent name as "keep it", so clearing it is refused.
   const labelValidate = (v: string) =>
     !model || v.trim() ? undefined : t("validation.required", { ns: "common" });
@@ -486,31 +479,11 @@ function ModelForm({
             onSelectionChange={handleSelectionChange}
             search={search.search}
             onSearchChange={search.setSearch}
-            isLoading={
-              source === "search"
-                ? search.isLoading
-                : isOauth && served.modelIds === null && !served.failed
-            }
-            loadingText={
-              source === "search"
-                ? t("models.form.modelSearchLoading")
-                : t("models.form.detectingModels")
-            }
-            // A refusal is not an empty plan.
-            emptyText={
-              isOauth && served.failed
-                ? t("models.form.discoverRequestFailed")
-                : isOauth && !search.search.trim()
-                  ? t("models.form.noModelsDetected")
-                  : t("models.form.modelSearchEmpty")
-            }
+            isLoading={source === "search" && search.isLoading}
+            loadingText={t("models.form.modelSearchLoading")}
+            emptyText={t("models.form.modelSearchEmpty")}
             grouped={source === "catalog"}
           />
-          {isOauth && served.failed && (
-            <Button type="button" variant="outline" onClick={served.retry}>
-              {t("models.form.discoverButton")}
-            </Button>
-          )}
           {modelIdError}
           {failedModelIds.length > 0 && (
             <div className="text-destructive text-sm">

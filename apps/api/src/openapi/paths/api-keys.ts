@@ -88,7 +88,7 @@ export const apiKeysPaths = {
                   {
                     id: "cm8vwx234",
                     name: "Production CI",
-                    keyPrefix: "ask_prod",
+                    keyPrefix: "apst_k3x9M2pq",
                     scopes: ["agents:run", "runs:read"],
                     created_by: "user_abc",
                     created_by_name: "Jane Doe",
@@ -161,11 +161,12 @@ export const apiKeysPaths = {
                   key: {
                     type: "string",
                     description:
-                      "Raw API key (prefix: ask_). Store it securely — it will not be shown again.",
+                      "Raw API key (prefix: apst_). Store it securely — it will not be shown again.",
                   },
                   keyPrefix: {
                     type: "string",
-                    description: "First 8 characters for identification",
+                    description:
+                      "The `apst_` prefix and the first 8 characters after it, for identification",
                   },
                   scopes: {
                     type: "array",
@@ -176,8 +177,8 @@ export const apiKeysPaths = {
               },
               example: {
                 id: "cm8vwx235",
-                key: "ask_prod_k3x9m2pq7r4t1w6y0a5d8g",
-                keyPrefix: "ask_prod",
+                key: "apst_k3x9M2pq7R4t1W6y0a5D8gHs2LmQ4v4WVgvC",
+                keyPrefix: "apst_k3x9M2pq",
                 scopes: ["agents:run", "runs:read"],
               },
             },

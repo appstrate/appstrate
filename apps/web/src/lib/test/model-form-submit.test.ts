@@ -12,14 +12,18 @@
 
 import { describe, expect, it } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
-import type { ModelFormData, ModelFormMultiData } from "../model-form-payload.ts";
+import type {
+  ModelFormData,
+  ModelFormMultiData,
+  NewCredentialBody,
+} from "../model-form-payload.ts";
 import {
   submitModelForm,
   type ModelFormCreateBody,
   type ModelFormWrites,
 } from "../model-form-submit.ts";
 
-const NEW_CREDENTIAL = { apiKey: "sk-abc", providerId: "openai" };
+const NEW_CREDENTIAL = { api_key: "sk-abc", providerId: "openai" };
 
 const DUPLICATE = new ApiError(
   "model_already_added",
@@ -31,13 +35,13 @@ const DUPLICATE = new ApiError(
 function harness(refuse?: "credential" | "model" | "duplicate") {
   const created: ModelFormCreateBody[] = [];
   const updated: { id: string; credentialId: string }[] = [];
-  const credentials: { providerId: string; apiKey: string }[] = [];
+  const credentials: NewCredentialBody[] = [];
   let successes = 0;
 
   const writes: ModelFormWrites = {
     createCredential: async (body) => {
       if (refuse === "credential") throw new Error("key refused");
-      credentials.push({ providerId: body.providerId, apiKey: body.apiKey });
+      credentials.push(body);
       return { id: `cred_${credentials.length}` };
     },
     createModel: async (body) => {

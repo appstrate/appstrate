@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   serial,
+  bigserial,
   uuid,
   index,
   uniqueIndex,
@@ -20,7 +21,13 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
-import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
+import {
+  runStatusEnum,
+  llmUsageSourceEnum,
+  runOriginEnum,
+  credentialSourceEnum,
+  inferenceRouteEnum,
+} from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces, endUsers } from "./spaces.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
@@ -153,6 +160,15 @@ export const runs = pgTable(
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
     modelSource: text("model_source"),
+    // The model the run launched with — a system model id or an `org_models.id`,
+    // the same pointer as `packages.model_id`. The platform LLM proxy serves a
+    // run's own inference from it, never from a model the request names. NULL
+    // on a remote-origin run, which resolves no platform model.
+    modelId: text("model_id"),
+    // Who serves the run's inference, decided at launch. NULL = no route
+    // recorded (a remote-origin run resolves no platform model): the runner's
+    // ledger row is kept and the proxy's run entry refuses the run.
+    inferenceRoute: inferenceRouteEnum("inference_route"),
     // Effective generation settings frozen at kickoff for reproducibility.
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     // Raw invocation layer (manual run or schedule), before agent defaults.
@@ -179,23 +195,28 @@ export const runs = pgTable(
     costPricingStatus: text("cost_pricing_status").$type<PricingStatus>(),
     runNumber: integer("run_number"),
     // Per-run integration connection overrides — the caller's explicit
-    // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot
-    // not my Gmail-Perso"). Shape: { "@scope/integration": "<connection_id>" }.
-    // Loses to admin pin. Resolution snapshot lives in resolvedConnections
-    // below. Flat (no per-authKey nesting): one connection per integration.
-    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
-    // Snapshot of the resolver output at run start — what connection
-    // was actually used per integration, plus the source
-    // ("admin_pin" | "run_override" | "schedule_override" | "member_pin" | "fallback_*").
+    // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot AND my
+    // Gmail-Perso"). Shape: { "@scope/integration": ["<connection_id>", ...] }.
+    // Loses to an admin pin and an enforced org default. Resolution snapshot
+    // lives in resolvedConnections below. Flat (no per-authKey nesting): the
+    // chosen connections carry their own authKey.
+    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
+    // Snapshot of the resolver output at run start — which connections were
+    // actually bound per integration, plus the resolver layer that bound them
+    // (`ConnectionResolutionSource` in `@appstrate/core/integration`).
     // Audit trail: a run's identity in the upstream provider logs maps
     // back through this column even after pins/connections are mutated.
-    resolvedConnections:
-      jsonb("resolved_connections").$type<
-        Record<
-          string,
-          { connectionId: string; source: string; label?: string | null; accountId?: string | null }
-        >
-      >(),
+    resolvedConnections: jsonb("resolved_connections").$type<
+      Record<
+        string,
+        {
+          connectionId: string;
+          source: string;
+          label?: string | null;
+          accountId?: string | null;
+        }[]
+      >
+    >(),
     // Snapshot of the integration manifest VERSION resolved per declared
     // integration at run kickoff (#686). Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.
@@ -406,13 +427,15 @@ export const runs = pgTable(
       "runs_cost_pricing_status_valid",
       sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
     ),
+    // The proxy serves the run's pinned model, never one the request names.
+    check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
   ],
 );
 
 export const runLogs = pgTable(
   "run_logs",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     runId: text("run_id")
       .notNull()
       .references(() => runs.id, { onDelete: "cascade" }),
@@ -558,7 +581,7 @@ export const packagePersistence = pgTable(
 export const llmUsage = pgTable(
   "llm_usage",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     source: llmUsageSourceEnum("source").notNull(),
     orgId: uuid("org_id")
       .notNull()
@@ -775,8 +798,9 @@ export const schedules = pgTable(
     versionOverride: text("version_override"),
     // Per-schedule integration connection overrides — frozen at schedule
     // creation/edit (mirrors `dependencyOverrides` on runs). Same shape as
-    // `runs.connectionOverrides`. Loses to admin pin at fire time.
-    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string>>(),
+    // `runs.connectionOverrides`. Loses to an admin pin and an enforced org
+    // default at fire time.
+    connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Per-schedule dependency version overrides — frozen at schedule
     // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`
     // (#666/#686). Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.

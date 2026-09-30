@@ -41,9 +41,9 @@ describe("llm-proxy route table", () => {
     // pins is the two FUNCTION BODIES against each other — the mount prefix,
     // the segment order, and above all that both spend `baseSuffix` exactly
     // once. Dropping it from `llmProxyUrlPath` fails this case; so does moving
-    // the `/api/llm-proxy` mount on one side only. It has teeth only for a row
-    // whose `baseSuffix` is non-empty (`openai-completions` today), which is
-    // also the only row where the two functions can disagree at all.
+    // the `/api/llm-proxy` mount on one side only. It has teeth only for rows
+    // whose `baseSuffix` is non-empty (the two OpenAI shapes today), which are
+    // also the only rows where the two functions can disagree at all.
     it(`${shape}: client base + sdkPath === server mount`, () => {
       const base = llmProxyBaseUrl(ORIGIN, shape);
       expect(base).not.toBeNull();
@@ -51,6 +51,13 @@ describe("llm-proxy route table", () => {
       expect(clientUrl).toBe(`${ORIGIN}/api/llm-proxy${llmProxyUrlPath(shape)}`);
     });
   }
+
+  it("routes the OpenAI Responses API with `/v1` in the base, like the OpenAI client", () => {
+    expect(llmProxyBaseUrl(ORIGIN, "openai-responses")).toBe(
+      `${ORIGIN}/api/llm-proxy/openai-responses/v1`,
+    );
+    expect(llmProxyUrlPath("openai-responses")).toBe("/openai-responses/v1/responses");
+  });
 
   it("refuses a shape the table does not carry", () => {
     expect(isProxiedApiShape("openai-codex-responses")).toBe(false);

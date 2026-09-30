@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
@@ -34,6 +35,8 @@ function integ(overrides: Partial<ApiCallIntegrationConfig> = {}): ApiCallIntegr
   return {
     namespace: "drive",
     integrationId: "@appstrate/google-drive",
+    connectionId: "conn-1",
+    declaredUris: [],
     fetchCredentials: unreachable as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials: unreachable as unknown as ApiCallIntegrationConfig["refreshCredentials"],
     ...overrides,
@@ -109,4 +112,27 @@ describe("createApiCallToolDefs — _meta marker payloads", () => {
       "api_call",
     ]);
   });
+});
+
+// Pi validates tool arguments against the published schema before the sidecar sees them.
+describe("createApiCallToolDefs — api_call target schema (#1627)", () => {
+  const [call] = createApiCallToolDefs(integ(), deps);
+  const accepts = (target: string): boolean => {
+    try {
+      validateToolArguments(
+        { name: "t", description: "", parameters: call!.descriptor.inputSchema } as never,
+        { type: "toolCall", id: "1", name: "t", arguments: { target } },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it.each(["https://api.example.com/x", "{{site_url}}/wp-json/x", "{{webhook_url}}"])(
+    "Pi accepts %s",
+    (target) => expect(accepts(target)).toBe(true),
+  );
+
+  it("Pi still refuses a non-URL target", () => expect(accepts("not a url")).toBe(false));
 });

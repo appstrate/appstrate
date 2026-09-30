@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import type { AssignableOrgRole } from "@appstrate/shared-types";
+import type { OrgRole } from "@appstrate/shared-types";
 import type { components } from "../../api/client";
 import { DataTable } from "../../components/data-table";
 import { Modal } from "../../components/modal";
@@ -48,9 +48,9 @@ export function UserDetailModal({
   memberships: SpaceMembership[];
   /** Only an owner or admin reads every space's member list. */
   showSpaces: boolean;
-  assignableRoles: readonly AssignableOrgRole[];
+  assignableRoles: readonly OrgRole[];
   isChangingOrgRole: boolean;
-  onChangeOrgRole: (role: AssignableOrgRole) => void;
+  onChangeOrgRole: (role: OrgRole) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -124,7 +124,7 @@ export function UserDetailModal({
           {assignableRoles.length > 0 ? (
             <Select
               value={member.role}
-              onValueChange={(value) => onChangeOrgRole(value as AssignableOrgRole)}
+              onValueChange={(value) => onChangeOrgRole(value as OrgRole)}
               disabled={isChangingOrgRole}
             >
               <SelectTrigger className="w-56">

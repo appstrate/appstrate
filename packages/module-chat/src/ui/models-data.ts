@@ -25,7 +25,7 @@ const orgModelOptionSchema = z.object({
   modelId: z.string().nullable(),
   apiShape: z.string().nullable(),
   providerId: z.string().nullable().optional(),
-  providerName: z.string().nullable().optional(),
+  provider_name: z.string().nullable().optional(),
   label: z.string().nullable(),
   is_default: z.boolean().optional(),
   needs_reconnection: z.boolean().optional(),
@@ -47,7 +47,7 @@ export interface OrgModelOption {
    * `apiShape` alone is ambiguous (OpenCode Go shares `openai-completions` with
    * OpenAI). `null` for aliases (binding hidden) or rows with no registry entry.
    */
-  providerName?: string | null;
+  provider_name?: string | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;

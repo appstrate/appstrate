@@ -117,4 +117,32 @@ describe("buildApiUploadToolFactory", () => {
     factories[0]!(pi);
     expect(registeredName).toBe("@scope/drive__api_upload");
   });
+
+  it("throws its argument and protocol refusals as Pi tool errors", async () => {
+    const [factory] = buildApiUploadToolFactory({
+      tool: uploadTool("x__api_upload", ["google-resumable"]),
+      apiCallToolName: "x__api_call",
+      mcp: fakeMcp,
+      runId: "r",
+      workspace: "/ws",
+      emit: () => {},
+    });
+    let execute: ((id: string, params: unknown) => Promise<unknown>) | undefined;
+    factory!({
+      registerTool: (def: { execute: typeof execute }) => {
+        execute = def.execute;
+      },
+    } as never);
+
+    await expect(execute!("call-1", { target: "https://x.test" })).rejects.toThrow(
+      "x__api_upload: missing one of target/fromFile/uploadProtocol",
+    );
+    await expect(
+      execute!("call-2", {
+        target: "https://x.test",
+        fromFile: "a.bin",
+        uploadProtocol: "s3-multipart",
+      }),
+    ).rejects.toThrow("protocol 's3-multipart' not declared by this integration");
+  });
 });

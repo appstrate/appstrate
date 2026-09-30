@@ -21,7 +21,7 @@ All value templates use the Arazzo runtime-expression grammar `{$credential.<fie
 ```jsonc
 {
   "$schema": "https://schemas.afps.dev/v0/integration.schema.json",
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "type": "integration",
   // …
 }
@@ -200,7 +200,7 @@ a fully-manual configuration MUST be supported.
       { "value": "write", "label": "Write access" },
       { "value": "admin", "label": "Admin access", "implies": ["read", "write"] }
     ],
-    "identity_claims": { "email": "email", "user_id": "sub" },
+    "identity_claims": { "email": "$.email", "user_id": "$.sub" },
     "required_identity_claims": ["email"],
     "callback_url_hint": "Set the authorized redirect URI to: {{callback_url}}",
     "authorized_uris": ["https://api.example.com/**"],
@@ -231,23 +231,27 @@ platform reads it to derive an **account key**, which is both the connection's
 display label and the value that distinguishes two accounts of the same
 provider. Resolution, in order:
 
-1. the `accountId` (or `account_id`) key of your `identity_claims` map;
+1. the `account_id` key of your `identity_claims` map (keys are snake_case:
+   creating, saving, publishing or importing a manifest that declares any
+   other key — `accountId`, `avatarUrl` — is refused);
 2. a top-level `email`, `account_email` or `sub` in the payload;
 3. the literal `"default"`.
 
 Landing on `"default"` is not an error and nothing is logged: the connection is
 simply labelled `Connexion 1`, `Connexion 2`, … and every connection on that
 provider shares one account key, so a member holding two accounts cannot tell
-them apart. **Declare `accountId` explicitly.** Choose the most human-readable
+them apart. **Declare `account_id` explicitly.** Choose the most human-readable
 value that is _unique per account_ — email, else a unique handle, else an opaque
 id. A display name that two accounts can share is the wrong choice even though
 it reads better.
 
-Accessors are `$.`-prefixed dotted paths (`$.data.email`,
-`$.identity.email_address`). A numeric segment indexes an array, which is how a
-provider that answers with a single-element list is read: `$.data.0.primaryEmail`.
-A path that matches nothing yields `""` and falls through to the chain above —
-so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
+Accessors are JSONPaths in the single-value RFC 9535 subset the login engine's
+selectors use too (`@appstrate/afps-shared/jsonpath`): `$`, `.name`,
+`['name']` / `["name"]`, and array indices `[0]` / `[-1]` — a provider that
+answers with a single-element list is read as `$.data[0].primaryEmail`.
+Filters, slices, wildcards, recursive descent, a `.name` starting with a digit
+and a bare name without the `$` are refused when the manifest is imported. A valid path that matches nothing leaves that claim out and falls
+through to the chain above — so a typo degrades silently. `apps/api/test/unit/services/system-package-identity-claims.test.ts`
 pins every shipped mapping against a payload taken from the provider's docs for
 exactly that reason.
 
@@ -605,6 +609,15 @@ down.
 Choose `link` when the credential is durable and acquired once. Choose `run-start`
 when each run needs a fresh session from a stored secret.
 
+Cookies the upstream sets during a proxy session (one `X-Session-Id` and connection on
+the platform proxy, one run in the sidecar), on any hop of a redirect chain, are filed
+under the host that set them and replayed there, winning by name over an injected cookie
+credential: a rotated session sticks, a deletion falls back to the injected value.
+Cookies are host-only: `Domain` and `Path` are ignored (a same-name cookie set for another
+path still shadows the injected one on that host), and two hosts share cookies only when
+both are literal `authorized_uris` entries. On a cross-origin redirect the platform proxy
+strips the Cookie credential; the sidecar keeps it inside the declared allowlist.
+
 ---
 
 ## `tools_policy` — per-tool authorization metadata
@@ -667,9 +680,68 @@ Consumers MUST NOT send credentials to URIs outside the authorized set unless
 `allow_all_uris` is explicitly `true`. URL-encoding bypass, fragment injection, and
 open-redirect chains MUST NOT cross the allowlist (§8.6).
 
+A caller that templates a credential field (`{{field}}`) into the target, a header or
+a substituted body loses `allow_all_uris`: the target and every redirect hop must
+match `authorized_uris`, and the call is refused when there is none. The sidecar, the
+CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`).
+
+An integration whose endpoint is per-connection declares it as a URL-form entry
+instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
+`"{$credential.webhook_url}"` for one exact URL. The placeholder comes first, alone,
+followed by nothing or a suffix starting with `/`; the field must be declared and
+`required`. Each connection's list is rendered from its value — an absolute
+`http(s)` URL without userinfo, `#`, an empty `?` or `*`, and without a query string
+unless the entry is the bare placeholder: `"{$credential.webhook_url}"` is matched
+exactly, so a Google Chat or Power Automate URL keeps its `?key=…&token=…` without
+widening anything, while a query before a `/**` suffix is refused. Every redirect hop
+must match that exact URL too, so a webhook that redirects elsewhere (Google Apps
+Script `…/exec` → `script.googleusercontent.com`) is refused. A value that does not
+qualify drops the entry, so a connection left with no entry has every call refused;
+the platform therefore refuses such a value when the connection is created or its
+credentials are updated (a 400 `validation_failed` naming `credentials.<field>` and
+the form it must take, never the value).
+Prefer the exact form when the host is shared between tenants (`hooks.slack.com`).
+Rendered entries never exempt a host from the SSRF blocklist, and never share cookies.
+
+What the guard covers is narrow. A templated credential cannot leave
+`authorized_uris`, which bound host and path, not tenant: an allowlisted multi-tenant
+API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
+path. The server-injected credential header (`delivery.http`) is not templated: under
+`allow_all_uris`, an untemplated call sends it to any public host, by design. Set
+`allow_all_uris` only when that is acceptable for the credential; the system
+catalogue refuses it on any auth that injects through `delivery.http`
+(`bun run build:system-packages:check`).
+
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
-cross-host hops).
+cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
+runner's whole network egress: a destination it does not grant is refused, and an
+auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
+way out at all. Only patterns with a `scheme://` count for raw TCP traffic: a pattern
+without a port grants only the scheme's default port (443 for https/wss, 80 for
+http/ws, 22 for ssh/sftp, none for any other scheme), and a bare `scheme://**` grants
+any host on any port.
+
+A `uv` server builds its venv at startup (`uv run` fetches the dependencies from the
+package index) through that same egress, and the platform makes no exception for it:
+either list the index in `authorized_uris` (`https://pypi.org/**` and
+`https://files.pythonhosted.org/**`, or your private index), or vendor the
+dependencies in the bundle.
+
+When the target depends on what the user enters (a self-hosted server), reference a
+connection field with `{$credential.<field>}`:
+
+```jsonc
+"authorized_uris": ["ssh://{$credential.host}:{$credential.port}"]
+```
+
+The field must be declared and listed in `credentials.schema.required`, and the entry
+must start with `scheme://` with its placeholders in the host and port only (never in
+the path or query) — or be a URL-form entry (`{$credential.site_url}/**`, above).
+Templates are refused on an `oauth2` auth and on an auth that declares `connect`. At run
+time a host or port value containing anything but letters, digits, `.` and `-`, or made
+only of dots, drops the pattern, so a user cannot add a wildcard, a separator or another
+host.
 
 ---
 

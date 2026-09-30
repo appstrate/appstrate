@@ -18,6 +18,8 @@
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
  *   - Per-space scope (principal cannot reach providers in another space)
+ *   - Run binding — `X-Run-Id` confines the call to its run's bound connections
+ *     (`selectAccessibleConnection`)
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -26,7 +28,8 @@
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the integration manifest
- *     (`authorized_uris` / `allow_all_uris`)
+ *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
+ *   - Upstream `Set-Cookie` never relayed to the caller
  *   - Request / response size caps
  */
 
@@ -35,17 +38,17 @@ import type { Context } from "hono";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 // Streaming cap — single-sourced from the shared outbound-HTTP engine, the
-// same module the in-container resolvers enforce it from. It used to be a
-// third private copy of the literal here, so a change to the shared value
-// silently desynchronised this route from every runner. The streaming/buffered
-// decision is header-driven (X-Stream-Request), not threshold-driven, so only
-// the hard cap is needed here.
+// same module the in-container resolvers enforce it from, so this route and
+// every runner apply one value. The streaming/buffered decision is
+// header-driven (X-Stream-Request), not threshold-driven, so only the hard cap
+// is needed here.
 import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
+import { isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
@@ -65,6 +68,7 @@ import {
   ProxySubstitutionError,
 } from "../services/credential-proxy/core.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
+import { runBoundSelection } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { assertBearerOnly } from "../lib/bearer-only.ts";
@@ -99,24 +103,20 @@ export function createCredentialProxyRouter() {
       const integrationId = c.req.header("X-Integration-Id");
       const target = c.req.header("X-Target");
       const sessionId = c.req.header("X-Session-Id");
-      const substituteBody = c.req.header("X-Substitute-Body") === "true";
-      // X-Run-Id is optional — populated by runners that want per-run
-      // attribution in `credential_proxy_usage`. The value is not validated
-      // against the principal here (matches llm-proxy behaviour); a
-      // mismatched runId is a reporting oddity, not a security boundary.
+      const substituteBody = readFlagHeader(c, "X-Substitute-Body");
+      // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
-      // X-Connection-Id is optional — when set the route narrows to that
-      // connection (validated in the resolver against the actor's accessible
-      // set AND against `X-Integration-Id`: an id belonging to a different
-      // integration never resolves, so this header cannot be used to inject
-      // another integration's credentials under this integration's manifest);
-      // when absent the implicit default chain still applies.
+      // X-Connection-Id is optional; the selector binds it to `X-Integration-Id`, so it can never
+      // inject another integration's credentials under this integration's manifest.
       const explicitConnectionHeader = c.req.header("X-Connection-Id");
       const explicitConnectionId =
         explicitConnectionHeader && explicitConnectionHeader.length > 0
           ? explicitConnectionHeader
           : null;
+      if (explicitConnectionId && !isUuid(explicitConnectionId)) {
+        throw invalidRequest("X-Connection-Id must be a connection uuid", "X-Connection-Id");
+      }
 
       if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -157,17 +157,12 @@ export function createCredentialProxyRouter() {
       const userId = c.get("user").id;
       const endUser = c.get("endUser");
 
-      // The actor selects which `integration_connections` row is decrypted:
-      //   - `Appstrate-User` impersonation → the end-user's connection
-      //   - dashboard / CLI-JWT / API-key callers → the platform user's
-      //     own connection (or any `shared_with_org` connection in the space).
-      // `X-Connection-Id` (when present) pins a specific connection id,
-      // validated against the actor's accessible set in the resolver.
       const actor = getActor(c);
+      const run = runId ? runBoundSelection({ orgId, spaceId, runId, integrationId, actor }) : null;
 
       // Streaming control headers from the runtime.
-      const streamRequest = c.req.header("x-stream-request") === "1";
-      const streamResponse = c.req.header("x-stream-response") === "1";
+      const streamRequest = readFlagHeader(c, "X-Stream-Request");
+      const streamResponse = readFlagHeader(c, "X-Stream-Response");
       const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
       // Optional caller-supplied buffered-response cap. Clamped to the
@@ -256,6 +251,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          ...(run ? { run } : {}),
           integrationId,
           method,
           target,
@@ -289,12 +285,14 @@ export function createCredentialProxyRouter() {
         });
 
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
-        // plus the X-Stream-* transport hints between the runtime and this
-        // proxy, which must not reach the caller.
+        // plus the route-specific set (transport hints, Set-Cookie).
         const responseHeaders = stripUpstreamResponseHeaders(
           result.headers,
-          STREAM_CONTROL_HEADERS,
+          CALLER_RESPONSE_SKIP_HEADERS,
         );
+        // One URL serves every target and connection (they ride in headers), so an upstream
+        // cache policy must not let a client replay one connection's response for another.
+        responseHeaders.set("Cache-Control", "no-store");
 
         // Streaming upload on a 401: credentials may be stale but the body
         // cannot be replayed. Signal the client to refresh and retry itself.
@@ -378,6 +376,14 @@ export function createCredentialProxyRouter() {
   return router;
 }
 
+/** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
+function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
+  const value = c.req.header(name);
+  if (value === undefined || value === "0") return false;
+  if (value === "1") return true;
+  throw invalidRequest(`${name} must be "1" or "0" (got "${value.slice(0, 32)}")`);
+}
+
 const PROXY_CONTROL_HEADERS = new Set([
   "x-integration",
   "x-integration-id",
@@ -402,8 +408,13 @@ const PROXY_CONTROL_HEADERS = new Set([
   "accept-encoding",
 ]);
 
-/** Transport hints between the runtime and this proxy — never forwarded to the caller. */
-const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);
+/** Not relayed to the caller: transport hints, and Set-Cookie (a cookie can be the credential). */
+const CALLER_RESPONSE_SKIP_HEADERS = new Set([
+  "x-stream-request",
+  "x-stream-response",
+  "set-cookie",
+  "set-cookie2",
+]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */
 interface StreamCapLogCtx {

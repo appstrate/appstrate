@@ -20,7 +20,9 @@
  *     bound org, OIDC end-user sees their space's owning org,
  *     dashboard user sees every org they're a member of); write/delete
  *     routes additionally enforce per-row owner (`userId`/`endUserId`)
- *     scoping in the service layer, not org membership.
+ *     scoping in the service layer, not org membership. Being authorized by
+ *     ownership rather than a role grant, the connection and pin routes are
+ *     capped by a delegated credential's scope ceiling (`requireCeiling`).
  *
  * Surface (each an explicitly named route — this namespace is NOT a
  * catch-all user-profile endpoint; adding a capability means adding a
@@ -28,6 +30,7 @@
  *   - GET    /orgs                      — orgs the caller belongs to
  *   - GET    /connections               — the caller's integration connections
  *   - DELETE /connections/:connectionId — destructive global credential delete
+ *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
  *   - GET    /integration-pins          — member-self pins for an agent
  *   - PUT    /integration-pins          — upsert a member-self pin
  *   - DELETE /integration-pins          — clear a member-self pin
@@ -40,15 +43,20 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
-import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
-import { getActor } from "../lib/actor.ts";
+import { integrationConnections, spaces } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import {
+  listMeConnections,
+  type MeConnectionAuthority,
+  getConnectionDeleteImpact,
+} from "../services/me-connections.ts";
+import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
+import { requireCeiling } from "../middleware/require-permission.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
@@ -57,12 +65,17 @@ import {
 } from "../services/integration-pins-service.ts";
 import {
   deleteIntegrationConnection,
+  getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
+import { handoffStepsFor } from "../services/connect/provisioning.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
+import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
-import { canReadRuns } from "../lib/run-visibility.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -186,7 +199,7 @@ router.get("/orgs", async (c) => {
  * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
  * package) in both cases.
  */
-router.get("/connections", async (c) => {
+router.get("/connections", requireCeiling("integrations", "read"), async (c) => {
   const actor = getActor(c);
   const authority = getMeConnectionAuthority(c);
   const groups = await listMeConnections(actor, authority);
@@ -194,17 +207,36 @@ router.get("/connections", async (c) => {
 });
 
 /**
+ * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
+ * schedules the delete would rewrite. A non-UUID id answers empty lists.
+ */
+router.get(
+  "/connections/:connectionId/delete-impact",
+  requireCeiling("integrations", "read"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    if (!z.uuid().safeParse(connectionId).success) return c.json({ pins: [], schedules: [] });
+    return c.json(
+      await getConnectionDeleteImpact(
+        getActor(c),
+        connectionId.toLowerCase(),
+        getMeConnectionAuthority(c),
+      ),
+    );
+  },
+);
+
+/**
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * The persisted replacement for the R5 localStorage pick: when an agent
- * has >1 candidate connection on a required (integration, authKey) and
- * the member picks one, the choice is stored here and read by the
- * resolver on every subsequent run (cascade layer 4).
+ * has >1 candidate connection on a required integration, the member's pick is stored
+ * here and read by the resolver on every run (cascade layer 4).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
  * overrides). All routes require `X-Space-Id`; the pin is scoped
- * to (member, space, agent, integration, authKey).
+ * to (member, space, agent, integration).
  *
  * Admin pins live under `/api/integrations/:packageId/pins/...` and use
  * a different validation rule (the connection must be `sharedWithOrg`);
@@ -214,84 +246,99 @@ export const upsertMemberPinSchema = z
   .object({
     agent_package_id: z.string().min(1),
     integration_package_id: z.string().min(1),
-    connection_id: z.uuid(),
+    connection_ids: connectionIdSetSchema,
   })
   .strict();
 
-router.get("/integration-pins", requireSpaceContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    // End-users have no member-pin surface — return an empty list rather
-    // than 403 so the picker can render without special-casing the actor.
-    return c.json(listResponse([]));
-  }
-  const agentPackageId = c.req.query("agent_package_id");
-  // An omitted parameter is an empty list, not a 400 — the picker renders
-  // before it has an agent to ask about, exactly as it does for an end-user
-  // above. The DELETE below refuses instead, because deleting nothing in
-  // particular is not a coherent request. The spec is what was wrong here:
-  // it marked the parameter `required` and documented a 400 this route has
-  // never raised.
-  if (!agentPackageId) return c.json(listResponse([]));
-  const scope = getSpaceScope(c);
-  const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
-  return c.json(listResponse(pins));
-});
+router.get(
+  "/integration-pins",
+  requireCeiling("integrations", "read"),
+  requireSpaceContext(),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    if (c.get("endUser")) {
+      // End-users have no member-pin surface — return an empty list rather
+      // than 403 so the picker can render without special-casing the actor.
+      return c.json(listResponse([]));
+    }
+    const agentPackageId = c.req.query("agent_package_id");
+    // An omitted parameter is an empty list, not a 400 — the picker renders
+    // before it has an agent to ask about, exactly as it does for an end-user
+    // above. The DELETE below refuses instead, because deleting nothing in
+    // particular is not a coherent request. The spec is what was wrong here:
+    // it marked the parameter `required` and documented a 400 this route has
+    // never raised.
+    if (!agentPackageId) return c.json(listResponse([]));
+    const scope = getSpaceScope(c);
+    const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
+    return c.json(listResponse(pins));
+  },
+);
 
-router.put("/integration-pins", requireSpaceContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    throw unauthorized("End-user cannot set a member-scope pin");
-  }
-  const scope = getSpaceScope(c);
-  const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
-  const result = await upsertMemberPin(scope, {
-    agentPackageId: input.agent_package_id,
-    integrationId: input.integration_package_id,
-    connectionId: input.connection_id,
-    userId: user.id,
-  });
-  await recordAuditFromContext(c, {
-    action: "integration.member_pin.upserted",
-    resourceType: "integration_pin",
-    resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
-    after: { connectionId: input.connection_id },
-  });
-  return c.json(result);
-});
-
-router.delete("/integration-pins", requireSpaceContext(), async (c) => {
-  const user = c.get("user");
-  if (!user) throw unauthorized("Authentication required");
-  if (c.get("endUser")) {
-    throw unauthorized("End-user cannot clear a member-scope pin");
-  }
-  const scope = getSpaceScope(c);
-  const agentPackageId = c.req.query("agent_package_id");
-  const integrationId = c.req.query("integration_package_id");
-  if (!agentPackageId || !integrationId) {
-    throw invalidRequest("agent_package_id and integration_package_id query params are required");
-  }
-  const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
-  if (result.deleted) {
-    await recordAuditFromContext(c, {
-      action: "integration.member_pin.deleted",
-      resourceType: "integration_pin",
-      resourceId: `${agentPackageId}|${integrationId}`,
+router.put(
+  "/integration-pins",
+  requireCeiling("integrations", "connect"),
+  requireSpaceContext(),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    if (c.get("endUser")) {
+      throw unauthorized("End-user cannot set a member-scope pin");
+    }
+    const scope = getSpaceScope(c);
+    const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
+    const result = await upsertMemberPin(scope, {
+      agentPackageId: input.agent_package_id,
+      integrationId: input.integration_package_id,
+      connectionIds: input.connection_ids,
+      userId: user.id,
     });
-  }
-  return c.body(null, 204);
-});
+    await recordAuditFromContext(c, {
+      action: "integration.member_pin.upserted",
+      resourceType: "integration_pin",
+      resourceId: `${input.agent_package_id}|${input.integration_package_id}`,
+      after: { connectionIds: result.connection_ids },
+    });
+    return c.json(result);
+  },
+);
+
+router.delete(
+  "/integration-pins",
+  requireCeiling("integrations", "connect"),
+  requireSpaceContext(),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) throw unauthorized("Authentication required");
+    if (c.get("endUser")) {
+      throw unauthorized("End-user cannot clear a member-scope pin");
+    }
+    const scope = getSpaceScope(c);
+    const agentPackageId = c.req.query("agent_package_id");
+    const integrationId = c.req.query("integration_package_id");
+    if (!agentPackageId || !integrationId) {
+      throw invalidRequest("agent_package_id and integration_package_id query params are required");
+    }
+    const result = await deleteMemberPin(scope, agentPackageId, integrationId, user.id);
+    if (result.deleted) {
+      await recordAuditFromContext(c, {
+        action: "integration.member_pin.deleted",
+        resourceType: "integration_pin",
+        resourceId: `${agentPackageId}|${integrationId}`,
+      });
+    }
+    return c.body(null, 204);
+  },
+);
 
 /**
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
  *
- * Removes the underlying `integration_connections` row. ON DELETE CASCADE
- * naturally vacates every reference: admin pins, member pins, run snapshots,
- * schedule overrides. The intent is *destructive* — "I never want to use
- * this credential anywhere again".
+ * Removes the underlying `integration_connections` row — *destructive* — unless an
+ * admin pin or an org default names it (409 `connection_pinned`). The caller's own
+ * member pins and schedule overrides drop it (a schedule it empties is disabled);
+ * `GET …/delete-impact` lists them beforehand.
  *
  * This is the ONLY entrypoint for that delete, and it is owner-scoped by
  * construction. Surfaced only from `/connections` (the user-owned management
@@ -306,72 +353,146 @@ router.delete("/integration-pins", requireSpaceContext(), async (c) => {
  * credentials in other orgs/spaces), so its own scope is used instead of the
  * row-derived one.
  */
-router.delete("/connections/:connectionId", async (c) => {
-  const connectionId = c.req.param("connectionId")!;
-  const actor = getActor(c);
-  const authority = getMeConnectionAuthority(c);
+router.delete(
+  "/connections/:connectionId",
+  requireCeiling("integrations", "disconnect"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    const actor = getActor(c);
+    const authority = getMeConnectionAuthority(c);
 
-  // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface
-  // as a 500. Validate first and short-circuit to 204: same non-disclosure
-  // intent as the "row not found" branch below (no information leak to a caller
-  // probing ids).
-  if (!z.uuid().safeParse(connectionId).success) {
-    return c.body(null, 204);
-  }
-
-  // /me/* skips org/space context middleware — derive spaceId from
-  // the connection row itself. Ownership is enforced by the service via
-  // (userId | endUserId) filter, not by org membership: a connection
-  // belongs to its owner regardless of which org context they're browsing.
-  const [row] = await db
-    .select({ spaceId: integrationConnections.spaceId })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  if (!row) {
-    // 204 instead of 404 keeps the response stable whether the connection
-    // never existed or already deleted — same end state, no information
-    // disclosure to a caller probing IDs.
-    return c.body(null, 204);
-  }
-
-  // Scope selection depends on the credential's authority:
-  //
-  //   - A bound credential: when it pins a space, a connection outside that
-  //     space short-circuits to 204 (same non-disclosure as the "row not
-  //     found" branch — a probing key learns nothing). The delete then runs
-  //     under the CREDENTIAL's `SpaceScope`, so the service's space∈org
-  //     assertion and its `spaceId` WHERE filter both enforce the binding in
-  //     SQL; an org-only credential is held to its org by that same assertion.
-  //
-  //   - A `user` principal (`user_global`): pass an `ActorScope`
-  //     (spaceId only, no orgId) deliberately. `/me/connections` is an
-  //     actor-ownership boundary, not a space∈org one: a connection belongs to
-  //     its owner regardless of which org the caller is currently scoped to.
-  //     The absence of `orgId` tells the service to skip its space∈org
-  //     assertion and rely solely on the (userId | endUserId) ownership
-  //     predicate. Passing the caller's live `c.get("orgId")` here (populated
-  //     for OIDC callers, empty for cookie sessions) would wrongly run that
-  //     assertion and 404 a self-owned connection whose space lives in
-  //     a different org. Ownership is still fully enforced downstream by the
-  //     actor filter.
-  let scope: SpaceScope | ActorScope;
-  if (authority.kind === "bound") {
-    if (authority.spaceId && row.spaceId !== authority.spaceId) {
+    // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface
+    // as a 500. Validate first and short-circuit to 204: same non-disclosure
+    // intent as the "row not found" branch below (no information leak to a caller
+    // probing ids).
+    if (!z.uuid().safeParse(connectionId).success) {
       return c.body(null, 204);
     }
-    scope = { orgId: authority.orgId, spaceId: row.spaceId };
-  } else {
-    scope = { spaceId: row.spaceId } satisfies ActorScope;
-  }
-  await deleteIntegrationConnection(scope, connectionId, actor);
-  await recordAuditFromContext(c, {
-    action: "integration.connection.deleted",
-    resourceType: "integration_connection",
-    resourceId: connectionId,
-  });
-  return c.body(null, 204);
-});
+
+    // /me/* skips org/space context middleware — derive spaceId from
+    // the connection row itself. Ownership is enforced by the service via
+    // (userId | endUserId) filter, not by org membership: a connection
+    // belongs to its owner regardless of which org context they're browsing.
+    const [row] = await db
+      .select({ spaceId: integrationConnections.spaceId, orgId: spaces.orgId })
+      .from(integrationConnections)
+      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+      .where(eq(integrationConnections.id, connectionId))
+      .limit(1);
+    if (!row) {
+      // 204 instead of 404 keeps the response stable whether the connection
+      // never existed or already deleted — same end state, no information
+      // disclosure to a caller probing IDs.
+      return c.body(null, 204);
+    }
+
+    // Scope selection depends on the credential's authority:
+    //
+    //   - A bound credential: when it pins a space, a connection outside that
+    //     space short-circuits to 204 (same non-disclosure as the "row not
+    //     found" branch — a probing key learns nothing). The delete then runs
+    //     under the CREDENTIAL's `SpaceScope`, so the service's space∈org
+    //     assertion and its `spaceId` WHERE filter both enforce the binding in
+    //     SQL; an org-only credential is held to its org by that same assertion.
+    //
+    //   - A `user` principal (`user_global`): pass an `ActorScope`
+    //     (spaceId only, no orgId) deliberately. `/me/connections` is an
+    //     actor-ownership boundary, not a space∈org one: a connection belongs to
+    //     its owner regardless of which org the caller is currently scoped to.
+    //     The absence of `orgId` tells the service to skip its space∈org
+    //     assertion and rely solely on the (userId | endUserId) ownership
+    //     predicate. Passing the caller's live `c.get("orgId")` here (populated
+    //     for OIDC callers, empty for cookie sessions) would wrongly run that
+    //     assertion and 404 a self-owned connection whose space lives in
+    //     a different org. Ownership is still fully enforced downstream by the
+    //     actor filter.
+    let scope: SpaceScope | ActorScope;
+    if (authority.kind === "bound") {
+      if (authority.spaceId && row.spaceId !== authority.spaceId) {
+        return c.body(null, 204);
+      }
+      scope = { orgId: authority.orgId, spaceId: row.spaceId };
+    } else {
+      scope = { spaceId: row.spaceId } satisfies ActorScope;
+    }
+    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, connectionId, actor);
+    await removeScheduleJobs(disabledScheduleIds);
+    // A cookie session carries no org context on /me/*: the audit names the connection's org.
+    await recordAuditFromContext(c, {
+      action: "integration.connection.deleted",
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      after: { disabledScheduleIds },
+      orgIdOverride: row.orgId,
+    });
+    return c.body(null, 204);
+  },
+);
+
+/**
+ * `GET /api/me/connections/:connectionId/handoff` — the steps due on the user's
+ * own machine when this connection is deleted (the `deferred` ones, flag
+ * dropped), re-derived by {@link handoffStepsFor}. Not on the connection list:
+ * it costs a decryption per row. An unknown, malformed or not-owned id answers
+ * an empty list, the same non-disclosure as the DELETE beside it. It exists
+ * only on the way to that DELETE, so it is capped as the DELETE is.
+ */
+router.get(
+  "/connections/:connectionId/handoff",
+  requireCeiling("integrations", "disconnect"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    const actor = getActor(c);
+    const authority = getMeConnectionAuthority(c);
+    const empty = () => c.json(listResponse([]));
+
+    if (!z.uuid().safeParse(connectionId).success) return empty();
+
+    // The org comes from the space (connections are space-scoped). Ownership
+    // rides the WHERE via `actorFilter`, so a row this actor does not own never
+    // loads and nothing below can decrypt it.
+    const [row] = await db
+      .select({
+        spaceId: integrationConnections.spaceId,
+        orgId: spaces.orgId,
+        integrationId: integrationConnections.integrationId,
+        authKey: integrationConnections.authKey,
+      })
+      .from(integrationConnections)
+      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+      .where(
+        and(
+          eq(integrationConnections.id, connectionId),
+          actorFilter(actor, integrationConnections),
+        ),
+      )
+      .limit(1);
+    if (!row) return empty();
+
+    // A BOUND credential is held to its org and pinned space, as on the list
+    // and the delete.
+    if (authority.kind === "bound") {
+      if (row.orgId !== authority.orgId) return empty();
+      if (authority.spaceId && row.spaceId !== authority.spaceId) return empty();
+    }
+
+    try {
+      const credentials = await getIntegrationConnectionCredentialFields(connectionId);
+      if (!credentials) return empty();
+      const removal = handoffStepsFor(row.integrationId, row.authKey, credentials)
+        .flatMap((step) => (step.kind === "command" && step.deferred ? [step] : []))
+        .map(({ deferred: _deferred, ...step }) => step);
+      return c.json(listResponse(removal));
+    } catch (err) {
+      // No steps rather than a 500 on the way to deleting.
+      logger.warn("Could not derive connection handoff steps", {
+        err: String(err),
+        connectionId,
+      });
+      return empty();
+    }
+  },
+);
 
 /**
  * GET /api/me/context — the caller's working context for an AI agent.
@@ -422,23 +543,26 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
   // must not read the same rows through this payload either. The route itself
   // stays open — a role without runs still needs its identity and org.
-  const mayReadRuns = canReadRuns(permissions);
+  const mayReadRuns = canReadRuns((p) => permissions.has(p));
   const mayReadIntegrations = permissions.has("integrations:read");
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
-  const accessible = await packageAccessSpaces(c);
-  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
-    homeWireForCaller(pkg, accessible).home_writable;
+  // `packageAccessSpaces` is memoized per request, so each listing awaits it.
+  const withHomeWritable = async () => {
+    const accessible = await packageAccessSpaces(c);
+    return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
+      homeWireForCaller(pkg, accessible).home_writable;
+  };
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     mayReadIntegrations
       ? listUsableIntegrationsForActor(scope, actor)
       : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
-      ? listRunnableAgents(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listRunnableAgents(scope, { homeWritable }))
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listActiveSkills(scope, { homeWritable })
+      ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
     // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).

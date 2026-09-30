@@ -14,6 +14,8 @@ describe("loadHistory decode", () => {
       new Response(
         JSON.stringify({
           id: "chs_1",
+          skill_mode: "auto",
+          pinned_skills: [],
           messages: [
             { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
             { id: "m2", content: { role: "assistant", parts: [{ type: "text", text: "yo" }] } },
@@ -22,16 +24,38 @@ describe("loadHistory decode", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       )) as typeof fetch;
 
-    const msgs = await loadHistory(() => ({}), "chs_1");
-    expect(msgs).toEqual([
+    const loaded = await loadHistory(() => ({}), "chs_1");
+    expect(loaded.messages).toEqual([
       { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
       { id: "m2", role: "assistant", parts: [{ type: "text", text: "yo" }] },
     ] as never);
   });
 
-  it("returns [] for a not-yet-persisted conversation (404)", async () => {
+  it("carries the session's skill selection as the server stores it", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          id: "chs_1",
+          messages: [],
+          skill_mode: "manual",
+          pinned_skills: ["@scope/a", "@scope/b"],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const loaded = await loadHistory(() => ({}), "chs_1");
+    expect(loaded.skills).toEqual({
+      skillMode: "manual",
+      pinnedSkills: ["@scope/a", "@scope/b"],
+    });
+  });
+
+  it("returns an empty, defaulted session for a not-yet-persisted conversation (404)", async () => {
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
-    expect(await loadHistory(() => ({}), "chs_new")).toEqual([]);
+    expect(await loadHistory(() => ({}), "chs_new")).toEqual({
+      messages: [],
+      skills: { skillMode: "auto", pinnedSkills: [] },
+    });
   });
 
   it("throws on other errors", async () => {

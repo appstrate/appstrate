@@ -41,6 +41,7 @@
 import type { Tool } from "@afps-spec/types";
 import type { Bundle } from "../bundle/types.ts";
 import {
+  enforceAuthorizedUris,
   makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
@@ -49,6 +50,7 @@ import {
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import {
   apiCallToolNameForAuth,
   assertUniqueApiToolAuthTokens,
@@ -57,7 +59,12 @@ import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
-import { guardedFetch, PreflightError, type HostResolver } from "./api-call-engine.ts";
+import {
+  guardedFetch,
+  PreflightError,
+  scrubTransportError,
+  type HostResolver,
+} from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
@@ -70,7 +77,8 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, referencesField } from "./template-vars.ts";
+import { substituteVars } from "./template-vars.ts";
+import { credentialUrlPolicy, exfiltrationRefusal, redactionFields } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -115,7 +123,7 @@ interface ApiCallIntegrationMeta {
   authKey: string;
   /** Auth type (`oauth2` | `api_key` | `basic` | `custom`). */
   authType: string;
-  /** URL allowlist enforced by the tool before dispatch. */
+  /** DECLARED `authorized_uris`, unrendered: `{$credential.<field>}` entries render per connection. */
   authorizedUris: string[];
   /** When true, the tool skips the URL allowlist (SSRF blocklist still applies upstream). */
   allowAllUris: boolean;
@@ -157,18 +165,22 @@ export function readApiCallIntegrationMetas(
   bundle: Bundle,
   ref: IntegrationRef,
 ): ApiCallIntegrationMeta[] {
+  return projectApiCallMetas(ref.name, readIntegrationManifest(bundle, ref));
+}
+
+/**
+ * The integration manifest `ref` resolves to in the bundle, unvalidated: its
+ * `integration.json` (else `manifest.json`) file, else the package's parsed
+ * manifest; `undefined` when the bundle does not carry the package.
+ */
+export function readIntegrationManifest(bundle: Bundle, ref: IntegrationRef): unknown {
   const pkg = resolvePackageRef(bundle, ref);
-  let parsed: unknown = pkg?.manifest;
-  if (pkg) {
-    for (const candidate of ["integration.json", "manifest.json"] as const) {
-      const bytes = pkg.files.get(candidate);
-      if (bytes) {
-        parsed = JSON.parse(new TextDecoder().decode(bytes));
-        break;
-      }
-    }
+  if (!pkg) return undefined;
+  for (const candidate of ["integration.json", "manifest.json"] as const) {
+    const bytes = pkg.files.get(candidate);
+    if (bytes) return JSON.parse(new TextDecoder().decode(bytes));
   }
-  return projectApiCallMetas(ref.name, parsed);
+  return pkg.manifest;
 }
 
 function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationMeta[] {
@@ -227,15 +239,6 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
   return out;
 }
 
-/** Build the {@link ApiCallMeta} the HTTP core uses for `authorizedUris` enforcement. */
-function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
-  return {
-    name: meta.name,
-    authorizedUris: meta.authorizedUris,
-    allowAllUris: meta.allowAllUris,
-  };
-}
-
 /**
  * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
  *
@@ -267,22 +270,13 @@ const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "x-integration-id",
   "x-target",
   "appstrate-user",
+  // Set by the platform (`extraHeaders`) to scope the call to its run; an agent
+  // copy under another casing would merge into "a, b" and break the call.
+  // `x-connection-id` stays open only so a caller that already knows a connection
+  // id can name it: the api_call tool has no way to address a member of a set,
+  // which is why a remote run binds one connection per integration (run-creation).
+  "x-run-id",
 ]);
-
-/**
- * True when `input` references at least one declared credential field via a
- * `{{field}}` placeholder. Used by the local resolver to detect a
- * credential-bearing call (the agent embedded the secret into the URL / a
- * header) so it can refuse to honour `allow_all_uris` and instead gate the
- * dispatch on the auth's `authorized_uris` allowlist — preventing secret
- * exfiltration to an arbitrary off-allowlist host.
- */
-function referencesCredentialField(
-  input: string,
-  fields: Readonly<Record<string, string>>,
-): boolean {
-  return referencesField(input, fields);
-}
 
 // ─────────────────────────────────────────────
 // Resolver contract
@@ -416,8 +410,9 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
+        // `buildCall` enforces authorized_uris on the SUBSTITUTED target (`{{site_url}}/…`).
         tools.push(
-          makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
+          makeApiCallTool({ name: meta.name, allowAllUris: true }, this.buildCall(meta, entry), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -445,27 +440,17 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     meta: ApiCallIntegrationMeta,
     entry: LocalIntegrationCredentialsFile["integrations"][string],
   ): ApiCallFn {
+    // Matching uses the list rendered for this connection; the SSRF pin and cookie
+    // siblings use the declared one, so a connection-supplied host is never trusted.
+    const authorizedUris = renderAuthorizedUris(meta.authorizedUris, entry.fields);
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Detect credential exfiltration via `{{field}}` substitution: when the
-      // agent embeds a decrypted credential field into the target URL or a
-      // header, that call must NOT be allowed to reach an off-allowlist host
-      // (see `allowAllUris` below). This is distinct from the credential
-      // header the resolver injects itself — that one is protected on
-      // cross-origin redirect hops by the shared engine's credential-strip,
-      // and allow_all_uris integrations legitimately send it to the
-      // agent-chosen first hop.
-      let substitutesCredential = referencesCredentialField(req.target, fields);
-      // A `{{field}}` credential reference in the request BODY is the same
-      // exfiltration channel as one in the URL/headers — only a string body is
-      // substituted (`transformString` below runs on strings only; multipart /
-      // fromFile / fromBytes parts are never `{{}}`-substituted), so that is the
-      // one shape to scan.
-      if (typeof req.body === "string" && referencesCredentialField(req.body, fields)) {
-        substitutesCredential = true;
-      }
+      // Every substituted string: target, kept header values, a string body (never multipart).
+      const templates = [req.target];
+      if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
+      enforceAuthorizedUris(meta, req.target, { target, authorizedUris });
 
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
@@ -485,7 +470,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ) {
           continue;
         }
-        if (referencesCredentialField(value, fields)) substitutesCredential = true;
+        templates.push(value);
         headers[key] = substituteVars(value, fields);
       }
       // Inject the credential header locally and capture its name so the
@@ -495,27 +480,20 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ? applyDeliveryPlan(headers, deliveryPlan)
         : null;
 
-      // A call that substitutes a credential field into the agent-controlled
-      // URL / headers / body MUST respect the auth's `authorized_uris`
-      // allowlist — `allow_all_uris` is not honoured for it, so the secret
-      // can't be exfiltrated to an arbitrary off-allowlist host.
-      const allowAllUris = meta.allowAllUris && !substitutesCredential;
-
-      // When allow_all_uris was the integration's ONLY permission (no
-      // authorized_uris allowlist exists), downgrading the flag alone is not
-      // enough: the engine's preflight would fall back to the internal-host
-      // SSRF net and still let the call proceed to any PUBLIC host with the
-      // credential embedded. Refuse outright instead — same semantics as the
-      // sidecar's credential-proxy 403 for this exact case.
-      // (`allowAllUris` is already false whenever `substitutesCredential` is
-      // true — see its definition above — so only the allowlist matters here.)
-      if (substitutesCredential && meta.authorizedUris.length === 0) {
+      const policy = credentialUrlPolicy({
+        templates,
+        fields,
+        allowAllUris: meta.allowAllUris,
+        authorizedUris,
+      });
+      if (policy.refuse) {
         throw new ResolverError(
           "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-          `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+          exfiltrationRefusal(meta.name),
           { integration: meta.name },
         );
       }
+      const redactFields = redactionFields(policy, fields);
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
         allowFromFile: true,
@@ -546,11 +524,13 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           url: target,
           init,
           fetchFn: this.fetchImpl,
-          authorizedUris: meta.authorizedUris,
-          allowAllUris,
+          authorizedUris,
+          declaredUris: meta.authorizedUris,
+          allowAllUris: policy.allowAllUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
           resolveHost: this.resolveHost,
+          credentialFields: redactFields,
         });
         res = result.response;
       } catch (err) {
@@ -564,13 +544,13 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             throw new AuthorizedUrisError(
               "AUTHORIZED_URIS_MISMATCH",
               `Integration ${meta.name}: ${err.message}`,
-              { integration: meta.name, target },
+              { integration: meta.name, target: req.target },
             );
           }
           throw new ResolverError(
             "RESOLVER_URL_BLOCKED",
             `Integration ${meta.name}: ${err.message}`,
-            { integration: meta.name, target },
+            { integration: meta.name, target: req.target },
           );
         }
         if (err instanceof Error && err.name === "RedirectBlockedError") {
@@ -580,7 +560,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             { integration: meta.name },
           );
         }
-        throw err;
+        throw scrubTransportError(err, redactFields);
       }
 
       return serializeFetchResponse(res, {
@@ -650,7 +630,7 @@ function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPl
 interface RemoteAppstrateIntegrationResolverOptions {
   /** Base URL of the Appstrate instance. */
   instance: string;
-  /** API key (ask_...) or device-flow JWT with `credential-proxy:call`. */
+  /** API key (apst_...) or device-flow JWT with `credential-proxy:call`. */
   apiKey: string;
   /** Space id (spc_...) the caller is scoped to. */
   spaceId: string;

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { sheetOffers, sheetSpaceMode, sheetSpaceRows } from "../catalogue-sheet.ts";
+import {
+  sheetChatEnforce,
+  sheetOffers,
+  sheetSpaceMode,
+  sheetSpaceRows,
+} from "../catalogue-sheet.ts";
 import type { CataloguePlacement } from "../catalogue-placement.ts";
 
 function placement(overrides: Partial<CataloguePlacement> = {}): CataloguePlacement {
@@ -90,5 +95,54 @@ describe("sheetOffers", () => {
     expect(sheetOffers(sheetSpaceRows(p, spaces, () => true)).map((row) => row.id)).toEqual([
       "spc_b",
     ]);
+  });
+});
+
+// Ported from the space library's tests, which went with its screen: the rule
+// is the same, only the control moved to the sheet's Espaces table.
+describe("sheetChatEnforce", () => {
+  const facts = { enforced: false, published: true, mayConfigure: true };
+
+  it("is offered on a placed, published skill to a caller who may configure the space", () => {
+    expect(sheetChatEnforce("skill", { state: "active" }, facts)).toEqual({
+      checked: false,
+      disabled: false,
+      refusal: null,
+    });
+  });
+
+  it("waits for a published version: what is imposed is never the draft", () => {
+    expect(sheetChatEnforce("skill", { state: "active" }, { ...facts, published: false })).toEqual({
+      checked: false,
+      disabled: true,
+      refusal: "publishFirst",
+    });
+  });
+
+  it("is refused without the space's configure right, personal owner included", () => {
+    expect(
+      sheetChatEnforce("skill", { state: "active" }, { ...facts, mayConfigure: false }),
+    ).toEqual({ checked: false, disabled: true, refusal: "configure" });
+  });
+
+  it("can still be released on a skill switched off there, even unpublished", () => {
+    expect(
+      sheetChatEnforce(
+        "skill",
+        { state: "inactive" },
+        { ...facts, enforced: true, published: false },
+      ),
+    ).toEqual({ checked: true, disabled: false, refusal: null });
+  });
+
+  it("draws no switch where there is no placement to configure", () => {
+    expect(sheetChatEnforce("skill", { state: "offered" }, facts)).toBeNull();
+    expect(sheetChatEnforce("skill", { state: null }, facts)).toBeNull();
+  });
+
+  it("draws no switch for any other type", () => {
+    for (const type of ["agent", "integration", "mcp-server"] as const) {
+      expect(sheetChatEnforce(type, { state: "active" }, facts)).toBeNull();
+    }
   });
 });

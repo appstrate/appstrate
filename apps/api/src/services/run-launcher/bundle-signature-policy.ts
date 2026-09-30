@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { unzipSync } from "fflate";
 import {
   buildBundleFromAfps,
   emptyPackageCatalog,
@@ -24,7 +25,9 @@ import {
   type VerifySignatureFailureReason,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
+import { isSystemPackage } from "../system-packages.ts";
 
 /**
  * Error thrown when a bundle's signature fails verification under the
@@ -90,26 +93,81 @@ function getTrustRoot(): TrustRoot {
   return cachedTrustRoot;
 }
 
+/**
+ * Boot hook: parse `AFPS_TRUST_ROOT` now (a malformed entry fails boot, not the
+ * first run) and log the effective policy so an operator can see it.
+ */
+export function initBundleSignaturePolicy(): void {
+  logger.info("AFPS bundle signature policy", {
+    policy: getEnv().AFPS_SIGNATURE_POLICY,
+    trustedKeys: getTrustRoot().keys.length,
+  });
+}
+
 /** Reset the cached trust root — tests only. */
 export function _resetTrustRootCacheForTesting(): void {
   cachedTrustRoot = null;
 }
 
 /**
- * Load a bundle buffer + apply the configured signature policy.
- *
- * Returns the loaded bundle (validated + size-capped by the runtime
- * loader). Throws {@link BundleSignatureError} only under the "required"
- * policy when the bundle is unsigned or fails verification.
+ * Apply the configured signature policy to one stored package about to be
+ * executed. Returns the loaded bundle, or `null` when nothing was verified.
+ * Only `required` throws; `warn` is observation-only and never fails a run.
  */
 export async function loadAndVerifyBundle(
   buffer: Uint8Array,
   packageId: string,
 ): Promise<Bundle | null> {
   const policy = getEnv().AFPS_SIGNATURE_POLICY;
-  if (policy === "off") return null;
+  // System packages are write-protected and ship unsigned: the image is their
+  // trust root.
+  if (policy === "off" || isSystemPackage(packageId)) return null;
+  if (policy === "required") return verifyOrThrow(buffer, packageId, policy);
+  // Most archives are unsigned: the zip central directory answers that cheaply.
+  if (!mayCarrySignature(buffer)) {
+    logger.debug("AFPS bundle is unsigned", { packageId });
+    return null;
+  }
+  try {
+    return await verifyOrThrow(buffer, packageId, policy);
+  } catch (err) {
+    logger.warn("AFPS bundle signature could not be checked", {
+      packageId,
+      error: getErrorMessage(err),
+    });
+    return null;
+  }
+}
 
-  const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog);
+const SIGNATURE_ENTRY = "signature.sig";
+
+/**
+ * Whether the archive has a `signature.sig` entry, read from the central
+ * directory only (nothing is inflated). An unreadable archive answers `true`
+ * so the full load reports it.
+ */
+function mayCarrySignature(buffer: Uint8Array): boolean {
+  let found = false;
+  try {
+    unzipSync(buffer, {
+      filter: (f) => {
+        if (f.name === SIGNATURE_ENTRY || f.name.endsWith(`/${SIGNATURE_ENTRY}`)) found = true;
+        return false;
+      },
+    });
+  } catch {
+    return true;
+  }
+  return found;
+}
+
+async function verifyOrThrow(
+  buffer: Uint8Array,
+  packageId: string,
+  policy: "warn" | "required",
+): Promise<Bundle> {
+  // Dependencies are separate objects, each verified when loaded.
+  const bundle = await buildBundleFromAfps(buffer, emptyPackageCatalog, { depTypes: [] });
 
   try {
     verifyBundleWithPolicy(bundle, {
@@ -117,7 +175,7 @@ export async function loadAndVerifyBundle(
       trustRoot: getTrustRoot(),
       onWarn: (reason, detail) => {
         if (reason === "unsigned") {
-          logger.warn("AFPS bundle is unsigned", { packageId });
+          logger.debug("AFPS bundle is unsigned", { packageId });
         } else {
           logger.warn("AFPS bundle signature invalid", { packageId, reason, detail });
         }

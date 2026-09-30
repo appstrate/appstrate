@@ -29,7 +29,7 @@ import { reduceEvents } from "../runner/reducer.ts";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { ExecutionContext } from "../types/execution-context.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../types/run-result.ts";
+import type { TerminalRunResult } from "../types/run-result.ts";
 import type { ConformanceAdapter, RenderSnapshot, RunScriptedOutput } from "./adapter.ts";
 
 export function createDefaultAdapter(): ConformanceAdapter {
@@ -65,7 +65,8 @@ export function createDefaultAdapter(): ConformanceAdapter {
       for (const event of scriptedEvents) {
         await sink.handle(event);
       }
-      const result: RunResult = reduceEvents(emitted);
+      // A scripted run has no failure path: it always ends in success.
+      const result: TerminalRunResult = { ...reduceEvents(emitted), status: "success" };
       await sink.finalize(result);
 
       return { emitted, result, finalizeCalls };

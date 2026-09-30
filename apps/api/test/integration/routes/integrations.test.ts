@@ -698,7 +698,7 @@ describe("api_key connection flow", () => {
     // connection's id on the fields flow so the write UPDATEs that row instead
     // of INSERTing a duplicate (single-writer contract). Without the route
     // threading connection_id into the strategy ctx, a non-OAuth renew left the
-    // dead row behind and the 412 modal never cleared its CTA.
+    // dead row behind and the 409 modal never cleared its CTA.
     const first = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -794,6 +794,85 @@ describe("api_key credentials schema validation (delivery.http silent-no-op guar
       body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// #1627 — a templated `authorized_uris` entry must render with the submitted fields.
+describe("connect/fields — templated authorized_uris render at connect time", () => {
+  let ctx: TestContext;
+
+  function templatedManifest(name: string, authorizedUris: string[]): IntegrationManifest {
+    const m = gmailManifest(name);
+    m.auths!.api!.authorized_uris = authorizedUris;
+    m.auths!.api!.credentials = {
+      schema: {
+        type: "object",
+        required: ["api_key", "site_url"],
+        properties: { api_key: { type: "string" }, site_url: { type: "string" } },
+      },
+    };
+    return m;
+  }
+
+  const connect = (name: string, siteUrl: string) =>
+    app.request(`/api/integrations/${name}/auths/api/connect/fields`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET", site_url: siteUrl } }),
+    });
+
+  const rowsOf = (name: string) =>
+    db.select().from(integrationConnections).where(eq(integrationConnections.integrationId, name));
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, templatedManifest("@myorg/wp", ["{$credential.site_url}/**"]));
+    await seedIntegration(ctx.orgId, templatedManifest("@myorg/hook", ["{$credential.site_url}"]));
+    await seedIntegration(
+      ctx.orgId,
+      templatedManifest("@myorg/plain", ["https://api.example.com/**"]),
+    );
+  });
+
+  for (const bad of ["mysite.com", "https://mysite.com/?page=1", "https://user@mysite.com"]) {
+    it(`refuses ${JSON.stringify(bad)} with a field-level 400 that does not echo it`, async () => {
+      const res = await connect("@myorg/wp", bad);
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      expect(text).not.toContain(bad);
+      const problem = JSON.parse(text) as {
+        code: string;
+        detail: string;
+        errors: { field: string; code: string; title: string; message: string }[];
+      };
+      expect(problem.code).toBe("validation_failed");
+      expect(problem.errors).toEqual([
+        {
+          field: "credentials.site_url",
+          code: "unrenderable_authorized_uri",
+          title: "Invalid Connection Field",
+          message: expect.stringContaining("absolute http:// or https:// URL"),
+        },
+      ]);
+      expect(problem.detail).toContain("credentials.site_url");
+      expect(await rowsOf("@myorg/wp")).toHaveLength(0);
+    });
+  }
+
+  it("accepts a URL that renders", async () => {
+    expect((await connect("@myorg/wp", "https://mysite.com/blog")).status).toBe(200);
+    expect(await rowsOf("@myorg/wp")).toHaveLength(1);
+  });
+
+  it("accepts a query string in the bare form only", async () => {
+    const hook = "https://chat.example.com/v1/spaces/S/messages?key=k&token=t";
+    expect((await connect("@myorg/hook", hook)).status).toBe(200);
+    expect((await connect("@myorg/wp", hook)).status).toBe(400);
+  });
+
+  it("leaves an untemplated allowlist unaffected", async () => {
+    expect((await connect("@myorg/plain", "mysite.com")).status).toBe(200);
   });
 });
 
@@ -969,6 +1048,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "a@x.test",
         clientRef: target.id,
       },
       {
@@ -978,6 +1058,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "b@x.test",
         clientRef: target.id,
       },
       {
@@ -987,6 +1068,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "c@x.test",
         clientRef: other.id,
       },
     ]);
@@ -1055,6 +1137,7 @@ describe("OAuth client CRUD", () => {
     const [foreign] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: otherCtx.orgId,
         spaceId: otherCtx.defaultSpaceId,
         integrationId: "@myorg/gmail",
         authKey: "google",
@@ -1478,6 +1561,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: shared,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -1496,51 +1580,51 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const put = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(put.status).toBe(200);
-    const created = (await put.json()) as { connection_id: string; enforce: boolean };
-    expect(created.connection_id).toBe(connId);
+    const created = (await put.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(false);
 
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
     expect(get.status).toBe(200);
-    const body = (await get.json()) as { connection_id: string; enforce: boolean };
-    expect(body.connection_id).toBe(connId);
+    const body = (await get.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(body.connection_ids).toEqual([connId]);
   });
 
-  it("upsert replaces the existing default (one row per integration) and honors enforce", async () => {
+  it("upsert replaces the existing default set and honors enforce", async () => {
     const a = await seedConn(true);
     const b = await seedConn(true);
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: a }),
+      body: JSON.stringify({ connection_ids: [a] }),
     });
     const put2 = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: b, enforce: true }),
+      body: JSON.stringify({ connection_ids: [b], enforce: true }),
     });
     expect(put2.status).toBe(200);
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    const body = (await get.json()) as { connection_id: string; enforce: boolean };
-    expect(body.connection_id).toBe(b);
+    const body = (await get.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(body.connection_ids).toEqual([b]);
     expect(body.enforce).toBe(true);
   });
 
-  it("refuses a connection that is not sharedWithOrg (400)", async () => {
+  it("refuses a connection that is not sharedWithOrg (404)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it("deletes the default", async () => {
@@ -1548,7 +1632,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     const del = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "DELETE",
@@ -1574,7 +1658,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: memberHeaders,
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });

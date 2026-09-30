@@ -9,8 +9,8 @@ import {
   type RunLogEvent,
   type RunMetricEvent,
 } from "@appstrate/shared-types";
-import { getCurrentOrgId } from "../stores/org-store";
-import { getCurrentSpaceId } from "./use-current-space";
+import { useCurrentOrgId } from "./use-org";
+import { useCurrentSpaceId } from "./use-current-space";
 import { withViewAsParam } from "../lib/scoping-headers";
 import { useViewAsHeader } from "../stores/view-as-store";
 import { patchRunDetail } from "./use-global-run-sync";
@@ -46,6 +46,8 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
   // A dependency, not a convenience: `EventSource` reads its URL once, so
   // entering or leaving a preview has to close this stream and open a new one.
   const viewAs = useViewAsHeader();
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
   const qc = useQueryClient();
   const handlersRef = useRef(handlers);
   useEffect(() => {
@@ -53,10 +55,7 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
   });
 
   useEffect(() => {
-    if (!runId) return;
-    const orgId = getCurrentOrgId();
-    const spaceId = getCurrentSpaceId();
-    if (!orgId || !spaceId) return;
+    if (!runId || !orgId || !spaceId) return;
 
     // Only the three run channels dispatched below are declared: the per-run
     // stream would otherwise also carry `connection_update` (every connection
@@ -89,5 +88,5 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     return () => {
       es.close();
     };
-  }, [runId, qc, viewAs]);
+  }, [runId, orgId, spaceId, qc, viewAs]);
 }

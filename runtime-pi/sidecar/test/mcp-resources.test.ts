@@ -51,6 +51,8 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
       {
         namespace: "test",
         integrationId: "@test/integ",
+        connectionId: "conn-1",
+        declaredUris: ["https://api.example.com/**"],
         fetchCredentials: integResCreds,
         refreshCredentials: integResCreds,
       },

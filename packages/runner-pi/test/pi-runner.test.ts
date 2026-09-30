@@ -63,8 +63,8 @@ describe("PiRunner.run — event forwarding", () => {
     // the runner ledger from the body.
     // The runner now stamps success explicitly (no terminal error); the
     // platform's `runHadZeroTokens` heuristic still flips this to "failed"
-    // downstream at ingestion (mapTerminalStatus honours the status, then the
-    // zero-token guard fires on success) — unchanged.
+    // downstream at ingestion (finalize starts from the runner's status, then
+    // the zero-token guard fires on success) — unchanged.
     expect(sink.finalized).toEqual({
       ...emptyRunResult(),
       status: "success",
@@ -269,6 +269,8 @@ describe("PiRunner.run — error path", () => {
     expect((errorEvent as unknown as { message: string }).message).toBe("LLM API unreachable");
     expect(sink.finalizeCalls).toBe(1);
     expect(sink.finalized?.error?.message).toBe("LLM API unreachable");
+    // The platform infers nothing from `error`: the runner declares the status.
+    expect(sink.finalized?.status).toBe("failed");
   });
 
   it("folds non-Error throws into a string message", async () => {

@@ -5,7 +5,7 @@
  *
  * All API errors use `application/problem+json` with standard fields
  * (type, title, status, detail, instance) plus Stripe-like extensions
- * (code, param, requestId, retryAfter, errors[]).
+ * (code, param, request_id, retry_after, errors[]).
  *
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
@@ -21,9 +21,9 @@ export interface ProblemDetail {
   detail: string;
   instance: string;
   code: string;
-  requestId: string;
+  request_id: string;
   param?: string;
-  retryAfter?: number;
+  retry_after?: number;
   errors?: ValidationFieldError[];
 }
 
@@ -43,7 +43,7 @@ export interface ValidationFieldError {
  * A `ValidationFieldError` carrying the connection-resolution "smuggle" fields
  * surfaced by the integration connection resolver
  * (`translateResolutionError`). These snake_case extras let the dashboard's
- * MissingConnections UI act on a 412 / readiness error without parsing the
+ * MissingConnections UI act on a 409 / readiness error without parsing the
  * `detail` string. Each field is populated only for the matching resolution
  * `code`; all are optional.
  */
@@ -51,17 +51,22 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /**
    * `must_choose_connection` — the connections the caller may pick from, each
    * carrying the fields that tell them apart (`label`, `account_id`,
-   * `owned_by_actor`). Pick one and send its `id` back in the request's
-   * `connection_overrides` map. Ids alone would force a second round-trip
-   * through the connection list before the caller could choose.
+   * `owned_by_actor`) and `needs_reconnection` — a dead one is listed but must
+   * be reconnected before a run can use it. Pick some and send their `id`s back
+   * in the request's `connection_overrides` map. Ids alone would force a second
+   * round-trip through the connection list before the caller could choose.
+   * On the credential proxy the candidates are the `X-Run-Id` run's bound set
+   * (else every own and shared connection), and the retry names one in
+   * `X-Connection-Id`.
    */
   candidate_connections?: {
     id: string;
-    label: string | null;
+    label: string;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
-  /** `needs_reconnection` / `insufficient_scopes` — the existing connection's id to UPDATE in place. */
+  /** `needs_reconnection` / `insufficient_scopes`: the row to UPDATE in place; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
@@ -83,23 +88,23 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
+  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the agent dep's `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a
-   * run-kickoff 412 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * run-kickoff 409 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
    * docblock states who may), and only on the items an oauth2 connect flow can
-   * clear for the calling actor. Single-use and short-lived (`expires_at`):
+   * clear for the calling actor. Single-use and short-lived (`expiresAt`):
    * open it — never store it, and never call the connect kickoff as well,
    * which would mint a second link.
    */
   connect_url?: string;
-  /** Absolute expiry (epoch ms) of `connect_url`. */
-  expires_at?: number;
+  /** Absolute expiry (RFC 3339) of `connect_url`. */
+  expiresAt?: string;
   /** Integration package id `connect_url` connects (`@scope/name`). */
-  package_id?: string;
+  packageId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +128,9 @@ const RESERVED_PROBLEM_KEYS: ReadonlySet<string> = new Set<string>([
   "detail",
   "instance",
   "code",
-  "requestId",
+  "request_id",
   "param",
-  "retryAfter",
+  "retry_after",
   "errors",
 ]);
 
@@ -198,10 +203,10 @@ export class ApiError extends Error {
       detail: this.message,
       instance: `urn:appstrate:request:${requestId}`,
       code: this.code,
-      requestId,
+      request_id: requestId,
     };
     if (this.param !== undefined) body.param = this.param;
-    if (this.retryAfter !== undefined) body.retryAfter = this.retryAfter;
+    if (this.retryAfter !== undefined) body.retry_after = this.retryAfter;
     if (this.fieldErrors?.length) body.errors = this.fieldErrors;
     // RFC 9457 §3.2 extension members, written last and only into keys the
     // standard fields do not own. The guard is the RESERVED SET, not
@@ -518,9 +523,9 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * `unrecognized_keys` is the one issue that does NOT name its field through
  * `path`: Zod reports the container's path (EMPTY for a top-level body) and
  * puts the offending names in `issue.keys`. Routing it through the generic
- * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
- * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
- * `skillIds` was perfectly valid, naming the one field the client got right.
+ * branch therefore blamed `fallbackField` — so `POST /packages/import-github`
+ * (`param: "url"`) answered `field: "url"` for a body whose `url` was
+ * perfectly valid, naming the one field the client got right.
  * Each unrecognized key gets its OWN entry, appended to the container path, so
  * `{ extra, other }` yields two actionable pointers instead of one ambiguous
  * combined message.

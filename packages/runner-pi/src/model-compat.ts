@@ -14,7 +14,7 @@
  *
  * The platform cannot price what it would produce. Anthropic bills a 1h cache
  * write at 2x the input rate, and a `ModelCost` record (`@appstrate/core`,
- * `computeTokenCost` in `@appstrate/afps-runtime/runner`) carries ONE
+ * `piTokenCostUsd` in `@appstrate/runner-pi`) carries ONE
  * `cacheWrite` rate, not two. A long-retention write is therefore metered at
  * the short-retention price and the org is under-billed.
  *
@@ -30,21 +30,19 @@
  * sufficient half, and it holds for any value anyone picks.
  *
  * Turning it back on is a pricing change, not a performance tweak: it needs a
- * second cache-write rate in the catalog and in `computeTokenCost` first.
+ * second cache-write rate in the catalog and in `piTokenCostUsd` first.
  *
- * Spread it rather than assigning it, so a site that needs an additional
- * per-record flag (the sidecar's `forceAdaptiveThinking`) can add one without
- * dropping these:
- *
- * ```ts
- * compat: { ...PLATFORM_MODEL_COMPAT, ...(adaptive ? { forceAdaptiveThinking: true } : {}) }
- * ```
+ * The other two override Pi record fields: `allowedFallbackModels` would let the
+ * vendor answer from a model billed at another rate, and `cacheControlFormat`
+ * makes a gateway (OpenRouter) bill cache writes the catalog has no rate for.
  *
  * Coverage is pinned by `apps/api/test/unit/model-compat-coverage.test.ts`,
  * which enumerates the model builders and fails on a new one that omits this.
  */
 export const PLATFORM_MODEL_COMPAT = {
   supportsLongCacheRetention: false,
+  allowedFallbackModels: [],
+  cacheControlFormat: undefined,
 } as const;
 
 /**
@@ -66,7 +64,7 @@ export const PLATFORM_MODEL_COMPAT = {
  *
  *  2. **Required-shape filler.** The Pi SDK types `Model.cost` as required, so
  *     an UNPRICED model still has to carry the shape
- *     (`runtime-pi/env.ts`, `packages/module-chat/src/pi-chat/model-binding.ts`).
+ *     (`buildPiModel` in `pi-model.ts`).
  *     Nothing bills off these zeros either: the runner's `unpriced` flag and
  *     the row's `pricing_status='unpriced'` are what stop a 0 escaping as a
  *     real price.

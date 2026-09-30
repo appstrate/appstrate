@@ -12,6 +12,7 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { useBreadcrumbStore } from "@/stores/breadcrumb-store";
+import { useCanReach } from "@/hooks/use-can-reach";
 
 function Separator() {
   return (
@@ -23,6 +24,7 @@ function Separator() {
 
 export function ShellBreadcrumb() {
   const entries = useBreadcrumbStore((s) => s.entries);
+  const canReach = useCanReach();
 
   return (
     <nav
@@ -34,13 +36,16 @@ export function ShellBreadcrumb() {
           {i > 0 && <Separator />}
           {crumb.node ? (
             crumb.node
-          ) : crumb.href ? (
+          ) : crumb.href && canReach(crumb.href) ? (
             <Link
               to={crumb.href}
               className="text-muted-foreground hover:text-foreground truncate transition-colors"
             >
               {crumb.label}
             </Link>
+          ) : crumb.href ? (
+            // A parent the caller may not open: named, not linked (#1569).
+            <span className="text-muted-foreground truncate">{crumb.label}</span>
           ) : (
             // Last segment: where you are, so it carries the weight.
             <span className="truncate font-semibold">{crumb.label}</span>

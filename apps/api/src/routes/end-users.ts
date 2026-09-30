@@ -165,7 +165,7 @@ export function createEndUsersRouter() {
       action: "end_user.updated",
       resourceType: "end_user",
       resourceId: endUserId,
-      after: data as unknown as Record<string, unknown>,
+      after: data,
     });
     return c.json(result);
   });

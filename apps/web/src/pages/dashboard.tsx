@@ -4,12 +4,16 @@ import { useAuth } from "../hooks/use-auth";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { usePermissions } from "../hooks/use-permissions";
 import { ErrorState } from "../components/page-states";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { DashboardContent } from "./dashboard-content";
 
 export function DashboardPage() {
   const { profile, user } = useAuth();
+  // Every query below gates itself on its guard; `DashboardContent` draws a
+  // section only when the read that feeds it is open to the caller.
+  const { ready } = usePermissions();
   const {
     data: runsData,
     isLoading: runsLoading,
@@ -22,7 +26,8 @@ export function DashboardPage() {
   const agentName = useRunAgentName();
   const { data: schedules, isLoading: schedulesLoading, error: schedulesError } = useAllSchedules();
 
-  const isLoading = runsLoading || agentsLoading || schedulesLoading;
+  // A disabled query is not loading, so an unresolved permission set must be.
+  const isLoading = !ready || runsLoading || agentsLoading || schedulesLoading;
   const error = runsError || agentsError || schedulesError;
 
   const runs = runsData?.data ?? [];

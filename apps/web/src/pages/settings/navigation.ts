@@ -16,7 +16,6 @@ import {
   Webhook,
 } from "lucide-react";
 import type { GateablePermission } from "../../hooks/use-permissions";
-import { WEBHOOK_READ_PERMISSIONS } from "../../lib/webhook-permissions";
 import type { SettingsScope } from "../../lib/settings-context";
 
 export interface UnifiedSettingsNavItem {
@@ -162,7 +161,7 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/webhooks",
           icon: Webhook,
           labelKey: "webhooks.pageTitle",
-          show: features.webhooks && WEBHOOK_READ_PERMISSIONS.some(can),
+          show: features.webhooks && (["webhooks:read", "org-webhooks:read"] as const).some(can),
         },
       ],
     },

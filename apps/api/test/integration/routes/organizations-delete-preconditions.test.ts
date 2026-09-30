@@ -28,6 +28,7 @@ import { organizations, runs } from "@appstrate/db/schema";
 import { reserveOrgDeletion } from "../../../src/services/organizations.ts";
 import { createRun } from "../../../src/services/state/runs.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 
 /** Every `onOrgDelete` fan-out observed since the last `beforeEach`. */
@@ -105,11 +106,12 @@ describe("DELETE /api/orgs/:orgId — deletability precondition", () => {
     app = getTestApp();
   });
 
-  afterAll(() => {
-    // Leave the global module registry as we found it (empty) so no later
-    // test file sees a stray `onOrgDelete` listener, and restore the RBAC
-    // provider that resetModules() nulls out.
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it — not empty — so no later
+    // test file sees a stray `onOrgDelete` listener AND none reads a platform
+    // short of its modules. The trailing call restores the RBAC provider that
+    // the reset inside nulls out.
+    await restoreDiscoveredModules();
     getTestApp();
   });
 
@@ -202,7 +204,14 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
 
     const err = await createRun(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { id: "run_after_reservation", packageId: pkg.id, actor: null, input: null },
+      {
+        id: "run_after_reservation",
+        packageId: pkg.id,
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+      },
     ).then(
       () => null,
       (e: unknown) => e,
@@ -220,7 +229,14 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
 
     await createRun(
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      { id: "run_no_reservation", packageId: pkg.id, actor: null, input: null },
+      {
+        id: "run_no_reservation",
+        packageId: pkg.id,
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+      },
     );
 
     const rows = await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId));

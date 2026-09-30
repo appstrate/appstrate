@@ -20,6 +20,7 @@
  * renderer does not draw.
  */
 
+import type { PackageType } from "@appstrate/core/validation";
 import type { CataloguePlacement, PlacementState } from "./catalogue-placement";
 
 export interface SheetSpaceRow {
@@ -70,4 +71,42 @@ export function sheetSpaceMode(rows: readonly SheetSpaceRow[]): SheetSpaceMode {
 /** The offers waiting on this reader: placed by a share, switched on by nobody. */
 export function sheetOffers(rows: readonly SheetSpaceRow[]): SheetSpaceRow[] {
   return rows.filter((row) => row.state === "offered");
+}
+
+/** Why a chat-enforcement switch cannot be flipped, when it cannot. */
+export type ChatEnforceRefusal = "configure" | "publishFirst";
+
+export interface SheetChatEnforce {
+  checked: boolean;
+  disabled: boolean;
+  refusal: ChatEnforceRefusal | null;
+}
+
+/**
+ * Whether a space imposes a SKILL on every chat conversation held in it, and
+ * whether the reader may change that there (`chat_enforced` on the placement,
+ * set through its PATCH).
+ *
+ * `null` means no switch at all: another type, or a space where the skill has
+ * no placement to configure (an offer nobody took up, an absence). A switched
+ * off row keeps its flag, which waits for re-activation.
+ *
+ * Imposing asks for a published version, since what is injected is never the
+ * draft; releasing never does, so an unpublished skill can still be released.
+ * The right is the space's `configure` verdict (`mayConfigurePackage`), with no
+ * personal-space exemption, unlike activation.
+ */
+export function sheetChatEnforce(
+  type: PackageType,
+  row: Pick<SheetSpaceRow, "state">,
+  facts: { enforced: boolean; published: boolean; mayConfigure: boolean },
+): SheetChatEnforce | null {
+  if (type !== "skill") return null;
+  if (row.state !== "active" && row.state !== "inactive") return null;
+  const refusal: ChatEnforceRefusal | null = !facts.mayConfigure
+    ? "configure"
+    : !facts.enforced && !facts.published
+      ? "publishFirst"
+      : null;
+  return { checked: facts.enforced, disabled: refusal !== null, refusal };
 }

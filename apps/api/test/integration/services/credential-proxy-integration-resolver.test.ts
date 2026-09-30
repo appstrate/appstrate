@@ -31,6 +31,9 @@ import {
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
+import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -121,6 +124,7 @@ describe("credential-proxy integration-resolver", () => {
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
@@ -140,11 +144,17 @@ describe("credential-proxy integration-resolver", () => {
     endUserId?: string;
     /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
     withRefreshToken?: boolean;
+    /** Also the label, which is unique per (space, integration). */
+    accountId?: string;
+    authKey?: string;
+    sharedWithOrg?: boolean;
+    needsReconnection?: boolean;
   }): Promise<string> {
+    const accountId = opts.accountId ?? "acct-1";
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
-        access_token: "live-access",
-        accessToken: "live-access",
+        access_token: `live-${accountId}`,
+        accessToken: `live-${accountId}`,
         ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
@@ -152,13 +162,16 @@ describe("credential-proxy integration-resolver", () => {
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION_ID,
-        authKey: "primary",
-        accountId: "acct-1",
+        authKey: opts.authKey ?? "primary",
+        accountId,
+        label: accountId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
+        sharedWithOrg: opts.sharedWithOrg ?? false,
+        needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
@@ -183,7 +196,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(resolved.authKey).toBe("primary");
     expect(resolved.payload).toBeDefined();
     // The live access token must reach the payload (header injection input).
-    expect(JSON.stringify(resolved.payload)).toContain("live-access");
+    expect(JSON.stringify(resolved.payload)).toContain("live-acct-1");
   });
 
   it("throws IntegrationCredentialNotFoundError when no accessible connection exists", async () => {
@@ -227,6 +240,64 @@ describe("credential-proxy integration-resolver", () => {
     await expect(
       resolveIntegrationProxyCredentials({ ...input(), integrationId: NO_AUTH }),
     ).rejects.toBeInstanceOf(IntegrationCredentialNotFoundError);
+  });
+
+  it("renders templated authorized_uris from the connection's fields (#1458)", async () => {
+    const TENANT = "@official/tenant";
+    await seedPackage({
+      id: TENANT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        schema_version: "0.1",
+        type: "integration",
+        name: TENANT,
+        version: "1.0.0",
+        display_name: "Tenant",
+        source: { kind: "local", server: { name: "@official/tenant-server", version: "^1.0.0" } },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://{$credential.host}/**", "https://{$credential.missing}/**"],
+            credentials: {
+              schema: {
+                type: "object",
+                properties: {
+                  api_key: { type: "string" },
+                  host: { type: "string" },
+                  missing: { type: "string" },
+                },
+                required: ["api_key", "host", "missing"],
+              },
+            },
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, TENANT);
+    await db.insert(integrationConnections).values({
+      integrationId: TENANT,
+      authKey: "primary",
+      accountId: "acct-1",
+      label: "Connexion 1",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({
+        outputs: { api_key: "k", host: "tenant.example.com" },
+      }),
+    });
+
+    const resolved = await resolveIntegrationProxyCredentials({
+      ...input(),
+      integrationId: TENANT,
+    });
+    // The entry whose field is absent is dropped, never forwarded raw.
+    expect(resolved.payload.authorizedUris).toEqual(["https://tenant.example.com/**"]);
   });
 
   it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
@@ -378,5 +449,149 @@ describe("credential-proxy integration-resolver", () => {
     // never touches/returns B's row.
     const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id));
     expect(refreshed).toBeNull();
+  });
+
+  describe("no X-Connection-Id, no org default — only the actor's single OWN connection is picked", () => {
+    async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
+      try {
+        await p;
+      } catch (err) {
+        return err;
+      }
+      throw new Error("expected a rejection");
+    }
+
+    it("uses the actor's own connection even when a colleague shares one", async () => {
+      const colleague = await createTestUser();
+      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
+
+      const resolved = await resolveIntegrationProxyCredentials(input());
+      expect(resolved.connectionId).toBe(ownId);
+      expect(JSON.stringify(resolved.payload)).toContain("live-mine");
+    });
+
+    it("never picks a colleague's shared connection implicitly — 409 naming it as a candidate", async () => {
+      const colleague = await createTestUser();
+      const sharedId = await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedWithOrg: true,
+      });
+
+      const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe("must_choose_connection");
+      const [item] = err.fieldErrors as ResolutionFieldError[];
+      expect(item!.candidate_connections!.map((c) => [c.id, c.owned_by_actor])).toEqual([
+        [sharedId, false],
+      ]);
+      const named = await resolveIntegrationProxyCredentials({
+        ...input(),
+        connectionId: sharedId,
+      });
+      expect(named.connectionId).toBe(sharedId);
+    });
+
+    it("answers 409 must_choose_connection listing every nameable connection when the actor owns several", async () => {
+      const colleague = await createTestUser();
+      const liveId = await seedConnection({ userId: ctx.user.id, accountId: "live" });
+      const deadId = await seedConnection({
+        userId: ctx.user.id,
+        accountId: "dead",
+        needsReconnection: true,
+      });
+      const sharedId = await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedWithOrg: true,
+      });
+      // A colleague's UNshared connection is not the caller's to name.
+      await seedConnection({ userId: colleague.id, accountId: "private" });
+
+      const err = await rejectionOf(resolveIntegrationProxyCredentials(input()));
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(409);
+      expect(apiErr.code).toBe("must_choose_connection");
+      expect(apiErr.message).toContain("X-Connection-Id");
+      const [item] = apiErr.fieldErrors as ResolutionFieldError[];
+      expect(item!.field).toBe(`integrations.${INTEGRATION_ID}`);
+      expect(item!.code).toBe("must_choose_connection");
+      // Rows seeded back to back can share a `created_at` — compare as a set.
+      const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
+      expect([...item!.candidate_connections!].sort(byId)).toEqual(
+        [
+          {
+            id: liveId,
+            label: "live",
+            account_id: "live",
+            owned_by_actor: true,
+            needs_reconnection: false,
+          },
+          {
+            id: deadId,
+            label: "dead",
+            account_id: "dead",
+            owned_by_actor: true,
+            needs_reconnection: true,
+          },
+          {
+            id: sharedId,
+            label: "shared",
+            account_id: "shared",
+            owned_by_actor: false,
+            needs_reconnection: false,
+          },
+        ].sort(byId),
+      );
+
+      // Naming one clears the ambiguity.
+      const named = await resolveIntegrationProxyCredentials({ ...input(), connectionId: liveId });
+      expect(named.connectionId).toBe(liveId);
+    });
+
+    it("reports a lone dead own connection as 409 needs_reconnection — never switches to the shared one", async () => {
+      const colleague = await createTestUser();
+      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      const deadId = await seedConnection({
+        userId: ctx.user.id,
+        accountId: "dead",
+        needsReconnection: true,
+      });
+
+      const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+      expect(err.code).toBe("needs_reconnection");
+      const [item] = err.fieldErrors as ResolutionFieldError[];
+      expect(item!.connection_id).toBe(deadId);
+    });
+
+    it("counts only own connections on a declared auth", async () => {
+      const primaryId = await seedConnection({ userId: ctx.user.id, accountId: "p" });
+      await seedConnection({ userId: ctx.user.id, accountId: "s", authKey: "secondary" });
+      const context = {
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user" as const, id: ctx.user.id },
+      };
+      const manifest = gmailManifest(token.url) as unknown as IntegrationManifest;
+      const primary = manifest.auths!.primary!;
+
+      const unpinned = await rejectionOf(
+        selectAccessibleConnection(
+          INTEGRATION_ID,
+          { ...manifest, auths: { primary, secondary: primary } },
+          null,
+          context,
+        ),
+      );
+      expect((unpinned as ApiError).code).toBe("must_choose_connection");
+
+      // An undeclared auth key is never picked.
+      const primaryOnly = await selectAccessibleConnection(INTEGRATION_ID, manifest, null, context);
+      expect(primaryOnly!.id).toBe(primaryId);
+    });
   });
 });

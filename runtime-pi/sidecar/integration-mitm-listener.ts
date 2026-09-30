@@ -6,27 +6,30 @@
  *
  * Wire flow:
  *
- *   [MCP subproc] --HTTP CONNECT host:443--> [listener:127.0.0.1:port]
+ *   [MCP subproc] --HTTP CONNECT host:port--> [listener:127.0.0.1:port]
  *                                                  | reply 200
  *                                                  v
  *                                          peek TLS ClientHello
  *                                                  v
  *                                          parse SNI host
  *                                                  v
+ *                    SSRF floor + egress allowlist (SNI host, CONNECT port)
+ *                                                  v
  *                                  mint leaf cert (per-SNI cache)
  *                                                  v
- *                                  spawn / reuse Bun.serve {tls: leaf}
- *                                          on a private 127.0.0.1 port
+ *                          spawn / reuse Bun.serve {tls: leaf} per host:port
+ *                                  on a unix socket in a 0700 directory
  *                                                  v
- *                                  relay raw TCP between inbound and
+ *                                  relay raw bytes between inbound and
  *                                          the per-SNI Bun.serve
  *                                                  v
  *                                          Bun.serve.fetch(req) →
+ *                              egress allowlist (full URL, else 403) →
  *                                       {@link planMitmAction}
  *                                                  v
  *                                  strip headers + inject credential
  *                                                  v
- *                                         fetch upstream HTTPS
+ *                              fetch upstream https://SNI:CONNECT-port
  *                                                  v
  *                       (401 on an injected auth → /refresh; retry once if rotated)
  *                                                  v
@@ -39,8 +42,15 @@
  *   first TLS record manually, mint the matching leaf, lazily start a
  *   Bun.serve per distinct host, and relay raw bytes between the
  *   inbound CONNECT-tunneled socket and the matching SNI server. Each
- *   Bun.serve is cheap (~one TCP listener + cert context) and lives
+ *   Bun.serve is cheap (~one unix socket + cert context) and lives
  *   for the rest of the integration's run.
+ *
+ * Why unix sockets: a per-SNI server injects credentials into whatever reaches
+ * it, and only the outer listener checks the peer. On a loopback TCP port any
+ * process sharing the loopback (another runner, the agent — process mode and
+ * the Firecracker guest) could find it and borrow this integration's
+ * credentials. The sockets live in a directory created 0700 for the sidecar,
+ * so only the sidecar's own relay can connect.
  *
  * Scope discipline (what 1.2d does NOT do):
  *   - No HTTP-non-CONNECT proxying. MCP servers use HTTPS_PROXY and
@@ -52,14 +62,21 @@
  *     each call flows through a fresh fetch.
  */
 
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as netCreateServer, connect as netConnect, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   isBlockedHost,
   isBlockedUrl,
+  peerAddress,
+  peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
   OUTBOUND_TIMEOUT_MS,
+  type AuthorityPolicy,
   type HostResolver,
+  type PeerCheck,
 } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
@@ -76,6 +93,7 @@ import {
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
 } from "@appstrate/connect/proxy-primitives";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
@@ -159,11 +177,15 @@ interface CreateMitmListenerOptions {
   resolveHostFn?: HostResolver;
   /** Telemetry sink — non-fatal events surface here. */
   onEvent?: (event: MitmListenerEvent) => void;
+  /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
+  egressPolicy: EgressPolicy;
+  /** Only the owning runner may connect (#1458). */
+  isPeerAllowed: PeerCheck;
 }
 
 export type MitmListenerEvent =
   | { kind: "connect-accepted"; host: string; port: number }
-  | { kind: "connect-rejected"; reason: string }
+  | { kind: "connect-rejected"; reason: string; host?: string; port?: number; peer?: string }
   | {
       kind: "request-forwarded";
       url: string;
@@ -185,15 +207,16 @@ export type MitmListenerEvent =
   | { kind: "upstream-error"; url: string; error: string };
 
 export interface MitmListenerHandle {
+  /** Rejects if the listener cannot come up, leaving nothing bound or on disk. */
   readonly ready: Promise<void>;
   address(): { host: string; port: number };
   proxyUrl(): string;
   close(): Promise<void>;
 }
 
-interface BunServerHandle {
-  hostname: string;
-  port: number;
+/** An inner TLS server (one per upstream authority), reachable only through its unix socket. */
+interface InnerTlsServer {
+  socketPath: string;
   stop(): void;
 }
 
@@ -211,33 +234,39 @@ export function createIntegrationMitmListener(
   const fetchFn = options.fetch ?? globalThis.fetch;
   const emit = options.onEvent ?? (() => {});
 
-  // Per-SNI cache of Bun.serve instances.
-  const tlsServers = new Map<string, Promise<BunServerHandle>>();
+  // Inner servers keyed by upstream authority: the inner request carries no
+  // trace of the tunnel it came through, so the server itself must know the
+  // port the runner asked for (#1588). Their sockets live in one 0700
+  // directory, named by a counter, not the authority: AF_UNIX paths cap near
+  // 104 bytes.
+  const tlsServers = new Map<string, Promise<InnerTlsServer>>();
+  const socketDir = mkdtemp(join(tmpdir(), "mitm-"));
+  let socketCount = 0;
 
-  const getOrCreateTlsServer = (sniHost: string): Promise<BunServerHandle> => {
-    const cached = tlsServers.get(sniHost);
+  const getOrCreateTlsServer = (sniHost: string, port: number): Promise<InnerTlsServer> => {
+    const authority = upstreamAuthority(sniHost, port);
+    const cached = tlsServers.get(authority);
     if (cached) return cached;
     const p = (async () => {
+      const socketPath = join(await socketDir, `${socketCount++}.sock`);
       const leaf = await options.minter.mintForHost(sniHost);
       const bun = (
         globalThis as unknown as {
           Bun?: {
             serve: (opts: {
-              port: number;
-              hostname: string;
+              unix: string;
               maxRequestBodySize: number;
               tls: { cert: string; key: string };
               fetch: (req: Request) => Promise<Response>;
-            }) => BunServerHandle;
+            }) => { stop(): void };
           };
         }
       ).Bun;
       if (!bun) {
         throw new Error("MITM listener requires the Bun runtime (Bun.serve)");
       }
-      return bun.serve({
-        port: 0,
-        hostname: "127.0.0.1",
+      const server = bun.serve({
+        unix: socketPath,
         // Bun defaults to 128 MiB, an order of magnitude above the cap this
         // listener actually enforces — and the sidecar's whole cgroup is
         // 256 MiB. Pinning it to the business cap makes the runtime itself
@@ -246,21 +275,32 @@ export function createIntegrationMitmListener(
         maxRequestBodySize: maxRequestBytes,
         tls: { cert: leaf.certPem, key: leaf.keyPem },
         fetch: (req) =>
-          handleInnerRequest(req, sniHost, options.credentials, fetchFn, maxRequestBytes, emit),
+          handleInnerRequest(
+            req,
+            authority,
+            options.credentials,
+            fetchFn,
+            maxRequestBytes,
+            emit,
+            options.egressPolicy,
+          ),
       });
+      return { socketPath, stop: () => server.stop() };
     })().catch((err) => {
       // Don't let a transient mint/bring-up failure poison this host for the
       // rest of the run: evict the rejected promise so the next CONNECT retries.
-      tlsServers.delete(sniHost);
+      tlsServers.delete(authority);
       throw err;
     });
-    tlsServers.set(sniHost, p);
+    tlsServers.set(authority, p);
     return p;
   };
 
   // Outer TCP server: parse CONNECT, peek ClientHello for SNI, relay
   // to the per-SNI Bun.serve.
   const tcpServer = netCreateServer((rawSocket: Socket) => {
+    // Peer gate, started at accept.
+    const admitted = peerAdmitted(rawSocket, options.isPeerAllowed);
     // `netCreateServer`'s handler is void-returning, so nothing in the runtime
     // observes this promise. `handleInboundConnection` awaits the SSRF/DNS
     // resolver and the ClientHello reads, none of which is inside a try — one
@@ -268,24 +308,34 @@ export function createIntegrationMitmListener(
     // sidecar down and with it the run it is proxying for. Route it through the
     // same `tls-error` + destroy path the function's own failure branches use,
     // so a bad connection kills the connection and nothing else.
-    handleInboundConnection(
-      rawSocket,
-      async (sniHost) => getOrCreateTlsServer(sniHost),
+    handleInboundConnection(rawSocket, {
+      admitted,
+      egressPolicy: options.egressPolicy,
+      resolveTlsServer: async (sniHost, port) => getOrCreateTlsServer(sniHost, port),
       emit,
-      options.resolveHostFn,
-    ).catch((err: unknown) => {
+      resolveHostFn: options.resolveHostFn,
+    }).catch((err: unknown) => {
       emit({ kind: "tls-error", error: `connection handler failed: ${(err as Error).message}` });
       rawSocket.destroy();
     });
   });
 
-  let readyResolve!: () => void;
-  const ready = new Promise<void>((res) => {
-    readyResolve = res;
+  const listening = new Promise<void>((res, rej) => {
+    tcpServer.once("error", rej);
+    tcpServer.listen(port, host, () => {
+      tcpServer.off("error", rej);
+      res();
+    });
   });
-
-  tcpServer.listen(port, host, () => {
-    readyResolve();
+  // The caller registers the listener for teardown only once `ready` settles,
+  // so a half-up listener tears down whatever half came up.
+  const ready = Promise.allSettled([listening, socketDir]).then(async ([listen, dir]) => {
+    if (listen.status === "fulfilled" && dir.status === "fulfilled") return;
+    if (listen.status === "fulfilled") {
+      await new Promise<void>((res) => tcpServer.close(() => res()));
+    }
+    if (dir.status === "fulfilled") await rm(dir.value, { recursive: true, force: true });
+    throw listen.status === "rejected" ? listen.reason : (dir as PromiseRejectedResult).reason;
   });
 
   return {
@@ -317,6 +367,8 @@ export function createIntegrationMitmListener(
         }
       }
       tlsServers.clear();
+      const dir = await socketDir.catch(() => null);
+      if (dir !== null) await rm(dir, { recursive: true, force: true });
     },
   };
 }
@@ -327,10 +379,15 @@ export function createIntegrationMitmListener(
 
 async function handleInboundConnection(
   rawSocket: Socket,
-  resolveTlsServer: (sniHost: string) => Promise<BunServerHandle>,
-  emit: (event: MitmListenerEvent) => void,
-  resolveHostFn?: HostResolver,
+  deps: {
+    admitted: Promise<boolean>;
+    egressPolicy: AuthorityPolicy;
+    resolveTlsServer: (sniHost: string, port: number) => Promise<InnerTlsServer>;
+    emit: (event: MitmListenerEvent) => void;
+    resolveHostFn?: HostResolver;
+  },
 ): Promise<void> {
+  const { emit, resolveHostFn } = deps;
   rawSocket.on("error", () => {
     // Per-connection handlers own teardown.
   });
@@ -399,6 +456,12 @@ async function handleInboundConnection(
     rawSocket.on("data", onData);
   });
 
+  if (!(await deps.admitted)) {
+    rawSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+    rawSocket.destroy();
+    emit({ kind: "connect-rejected", reason: "peer-not-allowed", peer: peerAddress(rawSocket) });
+    return;
+  }
   if (!result.ok) {
     rawSocket.write(result.reply);
     rawSocket.destroy();
@@ -434,12 +497,18 @@ async function handleInboundConnection(
   // IMDS, RFC1918, loopback, link-local, …). The SNI host is controlled by
   // the untrusted integration MCP code, and the sidecar's egress reaches the
   // host network + cloud metadata — so this must run BEFORE any cert mint.
-  // Mirrors the credential-proxy SSRF guard; external egress stays open
-  // (the per-integration MITM model intentionally forwards to external hosts).
+  // Mirrors the credential-proxy SSRF guard.
   //
   // Literal layer first (cheap, no DNS) …
   if (isBlockedHost(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
+    rawSocket.destroy();
+    return;
+  }
+  // … then the egress allowlist (no cert mint, no DNS for an unauthorized host).
+  // The upstream is the SNI host on the port the runner CONNECTed to (#1588).
+  if (!deps.egressPolicy.allowsAuthority(sniHost, result.port)) {
+    emit({ kind: "connect-rejected", reason: "not-authorized", host: sniHost, port: result.port });
     rawSocket.destroy();
     return;
   }
@@ -461,9 +530,9 @@ async function handleInboundConnection(
   }
 
   // 3. Resolve (or lazily start) the per-SNI Bun.serve.
-  let tlsServer: BunServerHandle;
+  let tlsServer: InnerTlsServer;
   try {
-    tlsServer = await resolveTlsServer(sniHost);
+    tlsServer = await deps.resolveTlsServer(sniHost, result.port);
   } catch (err) {
     emit({ kind: "tls-error", error: `tls bring-up failed: ${(err as Error).message}` });
     rawSocket.destroy();
@@ -474,7 +543,7 @@ async function handleInboundConnection(
   //    the upstream first, then pipe both directions. Disarm the handshake
   //    read timeout — the tunnel is now legitimately long-lived.
   rawSocket.setTimeout(0);
-  const upstream = netConnect(tlsServer.port, tlsServer.hostname, () => {
+  const upstream = netConnect(tlsServer.socketPath, () => {
     if (clientHello.length > 0) upstream.write(clientHello);
     rawSocket.pipe(upstream);
     upstream.pipe(rawSocket);
@@ -711,23 +780,25 @@ function targetWithinAuthorizedUris(url: string, authorizedUris: readonly string
 // ─────────────────────────────────────────────
 
 /**
- * The per-SNI `Bun.serve` fetch callback. Exported (like {@link extractSni})
- * so the body-cap and strip/inject behaviour can be exercised directly,
- * without standing up TLS.
+ * The per-authority `Bun.serve` fetch callback. `authority` is the upstream
+ * `host` or `host:port` ({@link upstreamAuthority}). Exported (like
+ * {@link extractSni}) so the body-cap and strip/inject behaviour can be
+ * exercised directly, without standing up TLS.
  */
 export async function handleInnerRequest(
   req: Request,
-  sniHost: string,
+  authority: string,
   credentials: MitmCredentialSource,
   fetchFn: typeof fetch,
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
+  egressPolicy: Pick<EgressPolicy, "allowsUrl">,
 ): Promise<Response> {
-  // Re-build the upstream URL from the SNI host + request path. Bun
-  // gives us the absolute URL but it points at our local 127.0.0.1
-  // listener — we replace the origin with the SNI host (port 443).
+  // Re-build the upstream URL from the tunnel's authority + request path. Bun
+  // gives us an absolute URL whose origin names our inner listener, not the
+  // upstream.
   const incoming = new URL(req.url);
-  let targetUrl = `https://${sniHost}${incoming.pathname}${incoming.search}`;
+  let targetUrl = `https://${authority}${incoming.pathname}${incoming.search}`;
 
   // Read the body up-front. Connect-login substitution (below) may need
   // to rewrite it, and the planner check must run on the SUBSTITUTED url,
@@ -778,9 +849,8 @@ export async function handleInnerRequest(
   // ONLY when the request targets one of the acquiring auth's authorized URIs.
   // Without this bound, an untrusted login tool could aim a `{{secret}}`
   // request at an arbitrary host and exfiltrate the secret off-target. A
-  // request to an off-allowlist host is forwarded WITHOUT substitution (any
-  // `{{...}}` literal it carries stays a literal — a placeholder name, never
-  // the secret value).
+  // request outside those URIs is never substituted (any `{{...}}` literal it
+  // carries stays a literal — a placeholder name, never the secret value).
   const active = credentials.activeInputs?.() ?? null;
   if (active && targetWithinAuthorizedUris(targetUrl, active.authorizedUris)) {
     const inboundHeaders: Record<string, string> = {};
@@ -803,6 +873,13 @@ export async function handleInnerRequest(
     headersForOutbound = subbed;
   }
 
+  // Hard egress allowlist on the FINAL url (substitution above may rewrite
+  // it): an unauthorized request is refused, never forwarded un-injected.
+  if (!egressPolicy.allowsUrl(targetUrl)) {
+    emit({ kind: "request-refused", url: targetUrl, reason: "not-authorized" });
+    return new Response("MITM listener: target not authorized", { status: 403 });
+  }
+
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
@@ -819,7 +896,7 @@ export async function handleInnerRequest(
 
   const outboundHeaders = buildOutboundHeaders(
     headersForOutbound,
-    sniHost,
+    authority,
     action.strippedHeaderNames,
     action.injectedHeader,
   );
@@ -887,7 +964,7 @@ export async function handleInnerRequest(
     lastAction = a;
     const outbound = buildOutboundHeaders(
       headersForOutbound,
-      sniHost,
+      authority,
       a.strippedHeaderNames,
       a.injectedHeader,
     );
@@ -986,13 +1063,18 @@ function parseHostPort(target: string): { host: string; port: number } | null {
   return { host, port };
 }
 
+/** `host`, or `host:port` off 443 — the form a URL and a `Host` header carry. */
+function upstreamAuthority(host: string, port: number): string {
+  return port === 443 ? host : `${host}:${port}`;
+}
+
 // ─────────────────────────────────────────────
 // Header plumbing
 // ─────────────────────────────────────────────
 
 function buildOutboundHeaders(
   incoming: Headers,
-  sniHost: string,
+  authority: string,
   strip: readonly string[],
   inject: { name: string; value: string } | null,
 ): Headers {
@@ -1006,7 +1088,7 @@ function buildOutboundHeaders(
     if (lower === "content-length") return; // fetch sets from body
     out.set(k, v);
   });
-  out.set("Host", sniHost);
+  out.set("Host", authority);
   if (inject) out.set(inject.name, inject.value);
   return out;
 }

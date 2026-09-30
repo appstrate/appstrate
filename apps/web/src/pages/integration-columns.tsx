@@ -23,12 +23,12 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, RotateCcw, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
 import { TableRowActions } from "../components/table-row-actions";
-import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
+import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../lib/integration-presentation";
 import type {
   IntegrationAuthType,
@@ -53,22 +53,37 @@ import {
  * Four columns. Type and `default` wait for a 36rem table because on a phone what
  * matters is which clients exist and how to remove one; which of them connect
  * picks is a setting you come back for.
+ *
+ * The same set draws both tiers — the space's clients and the organisation's.
+ * Only the tier's OWN rows (`ownSource`) can be rotated, promoted or deleted:
+ * the space table also lists the org's clients it inherits, read-only there.
  */
 export function useIntegrationClientColumns({
+  ownSource,
+  tid,
   canChooseDefault,
+  canPromote,
   settingDefaultClientRef,
   deletingClientRef,
   onSetDefault,
   onRotate,
+  onPromote,
   onDelete,
 }: {
+  /** The rows this table's tier owns: `custom` for a space, `org` for the organisation. */
+  ownSource: "custom" | "org";
+  /** An org row shows in both tables on the page: the org table prefixes its test ids. */
+  tid: (id: string) => string;
   /** Choosing one only means something when more than one client can mint. */
   canChooseDefault: boolean;
+  /** Moving a space's own client up to the org tier, for an org integrations admin. */
+  canPromote: boolean;
   settingDefaultClientRef: string | null;
   /** The delete in flight — only that row shows pending. */
   deletingClientRef: string | null;
   onSetDefault: (client: IntegrationClient) => void;
   onRotate: (client: IntegrationClient) => void;
+  onPromote: (client: IntegrationClient) => void;
   onDelete: (client: IntegrationClient) => void;
 }): DataColumn<IntegrationClient>[] {
   const { t } = useTranslation("settings");
@@ -91,11 +106,14 @@ export function useIntegrationClientColumns({
       tier: 2,
       cell: (client) => (
         <span className="text-muted-foreground block truncate text-xs">
-          {client.auto_provisioned
-            ? t("source.autoProvisioned")
-            : client.source === "built-in"
-              ? t("source.builtIn")
-              : t("source.custom")}
+          {client.source === "built-in"
+            ? t("source.builtIn")
+            : client.source === "org"
+              ? t("source.org")
+              : client.auto_provisioned
+                ? t("source.autoProvisioned")
+                : // Beside the org's rows, a space's own client reads as the space's.
+                  t("source.space")}
         </span>
       ),
     },
@@ -113,7 +131,7 @@ export function useIntegrationClientColumns({
           disabled={settingDefaultClientRef !== null}
           isPending={settingDefaultClientRef === client.client_ref}
           onSetDefault={() => onSetDefault(client)}
-          testId={`set-default-client-${client.client_ref}`}
+          testId={tid(`set-default-client-${client.client_ref}`)}
         />
       ),
     },
@@ -127,22 +145,22 @@ export function useIntegrationClientColumns({
         // minted by the server at connect time — neither has credentials an
         // admin could rotate here. Deleting the auto-provisioned one is
         // allowed: it re-triggers registration.
-        const editable = client.source === "custom" && !client.auto_provisioned;
-        const deletable = client.source === "custom";
+        const deletable = client.source === ownSource;
+        const editable = deletable && !client.auto_provisioned;
+        const promotable = editable && canPromote;
         const canSetDefault = canChooseDefault && !client.is_default;
         if (!editable && !deletable && !canSetDefault) return null;
         return (
           <TableRowActions
-            menuLabel={
-              editable || deletable || canSetDefault
-                ? t("integration.oauthClient.moreActions", { name: client.client_id })
-                : undefined
-            }
+            menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
             isPending={deletingClientRef === client.client_ref}
             pendingLabel={t("common:loading")}
           >
             {editable && (
-              <DropdownMenuItem onSelect={() => onRotate(client)}>
+              <DropdownMenuItem
+                onSelect={() => onRotate(client)}
+                data-testid={tid(`oauth-client-rotate-${client.client_ref}`)}
+              >
                 <RotateCcw />
                 {t("integration.oauthClient.btnRotate")}
               </DropdownMenuItem>
@@ -151,16 +169,25 @@ export function useIntegrationClientColumns({
               <DropdownMenuItem
                 onSelect={() => onSetDefault(client)}
                 disabled={settingDefaultClientRef !== null}
-                data-testid={`set-default-client-${client.client_ref}`}
+                data-testid={tid(`set-default-client-${client.client_ref}`)}
               >
                 {t("integration.clients.setDefault.action")}
+              </DropdownMenuItem>
+            )}
+            {promotable && (
+              <DropdownMenuItem
+                onSelect={() => onPromote(client)}
+                data-testid={`oauth-client-promote-${client.client_ref}`}
+              >
+                <ArrowUpFromLine />
+                {t("integration.clients.promote.action")}
               </DropdownMenuItem>
             )}
             {deletable && (
               <DropdownMenuItem
                 onSelect={() => onDelete(client)}
                 disabled={deletingClientRef === client.client_ref}
-                data-testid={`oauth-client-delete-${client.client_ref}`}
+                data-testid={tid(`oauth-client-delete-${client.client_ref}`)}
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 />
@@ -274,7 +301,9 @@ export function useConnectionColumns({
       header: t("integration.connection.col.shared"),
       width: "64px",
       tier: 2,
-      cell: (c) => <SharedCell connection={c} packageId={packageId} isOwn={owns(c)} />,
+      cell: (c) => (
+        <SharedCell connection={c} packageId={packageId} isOwn={owns(c)} isAdmin={isAdmin} />
+      ),
     },
     {
       id: "actions",
@@ -287,6 +316,7 @@ export function useConnectionColumns({
           packageId={packageId}
           {...(authForConnection?.(c) ?? { authKey, authType, canRenew })}
           isOwn={owns(c)}
+          isAdmin={isAdmin}
         />
       ),
     },

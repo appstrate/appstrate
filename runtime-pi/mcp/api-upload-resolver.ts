@@ -85,6 +85,8 @@ interface IntegrationUploadRequest {
    * The integration is implied by the tool name.
    */
   apiCallToolName: string;
+  /** Selector for a multi-connection integration, put on every dispatched chunk. */
+  connection?: string;
   target: string;
   fromFile: string;
   uploadProtocol: UploadProtocol;
@@ -232,7 +234,7 @@ export class McpApiUploadResolver {
       metadata: req.metadata ?? {},
       sourceMimeType: req.sourceMimeType,
       partSizeBytes,
-      apiCall: this.makeApiCall(ctx.signal),
+      apiCall: this.makeApiCall(ctx.signal, req.connection),
       signal: ctx.signal,
       hashUpdate: (bytes) => {
         hasher.update(bytes);
@@ -284,7 +286,7 @@ export class McpApiUploadResolver {
       // ctx.signal is typically already aborted on this path, so
       // aliasing it would short-circuit the DELETE inside mcp.callTool
       // and leak the upstream session.
-      this.fireAbort(adapter, state, adapterCtx);
+      this.fireAbort(adapter, state, adapterCtx, req.connection);
       return failure(adapter, err, bytesAcked);
     }
 
@@ -294,7 +296,7 @@ export class McpApiUploadResolver {
       throwIfAborted(ctx.signal);
       finalResult = await adapter.finalize(state, adapterCtx);
     } catch (err) {
-      this.fireAbort(adapter, state, adapterCtx);
+      this.fireAbort(adapter, state, adapterCtx, req.connection);
       return failure(adapter, err, bytesAcked);
     }
 
@@ -338,12 +340,17 @@ export class McpApiUploadResolver {
    * timeout caps the worst-case orphaned-promise lifetime so a slow
    * upstream cannot hold a reference to the run forever.
    */
-  private fireAbort(adapter: UploadAdapter, state: unknown, ctx: AdapterContext): void {
+  private fireAbort(
+    adapter: UploadAdapter,
+    state: unknown,
+    ctx: AdapterContext,
+    connection: string | undefined,
+  ): void {
     if (state === undefined) return;
     const cleanupSignal = AbortSignal.timeout(ABORT_CLEANUP_TIMEOUT_MS);
     const cleanupCtx: AdapterContext = {
       ...ctx,
-      apiCall: this.makeApiCall(cleanupSignal),
+      apiCall: this.makeApiCall(cleanupSignal, connection),
       signal: cleanupSignal,
     };
     void adapter.abort(state, cleanupCtx).catch(() => {});
@@ -365,7 +372,7 @@ export class McpApiUploadResolver {
    * `adapter.abort` runs on a fresh, time-bounded signal so it doesn't
    * inherit the user's already-aborted cancellation signal.
    */
-  private makeApiCall(signal: AbortSignal) {
+  private makeApiCall(signal: AbortSignal, connection?: string) {
     return async (req: AdapterApiCallRequest): Promise<AdapterApiCallResponse> => {
       // The `{ns}__api_call` tool does NOT accept a tool-name argument
       // (the integration is fixed by the tool name), so we dispatch to
@@ -375,6 +382,7 @@ export class McpApiUploadResolver {
         target: req.target,
         method: req.method,
       };
+      if (connection !== undefined) args.connection = connection;
       if (req.headers && Object.keys(req.headers).length > 0) args.headers = req.headers;
       if (req.body !== undefined) {
         if (typeof req.body === "string") {

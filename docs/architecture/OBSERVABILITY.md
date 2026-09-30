@@ -187,7 +187,7 @@ sub-second-aware boundaries via the OTel `advice.explicitBucketBoundaries` hint
 | --------------------------------- | ---------------- | ---------------------------------------------------------------- | ------------------------------------------ |
 | `appstrate.run.duration`          | histogram (s)    | `status`                                                         | `finalizeRun` (CAS winner, exactly once)   |
 | `appstrate.run.terminal`          | counter          | `status`, `error_code`                                           | `finalizeRun` — failure-rate source        |
-| `appstrate.run.container_spawn`   | histogram (s)    | `sidecar`, `error.type` (failure)                                | `runPlatformContainer` provisioning time   |
+| `appstrate.run.container_spawn`   | histogram (s)    | `error.type` (failure)                                           | `runPlatformContainer` provisioning time   |
 | `appstrate.scheduler.queue_depth` | observable gauge | —                                                                | BullMQ / local queue `count()`             |
 | `appstrate.llm.latency`           | histogram (s)    | `api_shape`, `http.response.status_code`, `error.type` (failure) | platform LLM proxy (`routes/llm-proxy.ts`) |
 
@@ -227,9 +227,10 @@ them.)
 ## Limitations / follow-ups
 
 - **Sidecar-side LLM latency.** The LLM-latency histogram is recorded at the
-  in-process platform proxy seam (`/api/llm-proxy`). The credential-isolating
-  **sidecar** runs in a separate per-run container on an isolated network and
-  would need its own OTel bootstrap plus collector reachability to export from
+  in-process platform proxy seam (`/api/llm-proxy`, and `/internal/llm-proxy`
+  for every API-key run). An OAuth-subscription run's inference leaves through
+  its credential-isolating **sidecar**, which runs in a separate per-run
+  container on an isolated network and would need its own OTel bootstrap plus collector reachability to export from
   there — tracked as a follow-up. The container's outbound HTTP already carries
   the forwarded `traceparent`, so a future sidecar exporter would slot into the
   same trace.

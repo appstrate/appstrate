@@ -20,7 +20,6 @@ import type {
   IntegrationOrgDefault,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 
@@ -51,7 +50,7 @@ export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
 /**
- * One OAuth client offered for connecting an integration auth — the org's
+ * One OAuth client offered for connecting an integration auth — a space or org
  * custom (BYO-app) client or a platform-provided system client. Spec-derived so
  * a rename/removal of any wire field breaks compilation. Secrets never present.
  */
@@ -59,8 +58,10 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
+import { onMutationError } from "../lib/mutation-error";
 import { useCurrentSpaceId } from "./use-current-space";
-import { useOrgScope } from "./use-org-scope";
+import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -86,9 +87,10 @@ export type {
 
 /**
  * Invalidate every cached integrations read (list, detail, connections,
- * pins, org default, agent resolutions, OAuth clients). Typed keys are
- * `[method, "/api/integrations…", init]` — a key-prefix invalidation can't
- * span sibling path strings, so match on the path element instead.
+ * pins, org default, agent resolutions, OAuth clients) and the caller's
+ * cross-org connection list, whose `locked_by` moves with pins and defaults.
+ * Typed keys are `[method, "/api/integrations…", init]` — a key-prefix
+ * invalidation can't span sibling path strings, so match on the path element.
  */
 export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
@@ -102,6 +104,7 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
+        path === "/api/me/connections" ||
         // The per-agent connection-readiness query lives under /api/agents but
         // is driven entirely by connection state, so refresh it here too.
         path === "/api/agents/{scope}/{name}/connection-readiness"
@@ -114,8 +117,15 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 // Hooks
 // ─────────────────────────────────────────────
 
-export function useIntegrations() {
+/** Every integration read guards on `integrations:read`, which no agent or run read implies. */
+function useIntegrationsReadScope() {
   const scope = useOrgScope();
+  const { can } = usePermissions();
+  return { header: scope.header, enabled: scope.enabled && can("integrations:read") };
+}
+
+export function useIntegrations() {
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations",
@@ -135,7 +145,7 @@ export function useIntegrations() {
  * soon as an organisation crosses that boundary.
  */
 export function useAllIntegrations(options?: { enabled?: boolean }) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return useQuery({
     queryKey: [
       "get",
@@ -168,7 +178,7 @@ export function useAllIntegrations(options?: { enabled?: boolean }) {
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}",
@@ -184,7 +194,7 @@ export function useIntegrationDetail(packageId: string | undefined) {
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/connections",
@@ -199,20 +209,14 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /**
- * Shared query options for a (integration, agent) resolution verdict.
- * Exported so every consumer — the picker hook
- * ({@link useIntegrationAgentResolution}) and the launch-badge readiness hook
- * (`useAgentIntegrationsReadiness`) — builds the SAME `[method, path, init]`
- * key from ONE place and shares the cache. Hand-copying the key risked a
- * silent cache split where the badge and the Connexions tab fetch the same
- * verdict twice and disagree.
+ * Query options for an (integration, agent) resolution verdict, shared by the
+ * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
-function agentConnectionReadinessQueryOptions(
-  orgId: string | null | undefined,
-  spaceId: string | null | undefined,
-  agentPackageId: string | undefined,
-  version?: string,
-) {
+function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
@@ -232,21 +236,19 @@ function agentConnectionReadinessQueryOptions(
         },
       },
     },
-    { enabled: Boolean(orgId && spaceId && agentPackageId) },
+    { enabled: Boolean(can("integrations:read") && orgId && spaceId && agentPackageId) },
   );
 }
 
 /**
  * Bulk connection readiness for an agent — ONE call that drives the launch
  * badge, the Connexions tab pickers, and the pre-run check. `blocks_run` /
- * `errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries
+ * `errors` mirror the run-kickoff 409 (run semantics); `integrations[]` carries
  * every declared integration's management verdict (includeInert) + a
  * `run_blocking` flag. Replaces the former N per-integration round-trips.
  */
 export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  return useQuery(agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId));
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
 }
 
 /**
@@ -260,11 +262,10 @@ export function useIntegrationAgentResolution(
   agentPackageId: string | undefined,
   version?: string,
 ) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
-    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
+    ...options,
+    enabled: options.enabled && !!integrationId,
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
   });
@@ -280,11 +281,10 @@ export function useIntegrationRunBlocking(
   agentPackageId: string | undefined,
   version?: string,
 ) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
-    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
+    ...options,
+    enabled: options.enabled && !!integrationId,
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
   });
@@ -319,87 +319,183 @@ export function useInitiateIntegrationConnect() {
   });
 }
 
-/** Invalidate the clients list + detail after a client mutation. */
-function useInvalidateIntegrationClients() {
+// ─────────────────────────────────────────────
+// OAuth clients — space tier and org tier
+// ─────────────────────────────────────────────
+
+/** `space` clients override the org's for that space; `org` clients apply to every space. */
+export type IntegrationClientTier = "space" | "org";
+
+const SPACE_CLIENTS = "/api/integrations/{packageId}/auths/{authKey}/clients";
+const ORG_CLIENTS = "/api/org-integrations/{scope}/{name}/auths/{authKey}/clients";
+
+type AuthPath = { path: { packageId: string; authKey: string } };
+type ClientPath = { path: { packageId: string; clientId: string } };
+/** Org routes address the integration as `{scope}/{name}`; space routes by `{packageId}`. */
+function orgAuthPath({ packageId, authKey }: AuthPath["path"]) {
+  return { ...splitPackageRef(packageId), authKey };
+}
+function orgClientPath({ packageId, clientId }: ClientPath["path"]) {
+  return { ...splitPackageRef(packageId), clientId };
+}
+type CreateOAuthClientBody =
+  paths["/api/integrations/{packageId}/auths/{authKey}/oauth-clients"]["post"]["requestBody"]["content"]["application/json"];
+type RotateOAuthClientBody =
+  paths["/api/integrations/{packageId}/oauth-clients/{clientId}"]["put"]["requestBody"]["content"]["application/json"];
+type SetDefaultClientBody =
+  paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
+
+/**
+ * Refreshes both lists: an org change re-badges the space list and can move its default.
+ * No message when the table already shows the effect (a default moved, a row gone).
+ */
+function useClientMutationSuccess(messageKey?: string) {
+  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return () => {
-    void qc.invalidateQueries({
-      queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
-    });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+    if (messageKey) toast.success(t(messageKey));
+    for (const path of [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]) {
+      void qc.invalidateQueries({ queryKey: ["get", path] });
+    }
   };
 }
 
 /**
- * Register a NEW custom (BYO-app) OAuth client for an auth — repeatable, so an
- * org can hold N clients. The first becomes the default; later ones stay
- * non-default until promoted via {@link useSetDefaultIntegrationClient}.
+ * A tier's own clients plus the one default it inherits (org or system). New
+ * connections always use the default — there is no per-connect picker.
  */
-export function useCreateIntegrationOAuthClient() {
-  const { t } = useTranslation("settings");
-  const invalidate = useInvalidateIntegrationClients();
-  return $api.useMutation("post", "/api/integrations/{packageId}/auths/{authKey}/oauth-clients", {
-    onSuccess: () => {
-      toast.success(t("integration.oauthClient.save.success"));
-      invalidate();
+export function useIntegrationClients(
+  tier: IntegrationClientTier,
+  packageId: string | undefined,
+  authKey: string | undefined,
+) {
+  const spaceScope = useIntegrationsReadScope();
+  const orgScope = useOrgOnlyScope();
+  const path = { packageId: packageId ?? "", authKey: authKey ?? "" };
+  const ready = !!packageId && !!authKey;
+  const orgPath = orgAuthPath(path);
+  // One query per tier: literal paths keep the client typed.
+  const space = $api.useQuery(
+    "get",
+    SPACE_CLIENTS,
+    { params: { path, header: spaceScope.header } },
+    {
+      enabled: tier === "space" && spaceScope.enabled && ready,
+      select: (envelope): IntegrationClient[] => envelope.data,
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+  );
+  const org = $api.useQuery(
+    "get",
+    ORG_CLIENTS,
+    { params: { path: orgPath, header: orgScope.header } },
+    {
+      enabled: tier === "org" && orgScope.enabled && ready,
+      select: (envelope): IntegrationClient[] => envelope.data,
+    },
+  );
+  return tier === "space" ? space : org;
+}
+
+/** Register a custom (BYO-app) client; only a tier's first becomes its default. */
+export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
+  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  return useMutation({
+    mutationFn: async (vars: { params: AuthPath; body: CreateOAuthClientBody }) => {
+      const { data } =
+        tier === "space"
+          ? await client.POST("/api/integrations/{packageId}/auths/{authKey}/oauth-clients", vars)
+          : await client.POST(
+              "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
+              {
+                params: { path: orgAuthPath(vars.params.path) },
+                body: vars.body,
+              },
+            );
+      return data;
+    },
+    onSuccess,
+    onError: onMutationError,
   });
 }
 
 /** Rotate one custom client's credentials in place, by its id. */
-export function useRotateIntegrationOAuthClient() {
-  const { t } = useTranslation("settings");
-  const invalidate = useInvalidateIntegrationClients();
-  return $api.useMutation("put", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
-    onSuccess: () => {
-      toast.success(t("integration.oauthClient.save.success"));
-      invalidate();
+export function useRotateIntegrationOAuthClient(tier: IntegrationClientTier) {
+  const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
+  return useMutation({
+    mutationFn: async (vars: { params: ClientPath; body: RotateOAuthClientBody }) => {
+      const { data } =
+        tier === "space"
+          ? await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
+          : await client.PUT("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+              params: { path: orgClientPath(vars.params.path) },
+              body: vars.body,
+            });
+      return data;
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onSuccess,
+    onError: onMutationError,
   });
 }
 
 /**
- * OAuth clients available to connect this auth: the org's custom (BYO-app)
- * client plus any platform-provided system clients, each with `source` and
- * which is the default. Secrets are never returned. Drives the detail page's
- * admin clients CRUD table (register/rotate/delete/set-default). New
- * connections always use the default — there is no per-connect picker.
+ * Choose the tier's default OAuth client for new connections. Existing
+ * connections keep the client that minted them.
  */
-export function useIntegrationClients(packageId: string | undefined, authKey: string | undefined) {
-  const scope = useOrgScope();
-  return $api.useQuery(
-    "get",
-    "/api/integrations/{packageId}/auths/{authKey}/clients",
-    {
-      params: {
-        path: { packageId: packageId ?? "", authKey: authKey ?? "" },
-        header: scope.header,
-      },
+export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
+  const onSuccess = useClientMutationSuccess();
+  return useMutation({
+    mutationFn: async (vars: { params: AuthPath; body: SetDefaultClientBody }) => {
+      const { data } =
+        tier === "space"
+          ? await client.PUT("/api/integrations/{packageId}/auths/{authKey}/default-client", vars)
+          : await client.PUT(
+              "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client",
+              {
+                params: { path: orgAuthPath(vars.params.path) },
+                body: vars.body,
+              },
+            );
+      return data;
     },
-    {
-      enabled: scope.enabled && !!packageId && !!authKey,
-      select: (envelope): IntegrationClient[] => envelope.data,
-    },
-  );
+    onSuccess,
+    onError: onMutationError,
+  });
 }
 
 /**
- * Choose which OAuth client is the default for new connections on an auth — the
- * model-provider `setDefaultModel` analogue. Existing connections keep the
- * client that minted them; only future connects are affected. Refreshes the
- * clients list so the "default" badge updates.
+ * Move one of the space's own clients to the org tier, inherited by every
+ * space. Its id is unchanged, so existing connections keep working.
  */
-export function useSetDefaultIntegrationClient() {
-  const qc = useQueryClient();
-  return $api.useMutation("put", "/api/integrations/{packageId}/auths/{authKey}/default-client", {
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
-      });
+export function usePromoteIntegrationOAuthClient() {
+  const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
+  return useMutation({
+    mutationFn: async (vars: { params: ClientPath }) => {
+      const { data } = await client.POST(
+        "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+        vars,
+      );
+      return data;
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onSuccess,
+    onError: onMutationError,
+  });
+}
+
+/** Also deletes the connections it minted — in every space for an org client. */
+export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
+  const onSuccess = useClientMutationSuccess();
+  return useMutation({
+    mutationFn: async (vars: { params: ClientPath }) => {
+      if (tier === "space") {
+        await client.DELETE("/api/integrations/{packageId}/oauth-clients/{clientId}", vars);
+      } else {
+        await client.DELETE("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+          params: { path: orgClientPath(vars.params.path) },
+        });
+      }
+    },
+    onSuccess,
+    onError: onMutationError,
   });
 }
 
@@ -408,7 +504,7 @@ export function useSetDefaultIntegrationClient() {
 // ─────────────────────────────────────────────
 
 export function useIntegrationPins(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/pins",
@@ -428,7 +524,7 @@ export function useIntegrationPins(packageId: string | undefined) {
  * picker.
  */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/consuming-agents",
@@ -470,7 +566,8 @@ export function useUpsertIntegrationPin() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string; agentPackageId: string } };
-      body: { connection_id: string };
+      /** The WHOLE pinned set — this write replaces it. */
+      body: { connection_ids: string[] };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
         ...vars,
@@ -479,8 +576,10 @@ export function useUpsertIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      // Admin pins top the resolver cascade: every readiness verdict moves with them.
+      void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -497,15 +596,16 @@ export function useDeleteIntegrationPin() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.pin.deleted"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}/pins"] });
+      void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
 // ─── Org default connection (cross-agent governance) ───────────────────────
 
 export function useIntegrationOrgDefault(packageId: string | undefined) {
-  const scope = useOrgScope();
+  const scope = useIntegrationsReadScope();
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/default",
@@ -527,7 +627,8 @@ export function useUpsertIntegrationOrgDefault() {
   return useMutation({
     mutationFn: async (vars: {
       params: { path: { packageId: string } };
-      body: { connection_id: string; enforce: boolean };
+      /** The WHOLE default set — this write replaces it. */
+      body: { connection_ids: string[]; enforce: boolean };
     }) => {
       const { data } = await client.PUT("/api/integrations/{packageId}/default", {
         ...vars,
@@ -540,6 +641,7 @@ export function useUpsertIntegrationOrgDefault() {
       // invalidate every integrations read, not just the default itself.
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -556,6 +658,7 @@ export function useDeleteIntegrationOrgDefault() {
       toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
+    onError: onMutationError,
   });
 }
 
@@ -566,7 +669,7 @@ export function useUpdateIntegrationConnection() {
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string | null; shared_with_org?: boolean };
+      body: { label?: string; shared_with_org?: boolean };
     }) => {
       const { data } = await client.PATCH(
         "/api/integrations/{packageId}/connections/{connectionId}",
@@ -575,20 +678,9 @@ export function useUpdateIntegrationConnection() {
       return data;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/integrations/{packageId}/connections"],
-      });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      // A label shows on every picker and readiness view, not just the connection list.
+      void invalidateIntegrationQueries(qc);
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
-}
-
-/** Delete one custom client by its id. */
-export function useDeleteIntegrationOAuthClient() {
-  const invalidate = useInvalidateIntegrationClients();
-  return $api.useMutation("delete", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
-    onSuccess: invalidate,
-    onError: (error) => toast.error(getErrorMessage(error)),
+    onError: onMutationError,
   });
 }

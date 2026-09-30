@@ -224,7 +224,7 @@ export function ModelSection({ packageId }: { packageId: string }) {
   const editorKey = [
     agentModel.modelId ?? "inherit",
     generation.temperature ?? "inherit",
-    generation.reasoningLevel ?? "inherit",
+    generation.reasoning_level ?? "inherit",
   ].join(":");
 
   return (
@@ -292,7 +292,7 @@ function ModelSectionEditor({
     return rest;
   };
   const withoutReasoning = () => {
-    const { reasoningLevel: _reasoningLevel, ...rest } = generation;
+    const { reasoning_level: _reasoningLevel, ...rest } = generation;
     void _reasoningLevel;
     return rest;
   };
@@ -412,14 +412,14 @@ function ModelSectionEditor({
       >
         <Select
           value={
-            reasoningUnsupported ? "__unsupported__" : (generation.reasoningLevel ?? "__inherit__")
+            reasoningUnsupported ? "__unsupported__" : (generation.reasoning_level ?? "__inherit__")
           }
           disabled={setAgentModel.isPending || reasoningUnsupported}
           onValueChange={(value) => {
             const nextGeneration =
               value === "__inherit__"
                 ? withoutReasoning()
-                : { ...generation, reasoningLevel: value as ModelReasoningLevel };
+                : { ...generation, reasoning_level: value as ModelReasoningLevel };
             setGeneration(nextGeneration);
             save(modelId, nextGeneration);
           }}

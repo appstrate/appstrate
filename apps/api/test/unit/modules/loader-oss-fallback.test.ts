@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { loadModules, resetModules } from "../../../src/lib/modules/module-loader.ts";
-import { getModuleRegistry } from "../../../src/lib/modules/registry.ts";
+import { getModuleRegistry } from "../../../src/lib/modules/module-loader.ts";
 import type { ModuleInitContext } from "@appstrate/core/module";
 
 /**

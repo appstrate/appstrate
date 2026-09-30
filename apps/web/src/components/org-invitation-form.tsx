@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useImperativeHandle, type Ref } from "react";
 import { toast } from "sonner";
 import { useSpaces } from "../hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
@@ -33,6 +34,16 @@ interface InviteFormValues {
   assignments: AssignmentDraft[];
 }
 
+export interface OrgInvitationFormHandle {
+  /**
+   * Invite the email still typed in the field — a new invitation, never an edit of
+   * `invitation`. Resolves `true` once sent or when the field is blank; `false` while
+   * an invite is in flight, or when the value is invalid or the invite fails, the
+   * form then showing why.
+   */
+  submitPending: () => Promise<boolean>;
+}
+
 /**
  * The same invitation flow in onboarding and organization settings. Remount on
  * org change. `allowGuest` offers the guest role on a NEW invitation (spaces
@@ -45,12 +56,14 @@ export function OrgInvitationForm({
   allowGuest = false,
   onSuccess,
   onCancel,
+  ref,
 }: {
   orgId: string;
   invitation?: components["schemas"]["OrgInvitationInfo"];
   allowGuest?: boolean;
   onSuccess?: () => void;
   onCancel?: () => void;
+  ref?: Ref<OrgInvitationFormHandle>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
@@ -65,7 +78,7 @@ export function OrgInvitationForm({
       // Invitations cannot grant ownership; the API enforces AssignableOrgRole.
       role: (invitation?.role ?? "member") as AssignableOrgRole,
       assignments: (invitation?.space_assignments ?? []).map((assignment) => ({
-        space_id: assignment.space_id,
+        spaceId: assignment.spaceId,
         role: spaceRoleValue(assignment),
       })),
     },
@@ -85,7 +98,7 @@ export function OrgInvitationForm({
     onError,
   });
 
-  const update = $api.useMutation("put", "/api/orgs/{orgId}/invitations/{invitationId}", {
+  const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
     onSuccess: () => {
       toast.success(t("orgSettings.inviteUpdated"));
       complete();
@@ -94,22 +107,39 @@ export function OrgInvitationForm({
   });
   const isPending = invite.isPending || update.isPending;
   const fieldPrefix = invitation ? "edit-invite" : "invite";
+  const bodyOf = (data: InviteFormValues) => ({
+    role: data.role,
+    space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
+  });
+  const inviteRequest = (data: InviteFormValues) => ({
+    params: { path: { orgId } },
+    body: { ...bodyOf(data), email: data.email.trim() },
+  });
+
+  useImperativeHandle(ref, () => ({
+    submitPending: async () => {
+      if (invite.isPending) return false;
+      if (!form.getValues("email").trim()) return true;
+      if (!(await form.trigger())) return false;
+      // The hook's `onError` already shows a refusal on the form.
+      return invite.mutateAsync(inviteRequest(form.getValues())).then(
+        () => true,
+        () => false,
+      );
+    },
+  }));
 
   return (
     <form
       noValidate
       onSubmit={form.handleSubmit((data) => {
-        const body = {
-          role: data.role,
-          space_assignments: assignmentsFor(data.role, toSpaceAssignments(data.assignments)),
-        };
         if (invitation) {
-          update.mutate({ params: { path: { orgId, invitationId: invitation.id } }, body });
-        } else {
-          invite.mutate({
-            params: { path: { orgId } },
-            body: { ...body, email: data.email.trim() },
+          update.mutate({
+            params: { path: { orgId, invitationId: invitation.id } },
+            body: bodyOf(data),
           });
+        } else {
+          invite.mutate(inviteRequest(data));
         }
       })}
       className="flex flex-col gap-4"

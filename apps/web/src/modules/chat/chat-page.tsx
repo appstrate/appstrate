@@ -9,12 +9,15 @@
 // (`chat-shell.tsx`, the only other importer of the module's UI — it mounts the
 // two pieces that belong to the shell rather than to the thread).
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
+import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
+import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useUploadClient } from "../../hooks/use-upload";
@@ -24,10 +27,19 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatShell } from "./chat-shell";
+import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
+import { usePermissions } from "../../hooks/use-permissions";
+
+// One element for the page's lifetime: it sits in the composer slot, which the
+// chat memoizes, and the chip keeps itself current through its own hooks.
+const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
+  // The agent-authoring preference is per user: bind it before the composer paints.
+  const userId = useAuth().user?.id ?? null;
+  useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
@@ -62,14 +74,15 @@ export function ChatModulePage() {
   // The same namespace's `t` is injected into the module, so the shell AROUND
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
-  // The persona is read reactively and threaded through so this callback's
-  // identity changes when the preview starts or ends. The module's SSE effects
-  // depend on `getHeaders`, and a stream reads its URL once — without this they
-  // would keep tailing under the authority the preview replaced.
+  const { can } = usePermissions();
+  // Persona and space are threaded through so this callback's identity moves
+  // with either: the module's streams read their URL once, and would otherwise
+  // keep tailing under the replaced authority or miss a space resolved late.
   const viewAs = useViewAsHeader();
+  const spaceId = useCurrentSpaceId();
   const getHeaders = useCallback(
-    () => ({ ...buildScopingHeaders(viewAs), "X-Chat-Locale": i18n.language }),
-    [i18n, viewAs],
+    () => ({ ...buildScopingHeaders(viewAs, spaceId), "X-Chat-Locale": i18n.language }),
+    [i18n, viewAs, spaceId],
   );
   const translate = useCallback(
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
@@ -118,6 +131,7 @@ export function ChatModulePage() {
       onConversationChange={onConversationChange}
       headerActions={<ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />}
       t={translate}
+      can={can}
     >
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="min-w-0 flex-1">
@@ -128,10 +142,12 @@ export function ChatModulePage() {
             initialComposerDraft={initialComposerDraft}
             onConversationChange={onConversationChange}
             onOpenFile={presentFile}
+            composerActions={COMPOSER_ACTIONS}
             downloadFile={onDownloadFile}
             useFileImageSrc={useFileImageSrc}
             uploadFile={uploadFile}
             t={translate}
+            can={can}
           />
         </div>
         <ConversationSidebar

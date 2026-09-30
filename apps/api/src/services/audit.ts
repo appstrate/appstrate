@@ -14,14 +14,16 @@
  * argument plumbing.
  */
 
+import { createInFlightRegistry } from "../lib/in-flight.ts";
 import type { Context } from "hono";
+import type { AuditPayload } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { auditEvents } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
-import { viewAsWire } from "../lib/view-as.ts";
+import { viewAsAudit } from "../lib/view-as.ts";
 
 type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {});
 
@@ -34,12 +36,17 @@ interface RecordAuditInput {
   action: string;
   resourceType: string;
   resourceId?: string | null;
-  before?: Record<string, unknown> | null;
-  after?: Record<string, unknown> | null;
+  before?: AuditPayload | null;
+  after?: AuditPayload | null;
   ip?: string | null;
   userAgent?: string | null;
   requestId?: string | null;
 }
+
+type ContextAuditInput = Omit<
+  RecordAuditInput,
+  "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
+>;
 
 export async function recordAudit(input: RecordAuditInput): Promise<void> {
   try {
@@ -74,60 +81,28 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
  * `drainAudits` so a process recycle still flushes the trail. Same shape as
  * `packages/module-chat/src/inflight.ts` for chat turns.
  */
-const inFlightAudits = new Set<Promise<unknown>>();
+const inFlightAudits = createInFlightRegistry();
 
 /**
  * Register an audit insert as in flight until it settles. Returns the same
- * promise so a caller can still await it when it wants to. Settlement (either
- * way) removes the entry — `recordAudit` never rejects, but a stubbed sink
- * might, and a rejected `finally` chain would surface as an unhandled
- * rejection, so both branches are handled explicitly.
+ * promise so a caller can still await it when it wants to.
  */
 export function trackAudit<T>(promise: Promise<T>): Promise<T> {
-  inFlightAudits.add(promise);
-  const untrack = () => {
-    inFlightAudits.delete(promise);
-  };
-  promise.then(untrack, untrack);
-  return promise;
+  return inFlightAudits.track(promise);
 }
 
 /** Number of audit inserts registered and not yet settled. */
 export function pendingAuditCount(): number {
-  return inFlightAudits.size;
+  return inFlightAudits.size();
 }
 
 /**
- * Await every tracked audit insert, capped at `timeoutMs`. Loops until the
- * registry is empty — an HTTP request still finishing during shutdown may
- * register an insert after the first snapshot — or the cap fires. `pending`
- * is the number of inserts awaited; `drained` is false when the cap fired
- * first (the remaining inserts stay registered and the caller — the shutdown
- * handler — decides what to log).
+ * Await every tracked audit insert, capped at `timeoutMs` — see
+ * {@link createInFlightRegistry}. The caller (the shutdown handler) decides
+ * what to log.
  */
-export async function drainAudits(
-  timeoutMs: number,
-): Promise<{ pending: number; drained: boolean }> {
-  let awaited = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), timeoutMs);
-    timer.unref?.();
-  });
-  try {
-    while (inFlightAudits.size > 0) {
-      const pending = [...inFlightAudits];
-      awaited += pending.length;
-      const outcome = await Promise.race([
-        Promise.allSettled(pending).then(() => "settled" as const),
-        timeout,
-      ]);
-      if (outcome === "timeout") return { pending: awaited, drained: false };
-    }
-    return { pending: awaited, drained: true };
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+export function drainAudits(timeoutMs: number): Promise<{ pending: number; drained: boolean }> {
+  return inFlightAudits.drain(timeoutMs);
 }
 
 /**
@@ -142,17 +117,16 @@ export async function drainAudits(
  * there).
  *
  * A route acting on a resource in another space re-enters that space before it
- * writes, so the spaceId read here is already the resource's. No per-call override.
+ * writes, so the space read here is already the resource's. A module route
+ * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
+ * (the credential's) alone — hence `space` first. No per-call override.
  *
- * Under a role preview the persona goes into `after.view_as`; the actor stays
+ * Under a role preview the persona goes into `after.viewAs`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
-  input: Omit<
-    RecordAuditInput,
-    "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
-  > & { orgIdOverride?: string },
+  input: ContextAuditInput & { orgIdOverride?: string },
 ): Promise<void> {
   const { orgIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
@@ -178,13 +152,28 @@ export async function recordAuditFromContext(
   const persona = c.get("viewAs");
   await recordAudit({
     ...auditInput,
-    ...(persona ? { after: { ...(auditInput.after ?? {}), view_as: viewAsWire(persona) } } : {}),
+    ...(persona ? { after: { ...(auditInput.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
     orgId,
-    spaceId: c.get("spaceId") ?? null,
+    spaceId: c.get("space")?.id ?? c.get("spaceId") ?? null,
     actorType,
     actorId,
+    ...requestAuditMeta(c),
+  });
+}
+
+/** For session-less doors (OAuth callback, hosted connect): the caller names the principal. */
+export async function recordAuditAs(
+  c: Context<AppEnv>,
+  principal: { orgId: string; spaceId: string | null; actorType: AuditActorType; actorId: string },
+  input: ContextAuditInput,
+): Promise<void> {
+  await recordAudit({ ...input, ...principal, ...requestAuditMeta(c) });
+}
+
+function requestAuditMeta(c: Context<AppEnv>) {
+  return {
     ip: getClientIpFromRequest(c.req.raw),
     userAgent: c.req.header("user-agent") ?? null,
     requestId: c.get("requestId") ?? null,
-  });
+  };
 }

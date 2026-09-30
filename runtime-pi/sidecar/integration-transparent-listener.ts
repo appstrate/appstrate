@@ -24,7 +24,8 @@
  *     header (the only place it exists — the wire target IP is ours);
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
- *     optional authorized-host matcher;
+ *     egress allowlist, that of the runner the peer belongs to
+ *     (`policyForPeer`, an unknown peer is refused — #1458);
  *   - dial the upstream at the PINNED resolved address — never at the
  *     kernel-level original destination, which is always our own IP and,
  *     more importantly, is attacker-controlled ordering: the hostname the
@@ -47,10 +48,20 @@
 import { createServer as netCreateServer } from "node:net";
 import type { Socket } from "node:net";
 
-import { isBlockedHost, resolveAndCheckHost, type HostResolver } from "./helpers.ts";
+import {
+  isBlockedHost,
+  resolveAndCheckHost,
+  socketPeer,
+  PREAMBLE_TIMEOUT_MS,
+  type AuthorityPolicy,
+  type HostResolver,
+  type Peer,
+} from "./helpers.ts";
 import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
+import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
+import { logger } from "./logger.ts";
 
 interface CreateTransparentListenerOptions {
   /** Bind host — 0.0.0.0 on the per-run bridge network. */
@@ -69,12 +80,8 @@ interface CreateTransparentListenerOptions {
   isBlockedHostFn?: typeof isBlockedHost;
   /** Injectable DNS resolver for the rebind guard (tests stub it). */
   resolveHostFn?: HostResolver;
-  /**
-   * Optional hard egress allowlist — same contract as the CONNECT
-   * listener's `authorizedHostMatcher` (#543): `undefined` leaves egress
-   * SSRF-floored-open, matching today's behaviour.
-   */
-  authorizedHostMatcher?: (host: string) => boolean;
+  /** Egress policy of the runner `peer` belongs to; `null` = refused. */
+  policyForPeer: (peer: Peer) => Promise<AuthorityPolicy | null>;
 }
 
 export interface TransparentListenerHandle {
@@ -85,15 +92,6 @@ export interface TransparentListenerHandle {
 
 /** Cap on plain-HTTP head accumulation while hunting for the Host header. */
 const MAX_HTTP_HEAD_BYTES = 16 * 1024;
-
-/**
- * Read timeout for the preamble phase (ClientHello / HTTP head). A client
- * that connects and stalls — or sends a complete SNI-less ClientHello we
- * can never route — is torn down instead of holding the socket open.
- * Once the splice starts, {@link relaySockets} replaces this with its own
- * idle timeout.
- */
-const PREAMBLE_TIMEOUT_MS = 10_000;
 
 /**
  * Pull the hostname out of a plain-HTTP request head. Accepts both the
@@ -158,11 +156,13 @@ export function createTransparentEgressListener(
   const isBlockedHostFn = options.isBlockedHostFn ?? isBlockedHost;
   const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
-  const matcher = options.authorizedHostMatcher;
 
   const server = netCreateServer();
 
   server.on("connection", (clientSocket: Socket) => {
+    // Peer gate, started at accept.
+    const peer = socketPeer(clientSocket);
+    const peerPolicy = peer ? options.policyForPeer(peer).catch(() => null) : Promise.resolve(null);
     // Upstream is dialed later, after the async SSRF/resolve phase. Track
     // it in the connection scope so ANY client teardown — including the
     // preamble idle-timeout firing mid-dial, before relaySockets wires its
@@ -205,6 +205,13 @@ export function createTransparentEgressListener(
         // void. relaySockets' pipe() resumes the stream.
         clientSocket.pause();
 
+        const policy = await peerPolicy;
+        if (!policy) {
+          const target = `<unknown>:${upstreamPort}`;
+          emit({ kind: "tunnel-refused", target, reason: "peer-not-allowed", peer: peer?.address });
+          clientSocket.destroy();
+          return;
+        }
         if (!targetHost) {
           emit({
             kind: "tunnel-refused",
@@ -223,8 +230,8 @@ export function createTransparentEgressListener(
           return;
         }
 
-        // Optional hard egress allowlist (#543 contract; no-op by default).
-        if (matcher && !matcher(targetHost)) {
+        // Hard egress allowlist — before any DNS lookup of the client-supplied name.
+        if (!policy.allowsAuthority(targetHost, upstreamPort)) {
           emit({ kind: "tunnel-refused", target, reason: "not-authorized" });
           clientSocket.destroy();
           return;
@@ -295,4 +302,94 @@ export function createTransparentEgressListener(
       return new Promise<void>((res) => server.close(() => res()));
     },
   };
+}
+
+/** Bind ports of the transparent plane. */
+interface TransparentPlanePorts {
+  dns: number;
+  tls: number;
+  http: number;
+}
+
+export interface TransparentEgressPlaneOptions {
+  /**
+   * IPv4 the plane binds AND the DNS responder answers with — one address, so
+   * every answer lands the runner's `connect(host, 443)` on the splicers.
+   */
+  ipv4: () => Promise<string>;
+  /** Egress policy of the runner a peer belongs to; `null` = refused. */
+  policyForPeer: (peer: Peer) => Promise<AuthorityPolicy | null>;
+  /** Defaults to 53/443/80; tests bind unprivileged ports. */
+  ports?: TransparentPlanePorts;
+  /** Test stubs for both splicers; production passes none. */
+  splicer?: Pick<
+    CreateTransparentListenerOptions,
+    "upstreamPort" | "isBlockedHostFn" | "resolveHostFn"
+  >;
+}
+
+export interface TransparentEgressPlane {
+  /** The address the plane binds and answers with. */
+  readonly ipv4: string;
+  /** Idempotent. */
+  close(): Promise<void>;
+}
+
+/**
+ * Mount the per-run transparent egress plane (#779): the DNS responder that
+ * resolves every external name to `ipv4`, and the SNI-passthrough splicers on
+ * :443/:80 at that same address. Shared by the docker adapter (the sidecar's
+ * IP on the per-run bridge) and the process adapter (127.0.0.1 in the guest).
+ *
+ * Any failure — resolving `ipv4`, a bind — is logged and swallowed (`null`):
+ * degrading to the CONNECT proxy contract removes a route and never widens
+ * one, so it is always safe.
+ *
+ * The splicers resolve with the default DNS resolver — deliberately NOT
+ * `bundleFetchOpts.resolveHostFn`, a test-injection seam (always `undefined` in
+ * production; see the `bootIntegrations` call in server.ts) that isn't threaded
+ * through the adapter interface. If a production resolver override ever lands,
+ * revisit so both egress planes resolve identically.
+ */
+export async function startTransparentEgressPlane(
+  options: TransparentEgressPlaneOptions,
+): Promise<TransparentEgressPlane | null> {
+  const ports = options.ports ?? { dns: 53, tls: 443, http: 80 };
+  const handles: Array<{ close(): Promise<void> }> = [];
+  const close = async () => {
+    for (const h of handles.splice(0)) {
+      await h.close().catch(() => {});
+    }
+  };
+  try {
+    const ip = await options.ipv4();
+    const onEvent = (event: { kind: string; target: string; reason?: string }) => {
+      const log = event.kind === "tunnel-opened" ? logger.info : logger.warn;
+      log.call(logger, "transparent egress event", event);
+    };
+    const splicer = (port: number) =>
+      createTransparentEgressListener({
+        ...options.splicer,
+        host: ip,
+        port,
+        onEvent,
+        policyForPeer: options.policyForPeer,
+      });
+    const dns = createIntegrationDnsResponder({ answerIpv4: ip, host: ip, port: ports.dns });
+    handles.push(dns);
+    const tls = splicer(ports.tls);
+    handles.push(tls);
+    const http = splicer(ports.http);
+    handles.push(http);
+    await Promise.all([dns.ready, tls.ready, http.ready]);
+    logger.info("transparent egress ready", { dnsIp: ip });
+    return { ipv4: ip, close };
+  } catch (err) {
+    await close();
+    logger.warn(
+      "transparent egress unavailable — env-delivery runners fall back to the CONNECT proxy contract (proxy-unaware HTTP clients will fail, #779)",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+    return null;
+  }
 }

@@ -20,11 +20,17 @@
  *    with the agent (judged from its home) and are named, never linked: a skill
  *    not shared to the reader's space would open on a 404.
  *
+ * A skill carries one more per-space fact beside its switch: whether that
+ * space IMPOSES it on every chat conversation held there (`chat_enforced`).
+ *
  * Runs, versions, files and settings stay on the package's own page, one link
  * away.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
@@ -54,13 +60,19 @@ import {
   TableRow,
 } from "@appstrate/ui/components/table";
 import type { PackageType } from "@appstrate/core/validation";
-import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
-import { fetchPackageDetail, PACKAGE_CONFIG } from "../hooks/use-packages";
+import {
+  useSetChatEnforced,
+  type LibraryPackageItem,
+  type LibrarySpace,
+} from "../hooks/use-library";
+import { fetchPackageDetail } from "../hooks/use-packages";
 import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
+import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
 import type { CataloguePlacement } from "../lib/catalogue-placement";
 import {
+  sheetChatEnforce,
   sheetOffers,
   sheetSpaceMode,
   sheetSpaceRows,
@@ -68,6 +80,7 @@ import {
 } from "../lib/catalogue-sheet";
 import { formatDateField } from "../lib/format-date";
 import { packageKeys } from "../lib/query-keys";
+import { ConfirmModal } from "./confirm-modal";
 import { SettingsGroup } from "./settings/setting-row";
 import { SettingsHeading } from "./settings/settings-heading";
 
@@ -154,6 +167,7 @@ export function CataloguePreview({
   spaces,
   placement,
   grantOf,
+  mayConfigureIn,
   integrations,
   agents,
   protocol,
@@ -168,6 +182,12 @@ export function CataloguePreview({
   placement: CataloguePlacement;
   /** The reader's verdict for switching it on (`next: true`) or off in a space. */
   grantOf: (spaceId: string, next: boolean) => boolean;
+  /**
+   * The reader's verdict for changing how a space runs a placed package (the
+   * placement PATCH's `configure` gate), which is what imposing a skill on that
+   * space's chat asks. No personal-space exemption, unlike activation.
+   */
+  mayConfigureIn: (spaceId: string) => boolean;
   /** The library's integrations: what an agent's switch-on would still need. */
   integrations: LibraryPackageItem[];
   /** The library's agents: which dependents of this package the reader may be told about. */
@@ -186,7 +206,13 @@ export function CataloguePreview({
   const currentSpaceId = useCurrentSpaceId();
   const from = readingSpace(placement, spaces, currentSpaceId);
   const { data: detail } = useQuery({
-    queryKey: packageKeys.detail(PACKAGE_CONFIG[type].path, orgId, from ?? null, item.id, null),
+    queryKey: packageKeys.detail(
+      PACKAGE_TYPE_ROUTE_SEGMENT[type],
+      orgId,
+      from ?? null,
+      item.id,
+      null,
+    ),
     queryFn: () => fetchPackageDetail(type, item.id, undefined, from),
     enabled: !!orgId && !!from,
     // The sheet reads without the detail; a refusal is not worth a retry.
@@ -246,6 +272,60 @@ export function CataloguePreview({
       onCheckedChange={(next) => onSetActive(row.id, next === true)}
     />
   );
+  // ── Imposed on the chat (skills only, `lib/catalogue-sheet`) ──
+  const setChatEnforced = useSetChatEnforced();
+  const [confirmEnforce, setConfirmEnforce] = useState<SheetSpaceRow | null>(null);
+  const enforceable = type === "skill";
+  const chatEnforcedIn = (spaceId: string) =>
+    item.placements.some((entry) => entry.space_id === spaceId && entry.chat_enforced);
+  const enforcesAnywhere = enforceable && rows.some((row) => chatEnforcedIn(row.id));
+  const notifyEnforceError = (err: unknown) => {
+    const key = chatEnforceErrorKey(err);
+    toast.error(key ? t(key, { ns: "common" }) : getErrorMessage(err));
+  };
+  const enforceSwitchFor = (row: SheetSpaceRow) => {
+    const verdict = sheetChatEnforce(type, row, {
+      enforced: chatEnforcedIn(row.id),
+      published: item.published,
+      mayConfigure: mayConfigureIn(row.id),
+    });
+    if (!verdict) return null;
+    const pending =
+      setChatEnforced.isPending &&
+      setChatEnforced.variables?.packageId === item.id &&
+      setChatEnforced.variables.spaceId === row.id;
+    return (
+      <Switch
+        checked={verdict.checked}
+        disabled={verdict.disabled || pending}
+        aria-label={t("library.chatEnforce.toggle", {
+          ns: "common",
+          package: item.name || item.id,
+          space: row.name,
+        })}
+        title={
+          verdict.refusal === "configure"
+            ? t("library.chatEnforce.cannot", { ns: "common" })
+            : verdict.refusal === "publishFirst"
+              ? t("library.chatEnforce.publishFirst", { ns: "common" })
+              : undefined
+        }
+        onCheckedChange={(next) => {
+          // Imposing discloses the content to every member who chats there:
+          // it is confirmed first. Releasing discloses nothing.
+          if (next) setConfirmEnforce(row);
+          else
+            setChatEnforced.mutate(
+              { spaceId: row.id, packageId: item.id, enforced: false },
+              { onError: notifyEnforceError },
+            );
+        }}
+      />
+    );
+  };
+
+  const singleEnforce = mode === "single" && rows[0] ? enforceSwitchFor(rows[0]) : null;
+
   const missingText = (spaceId: string) => {
     const names = missingIn(spaceId);
     return names.length > 0 ? t("catalogue.sheet.missing", { names: names.join(", ") }) : null;
@@ -430,6 +510,16 @@ export function CataloguePreview({
               : t("catalogue.activeNowhere")}
           </p>
         )}
+        {mode === "readonly" && enforcesAnywhere && (
+          <p className="text-muted-foreground mt-1 text-sm">
+            {t("catalogue.sheet.chatEnforcedIn", {
+              spaces: rows
+                .filter((row) => chatEnforcedIn(row.id))
+                .map((row) => row.name)
+                .join(", "),
+            })}
+          </p>
+        )}
         {mode === "single" && rows[0] && (
           <div
             className={cn(
@@ -449,6 +539,14 @@ export function CataloguePreview({
             {switchFor(rows[0])}
           </div>
         )}
+        {singleEnforce && (
+          // Its own line under the space's, the same shape: the space line
+          // says whether it runs there, this one whether its chat imposes it.
+          <label className="border-border mt-2 flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm">
+            <span>{t("library.column.chatEnforced", { ns: "common" })}</span>
+            {singleEnforce}
+          </label>
+        )}
         {mode === "table" && (
           <div className="overflow-hidden rounded-lg border">
             <Table>
@@ -459,6 +557,11 @@ export function CataloguePreview({
                   {/* Only an agent has a dependency another space must hold. */}
                   {missingAnywhere && <TableHead>{t("catalogue.sheet.missingColumn")}</TableHead>}
                   <TableHead className="w-20 text-right">{t("catalogue.filter.active")}</TableHead>
+                  {enforceable && (
+                    <TableHead className="w-32 text-right">
+                      {t("library.column.chatEnforced", { ns: "common" })}
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -483,6 +586,9 @@ export function CataloguePreview({
                       </TableCell>
                     )}
                     <TableCell className="text-right">{switchFor(row)}</TableCell>
+                    {enforceable && (
+                      <TableCell className="text-right">{enforceSwitchFor(row)}</TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -490,6 +596,29 @@ export function CataloguePreview({
           </div>
         )}
       </SettingsGroup>
+
+      {enforceable && (
+        <ConfirmModal
+          open={confirmEnforce !== null}
+          onClose={() => setConfirmEnforce(null)}
+          title={t("library.chatEnforce.confirmTitle", { ns: "common" })}
+          description={t("library.chatEnforce.confirmDescription", {
+            ns: "common",
+            package: item.name || item.id,
+            space: confirmEnforce?.name ?? "",
+          })}
+          confirmLabel={t("library.chatEnforce.confirm", { ns: "common" })}
+          variant="default"
+          isPending={setChatEnforced.isPending}
+          onConfirm={() => {
+            if (!confirmEnforce) return;
+            setChatEnforced.mutate(
+              { spaceId: confirmEnforce.id, packageId: item.id, enforced: true },
+              { onError: notifyEnforceError, onSettled: () => setConfirmEnforce(null) },
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -11,10 +11,13 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   renderCredentialTemplate,
+  renderAuthAuthorizedUris,
+  runnerEgressFor,
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
   getAppstrateConnectMeta,
+  authKeysServingSelection,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -175,5 +178,80 @@ describe("getAppstrateConnectMeta", () => {
   it("returns undefined when the connect block or meta is absent", () => {
     expect(getAppstrateConnectMeta(undefined)).toBeUndefined();
     expect(getAppstrateConnectMeta({ tool: {} })).toBeUndefined();
+  });
+});
+
+describe("authKeysServingSelection", () => {
+  const AUTHS = { oauth: { type: "oauth2" }, pat: { type: "api_key" } };
+  function serverless(apiAuths?: Record<string, unknown>): IntegrationManifest {
+    const m = manifest({ kind: "none" }, AUTHS) as unknown as Record<string, unknown>;
+    if (apiAuths) m._meta = { "dev.appstrate/api": { auths: apiAuths } };
+    return m as unknown as IntegrationManifest;
+  }
+
+  it("names the auths whose api_call tool is selected", () => {
+    const m = serverless({ oauth: {}, pat: {} });
+    expect(authKeysServingSelection(m, ["api_call__pat"])).toEqual(new Set(["pat"]));
+    expect(authKeysServingSelection(m, "*")).toEqual(new Set(["oauth", "pat"]));
+  });
+
+  // No auth serving is not a connection problem: refusing every connection
+  // for it would name a remedy (another connection) that cannot exist.
+  it("is null, not empty, when the manifest exposes no api_call tool", () => {
+    expect(authKeysServingSelection(serverless(), "*")).toBeNull();
+    expect(authKeysServingSelection(serverless(), ["search"])).toBeNull();
+  });
+
+  it("is null, not empty, when the selection names no current api_call tool", () => {
+    expect(
+      authKeysServingSelection(serverless({ oauth: {}, pat: {} }), ["api_call__gone"]),
+    ).toBeNull();
+  });
+});
+
+describe("renderAuthAuthorizedUris", () => {
+  const ssh = { authorized_uris: ["ssh://{$credential.host}:{$credential.port}"] };
+
+  it("renders a templated entry from the connection's fields", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" })).toEqual(["ssh://h:22"]);
+  });
+
+  it("drops a templated entry whose field is missing (deny-all), never the raw template", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "h" })).toEqual([]);
+  });
+
+  it("drops a templated entry whose value is not a literal host label or port", () => {
+    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" })).toEqual([]);
+  });
+
+  it("passes static entries unchanged and treats an absent list as empty", () => {
+    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {})).toEqual([
+      "https://a.example/**",
+    ]);
+    expect(renderAuthAuthorizedUris({}, {})).toEqual([]);
+  });
+});
+
+describe("runnerEgressFor", () => {
+  it("is undefined when the auth declares no outbound surface", () => {
+    expect(runnerEgressFor({}, [])).toBeUndefined();
+    expect(runnerEgressFor({ authorized_uris: [] }, [])).toBeUndefined();
+  });
+
+  it("carries the rendered list, even when rendering emptied it (deny-all)", () => {
+    const auth = { authorized_uris: ["ssh://{$credential.host}:22"] };
+    expect(runnerEgressFor(auth, [])).toEqual({ authorizedUris: [], allowAllUris: false });
+    expect(runnerEgressFor(auth, ["ssh://h:22"])).toEqual({
+      authorizedUris: ["ssh://h:22"],
+      allowAllUris: false,
+    });
+  });
+
+  it("carries allow_all_uris", () => {
+    expect(runnerEgressFor({ allow_all_uris: true }, [])).toEqual({
+      authorizedUris: [],
+      allowAllUris: true,
+    });
   });
 });

@@ -128,7 +128,7 @@ describe("runner protocol round-trip (real client ↔ real server)", () => {
     const client = makeClient(fake);
     await client.initialize();
 
-    const boundary = await client.createIsolationBoundary("run-1", { skipSidecar: false });
+    const boundary = await client.createIsolationBoundary("run-1");
     expect(boundary).toEqual(BOUNDARY);
 
     const sidecarSpec = {

@@ -56,23 +56,23 @@ describe("unknown request-body fields are refused, not stripped", () => {
   // The case named in the audit: `generation_config` is the snake spelling a
   // client would reasonably guess, since `schedules.ts` spells the same concept
   // `generation_config_override`. It used to answer 200 and change nothing.
-  it("spaces — PUT /api/spaces/{spaceId}/packages/{scope}/{name}", async () => {
+  it("spaces — PATCH /api/spaces/{spaceId}/packages/{scope}/{name}", async () => {
     const packageId = "@strictbodies/pkg";
     await seedPackage({ id: packageId, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
     await seedSpacePackage(ctx.defaultSpaceId, packageId);
 
     const put = (body: Record<string, unknown>) =>
       app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
-    await expectUnknownField(await put({ generation_config: { temperature: 0.4 } }));
+    await expectUnknownField(await put({ generationConfig: { temperature: 0.4 } }));
     // `enabled` is not a field of this body either: activation has its own pair
     // of doors, and a retired name must fail rather than be dropped in silence.
     await expectUnknownField(await put({ enabled: false }));
-    expect((await put({ generationConfig: null })).status).toBe(200);
+    expect((await put({ generation_config: null })).status).toBe(200);
   });
 
   it("proxies — POST /api/proxies", async () => {
@@ -134,32 +134,18 @@ describe("unknown request-body fields are refused, not stripped", () => {
       port: 587,
       username: "u",
       pass: "p",
-      fromAddress: "noreply@tenant.example",
+      from_address: "noreply@tenant.example",
     };
     await expectUnknownField(await put({ ...base, tls: true }));
+    await expectUnknownField(await put({ ...base, fromName: "Tenant" }));
     expect((await put(base)).status).toBe(200);
   });
 
-  // The two routes that pass a `param` to `readJsonBody`. That param is the
+  // The route that passes a `param` to `readJsonBody`. That param is the
   // fallback field name for a Zod issue with an empty path — and Zod reports
-  // `unrecognized_keys` with an EMPTY path, so both used to answer a 400 that
+  // `unrecognized_keys` with an EMPTY path, so it used to answer a 400 that
   // blamed the field the request had spelled correctly. Live half of
   // `test/unit/unknown-key-field-naming.test.ts`.
-  it("skills — PUT /api/agents/{scope}/{name}/skills names the extra key, not `skillIds`", async () => {
-    const packageId = "@strictbodies/skillsbody";
-    await seedPackage({ id: packageId, orgId: ctx.orgId, type: "agent" });
-
-    const res = await app.request(`/api/agents/${packageId}/skills`, {
-      method: "PUT",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ skillIds: [], extra: 1 }),
-    });
-
-    const body = await expectUnknownField(res);
-    expect(body.errors![0]!.field).toBe("extra");
-    expect(body.detail).toStartWith("extra: ");
-  });
-
   it("github import — POST /api/packages/import-github names the extra key, not `url`", async () => {
     const res = await app.request("/api/packages/import-github", {
       method: "POST",

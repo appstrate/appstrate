@@ -5,7 +5,7 @@
  * `/api/mcp/o/:org` HTTP endpoint + in-process dispatch:
  *
  *  - `list_files` returns the caller-visible files (agent outputs +
- *    the caller's own chat uploads), respects `run_id` / `purpose` filters, and
+ *    the caller's own chat uploads), respects `runId` / `purpose` filters, and
  *    does NOT leak another member's private chat-session files.
  *  - `resources/read` on an `appfile://` URI: a small textual doc inlines its
  *    bytes, a binary doc returns metadata only, and a foreign (cross-org) doc is
@@ -35,36 +35,17 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
-import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
+import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+await registerTestPlatformApp();
 
-const MCP_ACCEPT = "application/json, text/event-stream";
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
-
-async function rpc(
-  headers: Record<string, string>,
-  message: Record<string, unknown>,
-  requestOrigin = "",
-): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
-  const res = await app.request(`${requestOrigin}/api/mcp/o/${headers["X-Org-Id"]}`, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-    body: JSON.stringify(message),
-  });
-  const text = await res.text();
-  return { status: res.status, envelope: text ? (JSON.parse(text) as JsonRpcEnvelope) : {} };
-}
+const rpc = mcpRpc(app);
 
 /** Parse the JSON a tool returns in its first text content block. */
 function toolData(envelope: JsonRpcEnvelope): { isError: boolean; data: Record<string, unknown> } {
@@ -165,14 +146,13 @@ describe("mcp list_files", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpdocs" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
     headers = await apiKeyHeaders(ctx);
   });
 
-  it("returns the run's published files and respects run_id + purpose filters", async () => {
+  it("returns the run's published files and respects runId + purpose filters", async () => {
     const runA = await seedRun(scope);
     const runB = await seedRun(scope);
     const docA = await publishDoc(scope, runA, "a.txt", "text/plain", "alpha");
@@ -182,7 +162,7 @@ describe("mcp list_files", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "list_files", arguments: { run_id: runA } },
+      params: { name: "list_files", arguments: { runId: runA } },
     });
     const { data } = toolData(envelope);
     const docs = data.files as Array<Record<string, unknown>>;
@@ -192,7 +172,7 @@ describe("mcp list_files", () => {
       uri: `appfile://${docA}`,
       name: "a.txt",
       mime: "text/plain",
-      run_id: runA,
+      runId: runA,
       // Each entry carries the same capabilities the REST DTO computes, plus the
       // flat `downloadable` mirror — an agent_output is downloadable by any reader.
       downloadable: true,
@@ -202,7 +182,7 @@ describe("mcp list_files", () => {
       metadata: true,
       download: true,
     });
-    expect(data.has_more).toBe(false);
+    expect(data.hasMore).toBe(false);
 
     // purpose=user_upload excludes agent outputs.
     const uploads = await rpc(headers, {
@@ -212,6 +192,15 @@ describe("mcp list_files", () => {
       params: { name: "list_files", arguments: { purpose: "user_upload" } },
     });
     expect((toolData(uploads.envelope).data.files as unknown[]).length).toBe(0);
+
+    // An undeclared `run_id` argument fails loudly instead of listing unfiltered.
+    const undeclared = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "list_files", arguments: { run_id: runA } },
+    });
+    expect(undeclared.envelope.error?.message).toContain("Unknown argument(s): run_id");
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {
@@ -292,7 +281,6 @@ describe("mcp resources/read (appfile://)", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpres" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
@@ -540,7 +528,6 @@ describe("mcp file-backed package workflow", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     runOwner = ctx.user.id;
@@ -589,10 +576,8 @@ describe("mcp file-backed package workflow", () => {
   it("places a root homed elsewhere by the same rule the REST import uses", async () => {
     // R7 says a re-import places its root the way `POST /api/spaces/{id}/packages`
     // does: the offer is written with the installation when the caller may make
-    // one. The REST import route passes `holdsPackageShareAuthority`; this tool
-    // passed NOTHING, so `mayShareRoot?.() ?? false` was the fail-closed
-    // answer for every caller and `root_active` was permanently `false`
-    // here. One act, two behaviours — decided by which door asked.
+    // one. One act, one rule — this tool asks the same `holdsPackageShareAuthority`
+    // predicate the REST import route asks, off its own request.
     //
     // The fixture homes the root in ANOTHER team space of the organization and
     // places it nowhere else, which is the reachable half of that rule: a

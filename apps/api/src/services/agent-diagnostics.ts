@@ -139,10 +139,12 @@ export async function getAgentDiagnostics(args: {
   scope: SpaceScope;
   agent: LoadedPackage;
   actor: Actor;
-  isAdmin: boolean;
+  /** The connect routes' own guards, so a diagnostic cannot promise what they refuse. */
+  canConnect: boolean;
+  canConfigureIntegrations: boolean;
   version?: string;
 }): Promise<AgentDiagnosticsResult> {
-  const { scope, actor, isAdmin } = args;
+  const { scope, actor, canConnect, canConfigureIntegrations } = args;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
@@ -161,7 +163,8 @@ export async function getAgentDiagnostics(args: {
       scope,
       agentPackageId: agent.id,
       actor,
-      canConfigureIntegrations: isAdmin,
+      canConnect,
+      canConfigureIntegrations,
       version: versionRef,
     }),
     resolveModel(scope.orgId, agent.id, packageConfig.modelId),

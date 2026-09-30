@@ -22,6 +22,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -39,6 +40,7 @@ import {
   SelectConversationProvider,
 } from "./runtime-context.ts";
 import type {
+  ChatCan,
   ChatHost,
   ChatTranslate,
   DownloadFile,
@@ -48,34 +50,48 @@ import type {
   UploadFile,
   UseFileImageSrc,
 } from "./runtime-context.ts";
-export type { ChatTranslate, GetHeaders, OpenFile, SelectConversation } from "./runtime-context.ts";
+export type {
+  ChatCan,
+  ChatTranslate,
+  GetHeaders,
+  OpenFile,
+  SelectConversation,
+} from "./runtime-context.ts";
 export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
 export { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
-import { isModelLive } from "../model-liveness.ts";
 import {
   loadHistory,
   markSessionRead,
   mintSessionId,
+  patchSessionsCache,
   sessionQueryKey,
   sessionsQueryKey,
   spaceIdFromHeaders,
   SESSIONS_QUERY_KEY,
   stopSession,
+  type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
 import { useSessions } from "./use-sessions.ts";
 import {
   subscribeGeneration,
   subscribeModel,
+  attachConversation,
   getCompatibleGenerationSettings,
-  getGenerationSettings,
   getSelectedModel,
-  setGenerationSettings,
-  setModelGenerationCapabilities,
+  editGenerationSettings,
+  setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
+import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { latestTurnModelId } from "./turn-model.ts";
+import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { SkillsPicker } from "./skills-picker.tsx";
+import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
+import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -137,6 +153,8 @@ export interface ChatPageProps {
   onOpenFile?: OpenFile;
   /** Optional host-owned actions displayed beside the conversation title. */
   headerActions?: ReactNode;
+  /** Optional host-owned controls beside the model picker. Pass a memoized node. */
+  composerActions?: ReactNode;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
@@ -146,6 +164,8 @@ export interface ChatPageProps {
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
+  /** The caller's grants (see `ChatCan`). Pass a stable function. */
+  can: ChatCan;
 }
 
 export function ChatPage({
@@ -155,10 +175,12 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
+  composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
   t,
+  can,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -196,25 +218,15 @@ export function ChatPage({
   const selectedModel = useSyncExternalStore(subscribeModel, getSelectedModel, getSelectedModel);
   const generation = useSyncExternalStore(
     subscribeGeneration,
-    getGenerationSettings,
-    getGenerationSettings,
+    getCompatibleGenerationSettings,
+    getCompatibleGenerationSettings,
   );
 
   // Runs on every catalog change (first load, refetch after `staleTime`), not
   // just on mount — a cached list served on re-entry still has to reconcile
-  // the stored selection. External-store sync in an effect (no setState).
+  // the selection. External-store sync in an effect (no setState).
   useEffect(() => {
-    if (!modelsQuery.data) return;
-    const list = modelsQuery.data;
-    setModelGenerationCapabilities(list);
-    // Reconcile a stale/absent stored selection to the org default. A model
-    // whose credential went dead is listed (the picker marks it, unpickable)
-    // but must not be kept as the stored selection nor adopted as the
-    // fallback — the server would reject it on the next send.
-    const live = list.filter(isModelLive);
-    const cur = getSelectedModel();
-    if (cur && live.some((m) => m.id === cur)) return;
-    setSelectedModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
+    if (modelsQuery.data) setModelCatalog(modelsQuery.data);
   }, [modelsQuery.data]);
 
   // Unread replies for conversations the user left mid-generation. `unread` is
@@ -237,15 +249,19 @@ export function ChatPage({
   // failed PUT self-heals on the next signal/refetch; a duplicate PUT from a
   // refetch landing mid-flight is idempotent (monotonic marker) server-side.
   // External-system sync in an effect (no setState) — React Compiler-safe.
+  const canWrite = can("chat:write");
   useEffect(() => {
-    if (!visible) return;
+    // Marking read is a write (`chat:write`); a read-only caller keeps the dot.
+    if (!visible || !canWrite) return;
     const active = sessions.data?.find((s) => s.id === activeId);
     if (!active?.unread) return;
-    queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(pageSpaceId), (prev) =>
-      prev?.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+    queryClient.setQueryData<SessionsCache>(sessionsQueryKey(pageSpaceId), (prev) =>
+      patchSessionsCache(prev, (rows) =>
+        rows.map((s) => (s.id === activeId ? { ...s, unread: false } : s)),
+      ),
     );
     void markSessionRead(getHeaders, activeId).catch(() => {});
-  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible]);
+  }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -256,8 +272,9 @@ export function ChatPage({
       downloadFile,
       useFileImageSrc,
       t,
+      can,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -276,19 +293,22 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
+  const authorsAgents = canAuthorAgents(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
+        {authorsAgents ? <AgentAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
           onSelect={setSelectedModel}
           generation={generation}
-          onGenerationChange={setGenerationSettings}
+          onGenerationChange={editGenerationSettings}
         />
+        {composerActions}
       </div>
     ),
-    [models, selectedModel, generation],
+    [authorsAgents, models, selectedModel, generation, composerActions],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -319,6 +339,8 @@ export function ChatPage({
               onConversationChange={onConversationChange}
               attachments={attachments}
               composerSlot={composerSlot}
+              canPinSkills={canPinSkills(can)}
+              canWrite={canWrite}
               serverGenerating={serverGenerating}
               serverUpdatedAt={serverUpdatedAt}
             />
@@ -338,6 +360,9 @@ interface ConversationProps {
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
   composerSlot?: React.ReactNode;
+  canPinSkills: boolean;
+  /** `chat:write`: without the picker, the space's enforced skills are still named. */
+  canWrite: boolean;
   /** Server session row `generating`, from the shared list; `undefined` = no row. */
   serverGenerating: boolean | undefined;
   /** Server session row `updatedAt`, from the shared list; `undefined` = no row. */
@@ -363,6 +388,9 @@ const Conversation = memo(function Conversation({
   id,
   getHeaders,
   isPersisted,
+  composerSlot,
+  canPinSkills,
+  canWrite,
   ...rest
 }: ConversationProps) {
   // Freeze persistence at mount. The runtime key (`id`) is stable across the
@@ -384,6 +412,37 @@ const Conversation = memo(function Conversation({
     gcTime: 0,
   });
 
+  // Stable identity: `ConversationInner` keys its store-attach effect on it.
+  const initialMessages = useMemo(() => history.data?.messages ?? [], [history.data?.messages]);
+
+  // No picker on a failed read: it would show the defaults, and a change would
+  // send them over the stored choice.
+  const showPicker = canPinSkills && !history.isError;
+  // What the user changed, sent with every turn (which writes it); nothing
+  // changed = nothing sent, and the stored selection stands. The ref is the
+  // transport's request-time read of the same value.
+  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
+  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
+  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
+    chosenSkillsRef.current = selection;
+    setChosenSkills(selection);
+  }, []);
+  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
+  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  const slot = useMemo(
+    () => (
+      <div className="flex items-center gap-2">
+        {showPicker ? (
+          <SkillsPicker getHeaders={getHeaders} selection={skills} onChange={chooseSkills} />
+        ) : (
+          canWrite && <EnforcedSkillsIndicator getHeaders={getHeaders} />
+        )}
+        {composerSlot}
+      </div>
+    ),
+    [getHeaders, skills, chooseSkills, showPicker, canWrite, composerSlot],
+  );
+
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
@@ -396,7 +455,9 @@ const Conversation = memo(function Conversation({
       id={id}
       getHeaders={getHeaders}
       isPersisted={persistedAtMount}
-      initialMessages={history.data ?? []}
+      initialMessages={initialMessages}
+      composerSlot={slot}
+      getChosenSkills={getChosenSkills}
       {...rest}
     />
   );
@@ -413,9 +474,22 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-}: ConversationProps & { initialMessages: UIMessage[] }) {
+  getChosenSkills,
+}: Omit<ConversationProps, "canPinSkills" | "canWrite"> & {
+  initialMessages: UIMessage[];
+  getChosenSkills: () => ChatSkillSelection | undefined;
+}) {
   const queryClient = useQueryClient();
   const spaceId = spaceIdFromHeaders(getHeaders);
+
+  // Pre-select the model of this conversation's newest turn. A layout effect,
+  // so the composer never paints one frame of the stored default first.
+  useLayoutEffect(() => {
+    attachConversation(id, latestTurnModelId(initialMessages));
+  }, [id, initialMessages]);
+
+  // Detach on unmount, in its own effect so a re-run above never drops a pick.
+  useLayoutEffect(() => () => attachConversation(null, null), []);
 
   // Header builder invoked by the transport at request/reconnect time. It reads
   // the model from the external store, NOT from React state: `useChat` recreates
@@ -437,21 +511,30 @@ function ConversationInner({
         api: "/api/chat",
         credentials: "include",
         headers: buildHeaders,
-        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => ({
-          body: {
-            ...body,
-            id: chatId,
-            messages,
-            generation: getCompatibleGenerationSettings(),
-          },
-        }),
+        prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
+          const skills = getChosenSkills();
+          return {
+            body: {
+              ...body,
+              id: chatId,
+              messages,
+              generation: getCompatibleGenerationSettings(),
+              // Read at request time, like the model above, for the same reason.
+              agent_authoring: getAgentAuthoringEnabled(),
+              ...(skills && {
+                skill_mode: skills.skillMode,
+                pinned_skills: skills.pinnedSkills,
+              }),
+            },
+          };
+        },
         // Native resume targets our per-session stream endpoint (the chat id is
         // the conversation id = the URL).
         prepareReconnectToStreamRequest: ({ id: chatId }) => ({
           api: `/api/chat/sessions/${chatId}/stream`,
         }),
       }),
-    [buildHeaders],
+    [buildHeaders, getChosenSkills],
   );
 
   const chat = useChat({
@@ -518,8 +601,8 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.length <= chatMessages.length) return;
-        setMessages(fetched);
+        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        setMessages(fetched.messages);
       })
       .catch(() => {
         // Best-effort: the next server change re-arms the rule.
@@ -557,19 +640,24 @@ function ConversationInner({
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) => {
-        const list = prev ?? [];
-        const existing = list.find((s) => s.id === id);
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
+        const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
           ...(existing ?? { id, title: null, unread: false }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
-        return [row, ...list.filter((s) => s.id !== id)];
+        return patchSessionsCache(
+          prev,
+          (rows, first) => [...(first ? [row] : []), ...rows.filter((s) => s.id !== id)],
+          row,
+        );
       });
     } else if (wasGenerating.current) {
-      queryClient.setQueryData<SessionSummary[]>(sessionsQueryKey(spaceId), (prev) =>
-        prev?.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+      queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) =>
+        patchSessionsCache(prev, (rows) =>
+          rows.map((s) => (s.id === id ? { ...s, generating: false } : s)),
+        ),
       );
       void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY });
     }

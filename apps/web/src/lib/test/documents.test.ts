@@ -15,7 +15,7 @@ import {
 function doc(overrides: Partial<DocumentLike>): DocumentLike {
   return {
     purpose: "agent_output",
-    run_id: null,
+    runId: null,
     packageId: null,
     mime: "application/octet-stream",
     ...overrides,
@@ -40,14 +40,14 @@ describe("mimeIconFor", () => {
 
 describe("documentRunHref", () => {
   it("builds the agent run route with literal scope slashes", () => {
-    expect(documentRunHref(doc({ run_id: "run_1", packageId: "@acme/writer" }))).toBe(
+    expect(documentRunHref(doc({ runId: "run_1", packageId: "@acme/writer" }))).toBe(
       "/agents/@acme/writer/runs/run_1",
     );
   });
 
   it("returns undefined without a run or a package id", () => {
-    expect(documentRunHref(doc({ run_id: null, packageId: "@acme/writer" }))).toBeUndefined();
-    expect(documentRunHref(doc({ run_id: "run_1", packageId: null }))).toBeUndefined();
+    expect(documentRunHref(doc({ runId: null, packageId: "@acme/writer" }))).toBeUndefined();
+    expect(documentRunHref(doc({ runId: "run_1", packageId: null }))).toBeUndefined();
   });
 });
 

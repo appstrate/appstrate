@@ -114,17 +114,19 @@ export function installLabFetch(): void {
     console.debug(`[lab] ${method} ${url.pathname} → ${handled.status}`);
     // 204 carries no body — `Response.json` throws on one, and the endpoints
     // that answer 204 (the chat's resume probe) are read as "nothing running".
-    if (handled.status === 204) return new Response(null, { status: 204 });
+    if (handled.status === 204)
+      return new Response(null, { status: 204, headers: handled.headers });
     // Bytes, for the routes that serve a file rather than a document about one.
     if (handled.contentType) {
       return new Response(handled.body as BodyInit, {
         status: handled.status,
-        headers: { "content-type": handled.contentType },
+        headers: { ...handled.headers, "content-type": handled.contentType },
       });
     }
     return Response.json(handled.body, {
       status: handled.status,
       headers: {
+        ...handled.headers,
         "content-type": handled.status >= 400 ? "application/problem+json" : "application/json",
       },
     });

@@ -31,7 +31,8 @@ import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/format-date";
 import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
 import type { RunTurnRow } from "./log-utils";
-import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import { groupByIntegration } from "../lib/run-connections";
 import { SnapshotAccordionItem } from "./run-detail/snapshot-accordion-item";
 
 interface RunInfoTabProps {
@@ -239,7 +240,7 @@ export function RunInfoTab({
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
   const connectionsUsed = run.connections_used ?? null;
-  const usage = run.token_usage as TokenUsage | null;
+  const usage = run.token_usage;
   const metadata = run.metadata as Record<string, unknown> | null;
   const hasUsage =
     run.cost != null || run.cost_pricing_status != null || usage != null || run.model_label != null;
@@ -387,19 +388,27 @@ export function RunInfoTab({
         {connectionsUsed && connectionsUsed.length > 0 && (
           <InfoSection title={t("run.infoConnections")} icon={Plug}>
             <div className={factGridClass}>
-              {connectionsUsed.map((c) => (
+              {/* One card per integration, listing every connection it bound. */}
+              {groupByIntegration(connectionsUsed).map(([integrationId, bound]) => (
                 <InfoCard
-                  key={c.integration_id}
-                  label={c.integration_id}
+                  key={integrationId}
+                  label={integrationId}
                   value={
-                    <span className="flex flex-col">
-                      <span>{c.label ?? c.account_id ?? "—"}</span>
-                      {c.label && c.account_id && (
-                        <span className="text-muted-foreground text-xs">{c.account_id}</span>
-                      )}
-                      <span className="text-muted-foreground text-xs">
-                        {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
-                      </span>
+                    <span className="flex flex-col gap-1.5">
+                      {bound.map((c, i) => (
+                        <span
+                          key={`${c.label ?? c.account_id ?? ""}-${i}`}
+                          className="flex flex-col"
+                        >
+                          <span>{c.label ?? c.account_id ?? "—"}</span>
+                          {c.label && c.account_id && (
+                            <span className="text-muted-foreground text-xs">{c.account_id}</span>
+                          )}
+                          <span className="text-muted-foreground text-xs">
+                            {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
+                          </span>
+                        </span>
+                      ))}
                     </span>
                   }
                 />

@@ -67,7 +67,7 @@ describeRequiresPostgres("space grants serialize with org membership changes", (
                   orgId: ctx.orgId,
                   userId: member.id,
                   addedBy: ctx.user.id,
-                  assignments: [{ space_id: ctx.defaultSpaceId, preset_role: "builder" }],
+                  assignments: [{ spaceId: ctx.defaultSpaceId, preset_role: "builder" }],
                   onMissing: "skip",
                 }),
               );
@@ -143,7 +143,11 @@ describeRequiresPostgres("the removal's grant bound is judged under the lock", (
 
     expect(
       await removeSpaceMember({ orgId: ctx.orgId, space, userId: target.id, actorPermissions }),
-    ).toEqual({ removed: true, accessAfter: { kind: "preset", preset: "operator" } });
+    ).toEqual({
+      removed: true,
+      accessAfter: { kind: "preset", preset: "operator" },
+      unsharedConnectionIds: [],
+    });
   });
 
   it("refuses it against a promotion that commits between the read and the DELETE", async () => {

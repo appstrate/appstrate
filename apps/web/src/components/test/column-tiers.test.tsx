@@ -219,11 +219,15 @@ const SETS = {
   integrationClients: () =>
     columnsFrom(() =>
       useIntegrationClientColumns({
+        ownSource: "custom",
+        tid: (id) => id,
         canChooseDefault: true,
+        canPromote: true,
         settingDefaultClientRef: null,
         deletingClientRef: null,
         onSetDefault: () => {},
         onRotate: () => {},
+        onPromote: () => {},
         onDelete: () => {},
       }),
     ),

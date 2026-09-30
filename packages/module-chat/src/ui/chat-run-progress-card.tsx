@@ -25,7 +25,13 @@
  */
 
 import * as React from "react";
-import { AlertTriangleIcon, CheckIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ExternalLinkIcon,
+  Loader2Icon,
+  LockIcon,
+} from "lucide-react";
 import { Modal } from "./modal.tsx";
 import { useRunLogStream } from "./use-run-log-stream.ts";
 import { useLogTicker } from "./use-log-ticker.ts";
@@ -42,8 +48,8 @@ import {
   runStatusLineKey,
   visibleLogEntries,
   type ChatRunFile,
-  type RunStatus,
 } from "./run-events.ts";
+import type { RunStatus } from "@appstrate/core/run-status";
 import { FileAttachment } from "./file-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
 
@@ -81,7 +87,16 @@ const STATUS_TONE: Record<RunStatus, string> = {
  * state) rather than nothing. A non-terminal run spins; success shows a check;
  * any other terminal state shows a warning triangle.
  */
-function StatusIcon({ status, phase }: { status: RunStatus | undefined; phase: ToolPhase }) {
+function StatusIcon({
+  status,
+  phase,
+  denied,
+}: {
+  status: RunStatus | undefined;
+  phase: ToolPhase;
+  denied: boolean;
+}) {
+  if (denied) return <LockIcon className="text-muted-foreground size-4 shrink-0" />;
   if (status) {
     if (!isTerminalStatus(status)) {
       return <Loader2Icon className={`size-4 shrink-0 animate-spin ${STATUS_TONE[status]}`} />;
@@ -141,6 +156,7 @@ export function ChatRunProgressCard({
     producedFiles,
     producedFilesTruncated,
     sweepDone,
+    runDenied,
   } = useRunLogStream(runId, initialStatus, initialPackageId);
 
   // Files: the persisted tool-result list (reload-safe), the frames that arrive
@@ -212,12 +228,19 @@ export function ChatRunProgressCard({
   // message instead — same slot, same height.
   const terminal = isTerminalStatus(effectiveStatus);
   const launchFailed = !runId && phase === "error";
+  // Without a run read nothing will ever report on a live run: say so rather
+  // than reading "starting" forever, and offer no link to a page that 403s.
+  const denied = !!runId && runDenied && !terminal;
   const line = terminal
     ? { id: -1, text: t(runStatusLineKey(effectiveStatus)) }
     : launchFailed
       ? { id: -1, text: errorText ?? t("run.launchFailed") }
-      : current;
-  const effectiveRunHref = runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined);
+      : denied
+        ? { id: -1, text: t("run.noAccess") }
+        : current;
+  const effectiveRunHref = runDenied
+    ? undefined
+    : (runHref ?? (runId ? buildRunPageHref(packageId, runId) : undefined));
 
   // `isolate` scopes the internal z-0/z-10 layering to this card — without it
   // the z-10 content escapes into the thread's stacking context and paints
@@ -235,7 +258,7 @@ export function ChatRunProgressCard({
       />
       <div className="pointer-events-none relative z-10 flex items-center gap-2 px-3 py-2">
         {/* Leading status glyph — vertically centered across the two lines. */}
-        <StatusIcon status={effectiveStatus} phase={phase} />
+        <StatusIcon status={effectiveStatus} phase={phase} denied={denied} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {/* Line 1: package name + live execution time + run-page link */}
           <div className="flex items-center gap-2">

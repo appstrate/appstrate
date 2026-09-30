@@ -49,7 +49,6 @@ function ModelsList({
   settingDefaultId,
   canWrite,
   canDelete,
-  canReadCredentials,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -64,13 +63,13 @@ function ModelsList({
   // step with the route that already gates this screen.
   canWrite: boolean;
   canDelete: boolean;
-  /** The provider registry sits behind `model-provider-credentials:read`. */
-  canReadCredentials: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
   const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry(canReadCredentials);
+  // Provider icons are a nicety: a member reading the model list may not hold
+  // the registry's permission, and then gets none.
+  const { data: registry } = useProvidersRegistry();
 
   const columns = useModelColumns({
     registry,
@@ -235,11 +234,7 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
-  const {
-    data: credentials,
-    isLoading: pkLoading,
-    error: pkError,
-  } = useModelProviderCredentials(canReadCredentials);
+  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
   // The credentials tab has its own resource; `models:read` alone does not open it.
   const activeTab = canReadCredentials ? subTab : "models-list";
   const createPkMutation = useCreateModelProviderCredential();
@@ -288,7 +283,6 @@ export function OrgSettingsModelsPage() {
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
           canWrite={canWriteModels}
           canDelete={canDeleteModels}
-          canReadCredentials={canReadCredentials}
         />
       )}
 
@@ -343,13 +337,14 @@ export function OrgSettingsModelsPage() {
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
           if (editPk) {
-            // The PUT body only accepts mutable fields — `api`/`baseUrl` are
-            // pinned by `providerId` at create time. Strip them here even
-            // though the form disables those inputs on edit.
-            const patch: { label?: string; apiKey?: string } = { label: data.label };
-            if (data.apiKey) patch.apiKey = data.apiKey;
+            // The PATCH body only accepts mutable fields — the protocol and
+            // endpoint are pinned by `providerId` at create time. Strip them
+            // here even though the form disables those inputs on edit.
             updatePkMutation.mutate(
-              { params: { path: { id: editPk.id } }, body: patch },
+              {
+                params: { path: { id: editPk.id } },
+                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
+              },
               {
                 onSuccess: () => setPkModalOpen(false),
                 onError: (error) => toast.error(getErrorMessage(error)),
@@ -362,8 +357,8 @@ export function OrgSettingsModelsPage() {
                 body: {
                   label: uniqueLabel,
                   providerId: data.providerId,
-                  apiKey: data.apiKey ?? "",
-                  ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
+                  api_key: data.apiKey ?? "",
+                  ...(data.baseUrlOverride ? { base_url_override: data.baseUrlOverride } : {}),
                 },
               },
               {

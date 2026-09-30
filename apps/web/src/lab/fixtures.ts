@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SPACE_LEVEL_PERMISSIONS } from "@appstrate/core/permissions";
+import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import {
   LAB_PRESETS,
   effectivePreset,
   getRole,
   orgPermissionsForRole,
+  spaceAll,
   spacePermissionsForPreset,
   type LabPreset,
 } from "./role";
@@ -146,6 +147,8 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           reused_by_agents: 3,
           auth_key: "drive",
           shared_with_org: true,
+          // The org default names it: unsharing or deleting it is refused.
+          locked_by: "org_default",
           org: { id: ORG_ID, name: "Tractr" },
           space: { id: APP_ID, name: "Production" },
         },
@@ -161,10 +164,40 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           reused_by_agents: 1,
           auth_key: "drive",
           shared_with_org: false,
+          locked_by: null,
           org: { id: ORG_ID, name: "Tractr" },
           space: { id: APP_ID, name: "Production" },
         },
       ],
+    },
+  ],
+};
+
+/**
+ * What deleting a personal connection breaks: an agent pinned to it, and a
+ * schedule that binds it alone (so the delete switches it off).
+ */
+export const connectionDeleteImpact: Json200<
+  "/api/me/connections/{connectionId}/delete-impact",
+  "get"
+> = {
+  pins: [
+    {
+      agent_package_id: "@tractr/compta-trimestrielle",
+      agent_display_name: "Compta trimestrielle",
+      integration_package_id: "@appstrate/google-drive",
+      connection_count: 2,
+    },
+  ],
+  schedules: [
+    {
+      scheduleId: "sch_01",
+      schedule_name: "Tous les matins à 7 h",
+      agent_package_id: "@tractr/wiki-brain",
+      agent_display_name: "Wiki-brain",
+      integration_package_id: "@appstrate/google-drive",
+      connection_count: 1,
+      disables: true,
     },
   ],
 };
@@ -205,7 +238,8 @@ export const orgs: Json200<"/api/orgs", "get"> = {
       name: "Appstrate",
       slug: "appstrate",
       logo: "emoji:⚡️",
-      role: "admin",
+      // Its only member, so its only owner: see `soloOrgDetail`.
+      role: "owner",
       permissions: LAB_ORG_PERMISSIONS,
       deleting_at: null,
       createdAt: ago(60),
@@ -374,10 +408,11 @@ export const roles: Json200<"/api/roles", "get"> = {
       id: "role_lab_analyste",
       key: "analyste",
       name: "Analyste",
-      description: "Relit les runs et écrit dans le chat, quand le module chat est chargé.",
+      description: "Relit les runs et répond aux tickets, quand le module support est chargé.",
       permissions: ["agents:read", "runs:read", "runs:read-all"],
-      // Granted when the chat module was loaded, kept by the row ever since.
-      unavailable_permissions: ["chat:write"],
+      // Granted when a support module was loaded, kept by the row ever since.
+      // Not `chat:write`: the lab's deployment loads the chat module.
+      unavailable_permissions: ["tickets:write"],
       createdAt: ago(60_000),
       updatedAt: ago(9_000),
     },
@@ -394,11 +429,34 @@ export const assignableSpaceRoles: Role[] = roles.data.filter((role) =>
 
 type VocabularyGroup = Json200<"/api/roles/vocabulary", "get">["data"][number];
 
+/**
+ * The reads a role holding `permission` must also hold, as `readGrantsFor`
+ * answers on the server: `<resource>:read`, save the exceptions below, which
+ * mirror its `READ_REQUIREMENT_OVERRIDES` (the table lives in the API package,
+ * which the browser bundle must not import).
+ */
+const READ_REQUIREMENT_OVERRIDES: Record<string, readonly string[]> = {
+  "runs:read-all": [],
+  "runs:cancel": RUNS_READ_PERMISSIONS,
+  "runs:delete": RUNS_READ_PERMISSIONS,
+  "agents:run": RUNS_READ_PERMISSIONS,
+  "space-members:invite": [],
+  "integrations:connect": [],
+  "integrations:disconnect": [],
+};
+
+function readGrantsFor(permission: string, known: ReadonlySet<string>): string[] {
+  const read = `${permission.slice(0, permission.indexOf(":"))}:read`;
+  const reads = READ_REQUIREMENT_OVERRIDES[permission] ?? (permission === read ? [] : [read]);
+  return reads.filter((candidate) => known.has(candidate));
+}
+
 /** Grouped exactly as `spaceLevelVocabulary()` groups it on the server. */
 function vocabulary(): VocabularyGroup[] {
+  const known = new Set<string>(spaceAll);
   const grantable = new Set<string>(availableApiKeyScopes.data);
   const byResource = new Map<string, VocabularyGroup["permissions"]>();
-  for (const permission of [...SPACE_LEVEL_PERMISSIONS].sort()) {
+  for (const permission of [...known].sort()) {
     const colon = permission.indexOf(":");
     const resource = permission.slice(0, colon);
     const entries = byResource.get(resource) ?? [];
@@ -406,6 +464,7 @@ function vocabulary(): VocabularyGroup[] {
       permission,
       action: permission.slice(colon + 1),
       api_key_grantable: grantable.has(permission),
+      requires_one_of: readGrantsFor(permission, known),
     });
     byResource.set(resource, entries);
   }
@@ -437,6 +496,16 @@ export const spaceMembers: SpaceMember[] = [
     userId: USER_ID,
     name: "Olivier Tarbès",
     email: "olivier@tractr.net",
+    org_role: "owner",
+    source: "org_role",
+    role: { kind: "preset", key: "admin", name: "admin" },
+    createdAt: null,
+  },
+  {
+    object: "space_member",
+    userId: "user_lab_5",
+    name: "Anne Girard",
+    email: "anne@tractr.net",
     org_role: "owner",
     source: "org_role",
     role: { kind: "preset", key: "admin", name: "admin" },
@@ -1044,6 +1113,8 @@ export const chatSessions: Json200<"/api/chat/sessions", "get"> = {
       title: "Refonte de la page Runs",
       generating: false,
       unread: false,
+      skill_mode: "auto",
+      pinned_skills: [],
       createdAt: ago(90),
       updatedAt: ago(35),
     },
@@ -1069,6 +1140,8 @@ export const heavyChatSessions: ChatSession[] = Array.from({ length: 200 }, (_, 
       : `Conversation ${i + 1}`,
   generating: i === 1,
   unread: i % 7 === 3,
+  skill_mode: "auto",
+  pinned_skills: [],
   createdAt: ago(i * 90 + 120),
   updatedAt: ago(i * 90),
 }));
@@ -1181,15 +1254,30 @@ export const chatHistory = {
 };
 
 export const notifications: Json200<"/api/notifications", "get"> = {
-  has_more: false,
+  object: "list",
+  hasMore: false,
   data: [
     {
       id: "ntf_01",
-      type: "run.completed",
-      run_id: "run_02",
-      payload: { status: "success" },
+      type: "run_completed",
+      runId: "run_02",
+      payload: { packageId: "@tractr/compta-trimestrielle", status: "success" },
       read_at: null,
-      created_at: ago(46),
+      createdAt: ago(46),
+    },
+    {
+      // A share has no run behind it: it names the sharer and opens the
+      // package's catalogue sheet (the offer the sandbox has not taken up).
+      id: "ntf_02",
+      type: "package_shared",
+      runId: null,
+      payload: {
+        packageId: "@tractr/radar-ia",
+        package_type: "agent",
+        shared_by_name: "Julie Ferrand",
+      },
+      read_at: null,
+      createdAt: ago(120),
     },
   ],
 };
@@ -1364,7 +1452,6 @@ export const comptaReferencesSkillDetail: Json200<"/api/packages/skills/{scope}/
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  lock_version: 4,
   version: "1.4.0",
   manifest: {
     name: "@tractr/compta-references",
@@ -1424,7 +1511,6 @@ export const wikiBrainSkillDetail: Json200<"/api/packages/skills/{scope}/{name}"
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  lock_version: 2,
   version: "0.9.0",
   manifest: {},
   manifest_name: "@tractr/wiki-brain-method",
@@ -1496,7 +1582,6 @@ export const qboMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{nam
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
-  lock_version: 7,
   version: "1.0.0",
   manifest: {
     name: "@tractr/qbo-mcp",
@@ -1530,7 +1615,9 @@ type PackageFileIndex = Json200<"/api/packages/{scope}/{name}/files", "get">;
 function skillFileIndex(content: string, manifest: unknown): PackageFileIndex {
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
   return {
-    entries: [
+    object: "list",
+    hasMore: false,
+    data: [
       { path: "SKILL.md", size: content.length, media_kind: "text", inline: content },
       {
         path: "manifest.json",
@@ -1545,7 +1632,9 @@ function skillFileIndex(content: string, manifest: unknown): PackageFileIndex {
 function mcpServerFileIndex(manifest: unknown): PackageFileIndex {
   const content = `${JSON.stringify(manifest, null, 2)}\n`;
   return {
-    entries: [{ path: "manifest.json", size: content.length, media_kind: "text", inline: content }],
+    object: "list",
+    hasMore: false,
+    data: [{ path: "manifest.json", size: content.length, media_kind: "text", inline: content }],
   };
 }
 
@@ -1594,7 +1683,9 @@ if __name__ == "__main__":
 `;
 
 export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
-  entries: [
+  object: "list",
+  hasMore: false,
+  data: [
     {
       path: "SKILL.md",
       size: (comptaReferencesSkillDetail.content ?? "").length,
@@ -1628,7 +1719,9 @@ export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", 
 export const githubGitMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   mcpServerFileIndex(githubGitMcpServerDetail.manifest);
 export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
-  entries: [
+  object: "list",
+  hasMore: false,
+  data: [
     {
       path: "manifest.json",
       size: qboMcpManifest.length,
@@ -1646,7 +1739,9 @@ export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "g
 
 export const packageFileIndexes: Record<string, PackageFileIndex> = {
   "@tractr/compta-trimestrielle": {
-    entries: [
+    object: "list",
+    hasMore: false,
+    data: [
       {
         path: "manifest.json",
         size: 1_842,
@@ -1741,7 +1836,7 @@ type LabDocument = Json200<"/api/files", "get">["data"][number];
 
 /** Where the chat's inline run (`run_07`) puts its deliverables. */
 const chatRun = {
-  run_id: "run_07",
+  runId: "run_07",
   packageId: "@inline/r-8f2c41",
   chat_session_id: "chat_01",
 } as const;
@@ -1752,7 +1847,7 @@ function previewableRow(
   mime: string,
   preview_kind: "html" | "text",
   size: number,
-  owner: { run_id: string; packageId: string; chat_session_id?: string },
+  owner: { runId: string; packageId: string; chat_session_id?: string },
 ): LabDocument {
   return {
     object: "file",
@@ -1789,7 +1884,7 @@ const documentRows: LabDocument[] = [
     uri: "appfile://doc_lab_1",
     purpose: "agent_output",
     spaceId: APP_ID,
-    run_id: "run_02",
+    runId: "run_02",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
     name: "recapitulatif-2026-Q2.xlsx",
@@ -1816,7 +1911,7 @@ const documentRows: LabDocument[] = [
     uri: "appfile://doc_lab_2",
     purpose: "agent_output",
     spaceId: APP_ID,
-    run_id: "run_02",
+    runId: "run_02",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
     name: "releve-mastercard-juin.pdf",
@@ -1843,7 +1938,7 @@ const documentRows: LabDocument[] = [
     uri: "appfile://doc_lab_3",
     purpose: "user_upload",
     spaceId: APP_ID,
-    run_id: null,
+    runId: null,
     chat_session_id: null,
     packageId: null,
     name: "logo-tractr.png",
@@ -1873,7 +1968,7 @@ const documentRows: LabDocument[] = [
     uri: "appfile://doc_lab_4",
     purpose: "user_upload",
     spaceId: APP_ID,
-    run_id: "run_03",
+    runId: "run_03",
     chat_session_id: null,
     packageId: null,
     name: "document",
@@ -1897,7 +1992,7 @@ const documentRows: LabDocument[] = [
   // looked at: an HTML report featured alone on run_04, and three deliverables
   // of the chat's inline run (run_07), which the conversation's run card lists.
   previewableRow("doc_lab_5", "synthese-hebdo-2026-S38.html", "text/html", "html", 18_432, {
-    run_id: "run_04",
+    runId: "run_04",
     packageId: "@tractr/wiki-brain",
   }),
   previewableRow("doc_lab_6", "points-a-negocier.md", "text/markdown", "text", 2_310, chatRun),
@@ -2067,7 +2162,6 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
   home_shareable: true,
   active: true,
   updatedAt: ago(3_000),
-  lock_version: 12,
   prompt:
     "Prépare la comptabilité trimestrielle. Classe les transactions, rapproche les pièces et publie un récapitulatif vérifiable.",
   manifest: {
@@ -2384,6 +2478,7 @@ type Persistence = Json200<"/api/agents/{scope}/{name}/persistence", "get">;
  * panel's whole shape is pinned slots above archive memories.
  */
 export const agentPersistence: Persistence = {
+  object: "agent_persistence",
   pinned: [
     {
       id: 1,
@@ -2464,13 +2559,14 @@ export const agentConnectionReadiness: Json200<
       integration_id: "@appstrate/google-drive",
       run_blocking: false,
       resolution: {
-        status: "must_choose",
-        resolved_connection_id: null,
+        // Two usable accounts and nothing naming one: the member has to pick.
+        source: null,
+        error_code: "must_choose_connection",
+        resolved_connection_ids: [],
         resolved_missing_scopes: [],
-        resolved_owned_by_actor: false,
-        admin_pinned_connection_id: null,
-        member_pinned_connection_id: null,
-        org_default_connection_id: null,
+        admin_pinned_connection_ids: [],
+        member_pinned_connection_ids: [],
+        org_default_connection_ids: [],
         org_default_enforced: false,
         can_add_connection: true,
         candidates: [
@@ -2975,7 +3071,9 @@ export const agentVersionInfo: Json200<"/api/packages/agents/{scope}/{name}/vers
   };
 
 export const agentVersions: Json200<"/api/packages/agents/{scope}/{name}/versions", "get"> = {
-  versions: [
+  object: "list",
+  hasMore: false,
+  data: [
     {
       id: 6,
       packageId: "@tractr/compta-trimestrielle",
@@ -3007,7 +3105,9 @@ export const packageVersionsById: Record<
   [...skillDetails, ...mcpServerDetails].map((detail, index) => [
     detail.id,
     {
-      versions: [
+      object: "list",
+      hasMore: false,
+      data: [
         {
           id: 100 + index,
           packageId: detail.id,
@@ -3016,7 +3116,7 @@ export const packageVersionsById: Record<
               ?.latest_published_version ??
             detail.version ??
             "1.0.0",
-          integrity: agentVersions.versions[0]!.integrity,
+          integrity: agentVersions.data[0]!.integrity,
           artifact_size: 1240,
           yanked: false,
           created_by: USER_ID,
@@ -3032,7 +3132,7 @@ export function publishedPackageVersion(
   packageId: string,
   requestedVersion: string,
 ): components["schemas"]["PackageVersionDetail"] | undefined {
-  const published = packageVersionsById[packageId]?.versions.find(
+  const published = packageVersionsById[packageId]?.data.find(
     (version) => version.version === requestedVersion || requestedVersion === "latest",
   );
   if (!published) return undefined;
@@ -3065,7 +3165,7 @@ export const agentLatestVersion: components["schemas"]["PackageVersionDetail"] =
 /** The agent's model override: none, so the org default decides. */
 export const agentModel: Json200<"/api/agents/{scope}/{name}/model", "get"> = {
   modelId: "mdl_sonnet",
-  generation: { reasoningLevel: "high" },
+  generation: { reasoning_level: "high" },
 };
 
 export const agentProxy: Json200<"/api/agents/{scope}/{name}/proxy", "get"> = {
@@ -3138,6 +3238,36 @@ export const webhooks: Json200<"/api/webhooks", "get"> = {
       enabled: false,
       createdAt: ago(150_000),
       updatedAt: ago(20_000),
+    },
+  ],
+};
+
+/** The recent deliveries of a webhook: one delivered, one retried after a failure. */
+export const webhookDeliveries: Json200<"/api/webhooks/{id}/deliveries", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "whd_lab_2",
+      eventId: "evt_lab_2",
+      eventType: "run.failed",
+      status: "failed",
+      statusCode: 502,
+      latency: 1_840,
+      attempt: 2,
+      error: "Bad Gateway",
+      createdAt: ago(35),
+    },
+    {
+      id: "whd_lab_1",
+      eventId: "evt_lab_1",
+      eventType: "run.succeeded",
+      status: "success",
+      statusCode: 200,
+      latency: 212,
+      attempt: 1,
+      error: null,
+      createdAt: ago(46),
     },
   ],
 };
@@ -3242,6 +3372,14 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
       joinedAt: ago(200_000),
     },
     {
+      // A second owner: the caller may leave, the org keeps one.
+      userId: "user_lab_5",
+      displayName: "Anne Girard",
+      email: "anne@tractr.net",
+      role: "owner",
+      joinedAt: ago(150_000),
+    },
+    {
       userId: "user_lab_2",
       displayName: "Pierre",
       email: "pierre@tractr.net",
@@ -3270,7 +3408,7 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
       id: "inv_lab_guest",
       email: "marc@studio-lefort.fr",
       role: "guest",
-      space_assignments: [{ space_id: "app_lab_default", preset_role: "operator" }],
+      space_assignments: [{ spaceId: "app_lab_default", preset_role: "operator" }],
       token: "lab-invitation-guest",
       expiresAt: ago(-10_080),
       createdAt: ago(1_440),
@@ -3285,6 +3423,21 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
       createdAt: ago(4_320),
     },
   ],
+};
+
+/**
+ * The second org has nobody but the caller, its only owner: leaving is refused
+ * there and the page points to deleting the org instead.
+ */
+export const soloOrgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
+  id: "org_lab_2",
+  name: "Appstrate",
+  slug: "appstrate",
+  logo: "emoji:⚡️",
+  createdAt: ago(60),
+  storage: { used_bytes: 0, limit_bytes: null, effective_limit_bytes: null },
+  members: [orgDetail.members![0]!],
+  invitations: [],
 };
 
 export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {
@@ -3318,6 +3471,8 @@ export const oauthClients: Json200<"/api/oauth/clients", "get"> = {
 };
 
 export const oauthScopes: Json200<"/api/oauth/scopes", "get"> = {
+  object: "list",
+  hasMore: false,
   data: ["openid", "profile", "email", "offline_access", "agents:read", "agents:run"],
 };
 
@@ -3494,6 +3649,9 @@ const driveConnections: Connection[] = [
     owner_name: "Olivier Tarbès",
     label: "olivier@tractr.net",
     shared_with_org: true,
+    // Named by the org default (`integrationOrgDefault`): unsharing or
+    // deleting it is refused (409).
+    locked_by: "org_default",
     client_ref: "cli_lab_custom",
     createdAt: ago(60_000),
     updatedAt: ago(400),
@@ -3533,6 +3691,8 @@ const driveConnections: Connection[] = [
     owner_name: "Pierre",
     label: "compta@tractr.net",
     shared_with_org: true,
+    // An admin pin names it (`integrationPins`), which outranks the default.
+    locked_by: "admin_pin",
     client_ref: "cli_lab_custom",
     createdAt: ago(30_000),
     updatedAt: ago(1_200),
@@ -3687,14 +3847,18 @@ export const heavyIntegrationConnections: Connection[] = Array.from({ length: 12
     id: `conn_lab_h${i + 1}`,
     label: `equipe-${i + 1}@tractr.net`,
     account_id: `1084530991${i}`,
+    // Only the first copy of each locked row keeps its lock.
+    locked_by: i < driveConnections.length ? base.locked_by : null,
   };
 });
 
 /**
- * The OAuth clients of the `drive` auth. Three, for the same reason: a system
- * client nobody may edit or delete, the org's own client which is the default,
- * and a second custom one — without which the "définir par défaut" control has
- * no row to appear on.
+ * The OAuth clients of the `drive` auth, every tier at once — the lab's seed
+ * for both tables (`handlers.ts` lists each tier the way the server does). A
+ * system client nobody may edit or delete, an org client every space inherits
+ * (the org tier's default), the space's own client which is its default, and a
+ * second space one — without which the "définir par défaut" control has no
+ * row to appear on. `is_default` is each row's flag within its own tier.
  */
 export const integrationClients: Json200<
   "/api/integrations/{packageId}/auths/{authKey}/clients",
@@ -3708,6 +3872,16 @@ export const integrationClients: Json200<
       source: "built-in",
       client_id: "sys_a91f2c4d",
       is_default: false,
+      auto_provisioned: false,
+      has_client_secret: true,
+      token_endpoint_auth_method: "client_secret_post",
+      redirect_uri: null,
+    },
+    {
+      client_ref: "cli_lab_org",
+      source: "org",
+      client_id: "884012773901-o7r2g4n9z6x1.apps.googleusercontent.com",
+      is_default: true,
       auto_provisioned: false,
       has_client_secret: true,
       token_endpoint_auth_method: "client_secret_post",
@@ -3739,7 +3913,6 @@ export const integrationClients: Json200<
 /** The package row behind the integration — the header's source and version. */
 export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] = {
   id: INTEGRATION_ID,
-  lock_version: 1,
   orgId: null,
   name: "google-drive",
   description: "Lire, écrire et organiser les fichiers d'un Drive.",
@@ -3762,8 +3935,10 @@ export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] =
 
 /** The file view uses the same declaration as the rendered integration. */
 export const integrationFiles: PackageFileIndex = {
-  entries: [
-    ...mcpServerFileIndex(integrationDetail.manifest).entries,
+  object: "list",
+  hasMore: false,
+  data: [
+    ...mcpServerFileIndex(integrationDetail.manifest).data,
     {
       path: "INTEGRATION.md",
       size: integrationPackage.content!.length,
@@ -3810,13 +3985,15 @@ export function integrationVersionHistory(
 ): Json200<"/api/packages/integrations/{scope}/{name}/versions", "get"> {
   const item = integrationPackageList.data.find((entry) => entry.id === packageId);
   return {
-    versions: item
+    object: "list",
+    hasMore: false,
+    data: item
       ? [
           {
             id: 200 + integrationPackageList.data.indexOf(item),
             packageId: item.id,
             version: item.version ?? "1.0.0",
-            integrity: agentVersions.versions[0]!.integrity,
+            integrity: agentVersions.data[0]!.integrity,
             artifact_size: 1240,
             yanked: false,
             created_by: USER_ID,
@@ -3837,6 +4014,45 @@ export const integrationConsumingAgents: Json200<
   data: [
     { packageId: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" },
     { packageId: "@tractr/wiki-brain", display_name: "Wiki-brain" },
+  ],
+};
+
+/**
+ * The org default the lab's org starts with: the caller's own shared account,
+ * which is why that row reads locked by the org default. Not enforced, so an
+ * admin pin (Pierre's account, below) still outranks it for its agent.
+ */
+export const integrationOrgDefault: Json200<"/api/integrations/{packageId}/default", "get"> = {
+  integration_package_id: INTEGRATION_ID,
+  connection_ids: ["conn_lab_1"],
+  enforce: false,
+  createdAt: ago(30_000),
+  updatedAt: ago(30_000),
+};
+
+/**
+ * The admin pins of the integration, one per consuming agent. The second names
+ * a connection this reader cannot see (unshared, or deleted since): the row
+ * must say "Connexion indisponible" rather than drop the id.
+ */
+export const integrationPins: Json200<"/api/integrations/{packageId}/pins", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      packageId: "@tractr/compta-trimestrielle",
+      integration_package_id: INTEGRATION_ID,
+      connection_ids: ["conn_lab_3"],
+      createdAt: ago(20_000),
+      updatedAt: ago(1_000),
+    },
+    {
+      packageId: "@tractr/wiki-brain",
+      integration_package_id: INTEGRATION_ID,
+      connection_ids: ["conn_lab_gone"],
+      createdAt: ago(9_000),
+      updatedAt: ago(9_000),
+    },
   ],
 };
 
@@ -3895,10 +4111,11 @@ export const models: Json200<"/api/models", "get"> = {
       label: "Claude Sonnet 5",
       modelId: "claude-sonnet-5",
       apiShape: "anthropic",
-      baseUrl: null,
+      base_url: null,
       iconUrl: null,
       providerId: "anthropic",
-      providerName: "Anthropic",
+      provider_name: "Anthropic",
+      pi_provider: "anthropic",
       generation: null,
       credentialId: "cred_builtin",
       created_by: null,
@@ -3915,10 +4132,11 @@ export const models: Json200<"/api/models", "get"> = {
       label: "Claude Opus 5",
       modelId: "claude-opus-5",
       apiShape: "anthropic",
-      baseUrl: null,
+      base_url: null,
       iconUrl: null,
       providerId: "anthropic",
-      providerName: "Anthropic",
+      provider_name: "Anthropic",
+      pi_provider: "anthropic",
       generation: null,
       credentialId: "cred_openai",
       created_by: "Olivier Tarbès",
@@ -3935,10 +4153,11 @@ export const models: Json200<"/api/models", "get"> = {
       label: "Mistral local",
       modelId: "mistral-small",
       apiShape: "openai-compatible",
-      baseUrl: "http://localhost:11434/v1",
+      base_url: "http://localhost:11434/v1",
       iconUrl: null,
       providerId: null,
-      providerName: null,
+      provider_name: null,
+      pi_provider: null,
       generation: null,
       credentialId: null,
       created_by: "Pierre",
@@ -3963,7 +4182,7 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       id: "cred_builtin",
       label: "Anthropic (plateforme)",
       apiShape: "anthropic",
-      baseUrl: null,
+      base_url: null,
       source: "built-in",
       authMode: "api_key",
       providerId: null,
@@ -3977,7 +4196,7 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       id: "cred_openai",
       label: "OpenAI — clé Tractr",
       apiShape: "openai",
-      baseUrl: null,
+      base_url: null,
       source: "custom",
       authMode: "api_key",
       providerId: null,
@@ -3991,7 +4210,7 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       id: "cred_oauth",
       label: "Claude Code",
       apiShape: "anthropic",
-      baseUrl: null,
+      base_url: null,
       source: "custom",
       authMode: "oauth2",
       providerId: "claude-code",
@@ -4005,7 +4224,7 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       id: "cred_oauth_healthy",
       label: "Claude Code, équipe",
       apiShape: "anthropic",
-      baseUrl: null,
+      base_url: null,
       source: "custom",
       authMode: "oauth2",
       providerId: "claude-code",
@@ -4031,6 +4250,29 @@ export const connectionTest: Json200<"/api/models/{id}/test", "post"> = {
  * system row is there for the locked case (agents and skills treat a system
  * package as globally available; integrations do not).
  */
+type LibraryRow = Json200<"/api/library", "get">["packages"]["agent"][number];
+type LibraryPlacement = LibraryRow["placements"][number];
+type AuthoredLibraryRow = Omit<LibraryRow, "type" | "published" | "placements"> & {
+  published?: boolean;
+  placements: (Omit<LibraryPlacement, "chat_enforced"> & { chat_enforced?: boolean })[];
+};
+
+/**
+ * The rows as authored, completed with what most rows share: published, and
+ * enforced in no chat. The exceptions are written on the row itself.
+ */
+function libraryRows(type: LibraryRow["type"], rows: AuthoredLibraryRow[]): LibraryRow[] {
+  return rows.map((row) => ({
+    ...row,
+    type,
+    published: row.published ?? true,
+    placements: row.placements.map((placement) => ({
+      ...placement,
+      chat_enforced: placement.chat_enforced ?? false,
+    })),
+  }));
+}
+
 export const library: Json200<"/api/library", "get"> = {
   object: "library",
   spaces: [
@@ -4040,7 +4282,7 @@ export const library: Json200<"/api/library", "get"> = {
     { id: "app_lab_personal", name: "Mon espace", isDefault: false },
   ],
   packages: {
-    agent: [
+    agent: libraryRows("agent", [
       {
         id: "@tractr/compta-trimestrielle",
         name: "Compta trimestrielle",
@@ -4237,8 +4479,8 @@ export const library: Json200<"/api/library", "get"> = {
           },
         ],
       },
-    ].map((pkg) => ({ ...pkg, type: "agent" as const })),
-    skill: [
+    ]),
+    skill: libraryRows("skill", [
       {
         id: "@tractr/compta-references",
         name: "compta-references",
@@ -4253,6 +4495,8 @@ export const library: Json200<"/api/library", "get"> = {
             space_id: "app_lab_default",
             via: "home" as const,
             state: "active" as const,
+            // Imposed on every conversation of this space: the locked row.
+            chat_enforced: true,
             shared_by: null,
           },
           {
@@ -4328,6 +4572,8 @@ export const library: Json200<"/api/library", "get"> = {
         name: "notes-client",
         description: "Structure les notes de suivi client.",
         source: "local",
+        // Never published: the one skill no space may enforce in its chat.
+        published: false,
         home_space_id: APP_ID,
         home_writable: true,
         home_deletable: true,
@@ -4342,8 +4588,8 @@ export const library: Json200<"/api/library", "get"> = {
           },
         ],
       },
-    ].map((pkg) => ({ ...pkg, type: "skill" as const })),
-    integration: [
+    ]),
+    integration: libraryRows("integration", [
       {
         // Shipped with the instance and switched on nowhere: readable in every
         // team space (a placement each, `via: "system"`), running in none —
@@ -4484,8 +4730,8 @@ export const library: Json200<"/api/library", "get"> = {
         home_shareable: true,
         placements: [],
       },
-    ].map((pkg) => ({ ...pkg, type: "integration" as const })),
-    "mcp-server": [
+    ]),
+    "mcp-server": libraryRows("mcp-server", [
       {
         id: "@appstrate/github-git-mcp",
         name: "GitHub Git (MCP server)",
@@ -4510,6 +4756,6 @@ export const library: Json200<"/api/library", "get"> = {
           { space_id: APP_ID, via: "home" as const, state: "active" as const, shared_by: null },
         ],
       },
-    ].map((pkg) => ({ ...pkg, type: "mcp-server" as const })),
+    ]),
   },
 };

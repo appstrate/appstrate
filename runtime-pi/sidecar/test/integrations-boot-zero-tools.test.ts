@@ -20,6 +20,9 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
 import { TokenBudget } from "../token-budget.ts";
 import { bootIntegrations } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
+
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
 const INTEGRATION_ID = "@quiz-room/google-business-profile";
 
@@ -74,6 +77,7 @@ function zeroToolSpec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: "gbp",
+    connection: CONN_A,
     sourceKind: "none",
     manifest: { name: INTEGRATION_ID, version: "1.0.0" },
     spawnEnv: {},
@@ -90,6 +94,7 @@ function wildcardZeroToolSpec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: "gbp",
+    connection: CONN_A,
     sourceKind: "none",
     manifest: { name: INTEGRATION_ID, version: "1.0.0" },
     spawnEnv: {},
@@ -101,6 +106,7 @@ function healthySpec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: "gbp",
+    connection: CONN_A,
     sourceKind: "none",
     manifest: { name: INTEGRATION_ID, version: "1.0.0" },
     apiCalls: [
@@ -117,7 +123,7 @@ function healthySpec(): IntegrationSpawnSpec {
 
 async function boot(spec: IntegrationSpawnSpec) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
     return await bootIntegrations(
       [spec],
@@ -139,7 +145,7 @@ describe("bootIntegrations — zero callable tools is a boot failure", () => {
     const result = await boot(zeroToolSpec());
     try {
       expect(result.report.ok).toBe(false);
-      expect(result.report.declared).toBe(1);
+      expect(result.report.declaredConnections).toBe(1);
       expect(result.spawned).toEqual([]);
       expect(result.failed).toHaveLength(1);
       expect(result.failed[0]!.integrationId).toBe(INTEGRATION_ID);

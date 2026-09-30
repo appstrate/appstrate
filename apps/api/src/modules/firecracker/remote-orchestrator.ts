@@ -24,7 +24,6 @@ import type {
   WorkloadHandle,
   WorkloadSpec,
   IsolationBoundary,
-  IsolationBoundaryOptions,
   SidecarLaunchSpec,
   CleanupReport,
   StopResult,
@@ -313,11 +312,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
   /** No-op: guest images are baked into the daemon's rootfs at build time. */
   async ensureImages(_images: string[]): Promise<void> {}
 
-  async createIsolationBoundary(
-    runId: string,
-    opts?: IsolationBoundaryOptions,
-  ): Promise<IsolationBoundary> {
-    const res = await this.call(RUNNER_ROUTES.createBoundary, { body: { runId, opts } });
+  async createIsolationBoundary(runId: string): Promise<IsolationBoundary> {
+    const res = await this.call(RUNNER_ROUTES.createBoundary, { body: { runId } });
     return isolationBoundarySchema.parse(await res.json());
   }
 

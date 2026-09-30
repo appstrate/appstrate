@@ -10,7 +10,8 @@
  * long-running remote run.
  *
  * Both routes authenticate via JWT bearer (interactive CLI) or API key
- * with the `agents:run` scope (headless — GitHub Action, CI). HMAC-signed
+ * with the `agents:run` scope (headless — GitHub Action, CI); an inline
+ * `source` also takes `agents:write`. HMAC-signed
  * event ingestion lives in a separate router (`runs-events.ts`) because
  * its auth model is fundamentally different.
  *
@@ -29,7 +30,7 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
@@ -47,6 +48,7 @@ import { collectFileRefs } from "../services/input-parser.ts";
 import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
+import { preflightGateApiError } from "../services/run-preflight-gates.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
@@ -189,6 +191,8 @@ function assertNoPlatformFileRefs(
 export function createRunsRemoteRouter() {
   const router = new Hono<AppEnv>();
 
+  // The mounted guard is `agents:run`; the inline branch asks `agents:write` on
+  // top of it from inside the handler, on the request's own shape.
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
@@ -328,6 +332,9 @@ export function createRunsRemoteRouter() {
           actor,
         });
       } else {
+        // Composing: `agents:write` on top of the route's `agents:run` —
+        // mirror of `canComposeInline` (@appstrate/core/permissions).
+        assertPermission(c, "agents", "write");
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
@@ -403,15 +410,7 @@ export function createRunsRemoteRouter() {
         ...(manifestCache ? { manifestCache } : {}),
       });
 
-      if (!result.ok) {
-        // createRun's error shape carries { code, message, status? }.
-        throw new ApiError({
-          status: result.error.status ?? 500,
-          code: result.error.code,
-          title: result.error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
-          detail: result.error.message,
-        });
-      }
+      if (!result.ok) throw preflightGateApiError(result.error);
       logger.info("runs.remote.attribution", {
         runId: result.runId,
         orgId,

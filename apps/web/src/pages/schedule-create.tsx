@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAgents } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
+import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 
@@ -54,9 +55,9 @@ export function ScheduleCreatePage() {
         persistedProxyId={deps?.persistedProxyId ?? null}
         homeWritable={deps?.homeWritable ?? false}
         packageId={effectiveAgentId || undefined}
-        agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}
         isPending={createSchedule.isPending}
+        connectionChoices={scheduleConnectionChoices(createSchedule.error)}
         onSubmit={(data) => {
           createSchedule.mutate(data, {
             onSuccess: () => navigate("/schedules"),

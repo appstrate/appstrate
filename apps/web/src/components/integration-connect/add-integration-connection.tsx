@@ -12,7 +12,7 @@ import {
 import type { IntegrationDetailWire, IntegrationAuthStatus } from "../../hooks/use-integrations";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { isConnectionOwnedBy } from "./connection-label";
+import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 
 /** Single action for an integration; only genuinely multi-auth packages need a picker. */

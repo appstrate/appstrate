@@ -36,12 +36,17 @@ import { integrationConnections, integrationOauthClients, packages } from "@apps
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { getEnv } from "@appstrate/env";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 
 const INTEGRATION_ID = "@official/gmail";
+
+/** A well-formed connection uuid that no row carries — for the pre-lookup refusals. */
+const NO_SUCH_CONNECTION_ID = "00000000-0000-4000-8000-000000000000";
 
 // ── Controllable upstream token endpoint ─────────────────────
 interface TokenServer {
@@ -178,6 +183,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
@@ -215,6 +221,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
+        label: opts.accountId ?? "acct-1",
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
@@ -228,13 +235,20 @@ describe("resolveLiveIntegrationCredentials", () => {
     return row!.id;
   }
 
-  function resolverContext() {
+  /**
+   * `connectionId` is REQUIRED on the resolver: a run binds a SET of
+   * connections per integration and each credential read names one. Tests that
+   * fail before the connection is ever read pass {@link NO_SUCH_CONNECTION_ID}.
+   */
+  function resolverContext(connectionId: string) {
     return {
       runId: "run_test",
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       agentPackageId: "@creds/agent",
       actor: { type: "user" as const, id: ctx.user.id },
+      connectionId,
+      connectionSource: "member_pin",
     };
   }
 
@@ -253,7 +267,7 @@ describe("resolveLiveIntegrationCredentials", () => {
 
     let status: number | undefined;
     try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
         forceRefresh: true,
       });
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
@@ -270,7 +284,7 @@ describe("resolveLiveIntegrationCredentials", () => {
 
     let status: number | undefined;
     try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
         forceRefresh: true,
       });
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
@@ -290,7 +304,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // No forceRefresh + the seeded token has no expiry → outside the lead
     // window → no refresh attempt → a still-valid token must NOT be flagged
     // merely because it lacks a refresh client.
-    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
+    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {});
     expect(await needsReconnection(connId)).toBe(false);
   });
 
@@ -298,7 +312,8 @@ describe("resolveLiveIntegrationCredentials", () => {
   // A FORCED refresh only happens after the sidecar saw an upstream 401. For
   // EVERY auth shape a real fleet uses, the outcome must be exactly one of:
   //   • refreshed → fresh token rotated in, connection NOT flagged; or
-  //   • terminal  → 410 + connection flagged needsReconnection.
+  //   • terminal  → 502 below the failure threshold (one rejection can be
+  //     transient), then 410 + connection flagged needsReconnection.
   // It must NEVER be the old silent "stale-200, no flag" no-op (the original
   // bug). The `expect: "refreshed"` branch asserts the token was genuinely
   // ROTATED (not the seeded "old-access"), so a silent no-op fails both
@@ -423,20 +438,32 @@ describe("resolveLiveIntegrationCredentials", () => {
       // OAuth refresh exchange (when reached) returns a rotated token.
       token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-      let status: number | undefined;
-      let result: Awaited<ReturnType<typeof resolveLiveIntegrationCredentials>> | undefined;
-      try {
-        result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
-          forceRefresh: true,
-        });
-      } catch (err) {
-        status = (err as { status?: number }).status;
-      }
+      const forced = async () => {
+        try {
+          return {
+            result: await resolveLiveIntegrationCredentials(
+              INTEGRATION_ID,
+              resolverContext(connId),
+              {
+                forceRefresh: true,
+              },
+            ),
+            status: undefined,
+          };
+        } catch (err) {
+          return { result: undefined, status: (err as { status?: number }).status };
+        }
+      };
 
       if (c.expect === "flagged") {
-        expect(status).toBe(410);
+        for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
+          expect((await forced()).status).toBe(502);
+          expect(await needsReconnection(connId)).toBe(false);
+        }
+        expect((await forced()).status).toBe(410);
         expect(await needsReconnection(connId)).toBe(true);
       } else {
+        const { result, status } = await forced();
         expect(status).toBeUndefined();
         expect(await needsReconnection(connId)).toBe(false);
         const primary = result!.auths.find((a) => a.authKey === "primary");
@@ -445,6 +472,93 @@ describe("resolveLiveIntegrationCredentials", () => {
       }
     });
   }
+
+  it("renders templated authorized_uris from the connection's fields (#1458)", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: ["https://{$credential.host}/**", "https://static.example/**"],
+              credentialFields: ["api_key", "host"],
+              requiredCredentialFields: ["api_key", "host"],
+            },
+          },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        label: "Connexion 1",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({
+          outputs: { api_key: "k", host: "tenant.example.com" },
+        }),
+      })
+      .returning({ id: integrationConnections.id });
+
+    const result = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(conn!.id),
+      {},
+    );
+    expect(result.auths[0]!.authorizedUris).toEqual([
+      "https://tenant.example.com/**",
+      "https://static.example/**",
+    ]);
+  });
+
+  it("a reconnect resets the rejection count of an unrefreshable auth", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const connId = await seedConnection({ userId: ctx.user.id });
+    const forced = () =>
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
+        forceRefresh: true,
+      }).then(
+        () => undefined,
+        (err: { status?: number; message?: string }) => err,
+      );
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) expect((await forced())?.status).toBe(502);
+
+    await saveIntegrationConnection(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      {
+        packageId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        credentials: { api_key: "fresh" },
+        actor: { type: "user", id: ctx.user.id },
+        connectionId: connId,
+      },
+    );
+    // The count restarts from the reconnect — it is cumulative since the last
+    // (re)connect, not a streak — and the 502 says so.
+    const afterReconnect = await forced();
+    expect(afterReconnect?.status).toBe(502);
+    expect(afterReconnect?.message).toContain(
+      `1/${max} upstream rejections since the connection was last (re)connected`,
+    );
+    expect(await needsReconnection(connId)).toBe(false);
+  });
 
   it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {
     // The matrix above seeds connections with a NULL `expires_at`, so it never
@@ -461,9 +575,11 @@ describe("resolveLiveIntegrationCredentials", () => {
     });
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
-      forceRefresh: true,
-    });
+    const result = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(connId),
+      { forceRefresh: true },
+    );
 
     const primary = result.auths.find((a) => a.authKey === "primary");
     expect(primary?.fields.access_token).toBe("rotated");
@@ -483,7 +599,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     let status: number | undefined;
     let message: string | undefined;
     try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
         forceRefresh: true,
       });
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
@@ -528,7 +644,7 @@ describe("resolveLiveIntegrationCredentials", () => {
 
       let status: number | undefined;
       try {
-        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
           forceRefresh: true,
         });
       } catch (err) {
@@ -572,7 +688,11 @@ describe("resolveLiveIntegrationCredentials", () => {
       });
 
       // No forceRefresh → proactive path.
-      const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {});
+      const result = await resolveLiveIntegrationCredentials(
+        INTEGRATION_ID,
+        resolverContext(connId),
+        {},
+      );
       const primary = result.auths.find((a) => a.authKey === "primary");
       expect(primary?.fields.access_token).toBe("old-access"); // cached, un-rotated
       expect(await needsReconnection(connId)).toBe(false);
@@ -600,7 +720,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     });
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
       forceRefresh: true,
     });
     // Credentials still resolve (the refresh succeeded) ...
@@ -626,7 +746,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Shrinks delete+send away but keeps read (the required floor).
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read" });
 
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
       forceRefresh: true,
     });
     expect(out.auths.length).toBe(1);
@@ -641,7 +761,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // No force-refresh: we want to observe selection, not the refresh path.
     let err: unknown;
     try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext());
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(foreignId));
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
     } catch (e) {
       err = e;
@@ -657,6 +777,32 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(foreignId)).toBe(false);
   });
 
+  // A run binding TWO connections to one integration loses exactly the one that went away.
+  it("loses only the deleted member of a bound set — its sibling still resolves", async () => {
+    const kept = await seedConnection({ userId: ctx.user.id, accountId: "acct-kept" });
+    const removed = await seedConnection({ userId: ctx.user.id, accountId: "acct-removed" });
+    await db.delete(integrationConnections).where(eq(integrationConnections.id, removed));
+
+    let err: unknown;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(removed));
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (e) {
+      err = e;
+    }
+    expect((err as { status?: number }).status).toBe(404);
+    // Naming the id is the whole point: with N bound connections, "no
+    // connection for this integration" does not say which one to re-connect.
+    expect((err as Error).message).toContain(removed);
+    expect((err as Error).message).toContain("source 'member_pin'");
+
+    // CONTROL — the sibling is untouched. A dead member must not black-hole
+    // the credentials of the connections that are still live.
+    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(kept));
+    expect(out.auths).toHaveLength(1);
+    expect(out.auths[0]!.authKey).toBe("primary");
+  });
+
   it("throws 404 when the integration is not installed in the space", async () => {
     // A different integration the agent never declared / installed.
     await seedPackage({
@@ -669,7 +815,10 @@ describe("resolveLiveIntegrationCredentials", () => {
 
     let status: number | undefined;
     try {
-      await resolveLiveIntegrationCredentials("@official/uninstalled", resolverContext());
+      await resolveLiveIntegrationCredentials(
+        "@official/uninstalled",
+        resolverContext(NO_SUCH_CONNECTION_ID),
+      );
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
     } catch (err) {
       status = (err as { status?: number }).status;
@@ -680,7 +829,10 @@ describe("resolveLiveIntegrationCredentials", () => {
   it("throws 404 when the integration package does not exist", async () => {
     let status: number | undefined;
     try {
-      await resolveLiveIntegrationCredentials("@official/does-not-exist", resolverContext());
+      await resolveLiveIntegrationCredentials(
+        "@official/does-not-exist",
+        resolverContext(NO_SUCH_CONNECTION_ID),
+      );
       throw new Error("expected resolveLiveIntegrationCredentials to throw");
     } catch (err) {
       status = (err as { status?: number }).status;

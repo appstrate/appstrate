@@ -43,7 +43,7 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
 
 /** Exactly one of the two forms; the base URL only where the provider lets it move. */
 export type DiscoverBody =
-  { credential_id: string } | { provider_id: string; api_key: string; base_url_override?: string };
+  { credentialId: string } | { providerId: string; api_key: string; base_url_override?: string };
 
 export function buildDiscoverBody(input: {
   credentialId: string | null;
@@ -51,9 +51,9 @@ export function buildDiscoverBody(input: {
   inlineApiKey: string;
   baseUrl: string;
 }): DiscoverBody {
-  if (input.credentialId) return { credential_id: input.credentialId };
+  if (input.credentialId) return { credentialId: input.credentialId };
   return {
-    provider_id: input.provider.providerId,
+    providerId: input.provider.providerId,
     api_key: input.inlineApiKey.trim(),
     ...(input.provider.baseUrlOverridable ? { base_url_override: input.baseUrl.trim() } : {}),
   };

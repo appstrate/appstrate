@@ -85,7 +85,7 @@ describe("Enriched run projection", () => {
       agentScope: "@acme",
       agentName: "proj-agent",
       runOrigin: "platform",
-      connectionOverrides: { "@acme/gmail": "conn_1" },
+      connectionOverrides: { "@acme/gmail": ["conn_1", "conn_2"] },
       dependencyOverrides: { "@acme/skill": "draft" },
       // Excluded-by-design columns, all populated so an accidental spread shows.
       modelCost: { input: 1, output: 2 },
@@ -96,7 +96,10 @@ describe("Enriched run projection", () => {
       sinkExpiresAt: new Date(Date.now() + 3_600_000),
       lastEventSequence: 12,
       resolvedConnections: {
-        "@acme/gmail": { connectionId: "conn_1", label: "Work", accountId: "a@b.c", source: "pin" },
+        "@acme/gmail": [
+          { connectionId: "conn_1", label: "Work", accountId: "a@b.c", source: "pin" },
+          { connectionId: "conn_2", label: "Perso", accountId: "p@b.c", source: "pin" },
+        ],
       },
     });
     runId = run.id;
@@ -126,7 +129,7 @@ describe("Enriched run projection", () => {
     expect(body.agent_scope).toBe("@acme");
     expect(body.agent_name).toBe("proj-agent");
     expect(body.runOrigin).toBe("platform");
-    expect(body.connection_overrides).toEqual({ "@acme/gmail": "conn_1" });
+    expect(body.connection_overrides).toEqual({ "@acme/gmail": ["conn_1", "conn_2"] });
     expect(body.dependency_overrides).toEqual({ "@acme/skill": "draft" });
     expect(body.started_at).toBeString();
     expect(body.orgId).toBe(ctx.orgId);
@@ -135,9 +138,13 @@ describe("Enriched run projection", () => {
     // Enrichment computed alongside the projection.
     expect(body.file_counts).toEqual({ input: 0, output: 0 });
     expect(body.unread).toBeBoolean();
-    // `resolvedConnections` reaches the client only in its display-safe form.
+    // `resolvedConnections` reaches the client only in its display-safe form —
+    // one entry per BOUND connection, so the two connections of this single
+    // integration produce two entries sharing an `integration_id`, and the raw
+    // `connectionId` appears in neither.
     expect(body.connections_used).toEqual([
       { integration_id: "@acme/gmail", label: "Work", account_id: "a@b.c", source: "pin" },
+      { integration_id: "@acme/gmail", label: "Perso", account_id: "p@b.c", source: "pin" },
     ]);
   }
 

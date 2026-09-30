@@ -53,17 +53,56 @@ export function matchVersion(versions: string[], range: string): string | null {
   return semver.maxSatisfying(versions, range);
 }
 
+export type VersionBump = "major" | "minor" | "patch";
+
 /** Auto-bump a release segment of `currentVersion`. Returns null if invalid semver. */
-export function bumpVersion(
-  currentVersion: string,
-  release: "major" | "minor" | "patch",
-): string | null {
+export function bumpVersion(currentVersion: string, release: VersionBump): string | null {
   return semver.inc(currentVersion, release);
 }
 
 /** Auto-bump the patch segment of `currentVersion`. Returns null if invalid semver. */
 export function bumpPatch(currentVersion: string): string | null {
   return bumpVersion(currentVersion, "patch");
+}
+
+/**
+ * What publishing a draft would cut, given the draft manifest's version and the
+ * latest published one (`GET …/versions/info`). One decision for every
+ * publishing surface — the dashboard's dialog and the CLI — because the server
+ * cuts whatever it is handed and enforces forward-only on its own:
+ *
+ * - `bump` — the draft still carries the published version: the next version is
+ *   `latest` bumped by `bump`, sent as the override.
+ * - `direct` — the draft is ahead of `latest`, or nothing is published: the
+ *   draft's own version is cut, no override.
+ * - `blocked` — the draft is BEHIND `latest`; forward-only would refuse it.
+ * - `none` — the draft carries no valid version to reason about.
+ *
+ * `target` is the version the publish would create; `override` is the body's
+ * `version`, set only when it differs from what the draft already says.
+ */
+export type PublishVersionPlan =
+  | { kind: "bump"; target: string; override: string }
+  | { kind: "direct"; target: string; override: undefined }
+  | { kind: "blocked"; target: undefined; override: undefined }
+  | { kind: "none"; target: undefined; override: undefined };
+
+export function planPublishVersion(
+  draftVersion: string | null | undefined,
+  latestPublished: string | null | undefined,
+  bump: VersionBump,
+): PublishVersionPlan {
+  if (!draftVersion || !isValidVersion(draftVersion)) {
+    return { kind: "none", target: undefined, override: undefined };
+  }
+  if (!latestPublished || semver.gt(draftVersion, latestPublished)) {
+    return { kind: "direct", target: draftVersion, override: undefined };
+  }
+  if (semver.eq(draftVersion, latestPublished)) {
+    const next = bumpVersion(latestPublished, bump);
+    if (next) return { kind: "bump", target: next, override: next };
+  }
+  return { kind: "blocked", target: undefined, override: undefined };
 }
 
 /**

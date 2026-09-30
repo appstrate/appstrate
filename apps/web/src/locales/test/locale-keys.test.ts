@@ -180,7 +180,7 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
-  "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
+  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
@@ -202,6 +202,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
+  "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
@@ -217,7 +218,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "orgRolesGuide.can.", // pages/org-settings/org-roles.tsx — one key per capability row
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
+  "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx, run-execution-tab.tsx
   "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)

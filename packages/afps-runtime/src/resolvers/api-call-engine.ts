@@ -19,8 +19,8 @@
  *          checks and before re-issuing the fetch,
  *        - applies a hybrid credential-strip (forward credentials inside
  *          a declared allowlist; WHATWG origin-based strip otherwise),
- *        - captures `Set-Cookie` from intermediate hops into a jar
- *          (Bun/Node native fetch only surface the final hop's cookies).
+ *        - captures each hop's `Set-Cookie` into the caller's cookie scope by
+ *          its origin (Bun/Node native fetch only surface the final hop's cookies).
  *
  * What this module deliberately does NOT own:
  *   - HOW credentials are obtained (the sidecar fetches them from the
@@ -69,9 +69,9 @@
  *     that is what makes multi-host APIs (Dropbox `api.` ⇄ `content.`) work.
  *     Folding the two would mean an option that disables the shared
  *     primitive's central safety property for one caller.
- *   - **Cookie continuity.** Every hop's `Set-Cookie` is merged into a
- *     per-integration jar and recomposed onto the next hop (#473). The shared
- *     primitive has no jar and no reason to grow one.
+ *   - **Cookie continuity.** Every hop's `Set-Cookie` is captured into the
+ *     caller's cookie scope (per hop origin) and recomposed onto the next hop
+ *     (#473). The shared primitive has no jar and no reason to grow one.
  *
  * What the two DO share is now actually shared: the SSRF blocklist
  * (`@appstrate/afps-shared/ssrf`), the DNS-rebind check (`./ssrf-dns`) and the
@@ -83,7 +83,13 @@
 import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
 import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
-import { matchesAuthorizedUriSpec, stripUserInfoAndFragment } from "./http-call-core.ts";
+import {
+  hostLiterallyAllowlisted,
+  matchesAuthorizedUriSpec,
+  stripUserInfoAndFragment,
+} from "./http-call-core.ts";
+import { cookieScope, type CookieScope } from "./cookie-jar.ts";
+import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
 
 // Re-exported from its new home in `http-call-core.ts`, where the
 // `authorized_uris` matcher itself needs it (see
@@ -141,10 +147,15 @@ type PreflightResult =
 
 interface PreflightOptions {
   /**
-   * Provider's declared trust boundary. When non-empty and `allowAllUris`
-   * is false, the target must match.
+   * The connection's trust boundary (rendered `authorized_uris`). When non-empty and
+   * `allowAllUris` is false, the target must match.
    */
   authorizedUris?: string[] | null;
+  /**
+   * The manifest's DECLARED (unrendered) `authorized_uris`: only a host written literally
+   * there exempts a target from the SSRF net — a host rendered from a connection value never does.
+   */
+  declaredUris: readonly string[];
   /**
    * When true, the allowlist gate is skipped — but the SSRF blocklist
    * still applies (no `allowAllUris` ever permits a loopback / RFC1918 /
@@ -156,40 +167,8 @@ interface PreflightOptions {
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
-}
-
-/**
- * True when some allowlist entry names the URL's host with a literal
- * (wildcard-free) host component. Only then is the allowlist a
- * host-level trust declaration that exempts the target from the SSRF
- * gate: the operator wrote that exact host down, so an internal address
- * behind it is their declared topology (on-prem APIs are legitimate
- * allowlist targets). Entries whose host segment contains a glob
- * (`https://**`, `https://*.example.com/…`) never pin — the concrete
- * host is then chosen by the agent at call time, and the SSRF gate must
- * still apply.
- *
- * The host comparison is authority-only and case-insensitive: userinfo
- * and the port are stripped, a globbed scheme (`**://`, `*://`) and a
- * globbed port (`:*`) are tolerated — a glob there doesn't make the HOST
- * agent-chosen, and refusing to pin would wrongly re-gate a literal
- * on-prem host the operator explicitly named.
- */
-export function hostLiterallyAllowlisted(url: string, specs: string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  for (const spec of specs) {
-    const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
-    if (!m) continue;
-    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
-    if (hostPart.includes("*")) continue;
-    if (hostPart.toLowerCase() === host) return true;
-  }
-  return false;
+  /** Credential values scrubbed from the host a rejection echoes. */
+  credentialFields?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -215,7 +194,11 @@ export function hostLiterallyAllowlisted(url: string, specs: string[]): boolean 
  * them injects a stub. Closing it means giving this module a real transport
  * seam first.
  */
-async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<PreflightResult> {
+async function refuseSsrfUrl(
+  url: string,
+  resolveHost?: HostResolver,
+  credentialFields: Readonly<Record<string, string>> = {},
+): Promise<PreflightResult> {
   const blocked: PreflightResult = {
     ok: false,
     reason: "ssrf",
@@ -234,7 +217,7 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
     return {
       ok: false,
       reason: "ssrf",
-      message: `Target host could not be resolved (${redactHost(url)})`,
+      message: `Target host could not be resolved (${redactCredentialHost(url, credentialFields)})`,
     };
   }
   return blocked;
@@ -244,10 +227,11 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
  * Validate the INITIAL target URL against the allowlist + SSRF blocklist
  * + DNS-rebind layer. Mirrors the sidecar's `executeApiCall` branches:
  *   - `allowAllUris` → SSRF safety-net (literal + DNS).
- *   - declared `authorizedUris` → must match; a glob-matched host (no
- *     literal pin) additionally passes the SSRF safety-net — `https://**`
+ *   - `authorizedUris` → must match; a host not pinned literally by
+ *     `declaredUris` additionally passes the SSRF safety-net — `https://**`
  *     would otherwise let the agent pick ANY host with zero floor,
  *     strictly weaker than allow_all.
+ *   - `declaredUris` rendering to nothing → refused ({@link allowlistUnrendered}).
  *   - neither → SSRF safety-net (no allowlist means "block internals").
  *
  * The per-hop equivalents live in {@link fetchFollowingRedirectsCapturingCookies}.
@@ -255,23 +239,33 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
 export async function preflightUrl(url: string, opts: PreflightOptions): Promise<PreflightResult> {
   const authorizedUris = opts.authorizedUris ?? undefined;
   if (opts.allowAllUris) {
-    return refuseSsrfUrl(url, opts.resolveHost);
+    return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
+  }
+  if (
+    allowlistUnrendered({
+      declaredUris: opts.declaredUris,
+      authorizedUris: authorizedUris ?? [],
+      allowAllUris: false,
+    })
+  ) {
+    return { ok: false, reason: "not_authorized", message: UNRENDERED_ALLOWLIST_REFUSAL };
   }
   if (authorizedUris && authorizedUris.length) {
     if (!matchesAuthorizedUri(url, authorizedUris)) {
+      // The declared entries: a rendered one may be a secret (an exact webhook URL).
       return {
         ok: false,
         reason: "not_authorized",
-        message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
+        message: `URL not in authorized_uris allowlist. Allowed: ${opts.declaredUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(url, authorizedUris)) {
-      return refuseSsrfUrl(url, opts.resolveHost);
+    if (!hostLiterallyAllowlisted(url, opts.declaredUris)) {
+      return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
     }
     return { ok: true };
   }
   // No authorized_uris and no allowAllUris — apply the SSRF safety net.
-  return refuseSsrfUrl(url, opts.resolveHost);
+  return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
 }
 
 /** Extract hostname for audit logs, never throwing. */
@@ -283,31 +277,58 @@ export function redactHost(url: string): string {
   }
 }
 
-/** Dedup by cookie name; strip attributes (Path, Expires, Domain, SameSite, …). */
-export function mergeSetCookieIntoJar(
-  setCookieHeaders: string[],
-  cookieJar: Map<string, string[]>,
-  integrationId: string,
-): void {
-  if (!setCookieHeaders.length) return;
-  const byName = new Map<string, string>();
-  for (const ck of cookieJar.get(integrationId) ?? []) byName.set(ck.split("=")[0]!, ck);
-  for (const h of setCookieHeaders) {
-    const ck = h.split(";")[0]!.trim();
-    byName.set(ck.split("=")[0]!, ck);
+/** Each credential value, raw or percent-encoded, → `{{field}}`; longest first (overlaps). */
+export function redactCredentialValues(
+  value: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  const needles: Array<[string, string]> = [];
+  for (const [name, fieldValue] of Object.entries(fields)) {
+    if (fieldValue.length === 0) continue;
+    needles.push([fieldValue, name]);
+    const encoded = encodeURIComponent(fieldValue);
+    if (encoded !== fieldValue) needles.push([encoded, name]);
   }
-  cookieJar.set(integrationId, [...byName.values()]);
+  needles.sort((a, b) => b[0].length - a[0].length);
+  let out = value;
+  for (const [needle, name] of needles) out = out.split(needle).join(`{{${name}}}`);
+  return out;
 }
 
-/** Parse a `Cookie:` header value into name→pair entries, deduped by name. */
-function parseCookieHeader(value: string | null): Map<string, string> {
-  const byName = new Map<string, string>();
-  if (!value) return byName;
-  for (const part of value.split(";")) {
-    const trimmed = part.trim();
-    if (trimmed) byName.set(trimmed.split("=")[0]!, trimmed);
-  }
-  return byName;
+/** {@link redactHost}, credential values scrubbed (lowercased, as WHATWG lowercases hosts). */
+export function redactCredentialHost(
+  url: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  const lowered = Object.fromEntries(
+    Object.entries(fields).map(([name, v]) => [name, v.toLowerCase()]),
+  );
+  return redactCredentialValues(redactHost(url), lowered);
+}
+
+/** Every URL cut to its redacted host, then credential values scrubbed. */
+function redactCredentialMessage(
+  message: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  return redactCredentialValues(
+    message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactCredentialHost(url, fields)),
+    fields,
+  );
+}
+
+/**
+ * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
+ * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
+ */
+export function scrubTransportError(
+  err: unknown,
+  fields: Readonly<Record<string, string>>,
+): unknown {
+  if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
+  const clean = new Error(redactCredentialMessage(err.message, fields));
+  clean.name = err.name;
+  return clean;
 }
 
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
@@ -321,7 +342,7 @@ interface RedirectFollowOptions {
   url: string;
   init: RequestInit;
   fetchFn: typeof fetch;
-  cookieJar: Map<string, string[]>;
+  cookies: CookieScope;
   integrationId: string;
   /** Lowercased name of the credential header server-injected by the caller. */
   injectedCredentialHeader: string | null;
@@ -342,6 +363,8 @@ interface RedirectFollowOptions {
   allowAllUris?: boolean;
   /** Optional logger for per-hop refusals. Defaults to a no-op. */
   logger?: RedirectLogger;
+  /** Credential values scrubbed from the hosts it logs (a relative hop keeps a templated host). */
+  credentialFields?: Readonly<Record<string, string>>;
   /**
    * DNS resolver for the per-hop SSRF rebind check — injectable for tests.
    * Production callers omit it (system resolver via `node:dns`).
@@ -351,7 +374,7 @@ interface RedirectFollowOptions {
 
 /**
  * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into the per-integration jar — Bun's / undici's native
+ * **every** hop into `cookies` — Bun's / undici's native
  * fetch only surfaces the final hop's `Set-Cookie`, which breaks
  * multi-step OAuth/CAS flows where the session cookie lands on an
  * intermediate 302 (see #473).
@@ -376,8 +399,8 @@ interface RedirectFollowOptions {
  * native fetch — bodies can't be replayed across hops). The initial-URL
  * allowlist check still bounds the SSRF surface for that path.
  *
- * Caller-supplied cookies are preserved across hops (the jar wins on name
- * conflict so server-rotated values replace stale caller-supplied ones).
+ * Each hop's `Set-Cookie` lands in THAT hop's origin bucket; each hop's `Cookie`
+ * is composed over `init`'s, which is dropped for good once a strip fires.
  *
  * Returns the terminal `Response`, the URL it was served from (so
  * callers driving redirect-chain flows — OAuth code, CAS ticket,
@@ -394,24 +417,31 @@ export async function fetchFollowingRedirectsCapturingCookies(
     url,
     init,
     fetchFn,
-    cookieJar,
+    cookies,
     integrationId,
     injectedCredentialHeader,
     authorizedUris,
     allowAllUris,
   } = opts;
   const logger = opts.logger ?? NOOP_LOGGER;
+  const credentialFields = opts.credentialFields ?? {};
   const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  const callerCookies = parseCookieHeader(
-    new Headers(init.headers as RequestInit["headers"]).get("cookie"),
-  );
+  // Uncomposed, so a cookie deleted mid-chain falls back to it instead of being re-sent.
+  let base = new Headers(init.headers as RequestInit["headers"]).get("cookie");
 
   let currentUrl = url;
   let currentInit: RequestInit = { ...init, redirect: "manual" };
+  const first = cookies.header(url, base);
+  if (first !== (base ?? undefined)) {
+    const headers = new Headers(init.headers as RequestInit["headers"]);
+    if (first) headers.set("cookie", first);
+    else headers.delete("cookie");
+    currentInit.headers = headers;
+  }
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const response = await fetchFn(currentUrl, currentInit);
-    mergeSetCookieIntoJar(response.headers.getSetCookie(), cookieJar, integrationId);
+    cookies.capture(currentUrl, response.headers.getSetCookie());
 
     if (response.status < 300 || response.status >= 400) {
       return { response, finalUrl: currentUrl, hops: hop };
@@ -442,7 +472,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF blocklist)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -458,7 +488,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF DNS-rebind)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -466,7 +496,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (not in authorizedUris)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("unauthorized", nextUrl);
     }
@@ -481,23 +511,17 @@ export async function fetchFollowingRedirectsCapturingCookies(
     const stripCred = (!hasAllowlist || !!allowAllUris) && crossOrigin;
 
     const headers = new Headers(currentInit.headers as RequestInit["headers"]);
-    headers.delete("cookie");
-    // Compose Cookie from caller-supplied + jar (jar wins on dup name).
-    const merged = new Map(callerCookies);
-    for (const ck of cookieJar.get(integrationId) ?? []) merged.set(ck.split("=")[0]!, ck);
-    if (merged.size) headers.set("cookie", [...merged.values()].join("; "));
-    if (dropBody) {
-      headers.delete("content-length");
-      headers.delete("content-type");
-    }
     if (stripCred) {
       headers.delete("authorization");
       if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
-      // Cookies are credentials too. The jar/caller cookies were composed
-      // above unconditionally (to follow intra-allowlist multi-host flows);
-      // strip them on an out-of-boundary cross-origin hop so an
-      // upstream-controlled redirect can't exfiltrate the session jar.
-      headers.delete("cookie");
+      base = null; // cookies are credentials too
+    }
+    headers.delete("cookie");
+    const cookie = cookies.header(nextUrl, base);
+    if (cookie) headers.set("cookie", cookie);
+    if (dropBody) {
+      headers.delete("content-length");
+      headers.delete("content-type");
     }
 
     currentInit = {
@@ -509,7 +533,9 @@ export async function fetchFollowingRedirectsCapturingCookies(
     currentUrl = nextUrl;
   }
 
-  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${url}`);
+  throw new Error(
+    `Too many redirects (>${MAX_REDIRECTS}) starting at ${redactCredentialHost(url, credentialFields)}`,
+  );
 }
 
 /**
@@ -538,6 +564,8 @@ interface GuardedFetchOptions {
   init: RequestInit;
   fetchFn?: typeof fetch;
   authorizedUris?: string[] | null;
+  /** See {@link PreflightOptions.declaredUris}; also the only hosts that share cookies. */
+  declaredUris: readonly string[];
   allowAllUris?: boolean;
   /** Lowercased name of the credential header injected by the caller. */
   injectedCredentialHeader?: string | null;
@@ -545,6 +573,8 @@ interface GuardedFetchOptions {
   logger?: RedirectLogger;
   /** DNS resolver for the SSRF rebind preflight — injectable for tests. */
   resolveHost?: HostResolver;
+  /** Credential values scrubbed from the hosts preflight / redirect refusals echo. */
+  credentialFields?: Readonly<Record<string, string>>;
 }
 
 export class PreflightError extends Error {
@@ -563,8 +593,10 @@ export async function guardedFetch(
   const fetchFn = opts.fetchFn ?? fetch;
   const pre = await preflightUrl(opts.url, {
     authorizedUris: opts.authorizedUris,
+    declaredUris: opts.declaredUris,
     allowAllUris: opts.allowAllUris,
     resolveHost: opts.resolveHost,
+    credentialFields: opts.credentialFields,
   });
   if (!pre.ok) {
     throw new PreflightError(pre.reason, pre.message);
@@ -583,16 +615,18 @@ export async function guardedFetch(
     return { response, finalUrl: response.url || opts.url, hops: 0 };
   }
 
+  const integrationId = opts.integrationId ?? "local";
   return fetchFollowingRedirectsCapturingCookies({
     url: opts.url,
     init,
     fetchFn,
-    cookieJar: new Map<string, string[]>(),
-    integrationId: opts.integrationId ?? "local",
+    cookies: cookieScope(new Map(), integrationId, opts.allowAllUris ? null : opts.declaredUris),
+    integrationId,
     injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
     authorizedUris: opts.authorizedUris ?? undefined,
     allowAllUris: opts.allowAllUris,
     ...(opts.resolveHost ? { resolveHost: opts.resolveHost } : {}),
     ...(opts.logger ? { logger: opts.logger } : {}),
+    ...(opts.credentialFields ? { credentialFields: opts.credentialFields } : {}),
   });
 }

@@ -82,7 +82,7 @@ export function BillingManagersSection() {
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
 
-  const saved = (managersQuery.data?.managers ?? []).map((m) => m.user_id);
+  const saved = (managersQuery.data?.data ?? []).map((m) => m.userId);
   const selected = draft ?? saved;
   const members = orgQuery.data?.members ?? [];
   const rows = billingManagerRows(selected, members);

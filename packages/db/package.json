@@ -16,7 +16,8 @@
     "./ids": "./src/ids.ts",
     "./provision-org": "./src/provision-org.ts",
     "./storage": "./src/storage.ts",
-    "./notify": "./src/notify.ts"
+    "./notify": "./src/notify.ts",
+    "./pg-safe": "./src/pg-safe.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -29,18 +30,18 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "@appstrate/env": "workspace:*",
-    "@aws-sdk/client-s3": "^3.1127.0",
-    "@aws-sdk/lib-storage": "^3.1127.0",
-    "@aws-sdk/s3-request-presigner": "^3.1127.0",
+    "@aws-sdk/client-s3": "^3.1141.0",
+    "@aws-sdk/lib-storage": "^3.1141.0",
+    "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@electric-sql/pglite": "^0.5.8",
-    "better-auth": "1.7.3",
-    "drizzle-orm": "^0.45.2",
-    "nodemailer": "^10.0.0",
+    "better-auth": "1.7.6",
+    "drizzle-orm": "^0.45.3",
+    "nodemailer": "^10.0.11",
     "postgres": "^3.4.9",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/nodemailer": "^8.0.1",
-    "drizzle-kit": "^0.31.10"
+    "@types/nodemailer": "^8.0.2",
+    "drizzle-kit": "^0.31.11"
   }
 }

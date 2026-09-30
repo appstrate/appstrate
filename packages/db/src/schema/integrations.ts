@@ -43,6 +43,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
+import { organizations } from "./organizations.ts";
 import { spaces, endUsers } from "./spaces.ts";
 import { packages } from "./packages.ts";
 
@@ -77,7 +78,7 @@ export const integrationConnections = pgTable(
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // Which registered OAuth client minted this connection — a flat client id:
     // the env id of a system client (SYSTEM_INTEGRATIONS) or the
-    // `integration_oauth_clients.id` of the org's own per-space client.
+    // `integration_oauth_clients.id` of a custom (space or org) client.
     // Pinned so token refresh resolves the SAME client credentials that minted
     // the tokens. Resolved system-first then DB-by-id (mirrors the model-provider
     // credential pattern), so a system id MUST NOT be UUID-shaped.
@@ -96,8 +97,10 @@ export const integrationConnections = pgTable(
     // looking healthy. This counter, gated on `expiresAt < now() - grace`,
     // escalates such a connection to `needsReconnection` so the preflight
     // resolver catches it with an actionable cause instead of every run dying
-    // opaquely at integration boot. Reset to 0 on any successful credential
-    // write (`persistCredentialBundle`).
+    // opaquely at integration boot. Also counts upstream 401s on an auth that
+    // cannot refresh (no expiry gate) — cumulative since the last reconnect,
+    // not consecutive. Reset to 0 on any successful credential write
+    // (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,
@@ -110,14 +113,17 @@ export const integrationConnections = pgTable(
     // If "when did refresh last fail" is ever needed, build the reader first —
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
-    // (email/login) when available, else "Connexion N" (N = existing connection
-    // count + 1 in the same (space, integration, owner) group). Stable for the
-    // row's lifetime; user-editable. The UI shows it verbatim — a single source
-    // of truth, no render-time fallback gymnastics.
-    label: text("label"),
-    // Owner-set opt-in: when true, this connection is selectable by
-    // any actor of the same space during the run-time fallback
-    // resolution (see integration-connection-resolver). Off by default
+    // (email/login) when available, else "Connexion N" (N = 1 + the highest
+    // "Connexion <n>" in the same (space, integration), every owner), suffixed
+    // " (n)" when taken. Stable for the row's lifetime; user-editable. The UI
+    // shows it verbatim — a single source of truth, no render-time fallback
+    // gymnastics. Never empty and unique per (space, integration): the
+    // sidecar's `connection` tool argument addresses a bound connection by it.
+    label: text("label").notNull(),
+    // Owner-set opt-in: when true, any actor of the same space may
+    // bind this connection by an explicit pick (member pin, launch
+    // override, admin pin, org default); the resolver's fallback never
+    // binds it (see integration-connection-resolver). Off by default
     // — sharing is explicit consent, never silent.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -143,16 +149,19 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // spaceId-only scans (FK cascade on space delete) — not covered by
-    // the lookup index (which leads with integrationId).
-    index("idx_integration_conn_space").on(table.spaceId),
-    // Hot path for the fallback resolution: when an actor has no pin
-    // and no override, the resolver enumerates own + shared connections
-    // for (space, integration, authKey). Partial index keeps the sharing
-    // set small.
+    // The shared side of `actorOrSharedFilter` for one (space, integration):
+    // the connection pickers and the resolver's selectable rows (own +
+    // shared), and the shared-only checks of admin pins, org defaults and a
+    // schedule written for another member. Partial, so it stays the size of
+    // the sharing set.
     index("idx_integration_conn_shared")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),
+    // A bound set spans owners of one (space, integration) and a tool call
+    // names its connection by label, so no two rows there share one. Its
+    // leading spaceId also serves spaceId-only scans (FK cascade on space
+    // delete).
+    uniqueIndex("idx_integration_conn_label").on(table.spaceId, table.integrationId, table.label),
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
@@ -163,46 +172,24 @@ export const integrationConnections = pgTable(
     // never disagree (an attacker-crafted INSERT bypassing the API still
     // hits the same gate).
     check("integration_connections_auth_key_valid", sql`"auth_key" ~ '^[a-z][a-z0-9_]*$'`),
+    check("integration_connections_label_not_empty", sql`label <> ''`),
   ],
 );
 
 /**
- * Phase 1.3 — per-space OAuth2 client registration for integration
- * auths (proposal §4.1.6.1 + spec gap addressed by 1.3 UI).
- *
- * Many integration `auths.{key}` of type `oauth2` need a clientId/secret
- * registered against the upstream IdP before any user can perform the
- * authorization flow. Administrators provide these values once per
- * space via the marketplace detail page; the user-facing connect
- * button then drives the standard PKCE exchange against the manifest's
- * declared `authorizationUrl` / `tokenUrl`.
- *
- * For `tokenAuthMethod = "none"` (public clients), `client_secret` is
- * stored as the empty string — encryption still applies for shape
- * uniformity with private clients. PKCE is mandatory for public clients
- * (enforced at the connect-flow layer).
- *
- * Multi-client: an admin may register **N** custom (BYO-app) clients per
- * `(space, integration, auth)` — mirroring the model-provider pattern
- * (N credentials, one `is_default`, system fallback). The connect resolver
- * picks the `is_default` custom client (else the system client, else the
- * first custom). Two carve-outs are DB-enforced by partial unique indexes:
- *   - `idx_ioc_one_default` → at most one `is_default=true` custom per auth.
- *   - `idx_ioc_one_auto`    → at most one `auto_provisioned=true` client per
- *     auth (the DCR/CIMD machine client — find-or-create idempotence without
- *     the old global UNIQUE).
- *
- * Lifecycle: created by admin (or auto-provisioned via DCR), optionally
- * rotated, deleted when the placement is removed (FK cascade on
- * `space_packages`).
+ * Custom (BYO-app) OAuth2 clients for integration auths: a space row overrides the
+ * org rows (`space_id IS NULL`) every space inherits (space > org > system client).
+ * At most one `is_default` per tier and `(integration, auth)`. The service keeps a
+ * space row's `org_id` equal to its space's org.
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    spaceId: text("space_id")
+    orgId: uuid("org_id")
       .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
@@ -245,15 +232,6 @@ export const integrationOauthClients = pgTable(
     tokenEndpointAuthMethod: text("token_endpoint_auth_method"),
     /** Optional pre-registered redirect URI; falls back to the platform default at connect time. */
     redirectUri: text("redirect_uri"),
-    // Whether this custom (BYO-app) client is the default for new connections.
-    // A per-row `is_default` boolean (not an org-level pointer) BECAUSE the
-    // default is scoped per `(space, integration, auth)` tuple — unlike the
-    // org-scoped model/proxy default, which uses an `organizations.default_*_id`
-    // pointer (org scope → pointer). Here, among the N custom clients of an auth
-    // at most one is flagged default (DB-enforced by `idx_ioc_one_default`); the
-    // connect resolution cascade reads it (default custom → else system → else
-    // first custom). New clients are flagged default by the service only when no
-    // other custom default exists, so the column baseline is `false`.
     isDefault: boolean("is_default").notNull().default(false),
     // Provenance: `true` for a client minted automatically via DCR/CIMD at
     // connect time (remote MCP public client), `false` for an admin-registered
@@ -266,12 +244,13 @@ export const integrationOauthClients = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // At most one default custom client per (space, integration, auth) — the
-    // model-provider one-default invariant, DB-enforced. "Default = system" is
-    // simply zero custom rows flagged default (valid under the partial index).
+    // One default per tier: space rows here, org rows (NULL `space_id`) below.
     uniqueIndex("idx_ioc_one_default")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault}`),
+    uniqueIndex("idx_ioc_one_org_default")
+      .on(table.orgId, table.integrationId, table.authKey)
+      .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
     // At most one auto-provisioned (DCR/CIMD) client per (space, integration,
     // auth) — replaces the old global UNIQUE for the find-or-create path while
     // leaving classic custom clients free to be N.
@@ -297,11 +276,20 @@ export const integrationOauthClients = pgTable(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,
     ),
+    check(
+      "ioc_auto_provisioned_is_space",
+      sql`NOT ${table.autoProvisioned} OR ${table.spaceId} IS NOT NULL`,
+    ),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
     // Hot path: the connect resolver + clients list enumerate every custom
     // client for a (space, integration, auth).
     index("idx_integration_oauth_clients_lookup").on(
       table.spaceId,
+      table.integrationId,
+      table.authKey,
+    ),
+    index("idx_integration_oauth_clients_org_lookup").on(
+      table.orgId,
       table.integrationId,
       table.authKey,
     ),

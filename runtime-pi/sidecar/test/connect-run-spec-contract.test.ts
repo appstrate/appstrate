@@ -26,6 +26,7 @@
 import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { runConnectOnce } from "../integrations-boot.ts";
+import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@scope/connect-it";
 const SERVER_ID = "@scope/connect-srv";
@@ -128,7 +129,7 @@ async function connectRun(
   }) as unknown as typeof fetch;
 
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
-  process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
     await runConnectOnce(spec, {
       platformApiUrl: "http://platform.local",
@@ -240,6 +241,10 @@ describe("runConnectOnce — the connect spec the platform builder must emit", (
     expect(internalCalls).toEqual([
       {
         method: "GET",
+        // No `?connection_id=`: a connect run is MINTING the credential that
+        // becomes a connection, so there is no row to name. The platform
+        // answers this from its grant-authorised branch, which returns an
+        // empty payload before it ever looks at the query.
         path: `/internal/integration-credentials/${INTEGRATION_ID}`,
         authorization: "Bearer connect-token",
       },

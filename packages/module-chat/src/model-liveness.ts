@@ -7,7 +7,8 @@
  * refresh token, or a stored blob that no longer decrypts) instead of dropping
  * it — the row has to stay visible for the user to reconnect or delete it. So
  * every consumer has to apply the gate itself: the server picker (`llm.ts`),
- * the stored-selection reconcile and the picker rendering (`ui/`).
+ * the selection reconcile (`ui/model-store.ts`) and the picker rendering
+ * (`ui/model-select.tsx`).
  *
  * `!== true` rather than truthiness: the field is optional on the wire and
  * absent on an older instance, which means live.

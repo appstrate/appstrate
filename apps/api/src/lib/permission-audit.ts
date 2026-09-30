@@ -24,7 +24,7 @@ import type { PermissionDenialContext } from "@appstrate/core/permissions";
 import { setPermissionDenialHandler } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "./logger.ts";
-import { viewAsWire } from "./view-as.ts";
+import { viewAsAudit } from "./view-as.ts";
 
 /**
  * Install the audit handler. Idempotent — subsequent calls replace the
@@ -44,7 +44,7 @@ export function installPermissionAuditLogger(): void {
       role: c.get("orgRole"),
       path: `${c.req.method} ${c.req.path}`,
       ...(c.get("apiKeyId") ? { apiKeyId: c.get("apiKeyId") } : {}),
-      ...(persona ? { viewAs: viewAsWire(persona) } : {}),
+      ...(persona ? { viewAs: viewAsAudit(persona) } : {}),
     });
   });
 }

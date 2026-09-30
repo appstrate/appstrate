@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
+import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
-import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
+import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
+import type { RunStatus } from "@appstrate/core/run-status";
 
 export type RunKindFilter = "all" | "package" | "inline";
 
@@ -40,6 +43,9 @@ export function usePaginatedRuns({
 }: UsePaginatedRunsOptions) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
+  // Every door guards on `requireRunsRead`; a schedule's runs also on `schedules:read`.
+  const canRead = canReadRuns(can) && (!scheduleId || can("schedules:read"));
 
   // Key segment only — the typed call below selects the matching spec path.
   // One value on the wire, so one value in the key: an array would key on its
@@ -114,7 +120,7 @@ export function usePaginatedRuns({
         .every((segment, i) => segment === (currentKey[i] as unknown));
       return sameQuestion ? prev : undefined;
     },
-    enabled: !!spaceId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
+    enabled: canRead && !!spaceId,
   });
 }
 
@@ -122,6 +128,7 @@ export function usePaginatedRuns({
 export function useAgentRunActivity(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can } = usePermissions();
 
   return useQuery({
     queryKey: ["agent-run-activity", orgId, spaceId, packageId],
@@ -132,6 +139,6 @@ export function useAgentRunActivity(packageId: string | undefined) {
       });
       return data!;
     },
-    enabled: !!orgId && !!spaceId && !!packageId,
+    enabled: canReadRuns(can) && !!orgId && !!spaceId && !!packageId,
   });
 }

@@ -17,7 +17,9 @@
  *  2. a `BroadcastChannel` publish (same browser even if the user finished in a
  *     plain tab rather than the popup).
  *  3. a card-local `connection_update` SSE stream (cross-tab/device backstop).
- * The first to fire wins; `resumed` guards against a double resume.
+ * A failure settles at once and leaves the card retryable; a success waits for
+ * the card's popup to close — see `connect-waiter.ts`. `resumed` guards against
+ * a double resume.
  *
  * The callback page contract — channel name, message type, payload and the
  * origin policy both directions must agree on — lives in
@@ -45,9 +47,10 @@ import {
   completionMatches,
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
-import { useChatHeaders } from "./runtime-context.ts";
+import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
+import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -127,7 +130,7 @@ export function OAuthConnectCard({
   packageId?: string;
   /**
    * Tool call this card was rendered from. Several cards share one when a
-   * run-kickoff 412 lists several integrations to connect; it is the second
+   * run-kickoff 409 lists several integrations to connect; it is the second
    * axis of the resume claim (see {@link claimResume}).
    */
   toolCallId?: string;
@@ -136,6 +139,8 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
+  // Without `integrations:read` the chip keeps the bare package id.
+  const readsIntegration = useChatHost().can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
@@ -145,7 +150,7 @@ export function OAuthConnectCard({
   // Fetch the integration's display name + icon once so the connect button and
   // the resume chip can show its brand instead of the bare `@scope/name` id.
   useEffect(() => {
-    if (!packageId) return;
+    if (!packageId || !readsIntegration) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -180,7 +185,7 @@ export function OAuthConnectCard({
     return () => {
       cancelled = true;
     };
-  }, [packageId, getHeaders]);
+  }, [packageId, getHeaders, readsIntegration]);
 
   const complete = useCallback(
     (ok: boolean, error?: string) => {
@@ -218,6 +223,17 @@ export function OAuthConnectCard({
     [aui, label, meta, packageId, toolCallId],
   );
 
+  // One waiter for the card's lifetime: an SSE hit parked until the popup
+  // closes must survive the listener effect re-running (phase, headers, meta).
+  const [waiter] = useState(createConnectWaiter);
+  useEffect(() => {
+    waiter.bind(() => complete(true));
+  }, [waiter, complete]);
+  useEffect(() => {
+    waiter.resume();
+    return () => waiter.stop();
+  }, [waiter]);
+
   // Listen from mount until the connection lands — NOT only after the user
   // clicks our button. The assistant may also paste the raw auth_url as a link;
   // if the user opens that in a full tab, completion arrives via the callback
@@ -232,12 +248,13 @@ export function OAuthConnectCard({
     // package-addressed completion on either carrier — the intended direction,
     // since it cannot tell its own integration's completion from anyone else's.
     const card = { state, packageId };
-    const resume = (d: CompletionDetail) => complete(d.ok !== false, d.error);
+    const onCompletion = (d: CompletionDetail) =>
+      routeCompletion(d, waiter, (error) => complete(false, error));
 
     // `acceptsCompletionMessage` validates `ev.origin` before the payload — a
     // `message` listener that skips that check authenticates nothing.
     const onMessage = (ev: MessageEvent) => {
-      if (acceptsCompletionMessage(ev, window.location.origin, card)) resume(ev.data);
+      if (acceptsCompletionMessage(ev, window.location.origin, card)) onCompletion(ev.data);
     };
     window.addEventListener("message", onMessage);
 
@@ -249,21 +266,21 @@ export function OAuthConnectCard({
         bc.onmessage = (ev) => {
           // `completionMatches` is a type guard, so the raw `data` narrows here.
           const d: unknown = ev.data;
-          if (completionMatches(d, card)) resume(d);
+          if (completionMatches(d, card)) onCompletion(d);
         };
       } catch {
         bc = null;
       }
     }
 
-    const closeSse = watchConnectionSse(getHeaders, packageId, () => complete(true));
+    const closeSse = watchConnectionSse(getHeaders, packageId, () => waiter.connected());
 
     return () => {
       window.removeEventListener("message", onMessage);
       bc?.close();
       closeSse();
     };
-  }, [phase, state, packageId, getHeaders, complete]);
+  }, [phase, state, packageId, getHeaders, waiter, complete]);
 
   const start = () => {
     if (!authUrl) return;
@@ -271,6 +288,7 @@ export function OAuthConnectCard({
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
     const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
+    waiter.popupOpened(popup);
     if (!popup) {
       // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
       // + SSE backstops still resume the (now backgrounded) chat tab.

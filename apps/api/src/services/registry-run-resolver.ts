@@ -43,7 +43,7 @@
 
 import { getPackage } from "./package-catalog.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
-import { getVersionDetail } from "./package-versions.ts";
+import { getVersionDetail, requirePublishedPrompt } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
@@ -117,7 +117,7 @@ export async function resolveRegistryAgent(
     // `getPackage` already returned the draft state (`draftManifest`/
     // `draftContent`). Run the full AFPS structural validation —
     // type-dispatched so an agent with a corrupt `dependencies` shape,
-    // missing `schemaVersion`, etc. fails cleanly here instead of
+    // missing `schema_version`, etc. fails cleanly here instead of
     // crashing deeper in the run pipeline with a less actionable error.
     // READ direction: the draft is already persisted, so a `runtime_tools` id
     // retired after it was written must not make it unrunnable. Save paths
@@ -161,7 +161,7 @@ export async function resolveRegistryAgent(
   // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
   // nothing resolves — let it bubble.
   const version = await resolveExportVersion(packageId, spec ?? null);
-  const detail = await getVersionDetail(packageId, version);
+  const detail = await getVersionDetail(packageId, version, { forExecution: true });
   if (!detail) {
     throw new ApiError({
       status: 404,
@@ -237,7 +237,7 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const prompt = detail.prompt ?? "";
+  const prompt = requirePublishedPrompt(packageId, detail);
 
   // Build the LoadedPackage from the published version's manifest + prompt
   // while preserving the package row's identity (id, source, updatedAt).

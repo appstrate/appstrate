@@ -16,7 +16,11 @@ import {
   type UIHint,
   type SchemaWrapper,
 } from "@appstrate/core/form";
-import { AFPS_SCHEMA_URLS, dropRetiredRuntimeTools } from "@appstrate/core/validation";
+import {
+  AFPS_SCHEMA_URLS,
+  AFPS_SCHEMA_VERSION,
+  dropRetiredRuntimeTools,
+} from "@appstrate/core/validation";
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
   dropRetiredDependencyKeys,
@@ -44,7 +48,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): Editor
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: "0.2",
+      schema_version: AFPS_SCHEMA_VERSION,
       type: "agent",
       name: orgSlug ? `@${orgSlug}/` : "",
       version: "1.0.0",
@@ -66,7 +70,7 @@ export function defaultSkillManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.skill,
-    schema_version: "0.2",
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "skill",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",
@@ -95,7 +99,7 @@ export function defaultIntegrationManifest(
 ): Record<string, unknown> {
   return {
     $schema: AFPS_SCHEMA_URLS.integration,
-    schema_version: "0.2",
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "integration",
     name: orgSlug ? `@${orgSlug}/` : "",
     version: "1.0.0",

@@ -18,7 +18,7 @@ export function useOrgSettings() {
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
-  return $api.useMutation("put", "/api/orgs/{orgId}/settings", {
+  return $api.useMutation("patch", "/api/orgs/{orgId}/settings", {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}/settings"] });
     },

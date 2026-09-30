@@ -54,8 +54,10 @@ services:
       retries: 10
 
   # ─── MinIO (S3-compatible) — Tier 3 ────────────────────────
+  # Pinned with docker-compose.yml's `appstrate-minio` (why, uid 65532 and the
+  # refresh recipe there). `minio-init` reuses it for `mc` and `/bin/sh`.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     profiles: ["full"]
     command: server /data
     ports:
@@ -75,7 +77,7 @@ services:
       retries: 10
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     profiles: ["full"]
     restart: "no"
     depends_on:

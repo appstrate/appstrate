@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
@@ -10,11 +10,13 @@ import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
-import { $api } from "../../api/client";
+import { canLeaveOrg } from "@appstrate/shared-types";
+import { $api, ApiError } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
@@ -23,6 +25,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
+import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
 import { OrganizationAvatar } from "../../components/organization-avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -61,8 +64,9 @@ async function normalizeOrganizationLogo(file: File): Promise<string> {
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
-  const { currentOrg } = useOrg();
-  const { can } = usePermissions();
+  const { currentOrg, orgs, forgetOrg } = useOrg();
+  const { can, orgRole } = usePermissions();
+  const { features } = useAppConfig();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const canUpdateOrg = can("org:update");
@@ -79,8 +83,31 @@ export function OrgSettingsGeneralPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [processingLogo, setProcessingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const leaveHintId = useId();
 
-  const updateNameMutation = $api.useMutation("put", "/api/orgs/{orgId}", {
+  // Shares `useOrgStorage`'s cache entry; owners always get the member list.
+  const { data: orgDetail } = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: !!orgId },
+  );
+  const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
+  // Under a preview `orgRole` is the persona's, not the real membership.
+  const previewing = useViewAsHeader() !== null;
+  const lastOwner = !!orgDetail && orgRole !== null && !canLeaveOrg({ role: orgRole, ownerCount });
+  const canLeave = orgRole !== null && !previewing && !lastOwner;
+  // An only member has nobody to name owner: point to delete instead.
+  const leaveHint = previewing
+    ? t("orgSettings.leavePreview")
+    : lastOwner
+      ? orgDetail?.members?.length === 1
+        ? t("orgSettings.leaveOnlyMember")
+        : t("orgSettings.leaveLastOwner")
+      : t("orgSettings.leaveOrgDesc");
+
+  const updateNameMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
     onSuccess: () => {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
@@ -90,14 +117,28 @@ export function OrgSettingsGeneralPage() {
     },
   });
 
+  // No reload needed: `forgetOrg` moves the selection off the gone org.
+  const exitOrg = (leftOrgId: string) => {
+    forgetOrg(leftOrgId);
+    navigate("/", { replace: true });
+  };
+
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
-    onSuccess: () => {
-      queryClient.removeQueries({ queryKey: orgKeys.all });
-      navigate("/");
-      window.location.reload();
-    },
+    onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
       toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+    },
+  });
+
+  const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
+    onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
+    onError: (err) => {
+      // The server is the real guard (owners may have changed meanwhile).
+      toast.error(
+        err instanceof ApiError && err.code === "last_owner"
+          ? t("orgSettings.leaveLastOwner")
+          : t("error.prefix", { message: getErrorMessage(err) }),
+      );
     },
   });
 
@@ -317,30 +358,43 @@ export function OrgSettingsGeneralPage() {
         </SettingRow>
       </SettingsGroup>
 
-      {can("org:delete") && (
-        <>
-          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
-            {t("orgSettings.dangerZone")}
-          </div>
-          <div className="border-destructive bg-card rounded-lg border p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold">{t("orgSettings.deleteOrg")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {t("orgSettings.deleteOrgDesc")}
-                </span>
-              </div>
-              <Button
-                variant="destructive"
-                disabled={deleteOrgMutation.isPending}
-                onClick={() => setConfirmDelete(true)}
-              >
-                {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
+      {/* Same danger zone as the workspace's: a settings group whose rows hold
+          a button that opens a confirm. Leaving is offered to every member —
+          disabled, with the reason as its description, when the server would
+          refuse it (the last owner) or when the role on screen is a preview. */}
+      <SettingsGroup title={t("orgSettings.dangerZone")}>
+        <SettingRow
+          variant="action"
+          label={t("orgSettings.leaveOrg")}
+          description={<span id={leaveHintId}>{leaveHint}</span>}
+        >
+          <Button
+            data-testid="leave-org-button"
+            aria-describedby={leaveHintId}
+            variant="destructive"
+            disabled={!canLeave || leaveOrgMutation.isPending}
+            onClick={() => setConfirmLeave(true)}
+          >
+            {leaveOrgMutation.isPending ? t("orgSettings.leaving") : t("orgSettings.leaveOrg")}
+          </Button>
+        </SettingRow>
+        {can("org:delete") && (
+          <SettingRow
+            variant="action"
+            label={t("orgSettings.deleteOrg")}
+            description={t("orgSettings.deleteOrgDesc")}
+          >
+            <Button
+              data-testid="delete-org-button"
+              variant="destructive"
+              disabled={deleteOrgMutation.isPending}
+              onClick={() => setConfirmDelete(true)}
+            >
+              {deleteOrgMutation.isPending ? t("orgSettings.deleting") : t("btn.delete")}
+            </Button>
+          </SettingRow>
+        )}
+      </SettingsGroup>
 
       <ConfirmModal
         open={confirmDelete}
@@ -350,6 +404,30 @@ export function OrgSettingsGeneralPage() {
         isPending={deleteOrgMutation.isPending}
         onConfirm={() => deleteOrgMutation.mutate({ params: { path: { orgId: currentOrg.id } } })}
       />
+
+      <ConfirmModal
+        open={confirmLeave}
+        onClose={() => setConfirmLeave(false)}
+        title={t("orgSettings.leaveOrg")}
+        description={t("orgSettings.leaveConfirm", { name: currentOrg.name })}
+        confirmLabel={t("orgSettings.leaveOrg")}
+        isPending={leaveOrgMutation.isPending}
+        onConfirm={() => leaveOrgMutation.mutate({ params: { path: { orgId: currentOrg.id } } })}
+      >
+        <p className="text-muted-foreground mt-2 text-sm">
+          {t("orgSettings.leaveConfirmPersonalSpace")}
+        </p>
+        <p className="text-muted-foreground mt-2 text-sm">
+          {t("orgSettings.leaveConfirmConnections")}
+        </p>
+        {orgs.length === 1 && (
+          <p className="mt-2 text-sm font-medium">
+            {features.orgCreationDisabled
+              ? t("orgSettings.leaveLastOrgWaiting")
+              : t("orgSettings.leaveLastOrgCreate")}
+          </p>
+        )}
+      </ConfirmModal>
     </>
   );
 }

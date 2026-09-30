@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { DashboardPage } from "./pages/dashboard";
@@ -27,17 +27,19 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RequirePermission } from "./components/require-permission";
+import { RouteGate } from "./components/route-gate";
+import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import { WEBHOOK_READ_PERMISSIONS } from "./lib/webhook-permissions";
+import type { RoutePath } from "./lib/route-access";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
-// is disabled (zero-footprint invariant).
+// is disabled (zero-footprint invariant): `RouteGate` redirects before
+// rendering a route whose declared `feature` is off.
 const WebhooksPage = lazy(() =>
   import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
 );
@@ -211,6 +213,277 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * The page of every signed-in route, keyed like its access declaration
+ * (`lib/route-access.ts`): a route without one, or one without a page, fails to
+ * compile. Mounted by `pageRoute`, always behind `RouteGate`; `mountOf` decides
+ * which tree mounts it.
+ */
+const PAGES: Record<RoutePath, ReactNode> = {
+  "/": <DashboardPage />,
+  "/agents": <PackageList />,
+  "/agents/new": (
+    <LazyRoute>
+      <PackageEditorPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="agent" />
+    </LazyRoute>
+  ),
+  "/agents/:scope/:name/runs/:runId": (
+    <LazyRoute>
+      <RunDetailPage />
+    </LazyRoute>
+  ),
+  "/runs": (
+    <LazyRoute>
+      <RunsPage />
+    </LazyRoute>
+  ),
+  "/files": (
+    <LazyRoute>
+      <FilesPage />
+    </LazyRoute>
+  ),
+  "/schedules": (
+    <LazyRoute>
+      <SchedulesListPage />
+    </LazyRoute>
+  ),
+  "/schedules/new": (
+    <LazyRoute>
+      <ScheduleCreatePage />
+    </LazyRoute>
+  ),
+  "/schedules/:id": (
+    <LazyRoute>
+      <ScheduleDetailPage />
+    </LazyRoute>
+  ),
+  "/schedules/:id/edit": (
+    <LazyRoute>
+      <ScheduleEditPage />
+    </LazyRoute>
+  ),
+  "/skills": (
+    <LazyRoute>
+      <SkillsPage />
+    </LazyRoute>
+  ),
+  "/skills/new": (
+    <LazyRoute>
+      <PackageEditorPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="skill" />
+    </LazyRoute>
+  ),
+  "/skills/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="skill" />
+    </LazyRoute>
+  ),
+  "/integrations": (
+    <LazyRoute>
+      <IntegrationsPage />
+    </LazyRoute>
+  ),
+  "/integrations/new": (
+    <LazyRoute>
+      <PackageEditorPage type="integration" />
+    </LazyRoute>
+  ),
+  "/integrations/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="integration" />
+    </LazyRoute>
+  ),
+  "/integrations/:scope/:name": (
+    <LazyRoute>
+      <IntegrationDetailPage />
+    </LazyRoute>
+  ),
+  "/mcp-servers": (
+    <LazyRoute>
+      <McpServersPage />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name/edit": (
+    <LazyRoute>
+      <PackageEditorPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  "/mcp-servers/:scope/:name/:version": (
+    <LazyRoute>
+      <UnifiedPackageDetailPage type="mcp-server" />
+    </LazyRoute>
+  ),
+  // The catalogue is a destination like settings, not a per-list modal: one
+  // address, reachable from the navigation.
+  "/catalogue": (
+    <LazyRoute>
+      <CataloguePage />
+    </LazyRoute>
+  ),
+  "/catalogue/:origin/:type": (
+    <LazyRoute>
+      <CataloguePage />
+    </LazyRoute>
+  ),
+  "/preferences": (
+    <LazyRoute>
+      <PreferencesLayout />
+    </LazyRoute>
+  ),
+  "/preferences/general": <PreferencesGeneralPage />,
+  "/preferences/appearance": <PreferencesAppearancePage />,
+  "/preferences/security": <PreferencesSecurityPage />,
+  "/preferences/devices": <PreferencesDevicesPage />,
+  "/preferences/connections": <PreferencesConnectionsPage />,
+  "/preferences/mcp-access": <PreferencesMcpAccessPage />,
+  "/chat": (
+    <LazyRoute>
+      <ChatModulePage />
+    </LazyRoute>
+  ),
+  "/chat/:conversationId": (
+    <LazyRoute>
+      <ChatModulePage />
+    </LazyRoute>
+  ),
+  // Both settings scopes share `UnifiedSettingsLayout`, mounted one level up so
+  // switching scope keeps the dialog; each scope's own element is its outlet.
+  "/org-settings": <Outlet />,
+  "/org-settings/general": <OrgSettingsGeneralPage />,
+  "/org-settings/members": <OrgSettingsMembersPage />,
+  "/org-settings/roles": <OrgSettingsRolesPage />,
+  "/org-settings/spaces": <OrgSettingsSpacesPage />,
+  "/org-settings/models": <OrgSettingsModelsPage />,
+  "/org-settings/proxies": <OrgSettingsProxiesPage />,
+  "/org-settings/oauth": <OrgSettingsOAuthPage />,
+  "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
+  "/org-settings/billing": <OrgSettingsBillingPage />,
+  // Workspace settings are their own surface: everything below is scoped by
+  // `X-Application-Id`, which is a different scope from the org, not a
+  // subsection of it.
+  "/workspace-settings": <Outlet />,
+  "/workspace-settings/general": <OrgSettingsAppGeneralPage />,
+  // Space membership and its custom roles: who is in THIS space, and as what.
+  // Org members are the other surface — a person can hold an org role and no
+  // seat here.
+  "/workspace-settings/members": <OrgSettingsSpaceMembersPage />,
+  "/workspace-settings/auth": <OrgSettingsAppAuthPage />,
+  "/workspace-settings/api-keys": <ApiKeysPage />,
+  "/workspace-settings/oauth": <OrgSettingsSpaceOauthPage />,
+  "/workspace-settings/end-users": <EndUsersPage />,
+  "/workspace-settings/webhooks": <WebhooksPage />,
+  "/workspace-settings/webhooks/:id": <WebhookDetailPage />,
+};
+
+const PATHS = Object.keys(PAGES) as RoutePath[];
+
+/**
+ * Routed modals: opened over the screen they came from, so they mount in the
+ * overlay tree ONLY (the main tree renders the background location, so a copy
+ * there could never match). The chat brings its own shell.
+ */
+const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences", "/catalogue"];
+const CHAT_PREFIX = "/chat";
+
+const isUnder = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
+
+function mountOf(path: RoutePath): "main" | "chat" | "overlay" {
+  if (isUnder(path, CHAT_PREFIX)) return "chat";
+  return OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix)) ? "overlay" : "main";
+}
+
+/** The nested layouts, with what each index opens. */
+const LAYOUT_INDEX = {
+  "/preferences": <Navigate to="general" replace />,
+  "/org-settings": <SettingsIndexRedirect />,
+  "/workspace-settings": <SettingsIndexRedirect />,
+} satisfies Partial<Record<RoutePath, ReactNode>>;
+type LayoutPath = keyof typeof LAYOUT_INDEX;
+const LAYOUTS = Object.keys(LAYOUT_INDEX) as LayoutPath[];
+const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, layout));
+
+/** A mount's routes that no layout nests. */
+const flatPaths = (mount: ReturnType<typeof mountOf>) =>
+  PATHS.filter((path) => mountOf(path) === mount && !inLayout(path));
+
+function pageRoute(path: RoutePath) {
+  return (
+    <Route key={path} path={path} element={<RouteGate path={path}>{PAGES[path]}</RouteGate>} />
+  );
+}
+
+function layoutRoute(layout: LayoutPath) {
+  return (
+    <Route
+      key={layout}
+      path={layout}
+      element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
+    >
+      <Route index element={LAYOUT_INDEX[layout]} />
+      {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
+    </Route>
+  );
+}
+
+/**
+ * Old addresses, kept because they are in bookmarks and docs. Each lands on a
+ * declared route, whose gate then decides; none renders a page of its own.
+ */
+const PAGE_REDIRECTS: Record<string, ReactNode> = {
+  // One space's inventory and the org library were the placement model again,
+  // narrowed. The catalogue's placed half is that view, graded by the caller.
+  "/space/packages": <Navigate to="/catalogue/placed/agent" replace />,
+  "/library": <NavigateKeepingState to="/catalogue/placed/agent" />,
+  "/applications": <Navigate to="/org-settings/spaces" replace />,
+  "/app-settings": <Navigate to="/workspace-settings/general" replace />,
+  "/end-users": <Navigate to="/workspace-settings/end-users" replace />,
+  "/webhooks": <Navigate to="/workspace-settings/webhooks" replace />,
+};
+
+/** Same, for addresses under an overlay prefix: only the overlay tree sees them. */
+const OVERLAY_REDIRECTS: Record<string, ReactNode> = {
+  // Workspace settings used to live inside the organisation's, as
+  // `/org-settings/app/*` here and `/org-settings/space/*` on main.
+  "/org-settings/app/:tab": <RedirectAppSettings />,
+  "/org-settings/space/:tab": <RedirectAppSettings />,
+  "/org-settings/library": <Navigate to="/catalogue/placed/agent" replace />,
+};
+
+function redirectRoutes(redirects: Record<string, ReactNode>) {
+  return Object.entries(redirects).map(([from, element]) => (
+    <Route key={from} path={from} element={element} />
+  ));
+}
+
+/**
  * The one boot placeholder. Every gate below renders it, so a visitor sees a
  * single uninterrupted spinner while the boot reads settle, never a sequence
  * of visually identical ones handed off between gates.
@@ -258,6 +531,25 @@ function MainLayout() {
 function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
   useGlobalRunSync();
   return <>{children}</>;
+}
+
+/**
+ * The chat brings its OWN shell (`modules/chat/chat-shell.tsx`) — Studio's
+ * navigation is not its navigation — so its routes sit beside MainLayout's
+ * rather than inside them. They keep the realtime sync: a chat turn runs
+ * agents, and their progress is pushed on the same stream.
+ *
+ * The space is resolved HERE, above the route gate: `RouteGate` waits on a
+ * resolved space before it refuses, and the shell that also resolves it only
+ * mounts once the gate lets it through.
+ */
+function ChatLayout() {
+  useSpaceResolver();
+  return (
+    <GlobalRealtimeSync>
+      <Outlet />
+    </GlobalRealtimeSync>
+  );
 }
 
 /** Routes that don't require an org to be selected. */
@@ -364,176 +656,11 @@ export function App() {
   // float over, so the dashboard stands in. The surface is then a modal in
   // every case, which removes the second, page-shaped rendering of it that
   // otherwise had to exist and had to be kept looking like the first.
-  const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences", "/catalogue"];
   const isOverlayPath = OVERLAY_PREFIXES.some((p) => location.pathname.startsWith(p));
   const modalBackground =
     explicitBackground ??
     (isOverlayPath ? { ...location, pathname: "/", search: "", hash: "", state: null } : null);
   useExternalRedirect(!!user);
-
-  // Declared once, mounted twice: in the page route tree, and again in the
-  // overlay tree below when settings are opened over another screen.
-  const orgSettingsRoutes = (
-    <>
-      <Route index element={<SettingsIndexRedirect />} />
-      <Route
-        path="general"
-        element={
-          <RequirePermission permission="org:read">
-            <OrgSettingsGeneralPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="members"
-        element={
-          <RequirePermission permission="members:read">
-            <OrgSettingsMembersPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="roles"
-        element={
-          <RequirePermission permission="roles:read">
-            <OrgSettingsRolesPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="spaces"
-        element={
-          <RequirePermission permission="spaces:read">
-            <OrgSettingsSpacesPage />
-          </RequirePermission>
-        }
-      />
-      {/* The library was a second reading of the placement model, for admins
-          only. The catalogue carries the whole of it now, graded by what the
-          caller may do, so this address goes there. */}
-      <Route path="library" element={<Navigate to="/catalogue/placed/agent" replace />} />
-      <Route
-        path="models"
-        element={
-          <RequirePermission permission="models:read">
-            <OrgSettingsModelsPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="proxies"
-        element={
-          <RequirePermission permission="proxies:read">
-            <OrgSettingsProxiesPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="oauth"
-        element={
-          <RequirePermission permission="oauth-clients:read">
-            <OrgSettingsOAuthPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="cli-sessions"
-        element={
-          <RequirePermission permission="cli-sessions:read">
-            <OrgSettingsCliSessionsPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="billing"
-        element={
-          <RequirePermission permission="billing:read">
-            <OrgSettingsBillingPage />
-          </RequirePermission>
-        }
-      />
-    </>
-  );
-
-  // Workspace settings are their own surface: everything below is scoped by
-  // `X-Application-Id`, which is a different scope from the org, not a
-  // subsection of it.
-  const workspaceSettingsRoutes = (
-    <>
-      <Route index element={<SettingsIndexRedirect />} />
-      <Route
-        path="general"
-        element={
-          <RequirePermission permission="space-settings:write">
-            <OrgSettingsAppGeneralPage />
-          </RequirePermission>
-        }
-      />
-      {/* Space membership and its custom roles: who is in THIS space, and as
-          what. Org members are the other surface — a person can hold an org
-          role and no seat here. */}
-      <Route
-        path="members"
-        element={
-          <RequirePermission permission={["space-members:read", "space-members:invite"]}>
-            <OrgSettingsSpaceMembersPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="auth"
-        element={
-          <RequirePermission permission="spaces:write">
-            <OrgSettingsAppAuthPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="api-keys"
-        element={
-          <RequirePermission permission="api-keys:read">
-            <ApiKeysPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="oauth"
-        element={
-          <RequirePermission permission="oauth-clients:read">
-            <OrgSettingsSpaceOauthPage />
-          </RequirePermission>
-        }
-      />
-      <Route
-        path="end-users"
-        element={
-          <RequirePermission permission="end-users:read">
-            <EndUsersPage />
-          </RequirePermission>
-        }
-      />
-      {features.webhooks && (
-        <>
-          <Route
-            path="webhooks"
-            element={
-              <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                <WebhooksPage />
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="webhooks/:id"
-            element={
-              <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                <WebhookDetailPage />
-              </RequirePermission>
-            }
-          />
-        </>
-      )}
-    </>
-  );
 
   if (loading) {
     return <BootScreen />;
@@ -770,37 +897,8 @@ export function App() {
               </LazyRoute>
             }
           />
-          {/* The chat brings its OWN shell (`modules/chat/chat-shell.tsx`) —
-              Studio's navigation is not its navigation — so its routes sit
-              beside MainLayout's rather than inside them. They keep the
-              realtime sync: a chat turn runs agents, and their progress is
-              pushed on the same stream. */}
-          {features.chat && (
-            <Route
-              element={
-                <GlobalRealtimeSync>
-                  <Outlet />
-                </GlobalRealtimeSync>
-              }
-            >
-              <Route
-                path="/chat"
-                element={
-                  <Suspense fallback={<LoadingState />}>
-                    <ChatModulePage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/chat/:conversationId"
-                element={
-                  <Suspense fallback={<LoadingState />}>
-                    <ChatModulePage />
-                  </Suspense>
-                }
-              />
-            </Route>
-          )}
+          {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
+          <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
           <Route
             element={
               <GlobalRealtimeSync>
@@ -808,310 +906,19 @@ export function App() {
               </GlobalRealtimeSync>
             }
           >
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/agents" element={<PackageList />} />
-            <Route
-              path="/agents/new"
-              element={
-                <RequirePermission permission="agents:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="agent" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            {/* No current-space permission gate: write authority is the
-                package's HOME space (`home_writable` on its own read, RBAC spec
-                §6.9), which the caller may hold while only READING the space
-                they are browsing from. The editor page renders the no-access
-                panel from that field instead. */}
-            <Route
-              path="/agents/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name"
-              element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name/:version"
-              element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="agent" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/agents/:scope/:name/runs/:runId"
-              element={
-                <LazyRoute>
-                  <RunDetailPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/runs"
-              element={
-                <LazyRoute>
-                  <RunsPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/files"
-              element={
-                <LazyRoute>
-                  <FilesPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/schedules"
-              element={
-                <RequirePermission permission="schedules:read">
-                  <LazyRoute>
-                    <SchedulesListPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/new"
-              element={
-                <RequirePermission permission="schedules:write">
-                  <LazyRoute>
-                    <ScheduleCreatePage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/:id"
-              element={
-                <RequirePermission permission="schedules:read">
-                  <LazyRoute>
-                    <ScheduleDetailPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/schedules/:id/edit"
-              element={
-                <RequirePermission permission="schedules:write">
-                  <LazyRoute>
-                    <ScheduleEditPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/skills"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <SkillsPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/integrations"
-              element={
-                <LazyRoute>
-                  <IntegrationsPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/new"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="integration" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="integration" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/integrations/:scope/:name"
-              element={
-                <LazyRoute>
-                  <IntegrationDetailPage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/skills/new"
-              element={
-                <RequirePermission permission="skills:write">
-                  <LazyRoute>
-                    <PackageEditorPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            {/* Same as the agent editor above: the home decides, not the
-                current space. */}
-            <Route
-              path="/skills/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/skills/:scope/:name"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/skills/:scope/:name/:version"
-              element={
-                <RequirePermission permission="skills:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="skill" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <McpServersPage />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name/edit"
-              element={
-                <LazyRoute>
-                  <PackageEditorPage type="mcp-server" />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="mcp-server" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/mcp-servers/:scope/:name/:version"
-              element={
-                <RequirePermission permission="mcp-servers:read">
-                  <LazyRoute>
-                    <UnifiedPackageDetailPage type="mcp-server" />
-                  </LazyRoute>
-                </RequirePermission>
-              }
-            />
-            {/* One space's inventory was the same model again, narrowed, and
-                reachable from no navigation entry. The catalogue's placed half
-                is that view, with the space named in its own column. */}
-            <Route
-              path="/space/packages"
-              element={<Navigate to="/catalogue/placed/agent" replace />}
-            />
-            <Route
-              path="/library"
-              element={
-                <Navigate
-                  to={{
-                    pathname: "/org-settings/library",
-                    search: location.search,
-                    hash: location.hash,
-                  }}
-                  replace
-                  state={location.state}
-                />
-              }
-            />
-            <Route path="/applications" element={<Navigate to="/org-settings/spaces" replace />} />
-            <Route
-              path="/app-settings"
-              element={<Navigate to="/workspace-settings/general" replace />}
-            />
-            <Route
-              path="/end-users"
-              element={<Navigate to="/workspace-settings/end-users" replace />}
-            />
-            <Route
-              path="/webhooks"
-              element={<Navigate to="/workspace-settings/webhooks" replace />}
-            />
+            {flatPaths("main").map(pageRoute)}
+            {redirectRoutes(PAGE_REDIRECTS)}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
-        {/* Overlay tree — the ONLY home of the settings routes. The tree above
+        {/* Overlay tree — the ONLY home of the routed modals. The tree above
             renders the background location, so a second copy there could never
             match; that is why there is no page-shaped variant to keep in sync. */}
         {modalBackground && (
           <Routes>
-            {/* `/org-settings/app/*` moved out when workspace settings became
-                their own surface; these URLs are in bookmarks and docs. */}
-            <Route path="/org-settings/app/:tab" element={<RedirectAppSettings />} />
-            {/* The catalogue is a destination like settings, not a per-list
-                modal: one address, reachable from the navigation. */}
-            <Route
-              path="/catalogue"
-              element={
-                <LazyRoute>
-                  <CataloguePage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/catalogue/:origin/:type"
-              element={
-                <LazyRoute>
-                  <CataloguePage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/preferences"
-              element={
-                <LazyRoute>
-                  <PreferencesLayout />
-                </LazyRoute>
-              }
-            >
-              <Route index element={<Navigate to="general" replace />} />
-              <Route path="general" element={<PreferencesGeneralPage />} />
-              <Route path="appearance" element={<PreferencesAppearancePage />} />
-              <Route path="security" element={<PreferencesSecurityPage />} />
-              <Route path="devices" element={<PreferencesDevicesPage />} />
-              <Route path="connections" element={<PreferencesConnectionsPage />} />
-              <Route path="mcp-access" element={<PreferencesMcpAccessPage />} />
-            </Route>
+            {redirectRoutes(OVERLAY_REDIRECTS)}
+            {flatPaths("overlay").map(pageRoute)}
+            {layoutRoute("/preferences")}
             <Route
               element={
                 <LazyRoute>
@@ -1119,8 +926,8 @@ export function App() {
                 </LazyRoute>
               }
             >
-              <Route path="/org-settings">{orgSettingsRoutes}</Route>
-              <Route path="/workspace-settings">{workspaceSettingsRoutes}</Route>
+              {layoutRoute("/org-settings")}
+              {layoutRoute("/workspace-settings")}
             </Route>
           </Routes>
         )}

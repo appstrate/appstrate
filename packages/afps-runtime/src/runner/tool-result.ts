@@ -12,26 +12,13 @@
  */
 
 /**
- * Hard ceiling (bytes) on a forwarded tool-result payload. Default sized for
- * the typical "tail of a stack trace + a few JSON blobs": large enough to keep
+ * Default ceiling (bytes) on a forwarded tool-result payload. Sized for the
+ * typical "tail of a stack trace + a few JSON blobs": large enough to keep
  * useful detail, small enough that 100 tool calls × 2 KB stays well under the
- * platform's `run_logs.data` 32 KB write boundary. Operator-tunable via
- * `TOOL_RESULT_BYTE_LIMIT` (forwarded into the agent container). Tool results
- * carrying the run's actual output are truncated at WRITE time — no read-side
- * knob recovers them — so deployments whose consumers read `getRunLogs` for
- * results raise this cap. Invalid / non-positive values fall back to the
- * compiled default.
+ * platform's `run_logs.data` 32 KB write boundary. Truncation happens at WRITE
+ * time, so a runner that needs more exposes its own cap (this library reads no env).
  */
-const DEFAULT_TOOL_RESULT_BYTE_LIMIT = 2048;
-
-/** Resolve the effective tool-result cap: `TOOL_RESULT_BYTE_LIMIT` env override or default. */
-export function toolResultByteLimit(): number {
-  const raw = process.env.TOOL_RESULT_BYTE_LIMIT;
-  if (raw === undefined || raw === "") return DEFAULT_TOOL_RESULT_BYTE_LIMIT;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) return DEFAULT_TOOL_RESULT_BYTE_LIMIT;
-  return parsed;
-}
+export const DEFAULT_TOOL_RESULT_BYTE_LIMIT = 2048;
 
 /**
  * Truncate an arbitrary tool result for safe transport on the event sink.
@@ -47,7 +34,7 @@ export function toolResultByteLimit(): number {
  */
 export function truncateToolResult(
   result: unknown,
-  limitBytes: number = toolResultByteLimit(),
+  limitBytes: number = DEFAULT_TOOL_RESULT_BYTE_LIMIT,
 ): unknown {
   if (result === undefined || result === null) return result;
   if (typeof result === "string") return truncateString(result, limitBytes);

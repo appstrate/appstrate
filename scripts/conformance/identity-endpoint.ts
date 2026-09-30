@@ -40,18 +40,18 @@ import type { Finding } from "./types.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 
 const CHECK = "identity-endpoint";
-const FETCH_TIMEOUT_MS = 20_000;
+export const FETCH_TIMEOUT_MS = 20_000;
 
 /**
  * Token sent to be rejected. Deliberately not credential-shaped, so it cannot
  * be mistaken for a leaked secret in a log or a proxy trace.
  */
-const INVALID_BEARER = "conformance-probe-not-a-real-token";
+export const INVALID_BEARER = "conformance-probe-not-a-real-token";
 
 /** Statuses proving the endpoint exists and enforces authentication. */
-const REJECTS_AUTH = new Set([401, 403]);
+export const REJECTS_AUTH = new Set([401, 403]);
 /** Statuses proving the path itself is wrong. */
-const WRONG_PATH = new Set([404, 405, 410]);
+export const WRONG_PATH = new Set([404, 405, 410]);
 
 interface DeclaredEndpoint {
   authKey: string;

@@ -28,12 +28,24 @@ import { Trash2, MoreHorizontal, RotateCcw, History, GitCompareArrows } from "lu
 interface VersionHistoryProps {
   packageId: string;
   type: PackageType;
-  isOwned: boolean;
+  /**
+   * Restoring writes the draft, deleting removes a version: both are judged in
+   * the package's HOME space (`home_writable` / `home_deletable`), never in the
+   * space being browsed.
+   */
+  canRestore: boolean;
+  canDelete: boolean;
   /** Compare that version with the current draft, in the section's own modal. */
   onCompare?: (version: string) => void;
 }
 
-export function VersionHistory({ packageId, type, isOwned, onCompare }: VersionHistoryProps) {
+export function VersionHistory({
+  packageId,
+  type,
+  canRestore,
+  canDelete,
+  onCompare,
+}: VersionHistoryProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: versions, isLoading, error } = usePackageVersions(type, packageId);
   const [search, setSearch] = useState("");
@@ -123,7 +135,7 @@ export function VersionHistory({ packageId, type, isOwned, onCompare }: VersionH
               </Badge>
             ),
           },
-          ...(isOwned
+          ...(onCompare || canRestore || canDelete
             ? [
                 {
                   id: "actions",
@@ -148,26 +160,32 @@ export function VersionHistory({ packageId, type, isOwned, onCompare }: VersionH
                             {t("version.compareWithDraft")}
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem
-                          disabled={restoreVersion.isPending || deleteVersion.isPending}
-                          onSelect={() =>
-                            setConfirmState({ type: "restore", version: version.version })
-                          }
-                        >
-                          <RotateCcw />
-                          {t("version.restore")}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          disabled={deleteVersion.isPending || restoreVersion.isPending}
-                          onSelect={() =>
-                            setConfirmState({ type: "delete", version: version.version })
-                          }
-                        >
-                          <Trash2 />
-                          {t("btn.delete", { ns: "common" })}
-                        </DropdownMenuItem>
+                        {canRestore && (
+                          <DropdownMenuItem
+                            disabled={restoreVersion.isPending || deleteVersion.isPending}
+                            onSelect={() =>
+                              setConfirmState({ type: "restore", version: version.version })
+                            }
+                          >
+                            <RotateCcw />
+                            {t("version.restore")}
+                          </DropdownMenuItem>
+                        )}
+                        {canDelete && (
+                          <>
+                            {(onCompare || canRestore) && <DropdownMenuSeparator />}
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              disabled={deleteVersion.isPending || restoreVersion.isPending}
+                              onSelect={() =>
+                                setConfirmState({ type: "delete", version: version.version })
+                              }
+                            >
+                              <Trash2 />
+                              {t("btn.delete", { ns: "common" })}
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ),

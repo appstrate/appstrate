@@ -6,11 +6,10 @@
  *
  * Zod 4 reports `unrecognized_keys` with an EMPTY `path` (the offending names
  * live in `issue.keys`), so `zodIssuesToFieldErrors` used to fall through to
- * the caller-supplied `param`. Two routes supply one — `PUT /api/agents/
- * {scope}/{name}/skills` (`param: "skillIds"`) and `POST /api/packages/
- * import-github` (`param: "url"`) — so a body carrying a typo'd extra key
- * answered `errors[0].field = "skillIds"` / `"url"`, blaming the one field the
- * client had spelled correctly.
+ * the caller-supplied `param`. `POST /api/packages/import-github` supplies one
+ * (`param: "url"`), so a body carrying a typo'd extra key answered
+ * `errors[0].field = "url"`, blaming the one field the client had spelled
+ * correctly.
  *
  * The `param` fallback is still right for the issue shapes it was written for
  * (a root-level type/format failure genuinely has no path), so the control
@@ -20,7 +19,6 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import { zodIssuesToFieldErrors, parseBody, ApiError } from "@appstrate/core/api-errors";
-import { updateSkillsSchema } from "../../src/routes/user-agents.ts";
 import { githubImportSchema } from "../../src/routes/packages.ts";
 
 /** Run a schema + param exactly as the route's `readJsonBody` call does. */
@@ -38,16 +36,6 @@ function refusal(schema: z.ZodType, body: unknown, param: string) {
 }
 
 describe("unknown body keys are named by the key, not by the route's param", () => {
-  it("PUT /api/agents/{scope}/{name}/skills — names `extra`, not `skillIds`", () => {
-    const body = refusal(updateSkillsSchema, { skillIds: ["@a/b"], extra: 1 }, "skillIds");
-
-    expect(body.code).toBe("validation_failed");
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors[0]!.field).toBe("extra");
-    expect(body.errors[0]!.code).toBe("unknown_field");
-    expect(body.detail).toStartWith("extra: ");
-  });
-
   it("POST /api/packages/import-github — names `branch`, not `url`", () => {
     const body = refusal(
       githubImportSchema,
@@ -55,13 +43,19 @@ describe("unknown body keys are named by the key, not by the route's param", () 
       "url",
     );
 
+    expect(body.code).toBe("validation_failed");
     expect(body.errors).toHaveLength(1);
     expect(body.errors[0]!.field).toBe("branch");
     expect(body.errors[0]!.code).toBe("unknown_field");
+    expect(body.detail).toStartWith("branch: ");
   });
 
   it("every unrecognized key gets its own entry", () => {
-    const body = refusal(updateSkillsSchema, { skillIds: [], extra: 1, other: 2 }, "skillIds");
+    const body = refusal(
+      githubImportSchema,
+      { url: "https://github.com/acme/repo", extra: 1, other: 2 },
+      "url",
+    );
 
     expect(body.errors.map((e) => e.field)).toEqual(["extra", "other"]);
     expect(body.errors.every((e) => e.code === "unknown_field")).toBe(true);
@@ -84,20 +78,20 @@ describe("unknown body keys are named by the key, not by the route's param", () 
   // CONTROL — the `param` fallback still applies to the issue shapes it was
   // meant for: a root-level failure with a genuinely empty path.
   it("the `param` fallback still names the route field on a root-level failure", () => {
-    const body = refusal(updateSkillsSchema, "not-an-object", "skillIds");
+    const body = refusal(githubImportSchema, "not-an-object", "url");
 
     expect(body.errors).toHaveLength(1);
-    expect(body.errors[0]!.field).toBe("skillIds");
+    expect(body.errors[0]!.field).toBe("url");
     expect(body.errors[0]!.code).toBe("invalid_type");
   });
 
   // CONTROL — a keyed issue that is NOT `unrecognized_keys` still reports its
   // own path, so the change is scoped to the one issue code.
   it("a wrong-typed known field is unaffected", () => {
-    const body = refusal(updateSkillsSchema, { skillIds: "nope" }, "skillIds");
+    const body = refusal(githubImportSchema, { url: 42 }, "url");
 
     expect(body.errors).toHaveLength(1);
-    expect(body.errors[0]!.field).toBe("skillIds");
+    expect(body.errors[0]!.field).toBe("url");
     expect(body.errors[0]!.code).toBe("invalid_type");
   });
 });

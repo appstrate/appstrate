@@ -2,16 +2,42 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
-import { useOrgOnlyScope } from "./use-org-scope";
+import { queryClient } from "../lib/query-client";
+import { getCurrentOrgId } from "../stores/org-store";
+import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
+import { invalidateIntegrationQueries } from "./use-integrations";
+
+/** The one request init for the listing: the boot prime must land on `useSpaces`'s key. */
+function spacesListInit(header: ReturnType<typeof orgOnlyHeader>) {
+  return { params: { header } };
+}
 
 /** `enabled: false` for a surface that mounts the hook but needs no space list. */
 export function useSpaces(enabled = true) {
   const scope = useOrgOnlyScope();
-  return $api.useQuery(
-    "get",
-    "/api/spaces",
-    { params: { header: scope.header } },
-    { enabled: enabled && scope.enabled, select: (e) => e.data },
+  return $api.useQuery("get", "/api/spaces", spacesListInit(scope.header), {
+    enabled: enabled && scope.enabled,
+    select: (e) => e.data,
+  });
+}
+
+/**
+ * Start the listing at boot (`main.tsx`): every space-scoped request waits on it,
+ * so waiting for the layout to mount would cost each a round trip. Keyed on the
+ * remembered org, and only once the boot org list still names it: a caller
+ * removed from that org would otherwise open the app on a 403. A failure is not
+ * cached, `useSpaces` refetches on mount.
+ */
+export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
+  orgs.then(
+    (list) => {
+      const orgId = getCurrentOrgId();
+      if (!orgId || !list.some((org) => org.id === orgId)) return;
+      void queryClient.prefetchQuery(
+        $api.queryOptions("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId))),
+      );
+    },
+    () => {},
   );
 }
 
@@ -48,7 +74,14 @@ export function useCreateSpace() {
 
 export function useUpdateSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("patch", "/api/spaces/{id}", { onSuccess: invalidate });
+  const qc = useQueryClient();
+  return $api.useMutation("patch", "/api/spaces/{id}", {
+    onSuccess: () => {
+      invalidate();
+      // Closing the space unshares the connections of owners it leaves without access.
+      void invalidateIntegrationQueries(qc);
+    },
+  });
 }
 
 export function useDeleteSpace() {

@@ -30,6 +30,9 @@ const noCredentials: MitmCredentialSource = {
   deliveryPlans: () => ({}),
 };
 
+/** The egress allowlist is not under test here (#1458 has its own case below). */
+const allowAll = { allowsUrl: () => true };
+
 /** Upstream must never be reached on a refusal path. */
 const forbiddenFetch = (() => {
   throw new Error("upstream fetch must not be called for a refused request");
@@ -68,6 +71,7 @@ describe("MITM listener — inner-request body cap", () => {
       forbiddenFetch,
       CAP,
       (e) => events.push(e),
+      allowAll,
     );
 
     expect(res.status).toBe(413);
@@ -100,6 +104,7 @@ describe("MITM listener — inner-request body cap", () => {
       forbiddenFetch,
       CAP,
       (e) => events.push(e),
+      allowAll,
     );
 
     expect(res.status).toBe(413);
@@ -131,6 +136,7 @@ describe("MITM listener — inner-request body cap", () => {
       forbiddenFetch,
       CAP,
       (e) => events.push(e),
+      allowAll,
     );
 
     // Whatever the planner decides for an unauthenticated host, the body itself
@@ -139,5 +145,38 @@ describe("MITM listener — inner-request body cap", () => {
     expect(events.some((e) => e.kind === "request-refused" && e.reason === "body too large")).toBe(
       false,
     );
+  });
+});
+
+describe("MITM listener — inner-request egress allowlist (#1458)", () => {
+  it("answers 403 to a URL the policy does not grant, never reaching upstream", async () => {
+    const events: MitmListenerEvent[] = [];
+    const seen: string[] = [];
+    const req = new Request("https://127.0.0.1/admin/export?all=1", { method: "GET" });
+
+    const res = await handleInnerRequest(
+      req,
+      "api.test.local",
+      noCredentials,
+      forbiddenFetch,
+      CAP,
+      (e) => events.push(e),
+      {
+        allowsUrl: (url) => {
+          seen.push(url);
+          return url.startsWith("https://api.test.local/v1/");
+        },
+      },
+    );
+
+    expect(res.status).toBe(403);
+    expect(seen).toEqual(["https://api.test.local/admin/export?all=1"]);
+    expect(events).toEqual([
+      {
+        kind: "request-refused",
+        url: "https://api.test.local/admin/export?all=1",
+        reason: "not-authorized",
+      },
+    ]);
   });
 });

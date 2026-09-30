@@ -8,7 +8,7 @@ import {
   runAndWaitSteps,
   runAndWaitStepsWithFiles,
 } from "../src/run-and-wait-client.ts";
-import { agentManifestSchema } from "../src/validation.ts";
+import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION, agentManifestSchema } from "../src/validation.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -235,7 +235,7 @@ describe("run_and_wait client", () => {
               mime: "text/html",
               size: 2048,
               purpose: "agent_output",
-              run_id: "run_1",
+              runId: "run_1",
             },
           ],
           hasMore: false,
@@ -301,7 +301,7 @@ describe("run_and_wait client", () => {
   it("fetchRunFiles keeps only files this run produced", async () => {
     // The files container of a run also holds the files mounted as its
     // INPUT — a chained `appfile://` from an earlier run carries
-    // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
+    // `purpose: 'agent_output'` too, so only its `runId` distinguishes it.
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({
         object: "list",
@@ -313,7 +313,7 @@ describe("run_and_wait client", () => {
             mime: "application/pdf",
             size: 10,
             purpose: "agent_output",
-            run_id: "run_0",
+            runId: "run_0",
           },
           {
             id: "file_out",
@@ -322,7 +322,7 @@ describe("run_and_wait client", () => {
             mime: "text/html",
             size: 20,
             purpose: "agent_output",
-            run_id: "run_1",
+            runId: "run_1",
           },
           {
             id: "file_detached",
@@ -331,7 +331,7 @@ describe("run_and_wait client", () => {
             mime: "text/plain",
             size: 30,
             purpose: "agent_output",
-            run_id: null,
+            runId: null,
           },
         ],
         hasMore: false,
@@ -387,8 +387,8 @@ describe("run_and_wait client", () => {
 
 describe("launchRunAndWait launch body", () => {
   const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
-    $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-    schema_version: "0.2",
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "agent",
     version: "1.0.0",
     dependencies: {},
@@ -716,9 +716,9 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
-  // `connection_overrides` is the documented retry for a 412
+  // `connection_overrides` is the documented retry for a 409
   // `must_choose_connection`. Dropped anywhere along the way, every retry hits
-  // the same 412 with nothing saying why, and the model has no way out.
+  // the same 409 with nothing saying why, and the model has no way out.
   it("kind:inline forwards connection_overrides", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
@@ -727,7 +727,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+        connection_overrides: { "@appstrate/gmail": ["conn_abc"] },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -735,7 +735,7 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toMatchObject({
       url: "https://test.local/api/runs/inline",
       method: "POST",
-      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      body: { connection_overrides: { "@appstrate/gmail": ["conn_abc"] } },
     });
   });
 
@@ -747,7 +747,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        connection_overrides: { "@appstrate/gmail": "conn_abc" },
+        connection_overrides: { "@appstrate/gmail": ["conn_abc"] },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -755,7 +755,7 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toMatchObject({
       url: "https://test.local/api/agents/@acme/writer/run",
       method: "POST",
-      body: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      body: { connection_overrides: { "@appstrate/gmail": ["conn_abc"] } },
     });
   });
 
@@ -794,7 +794,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: JSON.stringify({ "@appstrate/gmail": "conn_abc" }),
+        connection_overrides: JSON.stringify({ "@appstrate/gmail": ["conn_abc"] }),
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -809,7 +809,7 @@ describe("launchRunAndWait launch body", () => {
   // Presence is what is refused, not one enumerated mistake: every non-object
   // shape reaches the same dead end as the JSON-encoded string above.
   it.each([
-    ["an array", [{ "@appstrate/gmail": "conn_abc" }]],
+    ["an array", [{ "@appstrate/gmail": ["conn_abc"] }]],
     ["a number", 42],
     ["a boolean", true],
     ["explicit null", null],
@@ -833,6 +833,28 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
+  // Several ids under one key is the whole point of the array shape — binding
+  // two connections of one integration in a single run. A client that kept
+  // only the first id fails here.
+  it("forwards several connection ids under one integration verbatim", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "do it",
+        connection_overrides: { "@appstrate/ssh": ["conn_web1", "conn_db"] },
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(captured()?.body).toMatchObject({
+      connection_overrides: { "@appstrate/ssh": ["conn_web1", "conn_db"] },
+    });
+  });
+
   // The name inside `input` belongs to the AGENT, not to us: an agent whose own
   // input schema declares a `connection_overrides` property must stay launchable
   // and get that property through untouched, whatever the top-level argument says.
@@ -844,7 +866,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        connection_overrides: { "@appstrate/gmail": "conn_top" },
+        connection_overrides: { "@appstrate/gmail": ["conn_top"] },
         // An agent whose input schema happens to declare a property with this
         // name: it is data for the run, never a source for the top-level field.
         input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
@@ -854,7 +876,7 @@ describe("launchRunAndWait launch body", () => {
 
     expect(result.ok).toBe(true);
     expect(captured()?.body).toMatchObject({
-      connection_overrides: { "@appstrate/gmail": "conn_top" },
+      connection_overrides: { "@appstrate/gmail": ["conn_top"] },
       input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
     });
   });

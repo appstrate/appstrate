@@ -14,7 +14,7 @@
  *     pin in-process; the e2e equivalent walks the live HTTP pipeline
  *     to prove the auth gate survives all the way out of the handler.
  *     Body-shape validation (unknown providerId, empty label, missing
- *     accessToken) is covered by Zod and integration tests inside the
+ *     access_token) is covered by Zod and integration tests inside the
  *     bearer-authenticated path — adding cookie-auth body-validation
  *     coverage would assert behavior that cannot happen in production.
  *   - The internal `/internal/oauth-token/:id` endpoint is not reachable
@@ -39,7 +39,7 @@ test.describe("OAuth Model Providers — API smoke", () => {
   // The pair/redeem route is bearer-pairing-only — cookie auth 401s at the
   // route's first check before body validation ever runs. Probing the
   // gate with several body shapes (well-formed, empty label, missing
-  // accessToken) proves the gate ignores the body entirely, which is
+  // access_token) proves the gate ignores the body entirely, which is
   // what makes the bearer-only contract load-bearing: a tampered body
   // cannot route around the auth check by triggering a different code
   // path. Body-shape validation under the bearer-authenticated path is
@@ -51,19 +51,19 @@ test.describe("OAuth Model Providers — API smoke", () => {
       {
         providerId: SYNTHETIC_UNKNOWN_PROVIDER,
         label: "Should fail",
-        accessToken: "fake-access",
-        refreshToken: "fake-refresh",
+        access_token: "fake-access",
+        refresh_token: "fake-refresh",
       },
       {
         providerId: SYNTHETIC_UNKNOWN_PROVIDER,
         label: "",
-        accessToken: "fake-access",
-        refreshToken: "fake-refresh",
+        access_token: "fake-access",
+        refresh_token: "fake-refresh",
       },
       {
         providerId: SYNTHETIC_UNKNOWN_PROVIDER,
         label: "Pro",
-        refreshToken: "fake-refresh",
+        refresh_token: "fake-refresh",
       },
     ];
     for (const body of bodies) {

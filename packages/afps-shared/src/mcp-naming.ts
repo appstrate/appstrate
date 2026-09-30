@@ -13,7 +13,6 @@ export const MCP_TOOL_NAMESPACE_BASE_MAX_LENGTH = 20;
  * snake-case namespace capped before collision suffixing.
  */
 export function normaliseMcpToolNamespace(raw: string): string {
-  if (typeof raw !== "string") return "";
   const out = trimUnderscores(
     raw
       .replace(/^@/, "")
@@ -24,18 +23,61 @@ export function normaliseMcpToolNamespace(raw: string): string {
 }
 
 /**
- * Canonicalise an untrusted upstream tool body before adding our namespace.
- * An upstream namespace is stripped so `drive__api-call` becomes `api_call`,
- * matching McpHost's outward naming contract.
+ * Exposed tool-name grammar: `{snake_namespace}__{body}`, the body in the LLM
+ * providers' `^[a-zA-Z0-9_-]{1,64}$` alphabet (56-char ceiling: re-prefix headroom).
+ */
+const MCP_TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9_]*__[A-Za-z0-9_-]+$/;
+
+export function isValidMcpToolName(name: string): boolean {
+  return name.length <= MCP_TOOL_NAME_MAX_LENGTH && MCP_TOOL_NAME_PATTERN.test(name);
+}
+
+/**
+ * Map an untrusted upstream tool name onto the body alphabet: each rejected
+ * code point becomes `_`; nothing else changes.
  */
 export function normaliseMcpToolBody(raw: string): string {
-  if (typeof raw !== "string") return "";
-  let out = trimUnderscores(raw.replace(/[^a-zA-Z0-9_]+/g, "_").toLowerCase());
-  const separator = out.indexOf("__");
-  if (separator >= 0 && separator < out.length - 2) {
-    out = out.slice(separator + 2);
+  return raw.replace(/[^A-Za-z0-9_-]/gu, "_");
+}
+
+const MCP_TOOL_HASH_LENGTH = 8;
+
+/**
+ * Exposed name for an untrusted upstream tool: `{namespace}__{body}` when it
+ * fits and is free, else the body cut to fit plus a hash of the ORIGINAL
+ * upstream name, so two names that normalise to the same body (`a.b`, `a_b`)
+ * still get distinct names. Which of them keeps the plain form depends on
+ * registration order: the first one registered. One salted re-hash on
+ * collision, then it throws.
+ */
+export function allocateMcpToolName(
+  namespace: string,
+  upstreamName: string,
+  taken: (name: string) => boolean,
+): string {
+  const body = normaliseMcpToolBody(upstreamName);
+  const plain = `${namespace}__${body}`;
+  if (isValidMcpToolName(plain) && !taken(plain)) return plain;
+  const budget = MCP_TOOL_NAME_MAX_LENGTH - namespace.length - 2 - MCP_TOOL_HASH_LENGTH - 1;
+  const head = body.slice(0, Math.max(0, budget));
+  for (const seed of [upstreamName, `${upstreamName}\0`]) {
+    const hash = fnv1a64Hex(seed).slice(0, MCP_TOOL_HASH_LENGTH);
+    const candidate = head ? `${namespace}__${head}_${hash}` : `${namespace}__${hash}`;
+    if (!taken(candidate)) return candidate;
   }
-  return out;
+  throw new Error(`MCP tool name ${JSON.stringify(upstreamName)} collides after re-hashing`);
+}
+
+/** 64-bit FNV-1a over the UTF-8 bytes, as 16 lowercase hex digits. */
+export function fnv1a64Hex(value: string): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (const byte of new TextEncoder().encode(value)) {
+    hash ^= BigInt(byte);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 /** Trim underscore runs in linear time without a backtracking expression. */

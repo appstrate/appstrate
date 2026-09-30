@@ -33,11 +33,11 @@ import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
-import type { AssignableOrgRole } from "@appstrate/shared-types";
+import type { OrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
 
-/** Widest reach first, the order every org-role list uses. */
-const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["admin", "member", "guest"];
+/** Widest reach first, the order every org-role list uses. Only an owner is offered `owner`. */
+const ORG_ROLE_DISPLAY_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -51,11 +51,11 @@ export function useMemberColumns({
   spaces,
 }: {
   /** Which roles this actor may move that member to. Empty = not theirs to change. */
-  assignableRoles: (member: OrgMember) => readonly AssignableOrgRole[];
+  assignableRoles: (member: OrgMember) => readonly OrgRole[];
   canRemove: (member: OrgMember) => boolean;
   isChangingRole: boolean;
   isRemoving: boolean;
-  onChangeRole: (userId: string, role: AssignableOrgRole) => void;
+  onChangeRole: (member: OrgMember, role: OrgRole) => void;
   onRemove: (member: OrgMember) => void;
   /** The spaces this person reaches, when the caller may see every one. */
   spaces?: (member: OrgMember) => string[];
@@ -102,7 +102,7 @@ export function useMemberColumns({
           <span className="relative z-10 block">
             <Select
               value={member.role}
-              onValueChange={(v) => onChangeRole(member.userId, v as AssignableOrgRole)}
+              onValueChange={(v) => onChangeRole(member, v as OrgRole)}
               disabled={isChangingRole}
             >
               <SelectTrigger className="h-7 w-full text-xs">

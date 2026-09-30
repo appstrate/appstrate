@@ -17,6 +17,7 @@ import { _resetFirecrackerEnvCacheForTesting as _resetCacheForTesting } from "..
 import { FirecrackerOrchestrator, type FirecrackerOrchestratorDeps } from "../../orchestrator.ts";
 import { deriveJailId, jailChrootBase } from "../../jail.ts";
 import { workloadSpecSchema } from "../../runner/protocol.ts";
+import type { GuestConfig } from "../../guest/guest-config.ts";
 import { fakeHostExec as fakeExec, defaultRespond } from "../helpers/fake-host-exec.ts";
 import {
   installFirecrackerDataDir,
@@ -799,13 +800,20 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     runId: string,
     mmdsPut: (socketPath: string, payload: unknown) => Promise<void>,
     withSidecar = true,
-  ): Promise<{ orch: FirecrackerOrchestrator; start: () => Promise<void> }> {
+  ): Promise<{
+    orch: FirecrackerOrchestrator;
+    start: () => Promise<void>;
+    guestConfigs: GuestConfig[];
+  }> {
     const { exec } = fakeExec();
     const orch = readyOrchestrator(exec, {
       mmdsPut: mmdsPut as FirecrackerOrchestratorDeps["mmdsPut"],
     });
+    const guestConfigs: GuestConfig[] = [];
     Reflect.set(orch, "spawnVmm", async () => fakeVmmProc());
-    Reflect.set(orch, "buildConfigDrive", async () => {});
+    Reflect.set(orch, "buildConfigDrive", async (_dir: string, _img: string, cfg: GuestConfig) => {
+      guestConfigs.push(cfg);
+    });
     Reflect.set(orch, "startConsoleWatch", () => {});
 
     const boundary = await orch.createIsolationBoundary(runId);
@@ -820,7 +828,7 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
       },
       boundary,
     );
-    return { orch, start: () => orch.startWorkload(agent) };
+    return { orch, start: () => orch.startWorkload(agent), guestConfigs };
   }
 
   it("PUTs the secret payload exactly once on the happy path (default broker)", async () => {
@@ -868,6 +876,21 @@ describe("MMDS credential broker (FIRECRACKER_CREDENTIAL_BROKER)", () => {
     });
     await start();
     expect(called).toBe(0);
+    await orch.shutdown();
+  });
+
+  // Every VM boots its sidecar: an agent staged without one is refused before
+  // any VMM is spawned.
+  it("refuses to start an agent whose run has no sidecar", async () => {
+    process.env.FIRECRACKER_CREDENTIAL_BROKER = "config-drive";
+    _resetCacheForTesting();
+    const { orch, start, guestConfigs } = await primeToStart(
+      "run_no_sidecar",
+      async () => {},
+      false,
+    );
+    await expect(start()).rejects.toThrow(/createSidecar/);
+    expect(guestConfigs).toHaveLength(0);
     await orch.shutdown();
   });
 });

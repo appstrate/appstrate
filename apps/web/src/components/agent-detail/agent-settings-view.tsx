@@ -20,6 +20,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
+import type { Versioned } from "../../hooks/use-packages";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RailLink } from "../settings/rail-link";
@@ -119,7 +120,7 @@ export function AgentSettingsView({
 }: {
   versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
   packageId: string;
-  detail: AgentDetail;
+  detail: Versioned<AgentDetail>;
   version?: string;
   isHistorical: boolean;
   configSchemaOverride?: JSONSchemaObject;
@@ -139,6 +140,7 @@ export function AgentSettingsView({
       return can("agents:configure");
     }
     if (section === "schedules") return can("schedules:read");
+    if (section === "connections") return can("integrations:read");
     if (section === "map" || section === "files" || section === "bundle") {
       return can("agents:read");
     }

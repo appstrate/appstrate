@@ -26,7 +26,7 @@ import { files, organizations, runs, uploads, storageDeletionJobs } from "@appst
 import { uploadStream } from "@appstrate/db/storage";
 import { _resetCacheForTesting } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -171,8 +171,7 @@ describe("files hardening — cross-phase interactions", () => {
       // run itself still succeeds. Drive the real finalize convergence.
       const run = await getRunSinkContext(runId);
       expect(run).not.toBeNull();
-      const result = emptyRunResult();
-      result.status = "success";
+      const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
       result.output = { ok: true };
       // Non-zero terminal usage so finalize's "never reached the LLM" heuristic
       // does not flip an otherwise-successful run to failed.

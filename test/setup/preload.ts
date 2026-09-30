@@ -299,7 +299,8 @@ const moduleEntries: DiscoveredModule[] = discoverModules(repoRoot);
 
 // Dynamic imports are async — bun supports top-level await in preloads.
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
-const { registerTestModule } = await import("../../apps/api/test/helpers/test-modules.ts");
+const { registerTestModule, registerDeclinedModule } =
+  await import("../../apps/api/test/helpers/test-modules.ts");
 
 // Phase 1: discover modules and register them. We collect imported modules
 // into a local list, then use the shared `collectModuleContributions()`
@@ -320,6 +321,7 @@ for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
     console.warn(
       `⚠ tier0: skipping module ${relative(repoRoot, moduleDir)} — it requires a real PostgreSQL.`,
     );
+    registerDeclinedModule(indexFile);
     continue;
   }
 

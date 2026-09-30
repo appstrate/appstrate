@@ -158,7 +158,7 @@ describe("CONFIGURING never activates — the row is the activation's, not the s
 
   const setModel = () =>
     app.request(`/api/agents/${OFFERED_AGENT}/model`, {
-      method: "PUT",
+      method: "PATCH",
       headers: authHeaders(ctx, { "Content-Type": "application/json" }),
       body: JSON.stringify({ modelId: null }),
     });

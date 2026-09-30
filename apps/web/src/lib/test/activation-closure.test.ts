@@ -25,10 +25,12 @@ function integration(
     home_writable: true,
     home_deletable: true,
     home_shareable: true,
+    published: true,
     placements: placements.map((p) => ({
       space_id: p.space_id,
       via: "home" as const,
       state: p.state,
+      chat_enforced: false,
       shared_by: null,
     })),
   };

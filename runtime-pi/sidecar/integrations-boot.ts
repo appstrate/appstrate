@@ -12,9 +12,9 @@
  * future: Firecracker microVM, podman, …), and aggregates their tools
  * on a shared {@link McpHost}.
  *
- * Phase 1.5 also wires per-integration HTTPS MITM listeners for auths
+ * Phase 1.5 also wires per-connection HTTPS MITM listeners for auths
  * that declare `delivery.http`: a per-run CA is minted on boot, each
- * such integration gets a credentials source (cache + refresh hook) +
+ * such bound connection gets a credentials source (cache + refresh hook) +
  * listener bound on the adapter's preferred interface, and the listener
  * injects the configured header on outbound calls. The runner reaches
  * the listener via the URL the adapter computed.
@@ -49,14 +49,15 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
+import { compileEgressPolicy, planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
 
 import { McpHost } from "./mcp-host.ts";
+import { runnerKeyOf } from "./runner-peers.ts";
 import { logger } from "./logger.ts";
-import type { HostResolver } from "./helpers.ts";
+import type { HostResolver, PeerCheck } from "./helpers.ts";
 import { createOpensslCertGenerator } from "./ca-cert-openssl.ts";
 import { createCertMinter, type CertMinter } from "./integration-cert-minter.ts";
 import {
@@ -67,6 +68,8 @@ import { createIntegrationEgressListener } from "./integration-egress-listener.t
 import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  isCredentialRejectedResult,
+  postIntegrationCredentialsRefresh,
   type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
@@ -162,7 +165,7 @@ interface BundleFetchOptions {
   /** Override for tests. Defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch;
   /**
-   * Override for tests: DNS resolver used by the per-integration egress
+   * Override for tests: DNS resolver used by the per-connection egress
    * listeners' SSRF rebind guard (tests use non-resolving mock hostnames).
    * Defaults to the system resolver.
    */
@@ -178,21 +181,8 @@ interface BootIntegrationsResult {
    * as trusted in-process MCP servers on the same host — one pipeline.
    */
   tools: AppstrateToolDefinition[];
-  /** Per-integration spawn outcome — useful for run-event observability. */
-  spawned: Array<{
-    integrationId: string;
-    namespace: string;
-    toolCount: number;
-    /**
-     * AFPS §7.1 build-provenance flag forwarded from
-     * `IntegrationSpawnSpec.manifest.server.vendored`. Set only for local
-     * sources whose mcp-server was vendored into the integration's own
-     * bundle; omitted for remote/serverless integrations.
-     */
-    vendored?: boolean;
-  }>;
-  /** Per-integration failures — captured here; the agent aborts the run on any. */
-  failed: Array<{ integrationId: string; error: string }>;
+  spawned: IntegrationBootReport["spawned"];
+  failed: IntegrationBootReport["failed"];
   /**
    * Structured boot report fetched by the agent via `GET /integrations/boot-report`.
    * Carries the ordered per-phase breadcrumbs (run-log observability) and the
@@ -201,6 +191,15 @@ interface BootIntegrationsResult {
   report: IntegrationBootReport;
   /** Idempotent teardown — closes every upstream MCP client + runtime adapter. */
   shutdown: () => Promise<void>;
+}
+
+/** Breadcrumb / log prefix: N specs share an `integrationId`, the label does not. */
+function specTag(spec: IntegrationSpawnSpec): string {
+  return spec.connection ? `${spec.integrationId} [${spec.connection.label}]` : spec.integrationId;
+}
+
+function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: string } {
+  return spec.connection ? { connectionLabel: spec.connection.label } : {};
 }
 
 /**
@@ -328,8 +327,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  *      refresh storms) and retry once. Caller-override 401s pass through.
  *
  * Auth selection: in practice the credentials payload carries EXACTLY ONE
- * auth — the platform's 5-layer connection cascade resolves a single
- * `integration_connections` row per run, and the resolver returns only that
+ * auth — each spec binds ONE `integration_connections` row, and the resolver returns only that
  * row's auth (see `integration-credentials-resolver.ts`, asserted by its
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
@@ -442,7 +440,7 @@ export async function connectRemoteHttpIntegration(
   const initial = source.snapshot();
 
   // Pick the auth whose header we'll inject. The payload normally carries a
-  // SINGLE auth (the cascade-resolved connection), so this resolves to that
+  // SINGLE auth (this spec's one connection), so this resolves to that
   // one auth — NOT a policy decision. OAuth2-first / first-with-a-plan is only
   // a defensive tie-breaker if the payload ever surfaces more than one. The
   // credentials resolver populates `deliveryPlans[authKey]` for every auth
@@ -578,15 +576,10 @@ export async function connectRemoteHttpIntegration(
  * when the login tool itself fails — the caller maps the throw onto the boot
  * result's `failed[]` list. Exported for unit testing; production callers go
  * through {@link bootIntegrations}.
- *
- * `allocatedNamespace` is the value {@link McpHost.register} returned for this
- * integration — the host may have disambiguated `spec.namespace` with a
- * suffix, and {@link McpHost.getUpstreamClient} keys against the allocated
- * form.
  */
 export async function runConnectLoginHook(
   spec: IntegrationSpawnSpec,
-  host: McpHost,
+  client: AppstrateMcpClient,
   mitmSource: IntegrationCredentialsSource | null,
   allocatedNamespace: string,
 ): Promise<void> {
@@ -597,11 +590,9 @@ export async function runConnectLoginHook(
       "connect-login requires the integration's MITM credentials source, but none was created (CA bring-up may have failed)",
     );
   }
-  // Same opts drive the initial login AND every mid-run re-login. The
-  // namespace MUST be the ALLOCATED one (McpHost may have suffixed it) so the
-  // re-login closure resolves the same upstream client.
+  // Boot login and every re-login share these opts: THIS runner, never a sibling's.
   const loginOpts = {
-    host,
+    client,
     namespace: allocatedNamespace,
     toolName: cl.toolName,
     ...(cl.produces ? { produces: cl.produces } : {}),
@@ -707,7 +698,7 @@ interface SpawnAndConnectResult {
  * ({@link runConnectOnce}); they diverge only in what they do AFTER (keep the
  * session alive for the agent vs. run the login tool once + tear down).
  *
- * Steps: optional per-integration MITM listener (when `wantsMitm` && a CA is
+ * Steps: optional per-connection MITM listener (when `wantsMitm` && a CA is
  * available) → fetch + extract the bundle → `adapter.spawn` → open the MCP
  * client with a 30s connect race → `host.register`.
  *
@@ -715,7 +706,7 @@ interface SpawnAndConnectResult {
  * collectors AS they are created, so a throw mid-pipeline still lets the
  * caller's teardown reclaim a half-built listener/client (no leak on error).
  */
-/** Max runner-stderr lines retained per integration for failure reports (#779). */
+/** Max runner-stderr lines retained per runner for failure reports (#779). */
 const STDERR_TAIL_MAX_LINES = 20;
 /** Cap per stderr line folded into a failure report — avoids a runaway blob. */
 const STDERR_LINE_MAX_CHARS = 500;
@@ -786,13 +777,6 @@ async function spawnAndConnectLocalIntegration(params: {
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
   /**
-   * Issue #543 — the runner needs a controlled egress route but no header
-   * injection (a `delivery.env` auth declaring an outbound surface). When set
-   * and `wantsMitm` is false, mount a plain CONNECT egress listener. MITM
-   * wins when both are set (it already provides egress).
-   */
-  wantsEgress: boolean;
-  /**
    * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
    * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
    * then turns into a failed boot.
@@ -808,6 +792,8 @@ async function spawnAndConnectLocalIntegration(params: {
   hiddenTools?: readonly string[];
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
+  /** Credential-rejected signal hook; agent-run only (a connect-run has no run to attribute it to). */
+  onCredentialRejected?: () => void;
   /** Caller-owned teardown collectors — appended to as resources are built. */
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
@@ -823,12 +809,16 @@ async function spawnAndConnectLocalIntegration(params: {
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
-  // One listener per integration, picked MITM-first (#543). `egressCtx` is
+  // One listener per connection, picked MITM-first (#543). `egressCtx` is
   // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
-  //   - plain CONNECT    → caCertHostPath null (tunnel + SSRF floor only).
-  //   - neither          → null (mtls / delivery.files reach upstream directly).
+  //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
+  //   - neither          → null: the runner has no egress route.
+  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
   let egressCtx: RuntimeEgressContext | null = null;
+  const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
+  const attribute = adapter.peerAttribution();
+  const isPeerAllowed: PeerCheck = async (peer) => (await attribute(peer)) === runnerKeyOf(spec);
   // The MITM listener is mounted only when this integration wants MITM, a CA
   // came up, AND the caller hoisted a source. When mounted, the shared
   // `source` is what the connect-login hook drives — surfaced back to the
@@ -845,6 +835,8 @@ async function spawnAndConnectLocalIntegration(params: {
       // (0.0.0.0 for bridged networks, 127.0.0.1 when it shares the parent NS).
       host: adapterCtx.listenerBindHost,
       resolveHostFn: bundleFetchOpts.resolveHostFn,
+      egressPolicy: policy,
+      isPeerAllowed,
       onEvent: (event) => {
         // Surface enough to debug auth-injection bugs without leaking
         // signed query params. URL is reduced to `host + path` (no
@@ -876,27 +868,29 @@ async function spawnAndConnectLocalIntegration(params: {
     params.mitmListeners.push(listener);
     mitmMounted = true;
     const port = listener.address().port;
-    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath };
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: ca.certHostPath, policy };
     logger.info(`${logLabel} MITM listener ready`, {
       integrationId: spec.integrationId,
       localUrl: listener.proxyUrl(),
       runnerProxyUrl: egressCtx.proxyUrl,
     });
-  } else if (params.wantsEgress) {
+  } else if (spec.egress) {
     // No injection plan, but the runner declares an outbound surface — give it
-    // a plain CONNECT egress route (tunnel + SSRF floor, NO TLS termination,
+    // a plain CONNECT egress route (policy + SSRF floor, NO TLS termination,
     // NO cert mint). `caCertHostPath: null` tells the adapter to skip the CA
     // env block + cert delivery.
     const listener = createIntegrationEgressListener({
       host: adapterCtx.listenerBindHost,
       resolveHostFn: bundleFetchOpts.resolveHostFn,
+      egressPolicy: policy,
+      isPeerAllowed,
       onEvent: (event) =>
         logger.info(`${logLabel} egress event`, { integrationId: spec.integrationId, ...event }),
     });
     await listener.ready;
     params.mitmListeners.push(listener);
     const port = listener.address().port;
-    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: null };
+    egressCtx = { proxyUrl: adapterCtx.proxyUrlFor(port), caCertHostPath: null, policy };
     logger.info(`${logLabel} egress listener ready`, {
       integrationId: spec.integrationId,
       localUrl: listener.proxyUrl(),
@@ -1008,13 +1002,17 @@ async function spawnAndConnectLocalIntegration(params: {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
   const connectMs = performance.now() - connectStart;
-  const wrapped = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
+  const base = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
+  const wrapped = params.onCredentialRejected
+    ? reportCredentialRejections(base, params.onCredentialRejected)
+    : base;
   params.clients.push(wrapped);
 
-  const sizeBefore = host.size();
+  const sizeBefore = host.routeCount();
   const allocatedNs = await host.register({
     namespace: spec.namespace,
     client: wrapped,
+    connection: spec.connection,
     // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
     // declared tools. `undefined` keeps the legacy "all tools allowed".
     ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
@@ -1023,7 +1021,7 @@ async function spawnAndConnectLocalIntegration(params: {
     // install-time catalog resolution.
     ...((params.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: params.hiddenTools } : {}),
   });
-  const toolCount = host.size() - sizeBefore;
+  const toolCount = host.routeCount() - sizeBefore;
 
   return {
     wrapped,
@@ -1034,6 +1032,45 @@ async function spawnAndConnectLocalIntegration(params: {
     connectMs,
     ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
   };
+}
+
+/**
+ * Fire `onRejected` on a credential-rejected tool result: servers whose
+ * credential never crosses the MITM (SSH, env keys) have no 401 to observe.
+ * The result is returned untouched.
+ */
+export function reportCredentialRejections(
+  client: AppstrateMcpClient,
+  onRejected: () => void,
+): AppstrateMcpClient {
+  return {
+    ...client,
+    async callTool(args, options) {
+      const result = await client.callTool(args, options);
+      if (isCredentialRejectedResult(result)) onRejected();
+      return result;
+    },
+  };
+}
+
+/** Report a rejection like the MITM does on a 401 (forced refresh); fire-and-forget. */
+function reportRejectedCredential(spec: IntegrationSpawnSpec, opts: BundleFetchOptions): void {
+  const { integrationId } = spec;
+  const connectionId = spec.connection?.id;
+  postIntegrationCredentialsRefresh(integrationId, connectionId, opts).then(
+    (res) =>
+      logger.warn("integration credential rejected by the target — reported", {
+        integrationId,
+        connectionId,
+        status: res.status,
+      }),
+    (err: unknown) =>
+      logger.warn("integration credential rejection report failed", {
+        integrationId,
+        connectionId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+  );
 }
 
 /**
@@ -1061,10 +1098,11 @@ export function pushUnavailableToolBreadcrumb(
   if (requested.length === 0 || added >= requested.length) return;
   const missing = requested.length - added;
   breadcrumbs.push({
-    message: `${spec.integrationId}: ${missing}/${requested.length} selected tool(s) unavailable`,
+    message: `${specTag(spec)}: ${missing}/${requested.length} selected tool(s) unavailable`,
     level: "warn",
     data: {
       integrationId: spec.integrationId,
+      ...connectionLabelOf(spec),
       requested: requested.length,
       surviving: added,
       missing,
@@ -1150,10 +1188,11 @@ export function pushServerlessReadyBreadcrumb(
   breadcrumbs: IntegrationBootBreadcrumb[],
 ): void {
   breadcrumbs.push({
-    message: `${spec.integrationId}: api_call ready (${durationMs}ms, ${toolCount} tool${toolCount === 1 ? "" : "s"})`,
+    message: `${specTag(spec)}: api_call ready (${durationMs}ms, ${toolCount} tool${toolCount === 1 ? "" : "s"})`,
     level: "info",
     data: {
       integrationId: spec.integrationId,
+      ...connectionLabelOf(spec),
       kind: "serverless",
       durationMs,
       toolCount,
@@ -1162,9 +1201,9 @@ export function pushServerlessReadyBreadcrumb(
 }
 
 /**
- * Spawn each integration sequentially, register the surviving ones on a
- * shared {@link McpHost}, and return the materialised tool list. Per-integration
- * failures are captured in `result.failed` so a single broken integration
+ * Spawn each spec (one per bound connection) sequentially, register the surviving ones on a
+ * shared {@link McpHost}, and return the materialised tool list. Per-connection
+ * failures are captured in `result.failed` so a single broken connection
  * doesn't black-hole the entire run. The one fatal exception is runtime
  * adapter selection (no adapter → nothing can spawn): that rethrows.
  */
@@ -1178,6 +1217,8 @@ export async function bootIntegrations(
    * server is skipped — a spec that declares `apiCall` is logged + dropped.
    */
   apiCallDeps?: ApiCallToolDeps,
+  /** Called once the adapter is prepared, before any runner spawns. */
+  onAdapterPrepared?: (adapter: IntegrationRuntimeAdapter) => void,
 ): Promise<BootIntegrationsResult> {
   const host = new McpHost({
     onLog: (event) =>
@@ -1237,6 +1278,7 @@ export async function bootIntegrations(
   const adapterPrepareStart = performance.now();
   const adapterCtx = await adapter.prepare(runId);
   const adapterPrepareMs = performance.now() - adapterPrepareStart;
+  onAdapterPrepared?.(adapter);
   // Decode the workspace handle once for the whole run — same handle is
   // shared by every opt-in integration runner. The agent already has
   // the underlying workspace mounted; this surfaces it to mcp-server
@@ -1266,7 +1308,7 @@ export async function bootIntegrations(
   // ─── Phase 1.5 (converge) — MITM bring-up (run-CA + cert minter) ───
   // The CA was minted once per run (kicked off above, concurrent with the
   // adapter phase), regardless of how many integrations need it.
-  // Per-integration listeners share the same minter (lazily creates leaf
+  // Per-connection listeners share the same minter (lazily creates leaf
   // certs per upstream SNI host). The CA cert PEM lands on local fs so
   // the adapter can ferry it into each runner's trust store.
   let runCa: RunCaMaterials | null = null;
@@ -1288,7 +1330,7 @@ export async function bootIntegrations(
     } catch (err) {
       // CA bring-up failed — every MITM integration will fail to register
       // below and land in `failed`, which aborts the run. We log + breadcrumb
-      // the root cause here so the per-integration failures downstream are
+      // the root cause here so the per-connection failures downstream are
       // attributable (typically openssl missing from the sidecar image).
       //
       // Scrubbed for the same reason the per-spec catch below is: this message
@@ -1315,10 +1357,12 @@ export async function bootIntegrations(
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
     try {
+      const connection = spec.connection;
+      if (!connection) throw new Error("agent-run spawn spec binds no connection");
       const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
-      // ─── ONE shared credentials source per integration ───
+      // ─── ONE shared credentials source per bound connection ───
       // The Source/Sink model (see integration-credentials-source.ts header):
-      // a single source feeds every consumer of this integration's credentials
+      // a single source feeds every consumer of this connection's credentials
       // — the MITM listener, the api_call adapter, and the connect-login hook.
       // Sharing it is what makes a connect.tool run-start session (installed via
       // `setSessionOutputs`) visible to api_call on the same authKey, and keeps
@@ -1331,10 +1375,12 @@ export async function bootIntegrations(
       const source = needsSource
         ? createIntegrationCredentialsSource({
             integrationId: spec.integrationId,
+            connectionId: connection.id,
             platformApiUrl: bundleFetchOpts.platformApiUrl,
             runToken: bundleFetchOpts.runToken,
             initialPayload: await fetchInitialIntegrationCredentials(
               spec.integrationId,
+              connection.id,
               bundleFetchOpts,
             ),
           })
@@ -1348,12 +1394,12 @@ export async function bootIntegrations(
       // spawned/remote integration — OUTSIDE any spawned container, so the
       // server code never sees the credential. One pipeline → McpHost owns
       // the namespacing (`{ns}__api_call`) + name validation. Two modes:
-      //  - serverless (`apiCall` block, no `spec.manifest.server`): api_call
-      //    is the namespace's PRIMARY client (`intoNamespace` omitted) and the
+      //  - serverless (`apiCall` block, no `spec.manifest.server`): the first
+      //    api_call allocates the namespace (`intoNamespace` omitted) and the
       //    integration does ONLY this, skipping spawn.
       //  - attachable (additive on a spawned/remote server): pass the server's
       //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
-      //    tools under one namespace; the spawned server stays primary.
+      //    tools under one namespace.
       // Returns the number of tools added so callers can sum the tool count.
       const attachApiCall = async (intoNamespace?: string): Promise<number> => {
         const apiCalls = spec.apiCalls ?? [];
@@ -1376,25 +1422,25 @@ export async function bootIntegrations(
         // The SHARED source serves every auth; each api_call entry binds its own
         // auth via a per-auth adapter reading from that same source.
         let total = 0;
-        // A serverless multi-auth integration has no primary MCP upstream to
-        // allocate its namespace before these synthetic tools are attached.
-        // The first api_call registration therefore becomes the primary; all
-        // subsequent auth-scoped api_call servers must merge into the exact
-        // namespace it was allocated (which may already carry a collision
-        // suffix). Otherwise McpHost allocates `namespace_2` for the second
-        // auth and the runtime surface drifts from the integration catalog.
+        // A serverless multi-auth integration has no MCP upstream to allocate
+        // its namespace, so the first api_call registration allocates it and
+        // every later auth merges into that exact namespace (collision suffix
+        // included). Registered on its own, a later auth would repeat this
+        // connection's label in the slot, which McpHost refuses.
         let sharedNamespace = intoNamespace;
         for (const apiCall of apiCalls) {
           const credAdapter = createApiCallCredentialAdapter({
             source,
             authKey: apiCall.authKey,
-            authorizedUris: apiCall.authorizedUris,
+            declaredUris: apiCall.authorizedUris,
             ...(apiCall.allowAllUris ? { allowAllUris: true } : {}),
           });
           const integ: ApiCallIntegrationConfig = {
             namespace: spec.namespace, // McpHost.register normalises it
             integrationId: spec.integrationId,
+            connectionId: connection.id,
             toolName: apiCall.toolName,
+            declaredUris: apiCall.authorizedUris,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
             // Resumable-upload protocols the manifest declared (plumbed via
@@ -1415,16 +1461,17 @@ export async function bootIntegrations(
           }
           const pair = await createInProcessPair(defs, {
             serverInfo: {
-              name: `appstrate-api-call-${spec.integrationId}-${apiCall.toolName}`,
+              name: `appstrate-api-call-${specTag(spec)}-${apiCall.toolName}`,
               version: "1",
             },
           });
           const wrapped = wrapClient(pair.client, { close: () => pair.close() });
-          const sizeBefore = host.size();
+          const sizeBefore = host.routeCount();
           const merging = sharedNamespace !== undefined;
           const allocatedNamespace = await host.register({
             namespace: spec.namespace,
             client: wrapped,
+            connection,
             trusted: true,
             allowedTools: defs.map((d) => d.descriptor.name),
             // `hidden_tools` is a runtime boundary, not merely catalog/UI
@@ -1434,11 +1481,12 @@ export async function bootIntegrations(
             ...(sharedNamespace ? { intoNamespace: sharedNamespace } : {}),
           });
           sharedNamespace ??= allocatedNamespace;
-          const count = host.size() - sizeBefore;
+          const count = host.routeCount() - sizeBefore;
           clients.push(wrapped);
           total += count;
           logger.info("integration api_call registered (in-process)", {
             integrationId: spec.integrationId,
+            ...connectionLabelOf(spec),
             namespace: allocatedNamespace,
             authKey: apiCall.authKey,
             toolName: apiCall.toolName,
@@ -1450,7 +1498,7 @@ export async function bootIntegrations(
       };
 
       // Serverless integration (api_call-only, no MCP server) — the in-process
-      // api_call server is its entire surface (registered as the primary).
+      // api_call server is its entire surface (it allocates the namespace).
       //
       // Bind `server` from the same predicate that decides the branch, so the
       // dispatch and the narrowing cannot disagree.
@@ -1466,6 +1514,7 @@ export async function bootIntegrations(
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
+          ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
           // serverless integration — no `source.server`, so `vendored` is N/A.
         });
@@ -1495,10 +1544,11 @@ export async function bootIntegrations(
         // closes the open Streamable HTTP client. Mirrors the local-spawn
         // path's leak-safe ordering.
         clients.push(client);
-        const sizeBefore = host.size();
+        const sizeBefore = host.routeCount();
         const allocatedNs = await host.register({
           namespace: spec.namespace,
           client,
+          connection,
           // Phase 3 tool allowlist still applies — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
@@ -1507,7 +1557,7 @@ export async function bootIntegrations(
           // tool can never reach the agent via the remote MCP path.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         });
-        const added = host.size() - sizeBefore;
+        const added = host.routeCount() - sizeBefore;
         pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(allocatedNs);
@@ -1515,11 +1565,13 @@ export async function bootIntegrations(
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
+          ...connectionLabelOf(spec),
           toolCount: added + apiCallAdded,
           // remote-source integration — no `source.server.vendored` field.
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
+          ...connectionLabelOf(spec),
           namespace: spec.namespace,
           serverUrl: server.url,
           // AFPS §7.1 — surface the actual transport the sidecar
@@ -1530,10 +1582,11 @@ export async function bootIntegrations(
         });
         const ms = Math.round(performance.now() - specStart);
         breadcrumbs.push({
-          message: `${spec.integrationId}: remote-http connect ${ms}ms · ready`,
+          message: `${specTag(spec)}: remote-http connect ${ms}ms · ready`,
           level: "info",
           data: {
             integrationId: spec.integrationId,
+            ...connectionLabelOf(spec),
             kind: "remote-http",
             durationMs: ms,
             toolCount: added + apiCallAdded,
@@ -1546,13 +1599,13 @@ export async function bootIntegrations(
       // MITM is created only when the CA came up AND this integration declared
       // `delivery.http`. `mitmSource` is returned so the connect-login hook
       // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from. `wantsEgress` (#543) is the
+      // source the MITM listener reads from. `spec.egress` (#543) is the
       // fallback: a no-injection runner that still needs an outbound route gets
       // a plain CONNECT egress listener instead.
       const wantsMitm =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
-      const wantsEgress = spec.needsEgress === true;
       const {
+        wrapped: runnerClient,
         allocatedNs,
         mitmSource,
         toolCount: added,
@@ -1570,12 +1623,12 @@ export async function bootIntegrations(
         ca: runCa,
         workspaceHandle,
         wantsMitm,
-        wantsEgress,
         allowedTools: spec.toolAllowlist,
         // R8a — propagate `hidden_tools` so the host filters them out at
         // runtime, regardless of whether install-time validation removed them.
         ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         logLabel: "integration",
+        onCredentialRejected: () => reportRejectedCredential(spec, bundleFetchOpts),
         clients,
         mitmListeners,
         stderrTail,
@@ -1592,10 +1645,8 @@ export async function bootIntegrations(
       // A failure here throws into the outer catch → the integration lands
       // on `failed` and is NOT pushed to `spawned`; the agent gets a
       // tool-error if it tries to use it rather than a silent half-session.
-      // The connect-login tool is reached via the ALLOCATED namespace (the
-      // host may have disambiguated `spec.namespace` with a suffix).
       if (spec.connectLogin) {
-        await runConnectLoginHook(spec, host, mitmSource, allocatedNs);
+        await runConnectLoginHook(spec, runnerClient, mitmSource, allocatedNs);
       }
 
       // Attach the in-process api_call tool alongside the spawned server's
@@ -1606,6 +1657,7 @@ export async function bootIntegrations(
       spawned.push({
         integrationId: spec.integrationId,
         namespace: spec.namespace,
+        ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
         // AFPS §7.1 — forward the local source's `vendored` build-provenance
         // flag so the boot report surfaces it for audit/security consumers.
@@ -1615,6 +1667,7 @@ export async function bootIntegrations(
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,
+        ...connectionLabelOf(spec),
         namespace: spec.namespace,
         adapter: adapter.id,
         ...(diagnosticId ? { diagnosticId } : {}),
@@ -1622,10 +1675,11 @@ export async function bootIntegrations(
       });
       const loginPart = spec.connectLogin ? " · login" : "";
       breadcrumbs.push({
-        message: `${spec.integrationId}: spawn ${Math.round(spawnMs)}ms · connect ${Math.round(connectMs)}ms${loginPart} · ready`,
+        message: `${specTag(spec)}: spawn ${Math.round(spawnMs)}ms · connect ${Math.round(connectMs)}ms${loginPart} · ready`,
         level: "info",
         data: {
           integrationId: spec.integrationId,
+          ...connectionLabelOf(spec),
           kind: "local",
           adapter: adapter.id,
           spawnMs: Math.round(spawnMs),
@@ -1654,17 +1708,23 @@ export async function bootIntegrations(
         stderrTail.length > 0
           ? ` — runner stderr (last ${stderrTail.length} line${stderrTail.length > 1 ? "s" : ""}): ${stderrTail.join(" ⏎ ")}`
           : "";
-      failed.push({ integrationId: spec.integrationId, error: msg + stderrSuffix });
+      failed.push({
+        integrationId: spec.integrationId,
+        ...connectionLabelOf(spec),
+        error: msg + stderrSuffix,
+      });
       logger.warn("integration spawn failed", {
         integrationId: spec.integrationId,
+        ...connectionLabelOf(spec),
         error: msg,
         ...(stderrTail.length > 0 ? { stderrTail } : {}),
       });
       breadcrumbs.push({
-        message: `${spec.integrationId}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
+        message: `${specTag(spec)}: failed after ${ms}ms — ${msg}${stderrSuffix}`,
         level: "error",
         data: {
           integrationId: spec.integrationId,
+          ...connectionLabelOf(spec),
           // Same `kind` the success crumbs carry — for the serverless
           // zero-tool case this is the only crumb that reports the mode.
           kind: isServerlessSpec(spec) ? "serverless" : "local",
@@ -1682,7 +1742,7 @@ export async function bootIntegrations(
   // whether to abort.
   const report: IntegrationBootReport = {
     ok: failed.length === 0,
-    declared: specs.length,
+    declaredConnections: specs.length,
     adapter: adapter.id,
     spawned,
     failed,
@@ -1815,16 +1875,20 @@ export async function runConnectOnce(
     // `setSessionOutputs` on this same source.
     const source = createIntegrationCredentialsSource({
       integrationId: spec.integrationId,
+      connectionId: undefined,
       platformApiUrl: bundleFetchOpts.platformApiUrl,
       runToken: bundleFetchOpts.runToken,
-      initialPayload: await fetchInitialIntegrationCredentials(spec.integrationId, bundleFetchOpts),
+      initialPayload: await fetchInitialIntegrationCredentials(
+        spec.integrationId,
+        undefined,
+        bundleFetchOpts,
+      ),
     });
 
     // Same spawn→connect→register pipeline the agent-run path uses, but
-    // `allowedTools: []` (connect-run never serves an agent; register() is only
-    // needed so `getUpstreamClient` resolves the login tool) and `wantsMitm`
+    // `allowedTools: []` (connect-run never serves an agent) and `wantsMitm`
     // forced on.
-    const { allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
+    const { wrapped, allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
       // connect-run never reaches an agent — the integration spawns only
       // long enough to mint a session, so workspace exposure is a
       // non-goal. Strip any `workspaceMount` the resolver attached so the
@@ -1842,10 +1906,9 @@ export async function runConnectOnce(
       // Always pass null to keep the connect-run path workspace-free
       // regardless of the launching orchestrator's env.
       workspaceHandle: null,
-      wantsMitm: true,
       // connect-run always mounts the MITM listener (it provides egress too),
       // so the plain-egress fallback never applies here.
-      wantsEgress: false,
+      wantsMitm: true,
       allowedTools: [],
       logLabel: "connect-run",
       clients,
@@ -1860,7 +1923,7 @@ export async function runConnectOnce(
     // Run the login tool ONCE and capture the bundle. The secret in
     // `cl.inputs` is substituted proxy-side by the MITM source.
     const bundle = await runConnectLogin({
-      host,
+      client: wrapped,
       namespace: allocatedNs,
       toolName: cl.toolName,
       ...(cl.produces ? { produces: cl.produces } : {}),

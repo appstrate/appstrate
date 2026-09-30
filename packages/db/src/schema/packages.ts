@@ -84,11 +84,16 @@ export const spacePackages = pgTable(
     // (POST /api/integration-connections returns 403). Existing user
     // connections stay functional; the lock is on creation only. The
     // intended workflow: admin enables this → connects → marks the
-    // connection sharedWithOrg → users fall through resolution onto
-    // the single admin-shared connection. Stored on space_packages
+    // connection sharedWithOrg → makes it the org default
+    // (integration_org_defaults), since the resolver's fallback never
+    // binds a shared connection. Stored on space_packages
     // because the gate is per-(space, integration) and spacePackages
     // already keys on those (when type=integration).
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
+    // Skills only. Every chat turn in this space injects the skill's latest
+    // published SKILL.md, whatever the skill mode and the member's `skills:*`
+    // grants. Like every setting here, it survives deactivation.
+    chatEnforced: boolean("chat_enforced").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
     installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

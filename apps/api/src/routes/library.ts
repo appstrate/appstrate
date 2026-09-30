@@ -28,6 +28,7 @@ function mayOpenOrganizationLibrary(c: Parameters<typeof callerOrgRole>[0]): boo
 
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
+  // The caller's org role decides, not a grant: no permission names this page.
   router.get("/", async (c) => {
     if (!mayOpenOrganizationLibrary(c))
       throw forbidden(

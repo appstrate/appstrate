@@ -253,6 +253,14 @@ function GeneralForm({
               ))}
             </RadioGroup>
             <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
+            {/* A pick commits at once, so the consequence of closing is said
+                while the space is still open: implicit members lose access and
+                the server unshares the connections they shared here. */}
+            {activeVisibility === "open" && !application.isDefault && !application.personal && (
+              <p className="text-muted-foreground text-xs">
+                {t("spaces.closeUnsharesConnections")}
+              </p>
+            )}
             {application.isDefault && (
               <p className="text-muted-foreground text-xs">{t("spaces.visibilityDefaultLocked")}</p>
             )}

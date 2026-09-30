@@ -18,12 +18,14 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
+import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
+import { aggregatedCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { appendRunLog, updateRun } from "../state/runs.ts";
+import { appendRunLog, isServedByLlmProxy, updateRun } from "../state/runs.ts";
+import type { InferenceRoute } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
@@ -42,11 +44,14 @@ export async function persistRunEvent(
   scope: SpaceScope,
   runId: string,
   event: RunEvent,
-  opts: {
-    writeLedger?: boolean;
-    modelSource?: string | null;
-    modelCost?: ModelCost | null;
-  } = {},
+  opts:
+    | { writeLedger?: false }
+    | {
+        writeLedger: true;
+        modelSource?: string | null;
+        inferenceRoute: InferenceRoute | null;
+        modelCost?: ModelCost | null;
+      } = {},
 ): Promise<string | null> {
   switch (event.type) {
     case "output.emitted": {
@@ -84,7 +89,7 @@ export async function persistRunEvent(
       // which is also what the readers' membership set is built from — writing
       // the literal here is what let a "shared" list have an unshared writer.
       // The set carries no retired spelling: none survives the rename.
-      const fileId = typeof event.file_id === "string" ? event.file_id : null;
+      const fileId = typeof event.fileId === "string" ? event.fileId : null;
       if (fileId) {
         await appendRunLog(
           scope,
@@ -145,7 +150,13 @@ export async function persistRunEvent(
         await writeRunnerLedgerRow(
           scope,
           runId,
-          { cost, usage, modelSource: opts.modelSource, modelCost: opts.modelCost },
+          {
+            cost,
+            usage,
+            modelSource: opts.modelSource,
+            inferenceRoute: opts.inferenceRoute,
+            modelCost: opts.modelCost,
+          },
           { executor },
         );
         // Best-effort live broadcast, throttled per run — never blocks the
@@ -187,6 +198,8 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
+    /** Run's inference route — see {@link isServedByLlmProxy}. */
+    inferenceRoute: InferenceRoute | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
     modelCost?: ModelCost | null;
   },
@@ -201,6 +214,10 @@ export async function writeRunnerLedgerRow(
     required?: boolean;
   } = {},
 ): Promise<void> {
+  // The proxy records every call from the provider's own response: those rows
+  // are this run's ledger, and a runner row beside them would count it twice.
+  if (isServedByLlmProxy(row)) return;
+
   // Degenerate-event skip — nothing to bill or audit. Keyed on whichever input
   // this row's cost is DERIVED from: the usage snapshot on a platform run, the
   // reported `cost` on a remote-origin run. A platform run with tokens but no
@@ -271,10 +288,11 @@ interface RunnerCostVerdict {
  *
  * The `cost` on an `appstrate.metric` event is produced inside the agent
  * container and is advisory: the platform holds both factors itself — the
- * kickoff snapshot `runs.model_cost` and the reported counts — and multiplies
- * them with `computeTokenCost`, the same formula the LLM-proxy meter uses. That
- * also lets `MODEL_COST` be withheld from a container running an aliased model
- * without changing what the run is billed.
+ * kickoff snapshot `runs.model_cost` and the reported counts — and prices
+ * them with Pi's `calculateCost`, as the LLM-proxy meter does. Summed counters
+ * are priced at the base rate (RUN_COST.md). That also lets
+ * `MODEL_COST` be withheld from a container running an aliased model without
+ * changing what the run is billed.
  *
  * A run that dies without terminal usage (watchdog kill, crash, timeout,
  * cancel) is priced from the cumulative snapshot finalize preserved
@@ -287,7 +305,7 @@ interface RunnerCostVerdict {
  * short-circuits both: `null` status (the platform makes no claim — that run's
  * inference is accounted elsewhere) and the pass-through cost. `model_cost` is
  * JSONB, so both halves read it narrowed: an unvalidated `{}` would classify as
- * fully priced and make `computeTokenCost` write `NaN`.
+ * fully priced and price it as `NaN`.
  */
 function resolveRunnerCost(
   orgId: string,
@@ -306,7 +324,7 @@ function resolveRunnerCost(
   const rates = parsedCost.success ? parsedCost.data : null;
   const usage = row.usage ?? {};
   return {
-    costUsd: computeTokenCost(usage, rates),
+    costUsd: aggregatedCostUsd(usage, rates),
     pricingStatus: resolvePricingStatus({
       orgId,
       // The run's model label is not in the sink context, so the warn line is
@@ -326,18 +344,20 @@ function resolveRunnerCost(
 const REPORTED_COST_DIVERGENCE_USD = 1e-6;
 
 /**
- * Divergence probe on the container's advisory `cost`. The server number is
- * authoritative either way — this only reports that the two formulas disagreed.
+ * Standing parity monitor between the runner's Pi `calculateCost` and server
+ * pricing. The server number is authoritative either way — this only reports
+ * that the two disagreed. The reported `cost` field itself is permanent: a
+ * remote-origin run (NULL `model_source`) is billed from it verbatim.
  *
- * It retires with the `cost` field on the `appstrate.metric` envelope, in the
- * same commit: the probe is the evidence for dropping that field, and dropping
- * the field is what makes the probe unreachable. Concrete signal to do both: a
- * deployment window over which `runner-reported cost diverges` appears zero
- * times in the platform logs. Until the field is gone the probe stays, because
- * a container is otherwise free to report a number nothing looks at.
+ * Population: server-priced runs whose container reported a cost — in practice
+ * OAuth-subscription runs, the one platform route the LLM proxy does not serve
+ * (a proxy-served run writes no runner row); an aliased run gets no
+ * `MODEL_COST` and reports no cost. The container prices at the base rate (`tiers` dropped from
+ * `MODEL_COST`), matching the server, so a tiered model raises no divergence.
  *
- * `apps/api/test/unit/runner-cost-parity.test.ts` pins the two formulas against
- * each other on constructed input; this catches the inputs that test does not
+ * It is the only live check that `@appstrate/runner-pi` (also the CLI's remote
+ * runner) prices as the server does. `runner-cost-parity.test.ts` pins the two
+ * formulas on constructed input; this catches the inputs that test does not
  * model.
  *
  * Fires at most once per run, on the terminal write: the counters are

@@ -10,9 +10,8 @@
  * `@appstrate/core/runtime-tool-defs` so the credential-isolating sidecar
  * can serve the SAME definitions as MCP tools without pulling the Pi SDK.
  * This wrapper is the second consumer: it registers each definition as a Pi
- * tool for the **no-sidecar execution path** — the platform skip-sidecar
- * branch (`runtime-pi/entrypoint.ts`) and the public `appstrate run` CLI,
- * neither of which has a sidecar to host the MCP surface.
+ * tool for the public `appstrate run` CLI, which has no sidecar to host the
+ * MCP surface.
  *
  * Event delivery mirrors the MCP path: the tool handler returns its
  * canonical events under the `_meta` key; this wrapper re-emits them into
@@ -32,6 +31,7 @@ import {
   type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
+import { piToolResultOrThrow } from "../pi-tool-result.ts";
 
 export interface BuildRuntimeToolExtensionsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
@@ -41,7 +41,7 @@ export interface BuildRuntimeToolExtensionsOptions {
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
    * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
-   * `attachStdoutBridge`, so no-sidecar callers need no extra wiring.
+   * `attachStdoutBridge`, so CLI callers need no extra wiring.
    */
   emit?: (event: RuntimeToolEvent) => void;
 }
@@ -57,7 +57,9 @@ function defaultStdoutEmit(event: RuntimeToolEvent): void {
 /**
  * Build one Pi {@link ExtensionFactory} per selected runtime tool. Each
  * registers a Pi tool whose `execute` runs the shared core handler, re-emits
- * the resulting canonical events, and adapts the text result to Pi's shape.
+ * the resulting canonical events, and adapts the text result to Pi's shape
+ * (a handler error — e.g. `output` failing its schema — throws as a Pi tool
+ * error, so the terminal-tool early stop never fires on it).
  */
 export function buildRuntimeToolExtensions(
   opts: BuildRuntimeToolExtensionsOptions,
@@ -84,11 +86,10 @@ function runtimeToolExtension(
       async execute(_toolCallId, params) {
         const result = await def.handler(params ?? {});
         reEmitRuntimeToolEvents(result._meta, emit);
-        return {
+        return piToolResultOrThrow({
           content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
-          details: undefined,
-          ...(result.isError ? { isError: true } : {}),
-        };
+          isError: result.isError === true,
+        });
       },
     });
   };

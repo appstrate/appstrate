@@ -58,5 +58,6 @@
   "artifact.copied": "Copied",
   "artifact.copyFailed": "Could not copy the content.",
   "artifact.fullscreen": "Full screen",
-  "artifact.exitFullscreen": "Exit full screen"
+  "artifact.exitFullscreen": "Exit full screen",
+  "run.noAccess": "Your role does not give access to this space's files."
 }

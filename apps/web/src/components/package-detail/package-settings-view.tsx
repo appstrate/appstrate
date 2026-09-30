@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { Versioned } from "../../hooks/use-packages";
 import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { LoadingState } from "../page-states";
 import { PackageFilesSection } from "../package-files/package-files-section";
@@ -42,7 +43,7 @@ export function PackageSettingsView({
   versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
   type: "skill" | "mcp-server";
   packageId: string;
-  detail: OrgPackageItemDetail | undefined;
+  detail: Versioned<OrgPackageItemDetail> | undefined;
   /** A pinned version being read; the definition is only edited on the draft. */
   version?: string;
   canEditDefinition: boolean;
@@ -54,8 +55,10 @@ export function PackageSettingsView({
   const params = new URLSearchParams(location.search);
   const requested = params.get("packageSettings");
   const requestedFile = params.get("file") ?? undefined;
+  // A system package has no history of its own to browse (same rule as agents).
+  const hasVersions = detail?.source !== "system";
   const active: PackageSettingsSection =
-    requested === "versions" && versions.isOwned
+    requested === "versions" && hasVersions
       ? "versions"
       : editable && requested === "general"
         ? "general"
@@ -91,7 +94,7 @@ export function PackageSettingsView({
           icon: FolderTree,
           label: t("detail.overview.explorer"),
         },
-        ...(versions.isOwned
+        ...(hasVersions
           ? [
               {
                 id: "versions" as PackageSettingsSection,

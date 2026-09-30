@@ -2,13 +2,9 @@
 
 /**
  * GATE 2 — the sidecar's re-origination of an aliased run's inference call is
- * byte-identical to the native (non-proxied) call for the same backing.
- *
- * Moving the vendor dialect out of the container only works if the sidecar
- * still produces exactly what the vendor expects, so the guarantee is that the
- * `Model` record the backend rebuilds drives pi-ai into the same shape a direct
- * call would. That is what makes it safe for the backend to mirror no quirk
- * table at all.
+ * byte-identical to a direct pi-ai call on the backing's model, and that model
+ * is Pi's record for the backing. The record's parity with Pi's native request
+ * is pinned once, per offered model, by `apps/api/test/unit/pi-model-parity.test.ts`.
  *
  * BEHAVIORAL: it compares real payloads captured through pi-ai's own
  * `onPayload` hook, never source text. This design transcribes nothing, so it
@@ -24,10 +20,13 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // barrel guard, and asking pi-ai's OWN classifier is the point — a copy of its
 // regex here would pass forever after the upstream one changed.
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
-import type { LlmProxyApiKeyConfig, ModelSwap } from "../helpers.ts";
+import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
 import {
   _resetSdkDriftWarningForTesting,
   buildBackingModel,
@@ -63,7 +62,7 @@ const CLIENT_BODY = JSON.stringify({
 
 interface Backing {
   name: string;
-  providerId: string;
+  providerId: string | null;
   apiShape: ModelSwap["backingApiShape"];
   modelId: string;
   baseUrl: string;
@@ -100,6 +99,13 @@ const BACKINGS: Backing[] = [
     name: "anthropic",
     providerId: "anthropic",
     apiShape: "anthropic-messages",
+    modelId: "claude-sonnet-4-5",
+    baseUrl: "https://api.anthropic.com",
+  },
+  {
+    name: "anthropic adaptive",
+    providerId: "anthropic",
+    apiShape: "anthropic-messages",
     modelId: "claude-sonnet-4-6",
     baseUrl: "https://api.anthropic.com",
   },
@@ -110,17 +116,30 @@ const BACKINGS: Backing[] = [
     modelId: "mistral-large-latest",
     baseUrl: "https://api.mistral.ai",
   },
+  // Unknown to Pi's provider-level detection: only its record knows the dialect.
+  {
+    name: "opencode-go",
+    providerId: "opencode-go",
+    apiShape: "openai-completions",
+    modelId: "deepseek-v4-flash",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+  },
 ];
 
 const CONTEXT_WINDOW = 200_000;
 const MAX_TOKENS = 32_768;
 
+/**
+ * The platform proxy's auth: the handler itself adds no other header. pi-ai's
+ * provider layer may add its own (OpenCode's session header).
+ */
+const PROXY_HEADERS = { authorization: "Bearer run-token" };
+
 function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessagesBackendDeps {
-  const llm: LlmProxyApiKeyConfig = {
-    authMode: "api_key",
-    baseUrl: backing.baseUrl,
-    apiKey: "sk-real-key",
-    placeholder: "sk-placeholder",
+  const upstream = {
+    modelBaseUrl: backing.baseUrl,
+    proxyBaseUrl: "https://platform.invalid/internal/llm-proxy/x",
+    headers: PROXY_HEADERS,
   };
   const swap: ModelSwap = {
     alias: "appstrate-medium",
@@ -130,12 +149,11 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
     backing: {
       providerId: backing.providerId,
       reasoning: true,
-      reasoningLevelMap: { high: "high" },
       input: ["text"],
     },
   };
   return {
-    llm,
+    upstream,
     swap,
     limits: { modelContextWindow: CONTEXT_WINDOW, modelMaxTokens: MAX_TOKENS },
     ...(streamBackingFn ? { streamBackingFn } : {}),
@@ -148,7 +166,10 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
  * dispatcher with `onPayload`, so what is captured is what the production path
  * would have sent — not a re-implementation of it.
  */
-async function originatedPayload(backing: Backing): Promise<Record<string, unknown>> {
+async function originatedPayload(
+  backing: Backing,
+  body = CLIENT_BODY,
+): Promise<Record<string, unknown>> {
   let payload: unknown;
   const capture: BackingStreamFn = (model, context, options) =>
     streamBacking(model, context, {
@@ -163,29 +184,17 @@ async function originatedPayload(backing: Backing): Promise<Record<string, unkno
   const res = handlePiMessagesRequest(
     depsFor(backing, capture),
     new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
-    CLIENT_BODY,
+    body,
   );
   await res.text();
   expect(payload).toBeDefined();
   return payload as Record<string, unknown>;
 }
 
-/** The payload a NATIVE (non-proxied) pi-ai call for the same backing produces. */
-async function nativePayload(backing: Backing): Promise<Record<string, unknown>> {
+/** The payload a DIRECT pi-ai call on the same backing model produces. */
+async function directPayload(backing: Backing): Promise<Record<string, unknown>> {
   let payload: unknown;
-  const model: Model<Api> = {
-    id: backing.modelId,
-    name: backing.modelId,
-    api: backing.apiShape,
-    provider: backing.providerId,
-    baseUrl: backing.baseUrl,
-    reasoning: true,
-    thinkingLevelMap: { high: "high" },
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: CONTEXT_WINDOW,
-    maxTokens: MAX_TOKENS,
-  };
+  const model = buildBackingModel(depsFor(backing));
   const result = await streamBacking(model, CONTEXT, {
     apiKey: "sk-real-key",
     maxTokens: 4_096,
@@ -208,8 +217,8 @@ async function nativePayload(backing: Backing): Promise<Record<string, unknown>>
 
 describe("re-originated request shape", () => {
   for (const backing of BACKINGS) {
-    it(`is byte-identical to the native ${backing.name} request`, async () => {
-      expect(await originatedPayload(backing)).toEqual(await nativePayload(backing));
+    it(`is byte-identical to a direct ${backing.name} request`, async () => {
+      expect(await originatedPayload(backing)).toEqual(await directPayload(backing));
     });
   }
 
@@ -268,9 +277,50 @@ describe("re-originated request shape", () => {
     const payload = await originatedPayload(BACKINGS[0]!);
     expect(payload["model"]).toBe("deepseek-chat");
   });
+
+  // The container sends a normalized transcript (system prompt inside `messages`),
+  // not the legacy `systemPrompt` field the fixtures above use.
+  it("forwards the wire transcript's system prompt exactly once", async () => {
+    const prompt = "You are the wire-shaped system prompt.";
+    const payload = await originatedPayload(
+      BACKINGS[0]!,
+      JSON.stringify({
+        model: "appstrate-medium",
+        context: {
+          messages: [
+            { role: "system", content: prompt, timestamp: 0 },
+            { role: "user", content: "hi", timestamp: 0 },
+          ],
+        },
+      }),
+    );
+    expect(JSON.stringify(payload).split(prompt)).toHaveLength(2);
+  });
 });
 
 describe("buildBackingModel", () => {
+  it("rebuilds Pi's record for the backing, keyed by its Pi provider key", () => {
+    const moonshot: Backing = {
+      name: "moonshot",
+      providerId: "moonshotai",
+      apiShape: "openai-completions",
+      modelId: "kimi-k2.6",
+      baseUrl: "https://api.moonshot.ai/v1",
+    };
+    const byName = (name: string) => BACKINGS.find((b) => b.name === name)!;
+    const cases: [Backing, Record<string, unknown>][] = [
+      [moonshot, { provider: "moonshotai", compat: { thinkingFormat: "deepseek" } }],
+      [byName("opencode-go"), { provider: "opencode-go", compat: { thinkingFormat: "deepseek" } }],
+      [byName("anthropic adaptive"), { compat: { forceAdaptiveThinking: true } }],
+    ];
+    for (const [backing, expected] of cases) {
+      expect(buildBackingModel(depsFor(backing))).toMatchObject({
+        id: backing.modelId,
+        ...expected,
+      });
+    }
+  });
+
   it("keeps the backing's real token limits — the same pair the container gets", () => {
     const model = buildBackingModel(depsFor(BACKINGS[0]!));
     expect(model.contextWindow).toBe(CONTEXT_WINDOW);
@@ -285,20 +335,18 @@ describe("buildBackingModel", () => {
     expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
-  it("falls back to pi's own defaults when the platform resolved no limits", () => {
-    const deps = depsFor(BACKINGS[0]!);
-    const model = buildBackingModel({ ...deps, limits: {} });
-    // 0 is pi-ai's "do not clamp" sentinel.
-    expect(model.contextWindow).toBe(0);
-    // pi's own default for a model definition declaring no maxTokens.
-    expect(model.maxTokens).toBe(16_384);
+  it("falls back to the platform defaults when neither the platform nor Pi sizes the model", () => {
+    const backing = { ...BACKINGS[0]!, modelId: "not-a-pi-model" };
+    const model = buildBackingModel({ ...depsFor(backing), limits: {} });
+    expect(model).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
   });
 
-  it("forces the adaptive Anthropic shape when the descriptor says the backing is adaptive", async () => {
-    // The container cannot know this — hence the descriptor — and pi-ai's own
-    // adaptive metadata does not cover a record we rebuilt rather than it
-    // resolved. Without the flag an adaptive backing answers 400.
-    const anthropic = BACKINGS.find((b) => b.apiShape === "anthropic-messages")!;
+  // The record's own `forceAdaptiveThinking` + `thinkingLevelMap` shape the
+  // call: nothing on the descriptor carries the dialect any more.
+  it("takes the adaptive Anthropic shape from Pi's record", async () => {
     let payload: unknown;
     const capture: BackingStreamFn = (model, context, options) =>
       streamBacking(model, context, {
@@ -308,19 +356,29 @@ describe("buildBackingModel", () => {
           throw new Error("payload captured");
         },
       });
-    const deps = depsFor(anthropic, capture);
+    const backing = BACKINGS.find((b) => b.name === "anthropic adaptive")!;
     const res = handlePiMessagesRequest(
-      { ...deps, swap: { ...deps.swap, anthropicAdaptiveReasoning: { effort: "max" } } },
+      depsFor(backing, capture),
       new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
       CLIENT_BODY,
     );
     await res.text();
     const body = payload as { thinking?: { type?: string }; output_config?: { effort?: string } };
     expect(body.thinking?.type).toBe("adaptive");
-    // Effort resolved from the backing's own `thinkingLevelMap` (`high` → `high`),
-    // not from a value the container could have influenced.
     expect(body.output_config?.effort).toBe("high");
     expect(body).not.toHaveProperty("thinking.budget_tokens");
+  });
+
+  // A gateway backing names no Pi provider: no record, the generic key.
+  it("gives a gateway backing no record", () => {
+    const deps = depsFor({
+      ...BACKINGS.find((b) => b.name === "anthropic adaptive")!,
+      providerId: null,
+    });
+    const model = buildBackingModel(deps);
+    expect(model.provider).toBe("anthropic");
+    expect(model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
+    expect(model.thinkingLevelMap).toBeUndefined();
   });
 
   it("refuses to re-originate without the backing catalog", () => {
@@ -362,8 +420,8 @@ const USAGE: Usage = {
  * not by hoping nothing asks for it.
  *
  * The billing reason is in {@link FORWARDED_OPTION_KEYS}: Anthropic bills a 1h
- * cache write at 2x the input rate and the platform's `computeTokenCost`
- * carries one cache-write rate, not two. Dropping `cacheRetention` from the
+ * cache write at 2x the input rate and the platform's ledger price carries one
+ * cache-write rate, not two. Dropping `cacheRetention` from the
  * forwarded set closes the request-body route; `compat.supportsLongCacheRetention`
  * closes the class, including the route no whitelist can reach — pi-ai falls
  * back to `PI_CACHE_RETENTION` in the AMBIENT process environment
@@ -409,7 +467,7 @@ describe("long cache retention", () => {
       id: ANTHROPIC.modelId,
       name: ANTHROPIC.modelId,
       api: ANTHROPIC.apiShape,
-      provider: ANTHROPIC.providerId,
+      provider: ANTHROPIC.providerId!,
       baseUrl: ANTHROPIC.baseUrl,
       reasoning: true,
       input: ["text"],
@@ -573,21 +631,22 @@ describe("event projection", () => {
  * them" but "hold them sidecar-side behind opaque handles", a redesign.
  * `docs/architecture/MODEL_ALIASES.md` (tier 1) records them and what closing
  * them would cost. Each note below says what its field narrows to, measured
- * against the five shapes an alias can be backed by (`ALIAS_BACKING_SHAPES`:
- * anthropic-messages, openai-completions, openai-responses,
- * openai-codex-responses, mistral-conversations).
+ * against the four shapes that can actually back an alias: anthropic-messages,
+ * openai-completions, openai-responses, mistral-conversations.
+ * `AliasBackingApiShape` also admits openai-codex-responses, but that is an
+ * OAuth-subscription shape — aliases are refused there and the proxy does not
+ * serve it.
  */
 
 /**
  * A tool call carrying BOTH of its optional members, so the projection's
  * treatment of each is observable rather than vacuously absent.
  *
- * Residual (2 of 5): `namespace` is written only by the shared openai-responses
- * adapter, so its presence narrows the backing to `openai-responses` /
- * `openai-codex-responses`.
- * Residual (1 of 5): `thoughtSignature` is written by `openai-completions` (from
+ * Residual (1 of 4): `namespace` is written only by the shared openai-responses
+ * adapter, so its presence names `openai-responses` outright.
+ * Residual (1 of 4): `thoughtSignature` is written by `openai-completions` (from
  * an OpenRouter-style reasoning detail) and by the Google adapters, which cannot
- * back an alias — so among the five it names `openai-completions` outright.
+ * back an alias — so among the four it names `openai-completions` outright.
  */
 const RESIDUAL_TOOL_CALL: ToolCall = {
   type: "toolCall",
@@ -648,8 +707,8 @@ const PROJECTION: Record<
       content: "hi",
       partial: partialMessage([RESIDUAL_TEXT]),
     },
-    // Residual (2 of 5): `contentSignature` here is the block's `textSignature`,
-    // written only by the shared openai-responses adapter among the five.
+    // Residual (1 of 4): `contentSignature` here is the block's `textSignature`,
+    // written only by the shared openai-responses adapter among the four.
     fields: ["type", "contentIndex", "content", "contentSignature"],
   },
   thinking_start: {
@@ -676,10 +735,10 @@ const PROJECTION: Record<
       content: "…",
       partial: partialMessage([RESIDUAL_THINKING]),
     },
-    // Residual (1 of 5): `redacted` is set by the Anthropic adapter alone —
+    // Residual (1 of 4): `redacted` is set by the Anthropic adapter alone —
     // it is how that vendor's safety-filtered thinking is carried back as
     // `redacted_thinking` — so its presence identifies the backing outright.
-    // Residual (4 of 5): `contentSignature` here is the block's
+    // Residual (3 of 4): `contentSignature` here is the block's
     // `thinkingSignature`, which every backing shape but `mistral-conversations`
     // emits; the tell is the weaker one of never seeing it on a reasoning run.
     fields: ["type", "contentIndex", "content", "contentSignature", "redacted"],
@@ -938,8 +997,8 @@ describe("discarded request fields", () => {
 
   it("does not forward `cacheRetention` — the container cannot make its run cheaper", async () => {
     // Long Anthropic cache retention bills cache-creation tokens at 2× the
-    // input rate, and the platform's authoritative `computeTokenCost` has no
-    // term for that bucket. The body is the container's, so forwarding this
+    // input rate, and the platform's ledger price has no term for that
+    // bucket. The body is the container's, so forwarding this
     // would let an aliased agent under-bill itself. Pinned from the other side
     // by `apps/api/test/unit/runner-cost-parity.test.ts`.
     const { options, warnings } = await forwardedOptions({
@@ -1115,11 +1174,9 @@ describe("handlePiMessagesRequest", () => {
   //
   // The alias path re-originates through pi-ai and consumes a GENERATOR, so it
   // does not go through `passUpstream` and inherited none of its bounds. It is
-  // also exactly the population that needs one: `pi-messages` is one of the four
-  // api shapes that ignore pi-ai's own `timeoutMs`, and the backing rebuilt here
-  // can be another (`google-vertex`, `bedrock-converse-stream`). Without the
-  // bound a stalled backing burned the whole run budget and died on the
-  // wall-clock watchdog with nothing to show.
+  // also exactly the population that needs one: `pi-messages` ignores pi-ai's own
+  // `timeoutMs`. Without the bound a stalled backing burned the whole run budget
+  // and died on the wall-clock watchdog with nothing to show.
   //
   // Same instrument as `passUpstream`'s (see `app.test.ts`): armed against the
   // PENDING `next()` and cleared the moment it settles — never a long-lived
@@ -1234,19 +1291,6 @@ describe("handlePiMessagesRequest", () => {
  * handling and the SDK's own error shaping are the production ones.
  */
 describe("transient upstream failures", () => {
-  /**
-   * Bun's `typeof fetch` carries a static `preconnect` beside the call
-   * signature; forward the real one so a stub is a faithful drop-in.
-   */
-  function asFetch(
-    fn: (
-      input: Parameters<typeof fetch>[0],
-      init: Parameters<typeof fetch>[1],
-    ) => Promise<Response>,
-  ): typeof fetch {
-    return Object.assign(fn, { preconnect: fetch.preconnect });
-  }
-
   /**
    * Answer `statuses` in order (repeating the last), recording each call.
    * `retry-after-ms: 1` keeps a real backoff sleep sub-millisecond.
@@ -1573,9 +1617,96 @@ describe("pi-ai version drift", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({ container: "0.85.0", sidecar: PI_SDK_VERSION });
     // The inbound header is a container↔sidecar fact; it must not ride upstream.
-    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: undefined });
+    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: PROXY_HEADERS });
   });
 });
+
+/**
+ * Quirks pi-ai applies at its PROVIDER layer, not in the per-API serializer:
+ * OpenCode answers 400 `MissingSessionID` without `x-opencode-session` (#1583).
+ * Read off the request that reached the socket, so the whole dispatch counts.
+ */
+describe("provider-layer quirks", () => {
+  /**
+   * Every request the handler sends upstream, then — with `reference` — the one
+   * pi-ai's own `Models` dispatch sends for the SAME model, context and options,
+   * through the same redirecting transport.
+   */
+  async function upstreamRequests(
+    backing: Backing,
+    sessionId?: string,
+    reference = false,
+  ): Promise<Request[]> {
+    const requests: Request[] = [];
+    const fetchImpl = asFetch(async (input, init) => {
+      requests.push(
+        input instanceof Request ? new Request(input, init) : new Request(String(input), init),
+      );
+      return new Response("{}", { status: 400, headers: { "content-type": "application/json" } });
+    });
+    let call: Parameters<BackingStreamFn> | undefined;
+    const capture: BackingStreamFn = (...args) => {
+      call = args;
+      return streamBacking(...args);
+    };
+    const res = handlePiMessagesRequest(
+      { ...depsFor(backing, capture), fetchImpl },
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      JSON.stringify({ model: "appstrate-medium", context: CONTEXT, options: { sessionId } }),
+    );
+    await res.text();
+    expect(requests).toHaveLength(1);
+    if (reference) {
+      const [model, context, options] = call!;
+      // The handler's signal is spent once its stream ends; the transport is not.
+      await builtinModels()
+        .streamSimple(model, context, { ...options, signal: undefined })
+        .result();
+      expect(requests).toHaveLength(2);
+    }
+    return requests;
+  }
+
+  it("sends the container's session id as `x-opencode-session` to an OpenCode backing", async () => {
+    const [request] = await upstreamRequests(
+      BACKINGS.find((b) => b.name === "opencode-go")!,
+      "session-1583",
+    );
+    expect(request!.headers.get("x-opencode-session")).toBe("session-1583");
+  });
+
+  for (const backing of BACKINGS) {
+    it(`sends ${backing.name} the request pi-ai's own dispatch sends`, async () => {
+      const [sidecar, direct] = await upstreamRequests(backing, "session-1583", true);
+      expect(sidecar!.url).toBe(direct!.url);
+      expect(Object.fromEntries(sidecar!.headers)).toEqual(Object.fromEntries(direct!.headers));
+    });
+  }
+
+  // A gateway's derived `model.provider` is `openai`, a Responses-only provider:
+  // without the catalog guard its dispatch would send completions to `/responses`.
+  it("keeps a single-API provider from taking a shape its catalog lacks", async () => {
+    const gateway: Backing = {
+      name: "openai-compatible gateway",
+      providerId: null,
+      apiShape: "openai-completions",
+      modelId: "house-model",
+      baseUrl: "https://llm.gateway.test/v1",
+    };
+    const [request] = await upstreamRequests(gateway);
+    expect(new URL(request!.url).pathname).toBe("/internal/llm-proxy/x/chat/completions");
+  });
+});
+
+/**
+ * Bun's `typeof fetch` carries a static `preconnect` beside the call
+ * signature; forward the real one so a stub is a faithful drop-in.
+ */
+function asFetch(
+  fn: (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => Promise<Response>,
+): typeof fetch {
+  return Object.assign(fn, { preconnect: fetch.preconnect });
+}
 
 /**
  * A stand-in for pi-ai's `AssistantMessageEventStream` that replays a fixed

@@ -1,0 +1,64 @@
+-- A pin and an org default each bind a SET of connections: one row per key,
+-- `connection_ids uuid[]` instead of the scalar `connection_id`.
+--
+-- The two `ARRAY["connection_id"]` UPDATEs are folds whose source column is
+-- dropped in this file, and the `label` UPDATE is the precondition of the
+-- `SET NOT NULL` and `CHECK` on `integration_connections` —
+-- `docs/NO_TRANSITIONAL_CODE.md` §2 licenses all three.
+--
+-- `DROP COLUMN "connection_id"` takes its FK and its btree index with it
+-- whatever the catalog calls them, so neither is dropped by name: production's
+-- constraint names have drifted from the declared ones before.
+--
+-- The label backfill mints what the service mints: "Connexion N", N counting on
+-- from the highest "Connexion <n>" already in the (space, integration) group,
+-- every owner included, so it can never mint a label the group already holds.
+--
+-- A label is unique per (space, integration): it is how a tool call names its
+-- connection. The index's precondition — no group holding a label twice — is
+-- NOT repaired here: §2 licenses no write beside a `CREATE UNIQUE INDEX`.
+-- `scripts/migration/0032-connection-sets.sql` renames the duplicates before
+-- this batch. The backfill above cannot make one: every label it mints is a
+-- "Connexion N" above every "Connexion <n>" of the group, and two minted labels
+-- differ in N — so the index's duplicates are exactly the non-empty labels
+-- already held twice.
+--
+-- That index leads with `space_id`, so it also serves the space-only scans
+-- (FK cascade on space delete) `idx_integration_conn_space` existed for.
+--
+-- The read-only DO block refuses, before any write, a database where 0032 has
+-- not run: a scalar left where a set belongs (its SHAPE section), which no
+-- constraint here catches, and a label held twice (its DEDUPE section), which
+-- the index would refuse as a bare 23505. Both name the steps that repair it.
+DO $$
+DECLARE
+  next_steps CONSTANT text := 'Run scripts/migration/0033-unshare-space-access-loss.ts --apply, then scripts/migration/0032-connection-sets.sql, then redeploy.';
+BEGIN
+  IF EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+    OR EXISTS (SELECT 1 FROM "runs" r, jsonb_each(r."resolved_connections") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+    OR EXISTS (SELECT 1 FROM "package_schedules" s, jsonb_each(s."connection_overrides") e(k, v) WHERE jsonb_typeof(e.v) <> 'array')
+  THEN
+    RAISE EXCEPTION 'runs.connection_overrides, runs.resolved_connections or package_schedules.connection_overrides still holds a scalar connection value. %', next_steps;
+  END IF;
+  IF EXISTS (SELECT 1 FROM "integration_connections" WHERE "label" <> '' GROUP BY "space_id", "integration_package_id", "label" HAVING count(*) > 1)
+  THEN
+    RAISE EXCEPTION 'integration_connections holds a label twice in one (space, integration). %', next_steps;
+  END IF;
+END $$;--> statement-breakpoint
+ALTER TABLE "integration_pins" ADD COLUMN "connection_ids" uuid[];--> statement-breakpoint
+UPDATE "integration_pins" SET "connection_ids" = ARRAY["connection_id"];--> statement-breakpoint
+ALTER TABLE "integration_pins" ALTER COLUMN "connection_ids" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "integration_pins" DROP COLUMN "connection_id";--> statement-breakpoint
+ALTER TABLE "integration_pins" ADD CONSTRAINT "integration_pins_connection_ids_cardinality" CHECK (cardinality(connection_ids) BETWEEN 1 AND 10);--> statement-breakpoint
+CREATE INDEX "idx_integration_pins_connection_ids" ON "integration_pins" USING gin ("connection_ids");--> statement-breakpoint
+ALTER TABLE "integration_org_defaults" ADD COLUMN "connection_ids" uuid[];--> statement-breakpoint
+UPDATE "integration_org_defaults" SET "connection_ids" = ARRAY["connection_id"];--> statement-breakpoint
+ALTER TABLE "integration_org_defaults" ALTER COLUMN "connection_ids" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "integration_org_defaults" DROP COLUMN "connection_id";--> statement-breakpoint
+ALTER TABLE "integration_org_defaults" ADD CONSTRAINT "integration_org_defaults_connection_ids_cardinality" CHECK (cardinality(connection_ids) BETWEEN 1 AND 10);--> statement-breakpoint
+CREATE INDEX "idx_integration_org_defaults_connection_ids" ON "integration_org_defaults" USING gin ("connection_ids");--> statement-breakpoint
+UPDATE "integration_connections" c SET "label" = 'Connexion ' || (g."base" + f."rank") FROM (SELECT "id", "space_id", "integration_package_id", row_number() OVER (PARTITION BY "space_id", "integration_package_id" ORDER BY "created_at", "id") AS "rank" FROM "integration_connections" WHERE "label" IS NULL OR "label" = '') f JOIN (SELECT "space_id", "integration_package_id", coalesce(max(substring("label" FROM '^Connexion ([0-9]+)$')::numeric), 0) AS "base" FROM "integration_connections" GROUP BY "space_id", "integration_package_id") g ON g."space_id" = f."space_id" AND g."integration_package_id" = f."integration_package_id" WHERE c."id" = f."id";--> statement-breakpoint
+ALTER TABLE "integration_connections" ALTER COLUMN "label" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "integration_connections" ADD CONSTRAINT "integration_connections_label_not_empty" CHECK (label <> '');--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_integration_conn_label" ON "integration_connections" USING btree ("space_id","integration_package_id","label");--> statement-breakpoint
+DROP INDEX "idx_integration_conn_space";

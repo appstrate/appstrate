@@ -9,7 +9,7 @@
  * @see docs/architecture/RBAC_PERMISSIONS_SPEC.md §4
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
@@ -46,6 +46,10 @@ export interface SpaceMemberRow {
  * the principal is not one: an API key (pinned to a space, and its creator's
  * private drafts are not its business) or an end-user. Every caller passes it
  * explicitly — a default would silently hand a key its creator's personal space.
+ *
+ * `space` and `memberRow` MUST come from ONE statement, `orgRole` from the
+ * request's admission (RBAC spec §4.4): read apart, they can pair states that
+ * never coexisted and grant what neither did.
  */
 export function resolveSpaceRole(
   orgRole: OrgRole,
@@ -98,6 +102,25 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   return partitionSpacePermissions(ref.role.permissions).granted;
 }
 
+/** Explicit-membership projection; joined onto `spaces` via {@link membershipOn} (RBAC spec §4.4). */
+export const MEMBERSHIP_COLUMNS = {
+  presetRole: spaceMembers.presetRole,
+  customRoleId: spaceMembers.customRoleId,
+  customKey: spaceRoles.key,
+  customName: spaceRoles.name,
+  customPermissions: spaceRoles.permissions,
+} as const;
+
+/** `spaces LEFT JOIN space_members ON` this — `null` joins nothing (a principal with no rows). */
+export function membershipOn(userId: string | null) {
+  return and(
+    eq(spaceMembers.spaceId, spaces.id),
+    userId === null ? sql`false` : eq(spaceMembers.userId, userId),
+  );
+}
+
+export const customRoleOn = eq(spaceRoles.id, spaceMembers.customRoleId);
+
 /**
  * One indexed lookup on the composite PK, custom role joined in the same query.
  *
@@ -110,15 +133,9 @@ export async function loadSpaceMember(
   executor: Pick<typeof db, "select"> = db,
 ): Promise<SpaceMemberRow | null> {
   const [row] = await executor
-    .select({
-      presetRole: spaceMembers.presetRole,
-      customRoleId: spaceMembers.customRoleId,
-      customKey: spaceRoles.key,
-      customName: spaceRoles.name,
-      customPermissions: spaceRoles.permissions,
-    })
+    .select(MEMBERSHIP_COLUMNS)
     .from(spaceMembers)
-    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
+    .leftJoin(spaceRoles, customRoleOn)
     .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
     .limit(1);
 
@@ -135,7 +152,7 @@ export interface MembershipColumns {
 }
 
 /** The `num_nonnulls` CHECK and the FK are what the assertions rest on. */
-export function toRef(row: MembershipColumns): SpaceRoleRef {
+function toRef(row: MembershipColumns): SpaceRoleRef {
   if (row.presetRole) return { kind: "preset", preset: row.presetRole };
   return {
     kind: "custom",
@@ -148,28 +165,9 @@ export function toRef(row: MembershipColumns): SpaceRoleRef {
   };
 }
 
-/** One query for a whole listing — `GET /api/spaces` must not look up per space. */
-export async function loadSpaceMemberships(
-  orgId: string,
-  userId: string,
-): Promise<Map<string, SpaceMemberRow>> {
-  const rows = await db
-    .select({
-      spaceId: spaceMembers.spaceId,
-      presetRole: spaceMembers.presetRole,
-      customRoleId: spaceMembers.customRoleId,
-      customKey: spaceRoles.key,
-      customName: spaceRoles.name,
-      customPermissions: spaceRoles.permissions,
-    })
-    .from(spaceMembers)
-    .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-    .leftJoin(spaceRoles, eq(spaceRoles.id, spaceMembers.customRoleId))
-    .where(and(eq(spaces.orgId, orgId), eq(spaceMembers.userId, userId)));
-
-  const out = new Map<string, SpaceMemberRow>();
-  for (const row of rows) out.set(row.spaceId, { ref: toRef(row) });
-  return out;
+/** The row a `LEFT JOIN` found, or `null` — the `num_nonnulls` CHECK sets one role column on a real row. */
+export function memberFromJoin(row: MembershipColumns): SpaceMemberRow | null {
+  return row.presetRole !== null || row.customRoleId !== null ? { ref: toRef(row) } : null;
 }
 
 export function toSpaceRoleWire(

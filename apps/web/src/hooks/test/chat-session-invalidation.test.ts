@@ -26,7 +26,7 @@ const filesForSessionKey = (id: string) => [
 const FILES_FOR_RUN_KEY = [
   "get",
   "/api/files",
-  { params: { query: { run_id: "run_1", purpose: "agent_output" }, header: HEADER } },
+  { params: { query: { runId: "run_1", purpose: "agent_output" }, header: HEADER } },
 ];
 const FILES_GALLERY_KEY = ["get", "/api/files", { params: { query: {}, header: HEADER } }];
 const RUNS_KEY = ["get", "/api/runs", { params: { header: HEADER } }];

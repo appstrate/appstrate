@@ -313,6 +313,17 @@ export async function withSpinner<T>(
 }
 
 /**
+ * A refusal the CLI translated: its message says what the cause means, so
+ * {@link formatError} prints it alone (#1517). The cause stays attached.
+ */
+export class ExplainedError extends Error {
+  constructor(message: string, options: { cause: unknown }) {
+    super(message, options);
+    this.name = "ExplainedError";
+  }
+}
+
+/**
  * Render an error with a user-actionable message. Used by the top-level
  * error handler in `cli.ts` — commands shouldn't catch expected errors,
  * they should let them bubble up here so the output stays consistent.
@@ -335,6 +346,7 @@ export function formatError(err: unknown): string {
   if (err instanceof InsecureInstanceError) return err.message;
   if (err instanceof AuthError) return err.message;
   if (err instanceof ApiError) return `API error (${err.status}): ${err.message}`;
+  if (err instanceof ExplainedError) return err.message;
   // Errors with a `hint` field (PackageSpecError, BundleFetchError, …)
   // render `<message> — <hint>` so the user sees the action item next to
   // the error. Avoids importing the error classes here just for instanceof.

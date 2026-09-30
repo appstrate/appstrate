@@ -15,7 +15,7 @@
  * breakage would be invisible without this test.
  *
  * The gap used here is a referenced mcp-server package that does not exist:
- * the connection cascade resolves fine (a connection exists, so no 412) and the
+ * the connection cascade resolves fine (a connection exists, so no 409) and the
  * run launches, yet the spawn resolver cannot produce a spec — precisely the
  * "run starts without the tools it declared" case the marker exists for.
  */

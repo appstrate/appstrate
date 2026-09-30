@@ -32,10 +32,9 @@ echo "==> Syncing repo to VM disk"
 limactl shell "$VM" -- bash -c "
   set -euo pipefail
   mkdir -p ~/appstrate-fc
-  # /data anchored to the repo root: package-relative data/ dirs (e.g.
-  # core-providers/data/featured-models.json) must sync, while the root
-  # data/ (VM-built kernel/rootfs artifacts, PGlite state) must survive
-  # --delete between runs.
+  # /data anchored to the repo root: the root data/ (VM-built kernel/rootfs
+  # artifacts, PGlite state) must survive --delete between runs, and no
+  # source directory named data/ is excluded with it.
   rsync -a --delete \
     --exclude node_modules --exclude .git --exclude /data --exclude dist \
     --exclude '.turbo' --exclude 'e2e/test-results' \

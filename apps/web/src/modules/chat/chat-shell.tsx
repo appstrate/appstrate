@@ -23,6 +23,7 @@ import {
   ChatConversationList,
   ChatHeadersProvider,
   SelectConversationProvider,
+  type ChatCan,
   type ChatTranslate,
   type GetHeaders,
   type SelectConversation,
@@ -39,6 +40,7 @@ export function ChatShell({
   onConversationChange,
   headerActions,
   t,
+  can,
   children,
 }: {
   getHeaders: GetHeaders;
@@ -47,6 +49,8 @@ export function ChatShell({
   /** Host actions for the header's right end (the context panel's tabs). */
   headerActions?: ReactNode;
   t: ChatTranslate;
+  /** The caller's grants: the list and the title hide rename and delete from a reader. */
+  can: ChatCan;
   children: ReactNode;
 }) {
   // Every request the chat makes is scoped by the current workspace, and it is
@@ -66,13 +70,13 @@ export function ChatShell({
               itself, not on the whole column — the new-conversation row above
               it must stay put while the history scrolls under it. */}
           <ShellSidebar contentClassName="overflow-hidden">
-            <ChatConversationList activeId={conversationId} t={t} />
+            <ChatConversationList activeId={conversationId} t={t} can={can} />
           </ShellSidebar>
           {/* No page scroll here, unlike Studio's inset: the chat owns its
               height, the thread scrolls inside itself and the composer stays
               pinned. */}
           <SidebarInset className="bg-canvas h-svh min-h-0 overflow-hidden">
-            <ChatTitleCrumb conversationId={conversationId} t={t} />
+            <ChatTitleCrumb conversationId={conversationId} t={t} can={can} />
             <ShellHeader actions={headerActions} fullBleed />
             <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
           </SidebarInset>

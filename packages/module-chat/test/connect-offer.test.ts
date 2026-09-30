@@ -20,17 +20,19 @@ import {
 const URL_ = "https://app.example.com/api/integrations/connect/start?token=SECRET";
 
 describe("splitConnectPayload", () => {
-  it("redacts and captures in one pass, with sibling state/expires_at", () => {
+  it("redacts and captures in one pass, with sibling state/expiresAt", () => {
     const payload = {
       status: 200,
-      body: { connect_url: URL_, state: "st-1", expires_at: 1784142529000 },
+      body: { connect_url: URL_, state: "st-1", expiresAt: "2026-07-15T19:08:49.000Z" },
     };
     const { redacted, offers } = splitConnectPayload(payload);
     expect(JSON.stringify(redacted)).not.toContain("token=SECRET");
     expect((redacted as { body: { connect_url: string } }).body.connect_url).toBe(
       REDACTED_CONNECT_LINK,
     );
-    expect(offers).toEqual([{ connect_url: URL_, state: "st-1", expires_at: 1784142529000 }]);
+    expect(offers).toEqual([
+      { connect_url: URL_, state: "st-1", expiresAt: "2026-07-15T19:08:49.000Z" },
+    ]);
   });
 
   it("redacts a non-URL string under a connect key but never offers it", () => {
@@ -65,12 +67,12 @@ describe("splitConnectPayload", () => {
   // The no-dual-read half of the pair above. `CONNECT_URL_KEYS` and
   // `offerFromNode` read the wire spelling ONLY — what
   // `routes/integrations.ts` actually emits (`connect_url` / `auth_url`, and
-  // `expires_at` beside them). This fails the moment anyone reinstates a
-  // `obj.expires_at ?? obj.expiresAt` fallback or a `connectUrl` key: the camel
+  // `expiresAt` beside them). This fails the moment anyone reinstates an
+  // `obj.expiresAt ?? obj.expires_at` fallback or a `connectUrl` key: the
   // twin would start being redacted and captured, and neither expectation here
   // would hold.
-  it("reads the wire spelling only — a camelCase twin is neither redacted nor offered", () => {
-    const payload = { connectUrl: URL_, connect_url: URL_, expiresAt: 1784142529000 };
+  it("reads the wire spelling only — a casing twin is neither redacted nor offered", () => {
+    const payload = { connectUrl: URL_, connect_url: URL_, expires_at: "2026-07-15T19:08:49.000Z" };
     const { redacted, offers } = splitConnectPayload(payload);
     expect((redacted as { connectUrl: string }).connectUrl).toBe(URL_);
     expect((redacted as { connect_url: string }).connect_url).toBe(REDACTED_CONNECT_LINK);
@@ -83,12 +85,12 @@ describe("splitConnectPayload", () => {
   it("captures every offer in walk order, redacting all, with sibling metadata", () => {
     const payload = {
       first: { auth_url: "https://a.example/one", state: "st-1" },
-      second: { auth_url: "https://a.example/two", expires_at: 1784142529000 },
+      second: { auth_url: "https://a.example/two", expiresAt: "2026-07-15T19:08:49.000Z" },
     };
     const { redacted, offers } = splitConnectPayload(payload);
     expect(offers).toEqual([
       { connect_url: "https://a.example/one", state: "st-1" },
-      { connect_url: "https://a.example/two", expires_at: 1784142529000 },
+      { connect_url: "https://a.example/two", expiresAt: "2026-07-15T19:08:49.000Z" },
     ]);
     const text = JSON.stringify(redacted);
     expect(text).not.toContain("a.example/one");

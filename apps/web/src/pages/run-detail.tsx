@@ -7,13 +7,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
-import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
+import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
+import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
@@ -106,7 +107,7 @@ export function RunDetailPage() {
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const runAgent = useRunAgent(packageId);
+  const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
@@ -270,16 +271,18 @@ export function RunDetailPage() {
               <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
             )}
             <RunHeaderActions
-              canRerun={!isRunning && !isInline && !!agent && permissionsReady}
-              canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
-              rerunPending={runAgent.isPending}
+              canRerun={!isRunning && !isInline && !!agent && permissionsReady && can("agents:run")}
+              // Hidden for remote-origin runs: the process runs on the caller's
+              // host and the platform cannot signal it.
+              canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
+              rerunPending={launcher.isPending}
               cancelPending={cancelRun.isPending}
               onRerun={() => {
                 if (canReadAgent) setInputOpen(true);
                 // The API conceals resolved input from runners: replay that
                 // snapshot server-side, keeping its parameters.
                 else
-                  runAgent.mutate({
+                  launcher.launch({
                     rerun_from: run.id,
                     version: replayVersion(run.version_ref, agent?.home_writable),
                   });
@@ -301,15 +304,21 @@ export function RunDetailPage() {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            runAgent.mutate(
+            launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              { onSuccess: () => setInputOpen(false) },
+              () => setInputOpen(false),
             );
           }}
-          isPending={runAgent.isPending}
+          isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}
         />
       )}
+
+      <RunLaunchRecovery
+        launcher={launcher}
+        packageId={packageId}
+        integrationEntries={agent?.dependencies.integrations}
+      />
 
       <RunDetailTabsController
         key={runId}

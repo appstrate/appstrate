@@ -20,6 +20,7 @@ function row(id: string, placements: LibraryPackageItem["placements"]): LibraryP
     home_writable: false,
     home_deletable: false,
     home_shareable: true,
+    published: true,
     placements,
   };
 }
@@ -34,7 +35,15 @@ describe("mergeSpaceLibraries", () => {
         packages: {
           ...empty,
           agent: [
-            row("@o/x", [{ space_id: "spc_a", via: "home", state: "active", shared_by: null }]),
+            row("@o/x", [
+              {
+                space_id: "spc_a",
+                via: "home",
+                state: "active",
+                chat_enforced: false,
+                shared_by: null,
+              },
+            ]),
           ],
         },
       },
@@ -43,7 +52,15 @@ describe("mergeSpaceLibraries", () => {
         packages: {
           ...empty,
           agent: [
-            row("@o/x", [{ space_id: "spc_b", via: "shared", state: "none", shared_by: null }]),
+            row("@o/x", [
+              {
+                space_id: "spc_b",
+                via: "shared",
+                state: "none",
+                chat_enforced: false,
+                shared_by: null,
+              },
+            ]),
           ],
         },
       },

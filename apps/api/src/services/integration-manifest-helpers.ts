@@ -21,10 +21,18 @@
  *   - URI restrictions: `authorized_uris`, `allow_all_uris`.
  */
 
-import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import {
+  getApiCallConfigs,
+  selectedApiCallConfigs,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
+import { isToolsWildcard } from "@appstrate/core/dependencies";
+import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
-import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
+import {
+  renderAuthorizedUris,
+  renderCredentialTemplate as renderCredentialTemplateCore,
+} from "@appstrate/afps-shared/credential-template";
 
 /**
  * AFPS `delivery.http` block (snake_case). The sidecar's canonical
@@ -112,7 +120,7 @@ export function toSupportedTokenEndpointAuthMethod(
 /**
  * The two rejection messages guarding the public/confidential client
  * declaration, shared by BOTH surfaces an OAuth client can be declared on:
- * the per-space API body (`oauthClientCreateSchema`,
+ * the API body, space or org tier (`oauthClientCreateSchema`,
  * `routes/integrations.ts`) and the env-sourced system entry
  * (`rawSystemIntegrationClientSchema`, `integration-client-registry.ts`).
  *
@@ -221,6 +229,24 @@ export function renderCredentialTemplate(
   return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
 }
 
+/** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
+export function renderAuthAuthorizedUris(
+  auth: Pick<AfpsManifestAuth, "authorized_uris">,
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return renderAuthorizedUris(auth.authorized_uris ?? [], fields);
+}
+
+/** Local runner egress policy; `undefined` when the auth declares no outbound surface. */
+export function runnerEgressFor(
+  auth: Pick<AfpsManifestAuth, "authorized_uris" | "allow_all_uris">,
+  authorizedUris: readonly string[],
+): IntegrationSpawnSpec["egress"] {
+  const allowAllUris = auth.allow_all_uris === true;
+  if ((auth.authorized_uris?.length ?? 0) === 0 && !allowAllUris) return undefined;
+  return { authorizedUris: [...authorizedUris], allowAllUris };
+}
+
 /**
  * Default file mode for `delivery.files` entries (AFPS §7.6: `"0400"`).
  * Read-only by owner — the strictest sane default for credential material.
@@ -288,6 +314,45 @@ export function getIntegrationSourceKind(
   const source = (manifest as { source?: { kind?: string } }).source;
   const kind = source?.kind;
   return kind === "local" || kind === "remote" || kind === "none" ? kind : undefined;
+}
+
+/**
+ * Auths whose connection exposes a tool of `selection` — a server's own tools via any auth, an
+ * `api_call` only via its own. `null` when every auth does, or none does (not a connection
+ * problem).
+ */
+export function authKeysServingSelection(
+  manifest: IntegrationManifest,
+  selection: readonly string[] | "*" | undefined,
+): ReadonlySet<string> | null {
+  if (selection === undefined || selection.length === 0) return null;
+  const kind = getIntegrationSourceKind(manifest);
+  if (kind === "local" || kind === "remote") {
+    if (isToolsWildcard(selection)) return null;
+    const apiCallNames = new Set(
+      getApiCallConfigs(manifest).flatMap((cfg) =>
+        cfg.uploadToolName ? [cfg.toolName, cfg.uploadToolName] : [cfg.toolName],
+      ),
+    );
+    if (selection.some((name) => !apiCallNames.has(name))) return null;
+  }
+  const serving = new Set(selectedApiCallConfigs(manifest, selection).map((cfg) => cfg.authKey));
+  return serving.size === 0 ? null : serving;
+}
+
+/**
+ * The dep's `auth_key` (AFPS §4.1) when it names a declared auth serving none of `selection` —
+ * no connection can satisfy it — with the auths that do; else `null`.
+ */
+export function authKeyServingNoSelectedTool(
+  manifest: IntegrationManifest,
+  authKey: string | undefined,
+  selection: readonly string[] | "*" | undefined,
+): { authKey: string; servingAuthKeys: string[] } | null {
+  if (authKey === undefined || !manifest.auths?.[authKey]) return null;
+  const serving = authKeysServingSelection(manifest, selection);
+  if (serving === null || serving.has(authKey)) return null;
+  return { authKey, servingAuthKeys: [...serving] };
 }
 
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */

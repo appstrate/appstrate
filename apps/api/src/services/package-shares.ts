@@ -47,10 +47,11 @@ export interface PackageShareView {
    * withholds — that a given id is somebody's private workspace.
    */
   target:
-    | { kind: "user"; user_id: string; name: string }
-    | { kind: "space"; space_id: string; name: string };
+    | { kind: "user"; userId: string; name: string }
+    | { kind: "space"; spaceId: string; name: string };
+  /** `user_id`, not `userId`: one of the enumerated counter-exceptions of CASING_CONVENTIONS. */
   shared_by: { user_id: string; name: string } | null;
-  created_at: string;
+  createdAt: string;
 }
 
 /**
@@ -288,11 +289,11 @@ export async function listPackageShares(
     target: row.ownerUserId
       ? {
           kind: "user" as const,
-          user_id: row.ownerUserId,
+          userId: row.ownerUserId,
           name: row.ownerName ?? row.ownerUserId,
         }
-      : { kind: "space" as const, space_id: row.spaceId, name: row.spaceName },
+      : { kind: "space" as const, spaceId: row.spaceId, name: row.spaceName },
     shared_by: sharerView(row),
-    created_at: row.createdAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
   }));
 }

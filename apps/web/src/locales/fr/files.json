@@ -58,5 +58,6 @@
   "artifact.copied": "Copié",
   "artifact.copyFailed": "Impossible de copier le contenu.",
   "artifact.fullscreen": "Plein écran",
-  "artifact.exitFullscreen": "Quitter le plein écran"
+  "artifact.exitFullscreen": "Quitter le plein écran",
+  "run.noAccess": "Votre rôle ne donne pas accès aux fichiers de cet espace."
 }

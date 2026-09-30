@@ -13,73 +13,17 @@
  * and refuses a caller that sets a locked field (400 `locked_input_field`).
  *
  * The launch surfaces derive their three display states from exactly those two
- * fields, so the form can never offer to set something the run would reject.
+ * fields (`partitionInputFields`, `@appstrate/core/input-resolution` — shared
+ * with the CLI), so the form can never offer to set something the run would
+ * reject.
  */
 
+import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import {
-  authorDefaults,
-  getOrderedKeys,
-  type JSONSchemaObject,
-  type SchemaWrapper,
-} from "@appstrate/core/form";
-import { withoutLockedFields } from "@appstrate/core/input-resolution";
-
-/** The per-space layer that rides next to the schema on `AgentDetail.input`. */
-export interface AgentInputSettings {
-  /** Values the editor stored once for this space. */
-  values: Record<string, unknown>;
-  /** Fields no caller may set at launch. */
-  locked_fields: string[];
-}
-
-/**
- * The three display states of a launch form, as ordered key lists.
- *
- * - `locked` — shown read-only with its resolved value; never submitted.
- * - `prefilled` — has a value behind it already (author `default` or a stored
- *   value), so it is folded into the "advanced" section, pre-filled.
- * - `prompted` — nothing decides it yet; asked at the top level.
- */
-interface InputFieldPartition {
-  locked: string[];
-  prefilled: string[];
-  prompted: string[];
-}
-
-/** Every top-level key of the input schema, in presentation order. */
-function orderedKeys(wrapper: SchemaWrapper | undefined): string[] {
-  if (!wrapper?.schema?.properties) return [];
-  return getOrderedKeys(wrapper.schema, wrapper.property_order);
-}
-
-/**
- * The value each field resolves to before the caller says anything: the
- * author's `default` overlaid by the editor's stored value. Same overlay the
- * server applies for layers 1 and 2 — a field neither layer supplies stays
- * absent rather than becoming `null`.
- */
-export function resolvedInputDefaults(
-  wrapper: SchemaWrapper | undefined,
-  settings: AgentInputSettings,
-): Record<string, unknown> {
-  return { ...authorDefaults(wrapper?.schema), ...settings.values };
-}
-
-/** Split the schema's fields into the three launch-form display states. */
-export function partitionInputFields(
-  wrapper: SchemaWrapper | undefined,
-  settings: AgentInputSettings,
-): InputFieldPartition {
-  const locked = new Set(settings.locked_fields);
-  const decided = resolvedInputDefaults(wrapper, settings);
-  const partition: InputFieldPartition = { locked: [], prefilled: [], prompted: [] };
-  for (const key of orderedKeys(wrapper)) {
-    if (locked.has(key)) partition.locked.push(key);
-    else if (decided[key] !== undefined) partition.prefilled.push(key);
-    else partition.prompted.push(key);
-  }
-  return partition;
-}
+  resolvedInputDefaults,
+  withoutLockedFields,
+  type AgentInputSettings,
+} from "@appstrate/core/input-resolution";
 
 /**
  * Narrow a wrapper to `keys`, carrying every piece of per-field metadata the

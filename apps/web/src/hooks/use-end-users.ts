@@ -3,6 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { useOrgScope } from "./use-org-scope";
+import { usePermissions } from "./use-permissions";
 
 /** Wire shape from the OpenAPI spec (components.schemas.EndUserObject). */
 export type EndUserInfo = components["schemas"]["EndUserObject"];
@@ -13,8 +14,15 @@ interface EndUserListParams {
   search?: string;
 }
 
-export function useEndUsers(params?: EndUserListParams) {
+/** `end-users:read`, which the schedule form's actor picker does not imply. */
+function useEndUsersReadScope() {
   const scope = useOrgScope();
+  const { can } = usePermissions();
+  return { header: scope.header, enabled: scope.enabled && can("end-users:read") };
+}
+
+export function useEndUsers(params?: EndUserListParams) {
+  const scope = useEndUsersReadScope();
   return $api.useQuery(
     "get",
     "/api/end-users",
@@ -33,7 +41,7 @@ export function useEndUsers(params?: EndUserListParams) {
 }
 
 export function useEndUser(endUserId: string) {
-  const scope = useOrgScope();
+  const scope = useEndUsersReadScope();
   return $api.useQuery(
     "get",
     "/api/end-users/{id}",

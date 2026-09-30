@@ -9,7 +9,6 @@ import {
 import {
   allocateMcpToolNamespace,
   MCP_TOOL_NAME_MAX_LENGTH,
-  normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "../src/mcp-naming.ts";
 
@@ -53,12 +52,6 @@ describe("api tool naming", () => {
   it("trims long underscore runs without changing the canonical result", () => {
     const padding = "_".repeat(10_000);
     expect(normaliseMcpToolNamespace(`${padding}Drive${padding}`)).toBe("drive");
-    expect(normaliseMcpToolBody(`${padding}api-call${padding}`)).toBe("api_call");
-  });
-
-  it("normalises upstream tool bodies and strips an existing namespace", () => {
-    expect(normaliseMcpToolBody("api-call")).toBe("api_call");
-    expect(normaliseMcpToolBody("drive__api.upload")).toBe("api_upload");
   });
 
   it("allocates namespace collisions with the McpHost suffix contract", () => {

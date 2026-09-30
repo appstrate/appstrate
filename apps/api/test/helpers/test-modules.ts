@@ -9,9 +9,11 @@
  * mount each module's router.
  *
  * Tests never call registerTestModule directly — the preload handles it.
- * Consumers only use getDiscoveredModules().
+ * Consumers only use getDiscoveredModules() and getDeclinedModuleEntries().
  */
 import type { AppstrateModule } from "@appstrate/core/module";
+import { loadModulesFromInstances, resetModules } from "../../src/lib/modules/module-loader.ts";
+import { buildModuleInitContext } from "../../src/lib/modules/registry.ts";
 
 const discovered: AppstrateModule[] = [];
 
@@ -22,4 +24,29 @@ export function registerTestModule(mod: AppstrateModule): void {
 
 export function getDiscoveredModules(): readonly AppstrateModule[] {
   return discovered;
+}
+
+const declined: string[] = [];
+
+/** Entry file of a module the preload found but did not load (its tier requirements). */
+export function registerDeclinedModule(entry: string): void {
+  declined.push(entry);
+}
+
+export function getDeclinedModuleEntries(): readonly string[] {
+  return declined;
+}
+
+/**
+ * Put the module-loader registry back the way the preload left it.
+ *
+ * A file that swaps in a fake module owns the registry for its duration, but
+ * the state it must return to is the preload's — not an empty map. Anything
+ * derived from `_modules` (the module-contributed OpenAPI paths the platform-app
+ * registration joins, the RBAC snapshot) reads a registry emptied by a sibling
+ * file as a smaller platform, and answers for one.
+ */
+export async function restoreDiscoveredModules(): Promise<void> {
+  resetModules();
+  await loadModulesFromInstances([...discovered], buildModuleInitContext());
 }

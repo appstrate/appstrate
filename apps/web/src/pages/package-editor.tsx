@@ -5,12 +5,13 @@ import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { usePackageDetail } from "../hooks/use-packages";
+import { usePackageDetail, type Versioned } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import type { IntegrationToolInspection } from "@appstrate/core/integration";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { newPackageContent } from "../lib/package-file-drafts";
@@ -33,7 +34,7 @@ import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 import { Spinner } from "../components/spinner";
-import { NoAccessState } from "../components/require-permission";
+import { NoAccessState } from "../components/route-gate";
 import { EditorShell } from "../components/editor-shell";
 
 import type { MetadataState } from "../components/agent-editor/metadata-section";
@@ -94,7 +95,7 @@ type Presentation = "page" | "embedded";
 
 /**
  * Save from a package's Package AFPS. It saves the draft IN PLACE (no redirect:
- * the reader is already on the package) and reads back the new lock version;
+ * the reader is already on the package) and reads back the draft's new ETag;
  * the parent refetches the package and remounts the editor on it, which is
  * what clears the unsaved state.
  */
@@ -483,23 +484,23 @@ export type AgentDefinitionSection = "general" | "schema" | "skills" | "integrat
 /**
  * An agent's definition, edited where it is read: inside its settings, one
  * rail section at a time, over ONE draft — moving from Schémas to Skills keeps
- * what was typed. Keyed on the lock version, so a save remounts it clean.
+ * what was typed. Keyed on the draft's ETag, so a save remounts it clean.
  */
 export function AgentDefinitionEditor({
   detail,
   section,
   onSection,
 }: {
-  detail: AgentDetail;
+  detail: Versioned<AgentDetail>;
   section: AgentDefinitionSection;
   onSection: (section: AgentDefinitionSection) => void;
 }) {
   return (
     <AgentEditorInner
-      key={`${detail.id}:${detail.lock_version}`}
+      key={`${detail.id}:${detail.etag}`}
       initialState={{
         manifest: withNormalizedManifest(detail.manifest ?? {}),
-        lock_version: detail.lock_version,
+        etag: detail.etag,
       }}
       resolvedDeps={detail.dependencies ?? null}
       packageId={detail.id}
@@ -877,15 +878,15 @@ export function IntegrationDefinitionEditor({
   onSection,
   toolInspection,
 }: {
-  detail: OrgPackageItemDetail;
+  detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
   toolInspection?: IntegrationToolInspection;
 }) {
   return (
     <IntegrationEditorInner
-      key={`${detail.id}:${detail.lock_version}`}
-      initialState={{ manifest: detail.manifest ?? {}, lock_version: detail.lock_version }}
+      key={`${detail.id}:${detail.etag}`}
+      initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
       packageId={detail.id}
       isEdit
       presentation="embedded"
@@ -908,13 +909,13 @@ export function PackageDefinitionEditor({
   detail,
 }: {
   type: "skill" | "mcp-server";
-  detail: OrgPackageItemDetail;
+  detail: Versioned<OrgPackageItemDetail>;
 }) {
   return (
     <PackageEditorInner
-      key={`${detail.id}:${detail.lock_version}`}
+      key={`${detail.id}:${detail.etag}`}
       type={type}
-      initialState={{ manifest: detail.manifest ?? {}, lock_version: detail.lock_version }}
+      initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
       packageId={detail.id}
       isEdit
       presentation="embedded"
@@ -938,7 +939,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   });
   const pkgQuery = usePackageDetail(type, type !== "agent" && isEdit ? packageId : undefined);
 
-  const isLoading = type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading;
+  // The detail read gates itself on the permission set, and a disabled query is
+  // not loading: without `ready` a hard reload would redirect before it lands.
+  const { ready } = usePermissions();
+  const isLoading = !ready || (type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading);
   const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {
@@ -950,7 +954,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
-    return <Navigate to="/agents" replace />;
+    return <Navigate to={packageListPath(type)} replace />;
   }
 
   // Write authority is the package's HOME space, not the space this request
@@ -977,7 +981,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
       isEdit && agentDetail
         ? {
             manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
-            lock_version: agentDetail.lock_version,
+            etag: agentDetail.etag,
           }
         : defaultEditorState(currentOrg?.slug, user?.email);
 
@@ -995,12 +999,12 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
 
   // Integration editor with structured configuration and the shared file tree.
   if (type === "integration") {
-    const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+    const intDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
     const initialState: EditorState =
       isEdit && intDetail
         ? {
             manifest: intDetail.manifest ?? {},
-            lock_version: intDetail.lock_version,
+            etag: intDetail.etag,
           }
         : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) };
 
@@ -1015,13 +1019,13 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   // Skill or MCP server editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
-  const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
+  const pkgDetail = pkgQuery.data as Versioned<OrgPackageItemDetail> | undefined;
 
   const initialState: EditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
-          lock_version: pkgDetail.lock_version,
+          etag: pkgDetail.etag,
         }
       : {
           manifest: defaultSkillManifest(currentOrg?.slug, user?.email),

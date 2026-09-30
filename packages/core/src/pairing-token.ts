@@ -21,7 +21,7 @@
  * tampered URL produces a non-200 (the platform at the wrong URL has no
  * matching pairing row) — failure is loud, not silent.
  *
- * The "appp_" prefix mirrors `ask_` (API key) and `pair_` (pairing row id)
+ * The "appp_" prefix mirrors `apst_` (API key) and `pair_` (pairing row id)
  * so logs and accidental copy-pastes in chat logs are immediately
  * identifiable.
  */

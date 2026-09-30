@@ -54,7 +54,14 @@ describe("createRun — per-org concurrency reservation", () => {
   }
 
   function admit(id: string) {
-    return createRun(scope(), { id, packageId: PACKAGE_ID, actor: null, input: null });
+    return createRun(scope(), {
+      id,
+      packageId: PACKAGE_ID,
+      actor: null,
+      input: null,
+      modelId: null,
+      inferenceRoute: null,
+    });
   }
 
   async function runCount(): Promise<number> {

@@ -19,7 +19,7 @@
 
 import type { EventSink } from "../interfaces/event-sink.ts";
 import type { RunEvent } from "@afps-spec/types";
-import type { RunResult } from "../types/run-result.ts";
+import type { RunResult, TerminalRunResult } from "../types/run-result.ts";
 import { emptyRunResult, foldEvent } from "../runner/reducer.ts";
 
 export interface ReducerSinkHandle {
@@ -35,7 +35,7 @@ export function createReducerSink(): ReducerSinkHandle {
     handle: async (event: RunEvent): Promise<void> => {
       foldEvent(result, event);
     },
-    finalize: async (final: RunResult): Promise<void> => {
+    finalize: async (final: TerminalRunResult): Promise<void> => {
       result = final;
     },
   };

@@ -18,8 +18,12 @@
 import { findTargetHandler } from "hono/utils/handler";
 
 /** Stamp `marker` on `handler` and return it, for a factory to `return` directly. */
-export function markHandler<T extends object>(handler: T, marker: symbol): T {
-  Object.defineProperty(handler, marker, { value: true });
+export function markHandler<T extends object>(
+  handler: T,
+  marker: symbol,
+  value: unknown = true,
+): T {
+  Object.defineProperty(handler, marker, { value });
   return handler;
 }
 
@@ -36,7 +40,12 @@ export function markHandler<T extends object>(handler: T, marker: symbol): T {
  * instead of guessing at it.
  */
 export function hasHandlerMarker(handler: unknown, marker: symbol): boolean {
-  if (typeof handler !== "function") return false;
+  return readHandlerMarker(handler, marker) === true;
+}
+
+/** The value stamped under `marker` (e.g. a guard's requirement string), or `undefined`. */
+export function readHandlerMarker(handler: unknown, marker: symbol): unknown {
+  if (typeof handler !== "function") return undefined;
   const target = findTargetHandler(handler as (...args: never[]) => unknown);
-  return (target as unknown as Record<symbol, unknown>)[marker] === true;
+  return (target as unknown as Record<symbol, unknown>)[marker];
 }

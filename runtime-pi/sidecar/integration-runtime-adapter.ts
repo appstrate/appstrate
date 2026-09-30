@@ -20,12 +20,14 @@ import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
+import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
+import type { PeerAttribution } from "./runner-peers.ts";
 
 /**
  * Per-run network + CA delivery context returned by
  * {@link IntegrationRuntimeAdapter.prepare}. Computed once at boot
- * and consumed by callers to wire the per-integration MITM listener
+ * and consumed by callers to wire the per-connection MITM listener
  * (bind host) + the proxy URL handed to the integration's runner.
  */
 export interface RuntimeAdapterRunContext {
@@ -45,17 +47,17 @@ export interface RuntimeAdapterRunContext {
 }
 
 /**
- * Per-integration egress context the adapter wires into the runner (proxy
+ * Per-connection egress context the adapter wires into the runner (proxy
  * env vars + optional CA file delivery). `null` means the runner gets no
- * egress route (mtls / `delivery.files` runners reach upstream directly).
+ * egress route.
  *
  * Egress is decoupled from credential injection (#543). `caCertHostPath`
  * discriminates the listener kind:
  *   - non-null → a MITM listener (TLS terminate + inject) is in front; the
  *     runner must trust the run CA, so the adapter copies the PEM in and sets
  *     the CA env block.
- *   - null → a plain CONNECT egress listener (tunnel + SSRF floor, no TLS
- *     termination); no CA needed, so the adapter sets only the proxy env block.
+ *   - null → a plain CONNECT egress listener (policy + SSRF floor, blind
+ *     tunnel); no CA needed, so the adapter sets only the proxy env block.
  */
 export interface RuntimeEgressContext {
   /** Full HTTPS_PROXY URL the runner targets (e.g. `http://sidecar:39472`). */
@@ -66,6 +68,8 @@ export interface RuntimeEgressContext {
    * egress listener (no TLS termination → the runner needs no extra CA).
    */
   readonly caCertHostPath: string | null;
+  /** The runner's compiled egress policy, enforced by its listener. */
+  readonly policy: EgressPolicy;
 }
 
 export interface SpawnIntegrationOptions {
@@ -75,9 +79,8 @@ export interface SpawnIntegrationOptions {
   readonly bundleRoot: string;
   /**
    * Egress context (proxy URL + optional CA file path). `null` = no egress
-   * route (mtls / `delivery.files` reach upstream directly). A non-null
-   * `caCertHostPath` signals a TLS-terminating MITM listener; `null` signals
-   * a plain CONNECT egress listener.
+   * route. A non-null `caCertHostPath` signals a TLS-terminating MITM
+   * listener; `null` signals a plain CONNECT egress listener.
    */
   readonly egress: RuntimeEgressContext | null;
   /**
@@ -121,6 +124,12 @@ export interface IntegrationRuntimeAdapter {
   prepare(runId: string): Promise<RuntimeAdapterRunContext>;
   /** Spawn one integration MCP server. Returns the JSON-RPC transport. */
   spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration>;
+  /**
+   * Which of this adapter's runners a listener peer is, valid after `prepare()`:
+   * the per-integration listeners admit only their own runner, the transparent
+   * plane serves that runner's policy, the agent's forward proxy refuses runners.
+   */
+  peerAttribution(): PeerAttribution;
   /** Tear down everything spawned through this adapter. Must be idempotent. */
   shutdown(): Promise<void>;
 }
@@ -426,7 +435,7 @@ export function isPathSafeForMount(
 
 /**
  * Proxy-routing half of the egress env block — points every standard
- * `HTTP(S)_PROXY` var at the per-integration listener. Always applied when an
+ * `HTTP(S)_PROXY` var at the per-connection listener. Always applied when an
  * egress context is present, for BOTH listener kinds (MITM and plain CONNECT),
  * because routing the runner's traffic out is orthogonal to whether the proxy
  * terminates TLS. The CA half ({@link buildCaEnvBlock}) is layered on top only

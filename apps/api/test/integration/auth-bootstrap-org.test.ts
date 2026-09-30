@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import {
   _rebuildAuthForTesting,
   setPostBootstrapOrgHook,
@@ -173,7 +174,9 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     // hello-world agent provisioned in the org's namespace
     const orgPackages = await db.select().from(packages).where(eq(packages.orgId, org!.id));
     expect(orgPackages.length).toBeGreaterThanOrEqual(1);
-    expect(orgPackages.some((p) => p.id === `@${org!.slug}/hello-world`)).toBe(true);
+    const helloWorld = orgPackages.find((p) => p.id === `@${org!.slug}/hello-world`);
+    expect(helloWorld).toBeDefined();
+    expect(helloWorld!.draftManifest).toMatchObject({ schema_version: AFPS_SCHEMA_VERSION });
 
     // onOrgCreate fan-out fired exactly once
     expect(orgCreateCalls).toHaveLength(1);

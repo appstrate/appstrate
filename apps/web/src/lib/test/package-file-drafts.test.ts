@@ -104,24 +104,19 @@ describe("package draft operations", () => {
     expect(files.map((file) => file.path)).toEqual(["SKILL.md", "moved.txt"]);
     expect(files[1]?.inline).toBe("new");
   });
-  it("sends manifest and files under the original token in one payload", () => {
+  it("sends manifest and files in one payload, the version riding in If-Match", () => {
     expect(
       packageUpdateBody({
         manifest: { description: "mine" },
-        lock_version: 7,
         operations: [{ op: "delete", path: "notes.md" }],
       }),
     ).toEqual({
       manifest: { description: "mine" },
-      lock_version: 7,
       operations: [{ op: "delete", path: "notes.md" }],
     });
   });
   it("omits an empty operation list", () => {
-    expect(packageUpdateBody({ manifest: {}, lock_version: 2, operations: [] })).toEqual({
-      manifest: {},
-      lock_version: 2,
-    });
+    expect(packageUpdateBody({ manifest: {}, operations: [] })).toEqual({ manifest: {} });
   });
   it("round-trips uploaded binary bytes", async () => {
     const operation = await uploadedFileOperation(

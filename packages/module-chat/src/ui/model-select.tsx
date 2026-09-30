@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { CheckIcon, ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -23,15 +24,15 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 /** Group/button label for a managed model — provider-neutral, binding not exposed. */
 const MANAGED_LABEL = "Géré";
 
-function providerLabel(model: { providerName?: string | null; aliased?: boolean }): string {
+function providerLabel(model: { provider_name?: string | null; aliased?: boolean }): string {
   // Managed models don't expose their binding — group/badge them neutrally (their
-  // `providerName` is nulled server-side anyway).
+  // `provider_name` is nulled server-side anyway).
   if (model.aliased) return MANAGED_LABEL;
-  // `providerName` is the server's registry-resolved display name (`providerId`
+  // `provider_name` is the server's registry-resolved display name (`providerId`
   // → `displayName`) — the single source for provider labels. We deliberately do
   // NOT fall back to `apiShape`: it's ambiguous (OpenCode Go and OpenAI both use
   // `openai-completions`), which is the bug this replaced.
-  return model.providerName || MANAGED_LABEL;
+  return model.provider_name || MANAGED_LABEL;
 }
 
 interface Props {
@@ -71,7 +72,7 @@ export function ModelSelect({
   const { t } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
   const groups = groupByProvider(models);
-  const hasOverrides = generation.temperature != null || generation.reasoningLevel != null;
+  const hasOverrides = generation.temperature != null || generation.reasoning_level != null;
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
     active.generation.reasoning.supported === "unsupported";
@@ -177,7 +178,7 @@ export function ModelSelect({
                     // `settings:` — the shared label family lives in the
                     // settings bundle (a boot namespace, so already loaded);
                     // the host binds `t` to `chat`.
-                    labels={buildGenerationLabels((key) => t(`settings:${key}`))}
+                    labels={buildGenerationLabels((key, options) => t(`settings:${key}`, options))}
                   />
                 )}
               </>
@@ -186,10 +187,13 @@ export function ModelSelect({
         </Tabs>
       </PopoverContent>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           className={cn(
-            "border-input bg-background hover:bg-accent text-foreground inline-flex max-w-64 items-center justify-start gap-1.5 rounded-md border px-2.5 py-1 text-left text-xs",
+            "text-foreground hover:text-foreground h-auto gap-1.5 px-2.5 py-1 font-normal shadow-none [&_svg]:size-3.5",
+            "max-w-64 justify-start text-left",
             hasOverrides && "border-primary/40 bg-primary/5",
           )}
           title={t("model.settingsTitle")}
@@ -202,7 +206,7 @@ export function ModelSelect({
           )}
           {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
           <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
-        </button>
+        </Button>
       </PopoverTrigger>
     </Popover>
   );

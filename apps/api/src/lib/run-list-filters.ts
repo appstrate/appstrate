@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { eq, ilike, or, type SQL } from "drizzle-orm";
-import { runs, runStatusValues, type RunStatus } from "@appstrate/db/schema";
+import { runs } from "@appstrate/db/schema";
+import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { invalidRequest } from "./errors.ts";
 
 /** The schedule history accepts the same bounded filters as the global run list. */

@@ -9,7 +9,8 @@ import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
  * (`packages/connect/src/connect/login-engine.ts`) does NOT fully support.
  *
  * Spec-conformant manifests still import cleanly — the engine is a documented
- * subset (no XPath, jsonpath single-value, criterion-type subset). These
+ * subset (no XPath, criterion-type subset). A JSONPath outside the engine's
+ * subset is not a warning: `integrationManifestSchema` rejects it. These
  * warnings surface the gap at import time so the publisher learns about it
  * BEFORE the first failed credential acquisition rather than chasing a
  * runtime `LoginError` after the fact.
@@ -17,9 +18,6 @@ import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
  * Categories produced:
  *   - `connect.login.outputs[<name>]` declared as an Arazzo Selector Object
  *     with `type === "xpath"` → engine throws at extraction time.
- *   - `connect.login.outputs[<name>]` declared as a `jsonpath` Selector
- *     whose query contains wildcards / filters / slices / recursive descent →
- *     the single-value RFC 9535 subset will throw.
  *   - `connect.login.success_criteria[*]` whose `type` is `xpath` (always
  *     unsupported) — the engine now handles `simple|jsonpath|regex`.
  *
@@ -40,8 +38,6 @@ interface MaybeCriterion {
   type?: unknown;
   context?: unknown;
 }
-
-const MULTI_VALUE_JSONPATH = /(\[\s*\*\s*\]|\[\s*\?|\.{2}|\[\s*-?\d+\s*:)/;
 
 function isSelectorObject(value: unknown): value is MaybeSelectorObject {
   return (
@@ -79,17 +75,10 @@ export function collectConnectLoginWarnings(manifest: unknown): string[] {
     if (outputs && typeof outputs === "object") {
       for (const [outputName, outputValue] of Object.entries(outputs as Record<string, unknown>)) {
         if (!isSelectorObject(outputValue)) continue;
-        const type = String(outputValue.type);
-        const selector = String(outputValue.selector);
-        if (type === "xpath") {
+        if (outputValue.type === "xpath") {
           warnings.push(
             `auths.${authKey}.connect.login.outputs.${outputName}: ` +
               `XPath selector not supported by Appstrate runtime; output \`${outputName}\` will fail at credential acquisition.`,
-          );
-        } else if (type === "jsonpath" && MULTI_VALUE_JSONPATH.test(selector)) {
-          warnings.push(
-            `auths.${authKey}.connect.login.outputs.${outputName}: ` +
-              `JSONPath selector \`${selector}\` uses wildcards/filters/slices/recursive-descent — the Appstrate runtime only supports the single-value subset (\`$.a.b\` / \`$.a[0].b\`). Extraction will fail.`,
           );
         }
       }

@@ -16,7 +16,8 @@ import {
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { usePermissions } from "../hooks/use-permissions";
+import type { RoutePath } from "../lib/route-access";
+import { useCanReach } from "../hooks/use-can-reach";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -27,7 +28,12 @@ import {
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
 
-type NavItem = { path: string; label: string; icon: LucideIcon; badge?: number };
+type NavItem = {
+  path: RoutePath;
+  label: string;
+  icon: LucideIcon;
+  badge?: number;
+};
 
 export function NavOrg() {
   const { t } = useTranslation();
@@ -40,7 +46,7 @@ export function NavOrg() {
   const visiblePathname = window.location.pathname;
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
-  const { can } = usePermissions();
+  const canReach = useCanReach();
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -59,34 +65,27 @@ export function NavOrg() {
   // is what you assemble. Schedules moved out of the old "Automatisation" for
   // that reason — a schedule is upcoming activity, not a thing you build.
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
-  const activityItems: NavItem[] = [
+  // Every entry, Runs included, is shown exactly when its route's declaration
+  // (`lib/route-access.ts`) opens the page it lands on — a custom space role
+  // may hold none of them, so no entry is assumed reachable.
+  const reachable = (items: NavItem[]) => items.filter((i) => canReach(i.path));
+
+  const activityItems = reachable([
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
-    // Module-contributed product surfaces (absent flag = entry hidden)
     { path: "/files", label: t("nav.files"), icon: FileText },
-  ];
+  ]);
 
-  // Each entry asks for the permission its landing page's list route needs, so
-  // a caller who would land on a wall of 403s never sees the link. `agents` is
-  // the disjunction the route itself accepts: a `runner` launches agents it
-  // holds no `agents:read` on. Activité stays ungated — every principal in a
-  // space reaches those.
-  const activityTailItems: NavItem[] = [
-    ...(can("schedules:read")
-      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
-      : []),
-  ];
+  const activityTailItems = reachable([
+    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+  ]);
 
-  const buildItems: NavItem[] = [
-    ...(can("agents:read") || can("agents:run")
-      ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]
-      : []),
-    ...(can("skills:read") ? [{ path: "/skills", label: t("nav.skills"), icon: Wrench }] : []),
-    // No "local MCP servers" entry: a server is the engine of a local
-    // integration and reached from it, never used on its own.
-    ...(can("integrations:read")
-      ? [{ path: "/integrations", label: t("nav.integrations"), icon: Boxes }]
-      : []),
-  ];
+  // No "local MCP servers" entry: a server is the engine of a local
+  // integration and reached from it, never used on its own.
+  const buildItems = reachable([
+    { path: "/agents", label: t("nav.agents"), icon: Layers },
+    { path: "/skills", label: t("nav.skills"), icon: Wrench },
+    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
+  ]);
 
   const renderItems = (items: NavItem[]) =>
     items.map((item) => (
@@ -116,31 +115,33 @@ export function NavOrg() {
         <SidebarMenu>
           {renderItems(activityItems)}
           {/* Runs — with unread badge + running indicator */}
-          <SidebarMenuItem className="relative">
-            <SidebarMenuButton
-              asChild
-              isActive={visiblePathname.startsWith("/runs")}
-              tooltip={t("nav.runs")}
-            >
-              <Link to="/runs">
-                <span className="flex size-4 shrink-0 items-center justify-center">
-                  {hasRunning ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Activity size={16} />
-                  )}
-                </span>
-                <span>{t("nav.runs")}</span>
-              </Link>
-            </SidebarMenuButton>
-            {unread > 0 && (
-              <SidebarMenuBadge>
-                <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              </SidebarMenuBadge>
-            )}
-          </SidebarMenuItem>
+          {canReach("/runs") && (
+            <SidebarMenuItem className="relative">
+              <SidebarMenuButton
+                asChild
+                isActive={visiblePathname.startsWith("/runs")}
+                tooltip={t("nav.runs")}
+              >
+                <Link to="/runs">
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {hasRunning ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Activity size={16} />
+                    )}
+                  </span>
+                  <span>{t("nav.runs")}</span>
+                </Link>
+              </SidebarMenuButton>
+              {unread > 0 && (
+                <SidebarMenuBadge>
+                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                </SidebarMenuBadge>
+              )}
+            </SidebarMenuItem>
+          )}
           {renderItems(activityTailItems)}
         </SidebarMenu>
       </SidebarGroup>

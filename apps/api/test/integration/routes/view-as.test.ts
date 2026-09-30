@@ -19,7 +19,7 @@ import {
 import type { AppstrateModule } from "@appstrate/core/module";
 import { getTestApp } from "../../helpers/app.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
-import { viewAsWire, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
+import { viewAsAudit, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -41,8 +41,7 @@ import {
 } from "../../helpers/seed.ts";
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 import { initRealtime } from "../../../src/services/realtime.ts";
-import { setPlatformApp } from "../../../src/lib/platform-app.ts";
-import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { collectModulePermissions } from "../../../src/lib/modules/module-loader.ts";
 import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 // Reaching into the chat module's source on purpose: this is the one carrier
@@ -53,7 +52,7 @@ import { getDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
-setPlatformApp(app);
+await registerTestPlatformApp();
 
 /**
  * Resources the probe module in the "intersection with the real caller" block
@@ -241,7 +240,7 @@ describe("view as role", () => {
       request("/api/packages/@view-as/shared/shares", {
         view,
         space: owner.defaultSpaceId,
-        body: { target: { kind: "space", space_id: target.id } },
+        body: { target: { kind: "space", spaceId: target.id } },
       });
 
     await expectProblem(await share(persona("member", "preset:viewer")), 403);
@@ -331,7 +330,7 @@ describe("view as role", () => {
         return {
           required: ctx.required,
           role: fromContext(ctx, "orgRole"),
-          viewAs: p ? viewAsWire(p) : undefined,
+          viewAs: p ? viewAsAudit(p) : undefined,
         };
       });
       // A disjunction refusal, which is the shape that reaches the hook
@@ -346,9 +345,9 @@ describe("view as role", () => {
       expect(records[0]).toMatchObject({
         role: "owner",
         viewAs: {
-          org_role: "member",
+          orgRole: "member",
           space: {
-            space_id: owner.defaultSpaceId,
+            spaceId: owner.defaultSpaceId,
             role: { kind: "preset", key: "builder", name: "builder" },
           },
         },
@@ -512,15 +511,15 @@ describe("view as role", () => {
 
     expect(previewed?.actorId).toBe(owner.user.id);
     expect(previewed?.actorType).toBe("user");
-    expect((previewed?.after as { view_as?: unknown }).view_as).toEqual({
-      org_role: "member",
+    expect((previewed?.after as { viewAs?: unknown }).viewAs).toEqual({
+      orgRole: "member",
       space: {
-        space_id: owner.defaultSpaceId,
+        spaceId: owner.defaultSpaceId,
         role: { kind: "preset", key: "admin", name: "admin" },
       },
     });
     // The control: the same write with no header carries no persona at all.
-    expect(real?.after).not.toHaveProperty("view_as");
+    expect(real?.after).not.toHaveProperty("viewAs");
   });
 
   // ─── 6. Nothing acts on the REAL org role behind the persona ──────
@@ -880,7 +879,6 @@ describe("view as role", () => {
   // ─── B1b. The inbound MCP endpoint re-enters with the persona ─────
 
   it("carries the persona into the MCP endpoint's in-process dispatch", async () => {
-    resetCatalog();
     // `mcp:invoke` is space-level and reaches preset `operator`; `spaces:write`
     // is org-level and admin-tier. So this persona can drive the tool and must
     // still be refused the operation it drives — which only holds if the header
@@ -923,6 +921,63 @@ describe("view as role", () => {
     // creates the space.
     const real = await invoke();
     expect(real.isError).toBe(false);
+  });
+
+  it("narrows the advertised MCP tool surface to the previewed role", async () => {
+    // A preview must get the answers the real role would, declarations
+    // included: `viewer` holds no `agents:run`, so `run_and_wait` is not among
+    // the tools it is shown; `operator` — same session, same endpoint — is.
+    const toolNames = async (view?: string): Promise<string[]> => {
+      const envelope = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+        await request(`/api/mcp/o/${owner.orgId}`, {
+          view,
+          space: owner.defaultSpaceId,
+          headers: { Accept: "application/json, text/event-stream" },
+          body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+        }),
+      );
+      return (envelope.result?.tools ?? []).map((tool) => tool.name);
+    };
+
+    expect(await toolNames(persona("member", "preset:viewer"))).not.toContain("run_and_wait");
+    expect(await toolNames(persona("member", "preset:operator"))).toContain("run_and_wait");
+    // The control: the same session with no persona is preset `admin` and
+    // keeps the tool, so the line above is the header narrowing the surface
+    // rather than the surface being empty.
+    expect(await toolNames()).toContain("run_and_wait");
+  });
+
+  it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
+    // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
+    // a persona whose space half points elsewhere previews nothing here — and
+    // the advertised surface must say so exactly as the REST route does.
+    const here = await space("Here", "closed");
+    const elsewhere = await space("Elsewhere", "closed");
+
+    const tools = (view: string) =>
+      request(`/api/mcp/o/${owner.orgId}`, {
+        view,
+        space: here.id,
+        headers: { Accept: "application/json, text/event-stream" },
+        body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      });
+    const agents = (view: string) => request("/api/agents", { view, space: here.id });
+
+    // The persona names THIS space: the role is previewed, and both surfaces
+    // answer as that role.
+    const named = persona("member", "preset:operator", here.id);
+    const listed = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
+      await tools(named),
+    );
+    expect((listed.result?.tools ?? []).map((tool) => tool.name)).toContain("run_and_wait");
+    expect((await agents(named)).status).toBe(200);
+
+    // The same role named in the OTHER space: a closed space admits this
+    // persona through no row, so both refuse. The persona's own space half is
+    // not what the endpoint reads.
+    const other = persona("member", "preset:operator", elsewhere.id);
+    expect((await tools(other)).status).toBe(403);
+    expect((await agents(other)).status).toBe(403);
   });
 
   // ─── 7. The marker is present exactly when the persona validated ──

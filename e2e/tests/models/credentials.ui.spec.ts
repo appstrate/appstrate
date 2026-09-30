@@ -50,8 +50,8 @@ test.describe("Provider keys — UI", () => {
     // providerId, never from a match on its URL.
     const key = await seedKey(apiClient, {
       providerId: "openai-compatible",
-      apiKey: "e2e-key",
-      baseUrlOverride: "https://vllm.internal.test/v1",
+      api_key: "e2e-key",
+      base_url_override: "https://vllm.internal.test/v1",
     });
 
     await openCredentialsTab(page);
@@ -65,7 +65,7 @@ test.describe("Provider keys — UI", () => {
     authedPage: page,
     apiClient,
   }) => {
-    const key = await seedKey(apiClient, { providerId: "anthropic", apiKey: "sk-ant-e2e" });
+    const key = await seedKey(apiClient, { providerId: "anthropic", api_key: "sk-ant-e2e" });
     const created = await apiClient.post("/models", { modelId: MODEL_ID, credentialId: key.id });
     expect(created.status()).toBe(201);
     const model = (await created.json()) as { id: string };

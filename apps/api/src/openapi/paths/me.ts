@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import {
+  connectionIdSetJsonSchema,
+  connectionSetRefusals,
+  lockedBySchema,
+} from "./integrations.ts";
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -145,13 +151,14 @@ export const mePaths = {
                               "auth_key",
                               "shared_with_org",
                               "reused_by_agents",
+                              "locked_by",
                               "org",
                               "space",
                             ],
                             properties: {
                               connection_id: { type: "string" },
                               kind: { type: "string", enum: ["integration"] },
-                              label: { type: ["string", "null"] },
+                              label: { type: "string" },
                               scopes_granted: { type: "array", items: { type: "string" } },
                               connected_at: { type: "string", format: "date-time" },
                               needs_reconnection: { type: "boolean" },
@@ -162,6 +169,7 @@ export const mePaths = {
                               reused_by_agents: { type: "integer" },
                               auth_key: { type: "string" },
                               shared_with_org: { type: "boolean" },
+                              locked_by: lockedBySchema,
                               org: {
                                 type: "object",
                                 required: ["id", "name"],
@@ -200,7 +208,7 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List the caller's member-scope integration pins for an agent",
       description:
-        "Returns the caller's own (integration, authKey) → connectionId pins for the " +
+        "Returns the caller's own integration → connection-set pins for the " +
         "given agent. Used by the agent-page picker to render the collapsed default " +
         "row. Member-only; end-user callers receive an empty list. Requires " +
         "`X-Space-Id`.",
@@ -232,14 +240,14 @@ export const mePaths = {
                   data: {
                     type: "array",
                     // `listMemberPinsForAgent` projects to exactly these two
-                    // fields (NOT the 6-field IntegrationPin the PUT route's
-                    // `toPinSummary` emits) — keep the list item minimal.
+                    // fields (NOT the IntegrationPin the PUT route emits) —
+                    // keep the list item minimal.
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "connection_id"],
+                      required: ["integration_package_id", "connection_ids"],
                       properties: {
                         integration_package_id: { type: "string" },
-                        connection_id: { type: "string", format: "uuid" },
+                        connection_ids: connectionIdSetJsonSchema,
                       },
                     },
                   },
@@ -257,12 +265,14 @@ export const mePaths = {
     put: {
       operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
-      summary: "Pin a connection for the caller's runs of an agent",
+      summary: "Pin connections for the caller's runs of an agent",
       description:
-        "Persists the caller's preference for a (integration, authKey) on this agent. " +
-        "Sits at cascade layer 4 — wins over the fallback ambiguity but loses to admin " +
-        "pins / run / schedule overrides. Replaces the previous R5 localStorage pick. " +
-        "Idempotent — repeated calls update the row in place.",
+        "Persists the caller's preference for an integration on this agent. " +
+        "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
+        "to an admin pin, an enforced org default and the launch override (the run's or " +
+        "the schedule's `connection_overrides`). " +
+        "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
+        "Idempotent — repeated calls rewrite the same set.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -273,11 +283,11 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agent_package_id", "integration_package_id", "connection_id"],
+              required: ["agent_package_id", "integration_package_id", "connection_ids"],
               properties: {
                 agent_package_id: { type: "string", minLength: 1 },
                 integration_package_id: { type: "string", minLength: 1 },
-                connection_id: { type: "string", format: "uuid" },
+                connection_ids: connectionIdSetJsonSchema,
               },
               additionalProperties: false,
             },
@@ -294,12 +304,15 @@ export const mePaths = {
           },
         },
         "400": {
-          description:
-            "Validation failed (connection wrong integration/auth, or not accessible to caller).",
+          description: `Refused: ${connectionSetRefusals}.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
+        },
       },
     },
     delete: {
@@ -307,8 +320,8 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layer 5 " +
-        "(accessible connections). Idempotent — 204 even when no row exists.",
+        "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
+        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -336,15 +349,120 @@ export const mePaths = {
       },
     },
   },
+  "/api/me/connections/{connectionId}/delete-impact": {
+    get: {
+      operationId: "getMyConnectionDeleteImpact",
+      tags: ["Profile"],
+      summary: "The caller's pins and schedules a connection delete would rewrite",
+      description:
+        "Lists the caller's own member pins and schedules whose connection set names this connection — " +
+        "exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
+        "say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a " +
+        "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
+        "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
+        "an unattended run never silently falls back to another account; its owner re-picks and " +
+        "re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, " +
+        "admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller " +
+        "references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees " +
+        "its bound organization (and space) only; an end user has no pins.",
+      parameters: [
+        { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "References naming the connection",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["pins", "schedules"],
+                properties: {
+                  pins: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "agent_package_id",
+                        "agent_display_name",
+                        "integration_package_id",
+                        "connection_count",
+                      ],
+                      properties: {
+                        agent_package_id: { type: "string" },
+                        agent_display_name: { type: "string" },
+                        integration_package_id: { type: "string" },
+                        connection_count: {
+                          type: "integer",
+                          minimum: 1,
+                          description: "Size of the pinned set before the delete.",
+                        },
+                      },
+                    },
+                  },
+                  schedules: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "scheduleId",
+                        "schedule_name",
+                        "agent_package_id",
+                        "agent_display_name",
+                        "integration_package_id",
+                        "connection_count",
+                        "disables",
+                      ],
+                      properties: {
+                        scheduleId: { type: "string" },
+                        schedule_name: { type: ["string", "null"] },
+                        agent_package_id: { type: "string" },
+                        agent_display_name: { type: "string" },
+                        integration_package_id: { type: "string" },
+                        connection_count: {
+                          type: "integer",
+                          minimum: 1,
+                          description:
+                            "Size of the schedule's override set for this integration before the delete.",
+                        },
+                        disables: {
+                          type: "boolean",
+                          description:
+                            "True when the delete disables this schedule: it is enabled and this connection is " +
+                            "the only one in its set for the integration.",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
   "/api/me/connections/{connectionId}": {
     delete: {
       operationId: "deleteMyConnection",
       tags: ["Profile"],
       summary: "Delete one of the caller's own connections (destructive)",
       description:
-        "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates " +
-        "every reference (admin pins, member pins, run snapshots, schedule overrides). " +
+        "Removes the `integration_connections` row globally. " +
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
+        "Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) " +
+        "names the connection: those sets carry no foreign key, so the dead id would fail every consuming " +
+        "run. An admin removes it from the pin(s) or default first. A member pin does not block the " +
+        "delete. The caller's own " +
+        "member pins and schedule overrides drop the connection in the same transaction — a pin it " +
+        "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
+        "integration and disables the schedule (its job is removed) rather than let it fall back " +
+        "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
+        "Another member's pins and schedules keep the id, and their next run fails " +
+        "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
+        "a set never shrinks behind its owner. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
@@ -359,6 +477,60 @@ export const mePaths = {
       ],
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": {
+          description:
+            "Connection is named by an admin pin or an org default (`connection_pinned`)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}/handoff": {
+    get: {
+      operationId: "getMyConnectionHandoff",
+      tags: ["Profile"],
+      summary: "What is due on the target when this connection is deleted",
+      description:
+        "For a connection whose credentials the platform minted, the steps to run on the " +
+        "target when deleting it (e.g. removing the installed key) — deleting the connection " +
+        "cannot reach the target. Creation-time steps come only from `submitIntegrationConnect`. " +
+        "`deferred` is omitted: every step here is deletion-time. Empty for an auth that mints " +
+        "nothing, and for an unknown, malformed or not-owned id.",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Handoff steps due at deletion (possibly empty)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  hasMore: { type: "boolean" },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/HandoffCommandStep" },
+                  },
+                },
+              },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
       },
     },
@@ -432,17 +604,11 @@ export const mePaths = {
                       "an agent reference a recent or failed run without a discovery round-trip.",
                     items: {
                       type: "object",
-                      required: ["package_id", "status"],
+                      required: ["packageId", "status"],
                       properties: {
-                        package_id: { type: "string" },
+                        packageId: { type: "string" },
                         status: { type: "string" },
-                        // CASING: `run_number` is snake_case here, diverging from
-                        // the universal `runNumber` carve-out used by the Run
-                        // schema. This is a distinct, prompt-oriented projection
-                        // (`services/state/runs.ts:listRecentForActor`) that emits
-                        // snake_case keys; spec matches that runtime output
-                        // (spec==runtime invariant). Documented divergence.
-                        run_number: { type: ["integer", "null"] },
+                        runNumber: { type: ["integer", "null"] },
                         started_at: { type: ["string", "null"], format: "date-time" },
                         error: {
                           type: ["string", "null"],
@@ -487,7 +653,7 @@ export const mePaths = {
                     items: {
                       type: "object",
                       required: [
-                        "package_id",
+                        "packageId",
                         "display_name",
                         "description",
                         "takes_input",
@@ -496,7 +662,7 @@ export const mePaths = {
                         "source",
                       ],
                       properties: {
-                        package_id: {
+                        packageId: {
                           type: "string",
                           description: 'Invokable identifier, e.g. "@appstrate/triage".',
                         },
@@ -522,7 +688,7 @@ export const mePaths = {
                             "otherwise). Read with `published`: false/false is an agent this " +
                             "caller cannot execute at all until its author publishes one.",
                         },
-                        source: { type: "string", enum: ["system", "local"] },
+                        source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
                   },
@@ -539,14 +705,14 @@ export const mePaths = {
                     type: "array",
                     description:
                       "Skills the caller could attach to an agent in the current space " +
-                      "(capped). Only present when the caller holds the `agents:run` permission; " +
-                      "empty otherwise. Skills are not run directly — declare them under an agent " +
+                      "(capped). A catalogue read, not a runnable hint: only present when the " +
+                      "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
                       "full list is reachable via the `listSkills` operation.",
                     items: {
                       type: "object",
                       required: [
-                        "package_id",
+                        "packageId",
                         "display_name",
                         "description",
                         "version",
@@ -555,7 +721,7 @@ export const mePaths = {
                         "source",
                       ],
                       properties: {
-                        package_id: {
+                        packageId: {
                           type: "string",
                           description:
                             'Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills.',
@@ -581,7 +747,7 @@ export const mePaths = {
                             "theirs to run — `dependency_overrides` with `draft` answers 403 " +
                             "`draft_not_writable` otherwise.",
                         },
-                        source: { type: "string", enum: ["system", "local"] },
+                        source: { type: "string", enum: [...packageSourceValues] },
                       },
                     },
                   },
@@ -605,16 +771,16 @@ export const mePaths = {
                 ],
                 recent_runs: [
                   {
-                    package_id: "@appstrate/triage",
+                    packageId: "@appstrate/triage",
                     status: "failed",
-                    run_number: 7,
+                    runNumber: 7,
                     started_at: "2026-06-25T09:12:00.000Z",
                     error: "Gmail token expired",
                   },
                 ],
                 agents: [
                   {
-                    package_id: "@appstrate/triage",
+                    packageId: "@appstrate/triage",
                     display_name: "Inbox Triage",
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
@@ -627,7 +793,7 @@ export const mePaths = {
                 agents_total: 1,
                 skills: [
                   {
-                    package_id: "@appstrate/web-research",
+                    packageId: "@appstrate/web-research",
                     display_name: "Web Research",
                     description: "Multi-source web search and synthesis.",
                     version: "1.2.0",

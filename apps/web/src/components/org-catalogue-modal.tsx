@@ -66,7 +66,7 @@ import { useSpaces } from "../hooks/use-spaces";
 import { fetchPackageDetail } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
-import { maySetPackageActive } from "../lib/package-permissions";
+import { mayConfigurePackage, maySetPackageActive } from "../lib/package-permissions";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
 import { useAllIntegrations } from "../hooks/use-integrations";
@@ -834,6 +834,9 @@ export function OrgCatalogueModal({
             next
               ? mayActivateIn(reading, targetSpaceId)
               : maySetPackageActive(grantById.get(targetSpaceId), active, false)
+          }
+          mayConfigureIn={(targetSpaceId) =>
+            mayConfigurePackage(grantById.get(targetSpaceId), active)
           }
           integrations={library?.packages.integration ?? []}
           agents={library?.packages.agent ?? []}

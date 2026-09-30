@@ -7,9 +7,12 @@
  *
  * Tiers:
  *   - gate  (default) — deterministic, no network/credentials. Local MCP-server
- *                       tool parity. Wired into `bun run check`.
+ *                       tool parity, refresh-strategy, identity-source,
+ *                       identity-claim-keys and scope-echo declarations.
+ *                       Wired into `bun run check`.
  *   - mcp             — gate + remote MCP parity + OAuth AS-metadata conformance
- *                       + identity-endpoint liveness (network, no credentials).
+ *                       + identity-endpoint liveness + auth-reject probes
+ *                       (network, no credentials).
  *   - all             — every check including auth-liveness.
  *
  * Static manifest validation (scope_catalog ↔ required_scopes, schema, drift)
@@ -28,7 +31,10 @@ import {
   checkUnverifiedBacklog,
   checkBacklogCeiling,
 } from "./refresh-strategy.ts";
-import { checkIdentityEndpoints } from "./identity-endpoint.ts";
+import { checkIdentityEndpoints, declaredIdentityEndpoints } from "./identity-endpoint.ts";
+import { checkIdentityClaimKeys, checkIdentitySource } from "./identity-source.ts";
+import { checkScopeEcho } from "./scope-echo.ts";
+import { checkAuthRejection } from "./auth-reject.ts";
 import { AUTH_PROBES } from "./probes.ts";
 import { credentialedCount } from "./creds.ts";
 import { formatReport, exitCode, type Summary, summarize } from "./report.ts";
@@ -81,6 +87,10 @@ async function main(): Promise<void> {
   const runOAuthMetadata = runRemote;
 
   let credIntegrations = 0;
+  // Credential-only integrations whose provider API nothing calls: no probe, no
+  // declared identity endpoint (the OAuth server may still be checked). Named
+  // in the summary so the gap is visible rather than silent.
+  const unprobed: string[] = [];
   for (const { entry, klass } of selected) {
     if (klass === "mcp-server-local") {
       findings.push(...(await checkMcpLocalParity(entry)));
@@ -88,6 +98,11 @@ async function main(): Promise<void> {
       findings.push(...(await checkMcpRemoteParity(entry, { snapshotDir: args.snapshotOut })));
     } else if (klass === "integration-cred") {
       credIntegrations++;
+      if (!AUTH_PROBES[entry.packageId] && declaredIdentityEndpoints(entry.manifest).length === 0) {
+        unprobed.push(entry.packageId);
+      }
+      // Credential-free, so it rides with the network tiers like the identity probe.
+      if (runRemote) findings.push(...(await checkAuthRejection(entry)));
       if (runAuthLive) findings.push(...(await checkAuthLiveness(entry)));
     }
     // Deterministic, credential-free, network-free → every tier, including
@@ -95,6 +110,9 @@ async function main(): Promise<void> {
     // entirely by what the manifest declares.
     if (klass !== "mcp-server-local" && klass !== "other") {
       findings.push(...checkRefreshStrategy(entry));
+      findings.push(...checkIdentitySource(entry));
+      findings.push(...checkIdentityClaimKeys(entry));
+      findings.push(...checkScopeEcho(entry));
     }
 
     // Manifest-declared OAuth surface, checked for every integration class —
@@ -124,7 +142,12 @@ async function main(): Promise<void> {
   }
   if (runAuthLive) {
     console.log(
-      `[conformance] auth-liveness: ${Object.keys(AUTH_PROBES).length} probes defined, ${credIntegrations} credential-only integrations (uncovered are skipped silently)`,
+      `[conformance] auth-liveness: ${Object.keys(AUTH_PROBES).length} probes defined, ${credIntegrations} credential-only integrations`,
+    );
+  }
+  if (runRemote && unprobed.length > 0) {
+    console.log(
+      `[conformance] provider API not probed for ${unprobed.length} credential-only integrations (no AUTH_PROBES entry, no userinfo_endpoint): ${unprobed.sort().join(", ")}`,
     );
   }
   console.log(

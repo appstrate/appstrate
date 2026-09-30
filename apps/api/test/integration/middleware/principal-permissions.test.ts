@@ -86,14 +86,14 @@ describe("per-principal org permissions", () => {
 
   it("grants it on the /api/orgs/:orgId path resolver too", async () => {
     const ok = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { Cookie: granted.cookie, "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(ok.status).toBe(200);
 
     const denied = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { Cookie: plain.cookie, "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
@@ -237,7 +237,10 @@ describe("per-principal org permissions", () => {
    * is CONSULTED — it is for a session, it is not for a key.
    */
   describe("the SSE transport resolves the same org half", () => {
-    /** A space role with no `runs:read`, so SSE auth refuses after the grants are resolved. */
+    /**
+     * A space role with no `runs:read`: a stream asking for run channels alone
+     * is refused after the grants are resolved.
+     */
     async function joinWithoutRunsRead(userId: string): Promise<void> {
       const role = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
       await seedSpaceMember({
@@ -253,7 +256,7 @@ describe("per-principal org permissions", () => {
       resolverCalls.length = 0;
 
       const res = await app.request(
-        `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`,
+        `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}&channels=run_update`,
         { headers: { Cookie: granted.cookie, Accept: "text/event-stream" } },
       );
 

@@ -33,18 +33,34 @@
  * `createOrgItem` alone). That is deliberate: `storage.deleteFile` is
  * idempotent on a missing object, so an over-broad enqueue costs one no-op
  * worker pass, whereas an under-broad one leaks bytes forever.
+ *
+ * ## Keys outlive their rows (#1612)
+ *
+ * A package key names an id, not an incarnation: a package deleted then
+ * recreated under the same id, or a version deleted then republished, writes
+ * the very key a pending job still targets. Deleting it blindly erases the
+ * successor's bytes. {@link deleteUnlessReclaimed} is therefore the only way a
+ * package object is physically deleted: under the lock its writers hold, it
+ * deletes only a key no live row claims.
  */
 
 import { and, eq, type SQL } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import type { StorageDeletionJobInput } from "./storage-deletion.ts";
-import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
+import {
+  AGENT_PACKAGES_BUCKET,
+  parseVersionZipKey,
+  versionZipKey,
+} from "./package-storage-keys.ts";
 import {
   PACKAGE_ITEMS_BUCKET,
   packageItemKey,
+  packageItemKeyId,
   packageItemOwnerNamespace,
   storageFolderForType,
 } from "./package-items/config.ts";
+import { lockPackageDraft, lockPackageVersions } from "./package-locks.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
@@ -135,4 +151,89 @@ export function packageStorageDeletionJobs(
     and(eq(packages.orgId, orgId), eq(packages.id, packageId)),
     reason,
   );
+}
+
+/** A package object key, with the lock its writers hold and the test for a live owner. */
+interface PackageKeyOwner {
+  lock: (tx: DbOrTx) => Promise<void>;
+  isClaimed: (tx: DbOrTx) => Promise<boolean>;
+}
+
+function packageKeyOwner(bucket: string, storageKey: string): PackageKeyOwner | null {
+  if (bucket === PACKAGE_ITEMS_BUCKET) {
+    const id = packageItemKeyId(storageKey);
+    if (!id) return null;
+    return {
+      lock: (tx) => lockPackageDraft(tx, id),
+      // The row's own key, rebuilt: a successor of another type or org writes
+      // elsewhere and does not protect this one.
+      isClaimed: async (tx) => {
+        const [row] = await tx
+          .select({ id: packages.id, type: packages.type, orgId: packages.orgId })
+          .from(packages)
+          .where(eq(packages.id, id))
+          .limit(1);
+        return (
+          !!row &&
+          packageItemKey(
+            storageFolderForType(row.type),
+            packageItemOwnerNamespace(row.orgId),
+            row.id,
+          ) === storageKey
+        );
+      },
+    };
+  }
+  if (bucket === AGENT_PACKAGES_BUCKET) {
+    const parsed = parseVersionZipKey(storageKey);
+    if (!parsed) return null;
+    return {
+      lock: (tx) => lockPackageVersions(tx, parsed.packageId),
+      isClaimed: async (tx) => {
+        const [row] = await tx
+          .select({ id: packageVersions.id })
+          .from(packageVersions)
+          .where(
+            and(
+              eq(packageVersions.packageId, parsed.packageId),
+              eq(packageVersions.version, parsed.version),
+            ),
+          )
+          .limit(1);
+        return !!row;
+      },
+    };
+  }
+  return null;
+}
+
+/**
+ * Run `del` unless a live package row claims `storageKey`. Any other bucket, or
+ * a key no package builder produced, is deleted unconditionally.
+ *
+ * The check and the delete run under the lock a successor's row commits
+ * under, so that successor is either committed (visible here, the key is kept)
+ * or not yet uploaded (it waits for this delete to finish). Without the lock, a
+ * successor could upload between the check and the delete. A writer whose row
+ * was committed before it uploads needs no lock: the check already sees it.
+ * The transaction stays open across one physical delete per package job,
+ * bounded by the storage client's request timeout, as `createPackageVersion`
+ * accepts for its upload.
+ */
+export async function deleteUnlessReclaimed(
+  bucket: string,
+  storageKey: string,
+  del: () => Promise<void>,
+): Promise<"deleted" | "reclaimed"> {
+  const owner = packageKeyOwner(bucket, storageKey);
+  if (!owner) {
+    await del();
+    return "deleted";
+  }
+  return db.transaction(async (tx) => {
+    await owner.lock(tx);
+    if (await owner.isClaimed(tx)) return "reclaimed";
+    await del();
+    return "deleted";
+  });
 }

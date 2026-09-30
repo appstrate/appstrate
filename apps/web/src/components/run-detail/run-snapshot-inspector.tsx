@@ -14,14 +14,16 @@ import {
   Tags,
   Trophy,
 } from "lucide-react";
-import type { EnrichedRun, TokenUsage } from "@appstrate/shared-types";
+import type { EnrichedRun } from "@appstrate/shared-types";
 import { RunTurnsDetail } from "../run-execution-tab";
 import type { RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
 import { Modal } from "../modal";
 import { useFiles } from "../../hooks/use-files";
+import { usePermissions } from "../../hooks/use-permissions";
 import { DocumentListPanel } from "../document-list-panel";
 import { formatDateField } from "../../lib/format-date";
+import { groupByIntegration } from "../../lib/run-connections";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import type { ExecutionEntry } from "../log-utils";
 import { OverviewCardAction } from "../overview-card-action";
@@ -58,6 +60,9 @@ export function RunSnapshotInspector({
     limit: 100,
   });
   const inputDocuments = inputDocumentsQuery.data?.data ?? [];
+  // The caller may not list files (`files:read`), so none were fetched: the
+  // input still says files were passed, and the fact says why none are shown.
+  const filesDenied = !usePermissions().can("files:read");
   const input = (run.input as Record<string, unknown> | null) ?? null;
   const inputEntries = input ? Object.entries(input) : [];
   const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
@@ -69,8 +74,9 @@ export function RunSnapshotInspector({
       : t("run.snapshotInputFiles");
   const config = (run.input as Record<string, unknown> | null) ?? null;
   const metadata = (run.metadata as Record<string, unknown> | null) ?? null;
-  const usage = run.token_usage as TokenUsage | null;
-  const connections = run.connections_used ?? [];
+  const usage = run.token_usage;
+  // One fact per integration, listing every connection it bound (#1611).
+  const connections = groupByIntegration(run.connections_used ?? []);
   const agentExecuted =
     [run.agent_scope, run.agent_name].filter(Boolean).join("/") || t("run.unknownValue");
   const triggerActor = getRunTriggerActor(run);
@@ -308,7 +314,9 @@ export function RunSnapshotInspector({
                             isLoading={inputDocumentsQuery.isLoading}
                             error={inputDocumentsQuery.error}
                             empty={{
-                              message: t("run.snapshotInputFilesUnavailable"),
+                              message: filesDenied
+                                ? t("run.noAccess", { ns: "files" })
+                                : t("run.snapshotInputFilesUnavailable"),
                               compact: true,
                             }}
                             showPurposeTabs={false}
@@ -329,19 +337,27 @@ export function RunSnapshotInspector({
                 headerInside={cardHeaders}
               >
                 <SnapshotFacts>
-                  {connections.map((connection) => (
+                  {connections.map(([integrationId, bound]) => (
                     <SnapshotFact
-                      key={connection.integration_id}
-                      label={connection.integration_id}
-                      value={[
-                        connection.label,
-                        connection.account_id,
-                        t(`run.connSource.${connection.source}`, {
-                          defaultValue: connection.source,
-                        }),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
+                      key={integrationId}
+                      label={integrationId}
+                      value={
+                        <span className="flex flex-col">
+                          {bound.map((connection, i) => (
+                            <span key={`${connection.label ?? connection.account_id ?? ""}-${i}`}>
+                              {[
+                                connection.label,
+                                connection.account_id,
+                                t(`run.connSource.${connection.source}`, {
+                                  defaultValue: connection.source,
+                                }),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          ))}
+                        </span>
+                      }
                     />
                   ))}
                 </SnapshotFacts>

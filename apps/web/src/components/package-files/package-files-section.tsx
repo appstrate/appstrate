@@ -74,7 +74,7 @@ export function PackageFilesSection({
     const index = ROLE_ORDER.indexOf(bundleFileRole(type, path, manifest));
     return index === -1 ? ROLE_ORDER.length : index;
   };
-  const entries = [...(data?.entries ?? [])].sort(
+  const entries = [...(data?.data ?? [])].sort(
     (a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path),
   );
 

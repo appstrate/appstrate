@@ -29,7 +29,7 @@
 import type { Context } from "hono";
 import type { AppEnv, LoadedPackage } from "../../types/index.ts";
 import type { ValidationFieldError } from "../../lib/errors.ts";
-import type { EnrichedSchedule } from "@appstrate/shared-types";
+import type { EnrichedSchedule, IntegrationAgentResolution } from "@appstrate/shared-types";
 import { getPackageForRead } from "../../services/package-catalog.ts";
 import { resolveDeclaredSkills } from "../../services/package-catalog.ts";
 import {
@@ -346,6 +346,19 @@ function scheduleCard(schedules: EnrichedSchedule[]) {
   }));
 }
 
+/** A member cannot change the set: an admin pin or an enforced org default bound it. */
+function isResolutionLocked(resolution: IntegrationAgentResolution): boolean {
+  return resolution.source === "admin_pin" || resolution.org_default_enforced;
+}
+
+function connectionLabel(
+  resolution: IntegrationAgentResolution,
+  connectionId: string,
+): string | null {
+  const candidate = resolution.candidates.find((item) => item.id === connectionId);
+  return candidate?.label ?? candidate?.account_id ?? null;
+}
+
 /**
  * Build the map for the agent addressed by the current request.
  *
@@ -358,8 +371,6 @@ export async function buildAgentMap(
 ): Promise<AgentMap | null> {
   const scope = getSpaceScope(c);
   const { orgId, spaceId } = scope;
-  const role = c.get("orgRole");
-  const isAdmin = role === "admin" || role === "owner";
   const actor = getActor(c);
   const canReadPersistence = c.get("permissions")?.has("persistence:read") ?? false;
   const persistenceScope = scopeFromActor(actor);
@@ -400,7 +411,8 @@ export async function buildAgentMap(
           scope,
           agentPackageId: agent.id,
           actor,
-          canConfigureIntegrations: isAdmin,
+          canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
+          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           version: versionRef,
         })
       : Promise.resolve(null),
@@ -460,19 +472,16 @@ export async function buildAgentMap(
 
   const inputFields = contractFields(agent.manifest.input);
   const outputFields = contractFields(agent.manifest.output);
+  // A run binds a SET of connections per integration; the map shows each one.
   const connectionItems = declaredIntegrations.flatMap((entry) => {
     const resolution = connectionByIntegration.get(entry.id)?.resolution;
-    const connectionId = resolution?.resolved_connection_id;
-    if (!connectionId) return [];
-    const candidate = resolution.candidates.find((item) => item.id === connectionId);
-    return [
-      {
-        id: connectionId,
-        integration_id: entry.id,
-        label: candidate?.label ?? candidate?.account_id ?? entry.id,
-        locked: resolution.status === "admin_locked" || resolution.org_default_enforced,
-      },
-    ];
+    if (!resolution) return [];
+    return resolution.resolved_connection_ids.map((connectionId) => ({
+      id: connectionId,
+      integration_id: entry.id,
+      label: connectionLabel(resolution, connectionId) ?? entry.id,
+      locked: isResolutionLocked(resolution),
+    }));
   });
 
   const leftCards: ColumnCard[] = [
@@ -593,21 +602,17 @@ export async function buildAgentMap(
           }
         : {}),
       ...(entry.scopes !== undefined ? { scopes: [...entry.scopes] } : {}),
-      status: resolution?.status ?? null,
-      connected: resolution ? resolution.resolved_connection_id !== null : null,
-      locked: resolution
-        ? resolution.status === "admin_locked" || resolution.org_default_enforced
-        : null,
+      // The cascade layer that bound the set, else the resolver's refusal.
+      status: resolution ? (resolution.source ?? resolution.error_code) : null,
+      connected: resolution ? resolution.resolved_connection_ids.length > 0 : null,
+      locked: resolution ? isResolutionLocked(resolution) : null,
       missing_scopes: resolution?.resolved_missing_scopes ?? [],
       run_blocking: readiness?.run_blocking ?? false,
-      connection_label: resolution?.resolved_connection_id
-        ? (resolution.candidates.find(
-            (candidate) => candidate.id === resolution.resolved_connection_id,
-          )?.label ??
-          resolution.candidates.find(
-            (candidate) => candidate.id === resolution.resolved_connection_id,
-          )?.account_id ??
-          null)
+      connection_label: resolution
+        ? resolution.resolved_connection_ids
+            .map((connectionId) => connectionLabel(resolution, connectionId))
+            .filter((label): label is string => label !== null)
+            .join(", ") || null
         : null,
     };
   });

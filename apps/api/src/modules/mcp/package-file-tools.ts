@@ -2,13 +2,13 @@
 
 /** File-backed package validation/import and MCP runtime discovery tools. */
 
-import { PACKAGE_WRITE_PERMISSIONS } from "../../lib/package-access.ts";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { MCP_SERVER_RUNTIME_CAPABILITIES, MCP_SERVER_RUNTIMES } from "@appstrate/core/mcp-server";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -32,19 +32,10 @@ interface PackageFileToolContext {
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
-   * Whether the caller may OFFER a package out of its home space — asked of a
-   * re-imported root that already lives in ANOTHER space, so this tool places
-   * it by the same rule as `POST /api/packages/import-bundle` and
-   * `POST /api/spaces/{id}/packages`: the offer is written with the placement
-   * when the caller holds `<type>:share` in the home, and the result reports
-   * `root_active: false` when they do not.
-   *
-   * Optional, and absent means `false`: a caller with no request context
-   * cannot be asked, and an import that silently offered on their behalf would
-   * be the one door that placed a package without proving the authority. One
-   * act, one rule — the fail-closed answer is the honest one here.
+   * Whether a root re-imported from ANOTHER home space is placed here with its
+   * offer, as `POST /api/packages/import-bundle` decides; `false` → `root_active: false`.
    */
-  mayShareRoot?: (packageId: string) => Promise<boolean>;
+  mayShareRoot: (packageId: string) => Promise<boolean>;
 }
 
 interface PackageFileBytes {
@@ -52,24 +43,6 @@ interface PackageFileBytes {
   fileId: string;
   name: string;
   mime: string;
-}
-
-type PackageFileImportContext = Pick<PackageFileToolContext, "permissions" | "actor">;
-
-function packageFileImportAccessError(ctx: PackageFileImportContext): string | undefined {
-  if (
-    !ctx.permissions.has("mcp:invoke") ||
-    !PACKAGE_WRITE_PERMISSIONS.some((permission) => ctx.permissions.has(permission))
-  ) {
-    return "Permissions 'mcp:invoke' and a package write permission are required to import packages.";
-  }
-  if (ctx.actor.type !== "user") return "Only organization users can import packages.";
-  return undefined;
-}
-
-/** Keep tool disclosure and server guidance on the same import eligibility rule. */
-export function canImportPackageFiles(ctx: PackageFileImportContext): boolean {
-  return packageFileImportAccessError(ctx) === undefined;
 }
 
 function packageSizeError(): McpError {
@@ -216,8 +189,6 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
     inputSchema: packageFileInputSchema(),
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
-    const accessError = packageFileImportAccessError(ctx);
-    if (accessError) return textResult({ error: accessError }, true);
     const uri = asString(args.file_uri);
     if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
     try {
@@ -262,7 +233,7 @@ function runtimeManifestTemplate(runtime: (typeof MCP_SERVER_RUNTIMES)[number]) 
     : [];
   return {
     manifest_version: capability.manifestVersion,
-    schema_version: "0.1",
+    schema_version: AFPS_SCHEMA_VERSION,
     type: "mcp-server",
     name: "@<organization-scope>/<package-name>",
     version: "1.0.0",
@@ -302,7 +273,7 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     textResult({
       archive_required: true,
       package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
-      schema_version: "0.1",
+      schema_version: AFPS_SCHEMA_VERSION,
       entry_point_must_exist: true,
       required_archive_files: ["manifest.json", "<server.entry_point>"],
       runtimes: MCP_SERVER_RUNTIMES.map((runtime) => ({
@@ -316,10 +287,15 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-export function buildPackageFileTools(ctx: PackageFileToolContext): AppstrateToolDefinition[] {
+/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
+ *  the actor being a user; the import service re-checks each package's `write`. */
+export function buildPackageFileTools(
+  ctx: PackageFileToolContext,
+  imports: boolean,
+): AppstrateToolDefinition[] {
   return [
     buildValidatePackageFileTool(ctx),
-    ...(canImportPackageFiles(ctx) ? [buildImportPackageFileTool(ctx)] : []),
+    ...(imports ? [buildImportPackageFileTool(ctx)] : []),
     buildRuntimeCapabilitiesTool(),
   ];
 }

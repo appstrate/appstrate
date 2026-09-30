@@ -23,10 +23,13 @@ import {
   pushServerlessReadyBreadcrumb,
 } from "../integrations-boot.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 function serverlessSpec(): IntegrationSpawnSpec {
   return {
     integrationId: "@tractr/google-drive",
     namespace: "google_drive",
+    connection: CONN_A,
     sourceKind: "none",
     manifest: { name: "@tractr/google-drive", version: "1.0.0" },
     spawnEnv: {},
@@ -51,7 +54,9 @@ describe("pushServerlessReadyBreadcrumb", () => {
 
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("info");
-    expect(breadcrumbs[0]!.message).toBe("@tractr/google-drive: api_call ready (8ms, 1 tool)");
+    expect(breadcrumbs[0]!.message).toBe(
+      "@tractr/google-drive [work]: api_call ready (8ms, 1 tool)",
+    );
     expect(breadcrumbs[0]!.data).toMatchObject({
       integrationId: "@tractr/google-drive",
       kind: "serverless",
@@ -66,7 +71,9 @@ describe("pushServerlessReadyBreadcrumb", () => {
 
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("info");
-    expect(breadcrumbs[0]!.message).toBe("@tractr/google-drive: api_call ready (3ms, 2 tools)");
+    expect(breadcrumbs[0]!.message).toBe(
+      "@tractr/google-drive [work]: api_call ready (3ms, 2 tools)",
+    );
   });
 });
 
@@ -74,6 +81,7 @@ function localSpec(): IntegrationSpawnSpec {
   return {
     integrationId: "@tractr/github",
     namespace: "github",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: "@tractr/github",

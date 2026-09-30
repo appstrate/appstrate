@@ -11,21 +11,59 @@ import {
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
+import { forbidden } from "../lib/errors.ts";
+import { lockOrgMember } from "./space-members.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import type { SpaceScope, OrgScope } from "../lib/scope.ts";
 
-const API_KEY_PREFIX = "ask_";
+/**
+ * `apst_` + 30 base62 random chars (~178 bits) + 6 base62 chars of CRC32: a
+ * secret scanner can validate a leaked key offline, and auth drops a malformed
+ * one without a database round-trip.
+ */
+export const API_KEY_PREFIX = "apst_";
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const RANDOM_LENGTH = 30;
+const CHECKSUM_LENGTH = 6;
+const API_KEY_RE = new RegExp(
+  `^${API_KEY_PREFIX}([0-9A-Za-z]{${RANDOM_LENGTH}})([0-9A-Za-z]{${CHECKSUM_LENGTH}})$`,
+);
+/** Stored and displayed so a holder can tell keys apart: the prefix + 8 random chars. */
+const DISPLAY_PREFIX_LENGTH = API_KEY_PREFIX.length + 8;
 
-/** Generate a new API key: `ask_` + 48 hex chars. */
+function randomBase62(length: number): string {
+  let out = "";
+  while (out.length < length) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(length))) {
+      // 248 = 4 × 62: dropping the top 8 byte values keeps every digit equiprobable.
+      if (byte < 248 && out.length < length) out += BASE62[byte % 62];
+    }
+  }
+  return out;
+}
+
+function checksum(random: string): string {
+  let n = Bun.hash.crc32(random);
+  let out = "";
+  for (let i = 0; i < CHECKSUM_LENGTH; i++) {
+    out = BASE62[n % 62] + out;
+    n = Math.floor(n / 62);
+  }
+  return out;
+}
+
+/** Generate a new API key in the current checksummed format. */
 export function generateApiKey(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  const hex = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return `${API_KEY_PREFIX}${hex}`;
+  const random = randomBase62(RANDOM_LENGTH);
+  return `${API_KEY_PREFIX}${random}${checksum(random)}`;
+}
+
+/** Shape and checksum only — no lookup. A `false` here never reaches the database. */
+export function isWellFormedApiKey(rawKey: string): boolean {
+  const match = API_KEY_RE.exec(rawKey);
+  return match !== null && checksum(match[1]!) === match[2];
 }
 
 /** SHA-256 hash of a raw key, returned as hex string. */
@@ -37,9 +75,8 @@ export async function hashApiKey(rawKey: string): Promise<string> {
     .join("");
 }
 
-/** First 8 characters of the raw key for display identification. */
 export function extractKeyPrefix(rawKey: string): string {
-  return rawKey.slice(0, 8);
+  return rawKey.slice(0, DISPLAY_PREFIX_LENGTH);
 }
 
 interface ValidatedApiKey {
@@ -59,7 +96,7 @@ interface ValidatedApiKey {
  * Updates lastUsedAt fire-and-forget.
  */
 export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | null> {
-  if (!rawKey.startsWith(API_KEY_PREFIX)) return null;
+  if (!isWellFormedApiKey(rawKey)) return null;
 
   const hash = await hashApiKey(rawKey);
 
@@ -123,7 +160,10 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
   };
 }
 
-/** Create a new API key record. Returns the record ID. */
+/**
+ * Create a new API key record. Returns the record ID. 403 when the creator is
+ * not (or no longer) a member.
+ */
 export async function createApiKeyRecord(params: {
   scope: SpaceScope;
   name: string;
@@ -134,16 +174,23 @@ export async function createApiKeyRecord(params: {
   scopes?: string[];
 }): Promise<string> {
   const id = crypto.randomUUID();
-  await db.insert(apiKeys).values({
-    id,
-    orgId: params.scope.orgId,
-    spaceId: params.scope.spaceId,
-    name: params.name,
-    keyHash: params.keyHash,
-    keyPrefix: params.keyPrefix,
-    createdBy: params.createdBy,
-    expiresAt: params.expiresAt,
-    scopes: params.scopes ?? [],
+  await db.transaction(async (tx) => {
+    // The exit holds this row FOR UPDATE while it revokes the member's keys: a
+    // key inserted without it could commit after the revocation and escape it.
+    if (!(await lockOrgMember(tx, params.scope.orgId, params.createdBy))) {
+      throw forbidden("Not a member of this organization");
+    }
+    await tx.insert(apiKeys).values({
+      id,
+      orgId: params.scope.orgId,
+      spaceId: params.scope.spaceId,
+      name: params.name,
+      keyHash: params.keyHash,
+      keyPrefix: params.keyPrefix,
+      createdBy: params.createdBy,
+      expiresAt: params.expiresAt,
+      scopes: params.scopes ?? [],
+    });
   });
   return id;
 }

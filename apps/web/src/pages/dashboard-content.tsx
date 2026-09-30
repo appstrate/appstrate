@@ -12,6 +12,7 @@ import {
   ChevronRight,
   MessageSquareText,
   Copy,
+  LayoutDashboard,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { AgentIdentityTile } from "../components/agent-identity";
 import { Badge } from "../components/status-badge";
+import { EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
 import { PageHeader } from "../components/page-header";
 import { RunDuration } from "../components/run-duration";
@@ -28,6 +30,7 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useAppConfig } from "../hooks/use-app-config";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
+import { dashboardSections } from "../lib/dashboard-sections";
 import { packageDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
 
@@ -72,7 +75,9 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
   }).format(new Date());
 
   const openChat = () => {
-    navigate("/chat", { state: chatDraftNavigationState(t("dashboard.askAi.draft")) });
+    navigate("/chat", {
+      state: chatDraftNavigationState(t("dashboard.askAi.draft")),
+    });
   };
 
   const copyCodingAgentSetup = async () => {
@@ -470,7 +475,7 @@ function UpcomingSchedules({
   );
 }
 
-function dashboardMetrics(data: DashboardData) {
+function dashboardMetrics(data: DashboardData, sections: ReturnType<typeof dashboardSections>) {
   const running = data.runs.filter((run) => run.status === "running").length;
   const terminal = data.runs.filter((run) => !["running", "pending"].includes(run.status));
   const successful = terminal.filter((run) => run.status === "success").length;
@@ -481,58 +486,79 @@ function dashboardMetrics(data: DashboardData) {
     running,
     successRate,
     activeSchedules,
+    // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
-      {
+      sections.recentRuns && {
         label: "Runs",
         value: data.runTotal,
         detail: `${running} en cours dans les derniers runs`,
       },
-      {
+      sections.recentAgents && {
         label: "Agents disponibles",
         value: data.agents.length,
         detail: `${data.agents.filter((agent) => agent.running_runs).length} actifs maintenant`,
       },
-      {
+      sections.recentRuns && {
         label: "Réussite des derniers runs",
         value: `${successRate} %`,
         detail: `${successful}/${terminal.length} runs terminés`,
       },
-      {
+      sections.schedules && {
         label: "Planifications actives",
         value: activeSchedules.length,
         detail: activeSchedules[0]?.next_run_at
           ? `Prochaine ${formatDateField(activeSchedules[0].next_run_at)}`
           : "Aucune exécution prévue",
       },
-    ],
+    ].filter((card) => card !== false),
   };
 }
 
 export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
-  const canReadSchedules = can("schedules:read");
-  const metrics = dashboardMetrics(data);
+  // The dashboard is the fallback route and renders for ANY principal: each
+  // section answers to the guard of the query that feeds it (#1556).
+  const sections = dashboardSections(can);
+  const canReadSchedules = sections.schedules;
+  const metrics = dashboardMetrics(data, sections);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
+
+  if (!sections.recentRuns && !sections.recentAgents && !sections.schedules) {
+    return (
+      <div className="space-y-8">
+        <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
+        <EmptyState
+          message={t("dashboard.empty")}
+          hint={t("dashboard.emptyHint")}
+          icon={LayoutDashboard}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
       <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
 
-      <div className="grid grid-cols-4 gap-3">
-        {metrics.cards.map((metric) => (
-          <MetricCard key={metric.label} {...metric} />
-        ))}
-      </div>
+      {metrics.cards.length > 0 && (
+        <div className="grid grid-cols-4 gap-3">
+          {metrics.cards.map((metric) => (
+            <MetricCard key={metric.label} {...metric} />
+          ))}
+        </div>
+      )}
 
-      <section>
-        <SectionHeading
-          title={t("dashboard.recentAgents")}
-          href="/agents"
-          action={t("dashboard.allAgents")}
-        />
-        <RecentAgents agents={data.agents} />
-      </section>
+      {sections.recentAgents && (
+        <section>
+          <SectionHeading
+            title={t("dashboard.recentAgents")}
+            href="/agents"
+            action={t("dashboard.allAgents")}
+          />
+          <RecentAgents agents={data.agents} />
+        </section>
+      )}
 
       {/* The schedules column follows the same permission as its nav entry: a
           caller who cannot reach `/schedules` was still being shown what is
@@ -541,17 +567,21 @@ export function DashboardContent(data: DashboardData) {
       <div
         className={cn(
           "grid gap-6",
-          canReadSchedules ? "grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]" : "grid-cols-1",
+          canReadSchedules && sections.recentRuns
+            ? "grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]"
+            : "grid-cols-1",
         )}
       >
-        <section className="min-w-0">
-          <SectionHeading
-            title={t("dashboard.recentRuns")}
-            href="/runs"
-            action={t("dashboard.seeAll")}
-          />
-          <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
-        </section>
+        {sections.recentRuns && (
+          <section className="min-w-0">
+            <SectionHeading
+              title={t("dashboard.recentRuns")}
+              href="/runs"
+              action={t("dashboard.seeAll")}
+            />
+            <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
+          </section>
+        )}
         {canReadSchedules && (
           <section className="min-w-0">
             <SectionHeading

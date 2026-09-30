@@ -20,8 +20,8 @@
  *
  *   keys(envSchema) ∪ modules ⊆ rows(ENV.md)
  *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
- *   required(envSchema) ∪ required(modules the sibling compose enables) ⊆ keys(EACH .env.example)
- * Module schemas are discovered, and so is that third line's per-file union — see below.
+ *   required(envSchema)    ⊆ keys(EACH shipped .env.example)
+ * Module schemas are discovered; the third line is not unioned — modules are opt-in via `MODULES`.
  *
  * ─── Why the third line exists ───────────────────────────────────────
  *
@@ -46,22 +46,12 @@
  * copies. Narrowing it to the root file would have left exactly the file the
  * defect was in unchecked.
  *
- * ─── Why "required" is per-FILE and not one set ───────────────────────
- *
- * A module's keys are optional because the module is: leave it out of `MODULES`
- * and nothing asks for them. That held for every example file while every
- * compose file passed `MODULES` through from the environment — and stopped
- * holding when `deploy/docker-compose.yml` pinned a DEFAULT naming one. For the
- * example beside it, "opt-in" is already opted in: an operator who copies that
- * file and runs `docker compose up` boots the module, and a missing Stripe key
- * is the aborted install this rule exists to prevent, not a doc gap.
- *
- * So each example file is held against the platform's required keys PLUS the
- * required keys of the modules its sibling compose enables by default
- * (`scripts/lib/compose-modules.ts`, read from the file — not a list of "the
- * deployments where billing is on" that the next such file would have to be
- * added to by hand). Where no compose pins `MODULES`, the two sets are equal
- * and this is the rule it replaces.
+ * A module's required keys are demanded of no example file, `deploy/.env.example`
+ * included: no shipped compose turns a module on by default —
+ * `deploy/docker-compose.yml` requires `MODULES` (`${MODULES:?}`) instead of
+ * pinning a list. The trade-off is known: nothing here forces that file to list
+ * the billing module's Stripe keys. It documents them in prose, and the
+ * module's own schema refuses to boot without them.
  *
  * It deliberately does not check the reverse direction. A documented row with
  * no schema key and no `.env.example` entry is the normal shape of a var read
@@ -75,8 +65,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { envSchema } from "../packages/env/src/index.ts";
 import { moduleEnvSchemas, type ModuleEnvFiles } from "./lib/module-env-schemas.ts";
-import { COMPOSE_GLOBS, ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
-import { modulesEnabledByDefault, siblingComposeFile } from "./lib/compose-modules.ts";
+import { ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -211,18 +200,14 @@ interface MissingRequired {
  * is per-FILE: `CONNECT_SESSION_SECRET` was present in the root `.env.example`
  * and absent from the self-hosting one, and a merged population reports that as
  * covered.
- *
- * BOTH sides are per-file. What a file must carry depends on which modules its
- * sibling compose boots, so the demand is a map too — one set per file, not one
- * set held against all of them.
  */
 export function findMissingRequired(
-  requiredPerFile: ReadonlyMap<string, ReadonlySet<string>>,
+  required: ReadonlySet<string>,
   perFile: ReadonlyMap<string, ReadonlySet<string>>,
 ): MissingRequired[] {
   const missing: MissingRequired[] = [];
   for (const [file, names] of [...perFile].sort(([a], [b]) => a.localeCompare(b))) {
-    for (const name of [...(requiredPerFile.get(file) ?? [])].sort()) {
+    for (const name of [...required].sort()) {
       if (!names.has(name)) missing.push({ name, file });
     }
   }
@@ -288,11 +273,6 @@ export function findUndocumented(
 interface MainDeps {
   /** The `.env.example` files to read. Default: every tracked one. */
   exampleFiles?: readonly string[];
-  /**
-   * The compose files that exist, so a sibling lookup asks before it reads.
-   * Default: every tracked one.
-   */
-  composeFiles?: readonly string[];
   /** Reads one repo-relative path. Default: from disk. */
   readFile?: (relativePath: string) => string;
   /** The schema key set. Default: the real `envSchema`'s keys. */
@@ -322,9 +302,6 @@ export async function main(deps: MainDeps = {}): Promise<number> {
 
   const exampleFiles =
     deps.exampleFiles ?? trackedFiles(ENV_EXAMPLE_GLOBS, "env example file", "fail");
-  const composeFiles = new Set(
-    deps.composeFiles ?? trackedFiles(COMPOSE_GLOBS, "compose file", "fail"),
-  );
   const perFile = new Map<string, ReadonlySet<string>>();
   const envExampleKeys = new Map<string, string>();
   for (const file of exampleFiles) {
@@ -333,28 +310,6 @@ export async function main(deps: MainDeps = {}): Promise<number> {
     for (const name of names) {
       if (!envExampleKeys.has(name)) envExampleKeys.set(name, file);
     }
-  }
-
-  // What each example file owes, which is not the same for all of them — see
-  // the header. The sibling compose is read only when it exists, so an example
-  // shipped without one keeps exactly the platform's demand.
-  const requiredByModule = new Map<string, ReadonlySet<string>>(
-    moduleEnv.schemas.map((module) => [module.id, requiredSchemaKeys(module.shape)]),
-  );
-  const requiredPerFile = new Map<string, ReadonlySet<string>>();
-  const moduleDemands: { file: string; module: string; keys: number }[] = [];
-  for (const file of exampleFiles) {
-    const names = new Set(required);
-    const sibling = siblingComposeFile(file);
-    if (composeFiles.has(sibling)) {
-      for (const id of modulesEnabledByDefault(readFile(sibling))) {
-        const moduleRequired = requiredByModule.get(id);
-        if (!moduleRequired || moduleRequired.size === 0) continue;
-        for (const name of moduleRequired) names.add(name);
-        moduleDemands.push({ file, module: id, keys: moduleRequired.size });
-      }
-    }
-    requiredPerFile.set(file, names);
   }
 
   // Vacuity floors. Each of the three populations can silently empty — a
@@ -382,7 +337,7 @@ export async function main(deps: MainDeps = {}): Promise<number> {
   // example missing a hard-required key does not get a confusing app, they get
   // an aborted `docker compose up` (the compose templates interpolate these
   // fail-hard as `${KEY:?…}`). That is a broken install, not a doc gap.
-  const missingRequired = findMissingRequired(requiredPerFile, perFile);
+  const missingRequired = findMissingRequired(required, perFile);
   if (missingRequired.length > 0) {
     err(
       `\x1b[31m✗\x1b[0m verify-env-docs: ${missingRequired.length} hard-required schema ` +
@@ -392,10 +347,8 @@ export async function main(deps: MainDeps = {}): Promise<number> {
         `aborts before a container starts. An example file that omits one hands the operator a ` +
         `broken install at step one.\n\n` +
         `Fix: add the key to the file below, commented or not, with a generated value or the ` +
-        `command that generates one. If it should NOT be required, give it a default in the ` +
-        `schema that declares it — this check reads the schema, not a list. A key demanded of ` +
-        `ONE example file comes from a module its sibling compose names in the DEFAULT of ` +
-        `\`MODULES\`; dropping the module from that default drops the demand.\n`,
+        `command that generates one. If it should NOT be required, give it a default in ` +
+        `packages/env/src/index.ts — this check reads the schema, not a list.\n`,
     );
     for (const m of missingRequired) {
       err(`  \x1b[1m${m.name}\x1b[0m  missing from \x1b[1m${m.file}\x1b[0m`);
@@ -408,15 +361,6 @@ export async function main(deps: MainDeps = {}): Promise<number> {
 
   if (findings.length === 0) {
     const schemaBacked = [...documented].filter((n) => schemaKeys.has(n)).length;
-    // Named, not counted: which file owes a module's keys is the half of this
-    // rule a reader cannot infer from the globs, and it moves when a compose
-    // file changes its `MODULES` default.
-    const moduleDemandNote =
-      moduleDemands.length === 0
-        ? ""
-        : `, plus ${moduleDemands
-            .map((d) => `module ${d.module}'s ${d.keys} in ${d.file}`)
-            .join(", ")}`;
     const moduleNote =
       `${moduleSources.size} from ${moduleEnv.schemas.length} module schema(s)` +
       (moduleEnv.unstructured.length > 0
@@ -429,7 +373,7 @@ export async function main(deps: MainDeps = {}): Promise<number> {
         `(${documented.size} rows: ${schemaBacked} schema-backed, ${documented.size - schemaBacked} ` +
         `read straight from process.env; ${Object.keys(INFRA_ALLOWLIST).length} infra vars ` +
         `allowlisted), and all ${required.size} hard-required platform vars appear in every ` +
-        `example file${moduleDemandNote}.`,
+        `example file.`,
     );
     return 0;
   }

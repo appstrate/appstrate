@@ -2,12 +2,10 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  applyModelGenerationCapabilitiesOverride,
   mapModelReasoningLevels,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
-  toNativeModelReasoningLevel,
   type ModelGenerationCapabilities,
 } from "./model-generation.ts";
 
@@ -53,27 +51,27 @@ describe("resolveModelGenerationSettings", () => {
     expect(
       resolveModelGenerationSettings({
         capabilities: capabilities(),
-        defaults: { temperature: 0.7, reasoningLevel: "medium" },
-        override: { temperature: 0, reasoningLevel: "high" },
+        defaults: { temperature: 0.7, reasoning_level: "medium" },
+        override: { temperature: 0, reasoning_level: "high" },
       }),
-    ).toEqual({ temperature: 0, reasoningLevel: "high" });
+    ).toEqual({ temperature: 0, reasoning_level: "high" });
   });
 
   it("treats null override fields as inherit", () => {
     expect(
       resolveModelGenerationSettings({
         capabilities: capabilities(),
-        defaults: { temperature: 0.3, reasoningLevel: "low" },
-        override: { temperature: null, reasoningLevel: null },
+        defaults: { temperature: 0.3, reasoning_level: "low" },
+        override: { temperature: null, reasoning_level: null },
       }),
-    ).toEqual({ temperature: 0.3, reasoningLevel: "low" });
+    ).toEqual({ temperature: 0.3, reasoning_level: "low" });
   });
 
   it("rejects an explicitly unsupported level", () => {
     expect(() =>
       resolveModelGenerationSettings({
         capabilities: capabilities(),
-        override: { reasoningLevel: "xhigh" },
+        override: { reasoning_level: "xhigh" },
       }),
     ).toThrow(ModelGenerationError);
   });
@@ -81,7 +79,7 @@ describe("resolveModelGenerationSettings", () => {
   it("rejects an unconfirmed reasoning level when every catalog fact is unknown", () => {
     expect(() =>
       resolveModelGenerationSettings({
-        override: { temperature: 0.4, reasoningLevel: "medium" },
+        override: { temperature: 0.4, reasoning_level: "medium" },
       }),
     ).toThrow("does not support reasoning level 'medium'");
   });
@@ -102,12 +100,12 @@ describe("resolveModelGenerationSettings", () => {
             levels: { high: "unknown" },
           },
         }),
-        override: { reasoningLevel: "high" },
+        override: { reasoning_level: "high" },
       }),
     ).toThrow("does not support reasoning level 'high'");
   });
 
-  it("rejects unconfirmed levels when LiteLLM only confirms one level", () => {
+  it("rejects unconfirmed levels when the catalog confirms only one level", () => {
     expect(() =>
       resolveModelGenerationSettings({
         capabilities: capabilities({
@@ -117,7 +115,7 @@ describe("resolveModelGenerationSettings", () => {
             levels: { minimal: "supported" },
           },
         }),
-        override: { reasoningLevel: "high" },
+        override: { reasoning_level: "high" },
       }),
     ).toThrow("does not support reasoning level 'high'");
   });
@@ -128,10 +126,10 @@ describe("resolveModelGenerationSettings", () => {
         capabilities: capabilities({
           reasoning: {
             ...capabilities().reasoning,
-            temperatureCompatible: "unsupported",
+            temperature_compatible: "unsupported",
           },
         }),
-        override: { temperature: 0.4, reasoningLevel: "high" },
+        override: { temperature: 0.4, reasoning_level: "high" },
       }),
     ).toThrow("cannot combine a custom temperature with reasoning");
   });
@@ -142,38 +140,12 @@ describe("resolveModelGenerationSettings", () => {
         capabilities: capabilities({
           reasoning: {
             ...capabilities().reasoning,
-            temperatureCompatible: "unsupported",
+            temperature_compatible: "unsupported",
           },
         }),
-        override: { temperature: 0.4, reasoningLevel: "off" },
+        override: { temperature: 0.4, reasoning_level: "off" },
       }),
-    ).toEqual({ temperature: 0.4, reasoningLevel: "off" });
-  });
-});
-
-describe("applyModelGenerationCapabilitiesOverride", () => {
-  it("overrides only provider-specific facts and preserves catalog reasoning", () => {
-    const catalog = capabilities();
-    expect(
-      applyModelGenerationCapabilitiesOverride(catalog, { temperature: "unsupported" }),
-    ).toEqual({ ...catalog, temperature: "unsupported" });
-  });
-
-  it("allows a provider override to clear adaptive reasoning", () => {
-    const catalog = capabilities({
-      reasoning: { ...capabilities().reasoning, adaptive: true },
-    });
-    expect(
-      applyModelGenerationCapabilitiesOverride(catalog, { reasoning: { adaptive: null } }),
-    ).toMatchObject({ reasoning: { adaptive: null } });
-  });
-
-  it("merges a sparse provider pair constraint into reasoning", () => {
-    expect(
-      applyModelGenerationCapabilitiesOverride(capabilities(), {
-        reasoning: { temperatureCompatible: "unsupported" },
-      }),
-    ).toMatchObject({ reasoning: { temperatureCompatible: "unsupported" } });
+    ).toEqual({ temperature: 0.4, reasoning_level: "off" });
   });
 });
 
@@ -181,7 +153,7 @@ describe("reconcileModelGenerationSettings", () => {
   it("removes settings explicitly rejected by the selected model", () => {
     expect(
       reconcileModelGenerationSettings(
-        { temperature: 0.7, reasoningLevel: "xhigh" },
+        { temperature: 0.7, reasoning_level: "xhigh" },
         capabilities({
           temperature: "unsupported",
           reasoning: {
@@ -194,28 +166,28 @@ describe("reconcileModelGenerationSettings", () => {
   });
 
   it("preserves object identity when every setting remains compatible", () => {
-    const value = { temperature: 0.4, reasoningLevel: "high" } as const;
+    const value = { temperature: 0.4, reasoning_level: "high" } as const;
     expect(reconcileModelGenerationSettings(value, capabilities())).toBe(value);
   });
 
   it("drops temperature but keeps reasoning for a known-incompatible pair", () => {
     expect(
       reconcileModelGenerationSettings(
-        { temperature: 0.4, reasoningLevel: "high" },
+        { temperature: 0.4, reasoning_level: "high" },
         capabilities({
           reasoning: {
             ...capabilities().reasoning,
-            temperatureCompatible: "unsupported",
+            temperature_compatible: "unsupported",
           },
         }),
       ),
-    ).toEqual({ reasoningLevel: "high" });
+    ).toEqual({ reasoning_level: "high" });
   });
 
   it("removes unconfirmed levels from a known reasoning model", () => {
     expect(
       reconcileModelGenerationSettings(
-        { reasoningLevel: "medium" },
+        { reasoning_level: "medium" },
         capabilities({
           reasoning: {
             supported: "supported",
@@ -230,7 +202,7 @@ describe("reconcileModelGenerationSettings", () => {
   it("removes unconfirmed levels when only one explicit level is known", () => {
     expect(
       reconcileModelGenerationSettings(
-        { reasoningLevel: "high" },
+        { reasoning_level: "high" },
         capabilities({
           reasoning: {
             supported: "unknown",
@@ -240,25 +212,5 @@ describe("reconcileModelGenerationSettings", () => {
         }),
       ),
     ).toEqual({});
-  });
-});
-
-describe("toNativeModelReasoningLevel", () => {
-  it("maps portable xhigh to the provider-native max value", () => {
-    expect(
-      toNativeModelReasoningLevel(
-        "xhigh",
-        capabilities({
-          reasoning: {
-            ...capabilities().reasoning,
-            nativeLevels: { xhigh: "max" },
-          },
-        }),
-      ),
-    ).toBe("max");
-  });
-
-  it("keeps max as a distinct first-class effort", () => {
-    expect(toNativeModelReasoningLevel("max", capabilities())).toBe("max");
   });
 });

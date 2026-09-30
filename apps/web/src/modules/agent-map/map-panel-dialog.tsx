@@ -33,6 +33,7 @@ import { ScheduleForm } from "../../components/schedule-form";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useCreateSchedule, useScheduleFormDeps } from "../../hooks/use-schedules";
+import { scheduleConnectionChoices } from "../../lib/connection-choice";
 import { agentMapQueryKeyPrefix } from "./use-agent-map";
 
 /** Which existing panel to show. */
@@ -84,9 +85,9 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
       persistedProxyId={deps?.persistedProxyId ?? null}
       homeWritable={deps?.homeWritable}
       packageId={packageId}
-      agentIntegrations={deps?.agentIntegrations ?? []}
       blockedMessage={deps?.hasFileInputs ? t("agents:schedule.fileInputBlocked") : undefined}
       isPending={createSchedule.isPending}
+      connectionChoices={scheduleConnectionChoices(createSchedule.error)}
       onSubmit={(data) => createSchedule.mutate(data, { onSuccess: onDone })}
       onCancel={onDone}
     />

@@ -4,7 +4,9 @@
  * Integration detail: capabilities and usage, connected accounts, tools,
  * authentication/access settings, and the read-only artifact. Technical auth
  * identifiers never stand in for navigation or capability activation.
- * OAuth client and connection mutations retain their existing ownership gates.
+ * OAuth clients are listed per tier (the space's own, then the organisation's,
+ * inherited by every space); client and connection mutations retain their
+ * ownership gates.
  */
 
 import { lazy, Suspense, useState } from "react";
@@ -48,6 +50,7 @@ import {
   FileArchive,
   IdCard,
   Server,
+  AlertTriangle,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { AddIntegrationConnection } from "../components/integration-connect/add-integration-connection";
@@ -65,6 +68,8 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { DataTable } from "../components/data-table";
@@ -82,10 +87,16 @@ import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps"
 import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
+import { keepAvailable, toggleCapped, unavailableConnectionIds } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
 import { maySetPackageActive } from "../lib/package-permissions";
-import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
+import {
+  usePackageDetail,
+  useDeletePackage,
+  usePackageDownload,
+  type Versioned,
+} from "../hooks/use-packages";
 import {
   useIntegrationDetail,
   useIntegrationClients,
@@ -93,6 +104,7 @@ import {
   useCreateIntegrationOAuthClient,
   useRotateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
+  usePromoteIntegrationOAuthClient,
   useUpdateIntegrationSettings,
   useIntegrationPins,
   useIntegrationConnections,
@@ -104,6 +116,7 @@ import {
   useDeleteIntegrationOrgDefault,
   type IntegrationAuthStatus,
   type IntegrationClient,
+  type IntegrationClientTier,
   type IntegrationConnection,
   type IntegrationManifestAuth,
   type IntegrationDetailWire,
@@ -120,7 +133,6 @@ import {
 } from "@appstrate/ui/components/table";
 import { useIntegrations } from "../hooks/use-integrations";
 import { useAuth } from "../hooks/use-auth";
-import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
 
 const IntegrationDefinitionEditor = lazy(() =>
   import("./package-editor").then((module) => ({
@@ -155,6 +167,7 @@ import { isOauthAuthConnectable } from "../components/integration-connect/connec
  * back, shown as a placeholder when one is already set.
  */
 function OAuthClientModal({
+  tier,
   packageId,
   authKey,
   authDecl,
@@ -163,6 +176,7 @@ function OAuthClientModal({
   platformRedirectUri,
   onClose,
 }: {
+  tier: IntegrationClientTier;
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
@@ -172,8 +186,8 @@ function OAuthClientModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const create = useCreateIntegrationOAuthClient();
-  const rotate = useRotateIntegrationOAuthClient();
+  const create = useCreateIntegrationOAuthClient(tier);
+  const rotate = useRotateIntegrationOAuthClient(tier);
   const pending = mode === "create" ? create.isPending : rotate.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
@@ -358,38 +372,49 @@ function OAuthClientModal({
 /**
  * The admin hub for an auth's OAuth clients: every client that can mint a
  * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
- * read-only) plus the org's N custom (BYO-app) clients — with which is the
+ * read-only) plus N custom (BYO-app) clients — with which is the
  * default. Multi-client: an admin registers as many custom clients as needed,
  * rotates or deletes each by id, and picks the default (the model-provider
  * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
  * client, shown read-only with a delete action that re-triggers registration;
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
- * public client. Secrets are never returned by the endpoint.
+ * public client. Secrets are never returned by the endpoint. `tier` picks the
+ * routes; only the tier's own rows are editable.
  */
 function ClientsTable({
+  tier,
   packageId,
   authKey,
   authDecl,
   autoProvisioned,
 }: {
+  tier: IntegrationClientTier;
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const { data: clients, isLoading, isError, error } = useIntegrationClients(packageId, authKey);
+  const {
+    data: clients,
+    isLoading,
+    isError,
+    error,
+  } = useIntegrationClients(tier, packageId, authKey);
   // Read from the same query key the page already holds, rather than threading
   // the value down through `ConfigAuthBlock`, which would carry a prop it never
   // reads. React Query dedupes, so this costs no request.
   const { data: detail } = useIntegrationDetail(packageId);
   const platformRedirectUri = detail?.platform_redirect_uri ?? "";
-  const setDefault = useSetDefaultIntegrationClient();
-  const del = useDeleteIntegrationOAuthClient();
+  const setDefault = useSetDefaultIntegrationClient(tier);
+  const del = useDeleteIntegrationOAuthClient(tier);
+  const promote = usePromoteIntegrationOAuthClient();
+  const { can } = usePermissions();
   const [modal, setModal] = useState<
     { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
+  const [confirmPromote, setConfirmPromote] = useState<IntegrationClient | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
   // token endpoint only accepts a DCR/CIMD-acquired client, so a hand-entered
   // one usually points at the wrong server and disables auto-registration. Keep
@@ -397,21 +422,21 @@ function ClientsTable({
   const [showManual, setShowManual] = useState(false);
 
   const rows = clients ?? [];
-  // What connect will ACTUALLY send. A registered client may carry its own
-  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
-  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
-  // value unconditionally would hand the admin the wrong string to register in
-  // exactly the setup this display exists to get right. New connections always
-  // use the default client, so that client's override is the one that decides.
-  const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
-  // Choosing a default only matters when more than one client can mint connections.
   const canChooseDefault = rows.length > 1;
+  const ownSource = tier === "space" ? "custom" : "org";
+  // An org row shows in both tables on the page: prefix the org table's test ids.
+  const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
   // Classic auths always allow registering more custom clients; auto-provisioned
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
+  // Auto-provisioned auths have no org tier (their clients are per space).
+  const canPromote = tier === "space" && !autoProvisioned && can("org-integrations:configure");
   const columns = useIntegrationClientColumns({
+    ownSource,
+    tid,
     canChooseDefault,
+    canPromote,
     settingDefaultClientRef: setDefault.isPending
       ? (setDefault.variables?.body.client_ref ?? null)
       : null,
@@ -422,13 +447,28 @@ function ClientsTable({
         body: { client_ref: client.client_ref },
       }),
     onRotate: (client) => setModal({ mode: "rotate", client }),
+    onPromote: (client) => setConfirmPromote(client),
     onDelete: (client) => setConfirmDelete(client),
   });
+  // What the tier means, said once under its heading: the org's clients serve
+  // every space, and a space row inherited from the org says where it comes from.
+  const tierHint =
+    tier === "org"
+      ? t("integration.clients.orgHint")
+      : rows.some((c) => c.source === "org")
+        ? t("integration.clients.inheritedOrgHint")
+        : null;
 
   return (
-    <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
+    <div
+      // The org's table follows the space's under the same auth.
+      className={tier === "space" ? "mb-3" : "mt-8 mb-3"}
+      data-testid={tid(`oauth-clients-list-${authKey}`)}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h4 className="text-sm font-medium">{t("integration.clients.title")}</h4>
+        <h4 className="text-sm font-medium">
+          {tier === "space" ? t("integration.clients.title") : t("integration.clients.orgTitle")}
+        </h4>
         {canRegister && (
           <Button
             type="button"
@@ -436,7 +476,7 @@ function ClientsTable({
             variant="outline"
             className="h-7 text-xs"
             onClick={() => setModal({ mode: "create" })}
-            data-testid={`oauth-client-register-${authKey}`}
+            data-testid={tid(`oauth-client-register-${authKey}`)}
           >
             <Plus size={14} />
             {t("integration.clients.register")}
@@ -444,10 +484,14 @@ function ClientsTable({
         )}
       </div>
 
+      {tierHint && <p className="text-muted-foreground mb-3 text-sm">{tierHint}</p>}
+
       <DataTable
         surface="integrated"
         columnMode="scroll"
-        label={t("integration.clients.title")}
+        label={
+          tier === "space" ? t("integration.clients.title") : t("integration.clients.orgTitle")
+        }
         columns={columns}
         rows={rows}
         rowKey={(client) => client.client_ref}
@@ -492,11 +536,10 @@ function ClientsTable({
         </Button>
       )}
 
-      <AuthTechnicalSettings redirectUri={effectiveRedirectUri} authKey={authKey} />
-
       {modal && (
         <OAuthClientModal
           key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          tier={tier}
           packageId={packageId}
           authKey={authKey}
           authDecl={authDecl}
@@ -510,13 +553,32 @@ function ClientsTable({
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
         title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.oauthClient.delete.confirm")}
+        description={
+          tier === "space"
+            ? t("integration.oauthClient.delete.confirm")
+            : t("integration.oauthClient.delete.confirmOrg")
+        }
         isPending={del.isPending}
         onConfirm={() => {
           if (!confirmDelete) return;
           del.mutate(
             { params: { path: { packageId, clientId: confirmDelete.client_ref } } },
             { onSuccess: () => setConfirmDelete(null) },
+          );
+        }}
+      />
+      <ConfirmModal
+        open={confirmPromote !== null}
+        onClose={() => setConfirmPromote(null)}
+        title={t("integration.clients.promote.action")}
+        description={t("integration.clients.promote.confirm")}
+        variant="default"
+        isPending={promote.isPending}
+        onConfirm={() => {
+          if (!confirmPromote) return;
+          promote.mutate(
+            { params: { path: { packageId, clientId: confirmPromote.client_ref } } },
+            { onSuccess: () => setConfirmPromote(null) },
           );
         }}
       />
@@ -529,19 +591,23 @@ function ClientsTable({
 // ─────────────────────────────────────────────
 
 /**
- * Per-auth admin configuration: the declared auth metadata (scopes, resource,
- * authorized URIs) plus the OAuth clients table (system + custom) and the
- * registration form to add/rotate/delete the org's own (BYO-app) client.
- * Separated from the connected accounts table.
+ * The redirect URI an admin registers at the provider, once per auth, under
+ * both client tables.
  */
-function AuthTechnicalSettings({
-  redirectUri,
-  authKey,
-}: {
-  redirectUri?: string;
-  authKey: string;
-}) {
+function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; authKey: string }) {
   const { t } = useTranslation("settings");
+  // Same query keys the tables above hold: React Query dedupes, no request.
+  const { data: clients } = useIntegrationClients("space", packageId, authKey);
+  const { data: detail } = useIntegrationDetail(packageId);
+  // What connect will ACTUALLY send. A registered client may carry its own
+  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
+  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
+  // value unconditionally would hand the admin the wrong string to register in
+  // exactly the setup this display exists to get right. New connections always
+  // use the space's default client (its own or the org's it inherits), so that
+  // client's override is the one that decides.
+  const redirectUri =
+    clients?.find((c) => c.is_default)?.redirect_uri || detail?.platform_redirect_uri;
   if (!redirectUri) return null;
   return (
     <section className="mt-8">
@@ -568,6 +634,7 @@ function ConfigAuthBlock({
   authDecl: IntegrationManifestAuth;
 }) {
   const { t } = useTranslation("settings");
+  const { can } = usePermissions();
   const isOAuth = status.type === "oauth2";
 
   return (
@@ -581,12 +648,23 @@ function ConfigAuthBlock({
       </p>
       {isOAuth && (
         <ClientsTable
+          tier="space"
           packageId={packageId}
           authKey={status.auth_key}
           authDecl={authDecl}
           autoProvisioned={status.client_auto_provisioned}
         />
       )}
+      {isOAuth && !status.client_auto_provisioned && can("org-integrations:configure") && (
+        <ClientsTable
+          tier="org"
+          packageId={packageId}
+          authKey={status.auth_key}
+          authDecl={authDecl}
+          autoProvisioned={false}
+        />
+      )}
+      {isOAuth && <AuthTechnicalSettings packageId={packageId} authKey={status.auth_key} />}
     </section>
   );
 }
@@ -605,6 +683,7 @@ function IntegrationSettings({
   canActivate,
   definition,
   isOwned,
+  versionGrants,
 }: {
   packageId: string;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
@@ -618,9 +697,11 @@ function IntegrationSettings({
    * The package draft, present when the reader may change the definition: its
    * sections are then edited here, in place. Absent, Définition stays a read.
    */
-  definition?: OrgPackageItemDetail;
+  definition?: Versioned<OrgPackageItemDetail>;
   /** A system integration has no version history of its own. */
   isOwned: boolean;
+  /** What the version history may do: restore needs the home space's write, delete its delete. */
+  versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const location = useLocation();
@@ -775,7 +856,7 @@ function IntegrationSettings({
           filesHref={(path) => sectionHref("files", { file: path })}
         />
       ) : active === "versions" ? (
-        <PackageVersionsSection type="integration" packageId={packageId} isOwned={isOwned} />
+        <PackageVersionsSection type="integration" packageId={packageId} {...versionGrants} />
       ) : active === "files" ? (
         <PackageFilesView
           key={requestedFile}
@@ -1032,12 +1113,6 @@ function BlockUserConnectionsToggle({
 }
 
 /**
- * Org-wide default connection for this integration — the cross-agent
- * baseline every consuming agent uses unless a per-agent exception (pin)
- * overrides it. `enforce` locks members; otherwise it's a soft default a
- * member can still override with their own pick.
- */
-/**
  * Option label for the two admin pickers (org default, pins). Those lists
  * are org-wide — since the connections endpoint returns shared connections
  * owned by other members, an admin choosing a cross-agent default is picking
@@ -1046,10 +1121,19 @@ function BlockUserConnectionsToggle({
  * information as a badge instead, where a suffix would fight the rename UI.
  */
 function connectionOptionLabel(c: IntegrationConnection): string {
-  const base = connectionDisplayLabel(c);
-  return c.owner_name ? `${base} — ${c.owner_name}` : base;
+  return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }
 
+/**
+ * Org-wide default connections for this integration — the cross-agent
+ * baseline every consuming agent uses unless a per-agent exception (pin)
+ * overrides it. `enforce` locks members; otherwise it's a soft default a
+ * member can still override with their own pick.
+ *
+ * The default is a SET (up to {@link MAX_CONNECTIONS_PER_INTEGRATION}), and
+ * every subset is a valid default on its own, so each tick commits alone —
+ * the rule for a list of independently valid values.
+ */
 function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
@@ -1058,120 +1142,198 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const remove = useDeleteIntegrationOrgDefault();
 
   const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
+  const sharedIds = shared.map((c) => c.id);
+  const storedIds = orgDefault?.connection_ids ?? [];
+  // Stored members no longer shared are named apart: every run falling back on
+  // them is refused. Until the list loads, every member would read as unavailable.
+  const unavailableIds = connections ? unavailableConnectionIds(storedIds, sharedIds) : [];
 
   const [pendingValue, setPendingValue] = useState<{
-    connection_id: string;
+    connection_ids: string[];
     enforce: boolean;
   } | null>(null);
-  const connectionId = pendingValue?.connection_id ?? orgDefault?.connection_id ?? "";
+  // Only what is still shared is ticked, so the next write is what the list shows.
+  const connectionIds = pendingValue?.connection_ids ?? keepAvailable(storedIds, sharedIds);
   const enforce = pendingValue?.enforce ?? orgDefault?.enforce ?? false;
+  const hasDefault = pendingValue ? pendingValue.connection_ids.length > 0 : !!orgDefault;
   const [draftMode, setDraftMode] = useState<string | null>(null);
-  const mode = draftMode ?? (connectionId ? (enforce ? "forced" : "default") : "choice");
-  const save = async (nextId: string, nextEnforce: boolean) => {
-    setPendingValue({ connection_id: nextId, enforce: nextEnforce });
+  const mode = draftMode ?? (hasDefault ? (enforce ? "forced" : "default") : "choice");
+  /** An empty set removes the default; `keepMode` holds the mode while the list is empty. */
+  const save = async (nextIds: string[], nextEnforce: boolean, keepMode: string | null = null) => {
+    setPendingValue({ connection_ids: nextIds, enforce: nextEnforce });
+    if (nextIds.length === 0) setDraftMode(keepMode);
     try {
-      if (nextId)
+      if (nextIds.length > 0)
         await upsert.mutateAsync({
           params: { path: { packageId } },
-          body: { connection_id: nextId, enforce: nextEnforce },
+          body: { connection_ids: nextIds, enforce: nextEnforce },
         });
       else await remove.mutateAsync({ params: { path: { packageId } } });
       await refetch();
-    } catch (error) {
-      toast.error(getErrorMessage(error));
+    } catch {
+      // The mutation's own `onError` has already said why.
     } finally {
       setPendingValue(null);
-      setDraftMode(null);
+      if (nextIds.length > 0) setDraftMode(null);
     }
   };
+  const connectionsLabel = t(
+    `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
+  );
 
   return (
-    <div className="grid items-start gap-6 md:grid-cols-2" data-testid="org-default-section">
-      <div className="min-w-0">
-        <div className="mb-3">
-          <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
-        </div>
-
-        <Select
-          value={mode}
-          disabled={isLoading || isError || pendingValue !== null}
-          onValueChange={(value) => {
-            if (value === "choice") {
-              setDraftMode(null);
-              if (connectionId) void save("", false);
-            } else if (connectionId) void save(connectionId, value === "forced");
-            else setDraftMode(value);
-          }}
-        >
-          <SelectTrigger aria-label={t("integration.admin.usage.title")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(["choice", "default", "forced"] as const).map((value) => (
-              <SelectItem
-                key={value}
-                value={value}
-                disabled={value !== "choice" && shared.length === 0}
-              >
-                {t(`integration.admin.usage.${value}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-muted-foreground mt-2 text-sm">
-          {t(`integration.admin.usage.${mode}Help`)}
-        </p>
-        {shared.length === 0 ? (
-          <p className="text-muted-foreground text-xs italic">
-            {t("integration.admin.orgDefault.noPinnableConnections")}
-          </p>
-        ) : null}
-      </div>
-      {shared.length > 0 && mode !== "choice" ? (
-        <div className="min-w-0">
-          <Label htmlFor="org-default-connection" className="mb-3 block text-sm font-medium">
-            {t(
-              `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
-            )}
-          </Label>
-          <Select
-            value={connectionId || ""}
-            disabled={isLoading || isError || pendingValue !== null}
-            onValueChange={(value) => void save(value, mode === "forced")}
-          >
-            <SelectTrigger
-              id="org-default-connection"
-              data-testid="org-default-connection"
-              aria-label={t(
-                `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
-              )}
+    <div className="space-y-4" data-testid="org-default-section">
+      {unavailableIds.length > 0 && (
+        <Alert variant="warning" data-testid="org-default-unavailable-warning">
+          <AlertTriangle className="size-4" />
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              {t("integration.admin.orgDefault.unavailableWarning", {
+                count: unavailableIds.length,
+              })}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pendingValue !== null}
+              onClick={() => void save(connectionIds, enforce)}
+              data-testid="org-default-drop-unavailable"
             >
-              <SelectValue placeholder={t("integration.admin.orgDefault.select")} />
+              {t("integration.admin.orgDefault.dropUnavailable", {
+                count: unavailableIds.length,
+              })}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="grid items-start gap-6 md:grid-cols-2">
+        <div className="min-w-0">
+          <div className="mb-3">
+            <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
+          </div>
+
+          <Select
+            value={mode}
+            disabled={isLoading || isError || pendingValue !== null}
+            onValueChange={(value) => {
+              if (value === "choice") {
+                setDraftMode(null);
+                if (orgDefault) void save([], false);
+              } else if (connectionIds.length > 0) void save(connectionIds, value === "forced");
+              else setDraftMode(value);
+            }}
+          >
+            <SelectTrigger aria-label={t("integration.admin.usage.title")}>
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {shared.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
+              {(["choice", "default", "forced"] as const).map((value) => (
+                <SelectItem
+                  key={value}
+                  value={value}
+                  disabled={value !== "choice" && shared.length === 0}
+                >
+                  {t(`integration.admin.usage.${value}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {t(`integration.admin.usage.${mode}Help`)}
+          </p>
+          {shared.length === 0 ? (
+            <p className="text-muted-foreground text-xs italic">
+              {t("integration.admin.orgDefault.noPinnableConnections")}
+            </p>
+          ) : null}
         </div>
-      ) : null}
+        {shared.length > 0 && mode !== "choice" ? (
+          <div className="min-w-0">
+            <p id="org-default-connections-label" className="mb-3 text-sm font-medium">
+              {connectionsLabel}
+            </p>
+            <ConnectionSetChecklist
+              connections={shared}
+              value={connectionIds}
+              onChange={(next) => void save(next, mode === "forced", mode)}
+              idPrefix="org-default-connection"
+              labelledBy="org-default-connections-label"
+              unavailableIds={unavailableIds}
+              disabled={isLoading || isError || pendingValue !== null}
+            />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 /**
- * Centralised pin management. One pin per (agent, integration) — admin
- * picks which shared connection a given agent uses. Flat model: no
- * authKey to disambiguate (the connection's own authKey is implicit).
- * With an org default in place, this surface is for per-agent EXCEPTIONS.
+ * Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}. `unavailableIds` are stored
+ * members no longer offered: listed unticked, so the next write visibly drops them.
+ */
+function ConnectionSetChecklist({
+  connections,
+  value,
+  onChange,
+  idPrefix,
+  labelledBy,
+  unavailableIds,
+  disabled = false,
+}: {
+  connections: IntegrationConnection[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  idPrefix: string;
+  labelledBy: string;
+  unavailableIds?: string[];
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelledBy}
+      className="flex flex-col gap-2"
+      data-testid={`${idPrefix}s`}
+    >
+      {connections.map((c) => {
+        const id = `${idPrefix}-${c.id}`;
+        const isChecked = value.includes(c.id);
+        return (
+          <div key={c.id} className="flex items-center gap-2 text-sm">
+            <Checkbox
+              id={id}
+              checked={isChecked}
+              disabled={disabled || (!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION)}
+              onCheckedChange={() => onChange(toggleCapped(value, c.id))}
+              data-testid={id}
+            />
+            <label htmlFor={id} className="min-w-0 truncate">
+              {connectionOptionLabel(c)}
+            </label>
+          </div>
+        );
+      })}
+      {unavailableIds?.map((id) => (
+        <div
+          key={id}
+          className="flex items-center gap-2 text-sm"
+          data-testid={`${idPrefix}-unavailable-${id}`}
+        >
+          <Checkbox checked={false} disabled aria-hidden />
+          <span className="text-muted-foreground line-through">
+            {t("integration.admin.unavailableConnection")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
+ * write. With an org default in place, these are per-agent EXCEPTIONS.
  */
 function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -1183,30 +1345,27 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   const [newAgent, setNewAgent] = useState("");
   const [adding, setAdding] = useState(false);
-  const [newConnectionId, setNewConnectionId] = useState("");
+  const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
+
+  const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
   const onSubmitNewPin = () => {
-    if (!newAgent || !newConnectionId) return;
+    if (!canAddPin) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_id: newConnectionId },
+        body: { connection_ids: newConnectionIds },
       },
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewConnectionId("");
+          setNewConnectionIds([]);
           setAdding(false);
         },
       },
@@ -1236,24 +1395,32 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             <TableHeader>
               <TableRow>
                 <TableHead>{t("integration.admin.pinManagement.colAgent")}</TableHead>
-                <TableHead>{t("integration.admin.pinManagement.colAuth")}</TableHead>
-                <TableHead>{t("integration.admin.pinManagement.colConnection")}</TableHead>
+                <TableHead>{t("integration.admin.pinManagement.colConnections")}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow
-                  key={`${p.packageId}-${p.auth_key}`}
-                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
-                >
+                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
                   <TableCell>{agentDisplayName(p.packageId)}</TableCell>
                   <TableCell>
-                    <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.auth_key}
-                    </span>
+                    {p.connection_ids.map((id, i) => {
+                      const c = pinnableConnections.find((x) => x.id === id);
+                      return (
+                        <span key={id}>
+                          {i > 0 && " · "}
+                          {c ? (
+                            connectionOptionLabel(c)
+                          ) : connections === undefined ? null : (
+                            // No longer shared or deleted: every run of this agent is refused.
+                            <span className="text-warning">
+                              {t("integration.admin.unavailableConnection")}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </TableCell>
-                  <TableCell>{connectionDisplay(p.connection_id)}</TableCell>
                   <TableCell>
                     <Button
                       size="icon"
@@ -1314,27 +1481,22 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             </Select>
           </div>
           <div className="min-w-[12rem] flex-1">
-            <Label htmlFor="pin-add-connection" className="mb-2 block text-sm">
-              {t("integration.admin.pinManagement.colConnection")}
-            </Label>
-            <Select value={newConnectionId} onValueChange={setNewConnectionId}>
-              <SelectTrigger id="pin-add-connection" data-testid="pin-add-connection">
-                <SelectValue placeholder={t("integration.admin.pinManagement.colConnection")} />
-              </SelectTrigger>
-              <SelectContent>
-                {pinnableConnections.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {connectionDisplay(c.id)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <p id="pin-add-connections-label" className="mb-2 block text-sm font-medium">
+              {t("integration.admin.pinManagement.colConnections")}
+            </p>
+            <ConnectionSetChecklist
+              connections={pinnableConnections}
+              value={newConnectionIds}
+              onChange={setNewConnectionIds}
+              idPrefix="pin-add-connection"
+              labelledBy="pin-add-connections-label"
+            />
           </div>
           <Button
             size="sm"
             variant="outline"
             onClick={onSubmitNewPin}
-            disabled={!newAgent || !newConnectionId || upsertPin.isPending}
+            disabled={!canAddPin || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
@@ -1760,6 +1922,10 @@ export function IntegrationDetailPage() {
             canActivate={canActivate}
             definition={isOwned && can("integrations:write") && pkg ? pkg : undefined}
             isOwned={isOwned}
+            versionGrants={{
+              canRestore: isOwned && !!homeWritable,
+              canDelete: isOwned && !!homeDeletable,
+            }}
           />
         </TabsContent>
 

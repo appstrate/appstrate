@@ -45,7 +45,7 @@ test("a never-published agent opens read-only for an operator, and becomes launc
   // Nothing here reaches the provider — no run is started.
   const credential = await apiClient.post("/model-provider-credentials", {
     providerId: "anthropic",
-    apiKey: "sk-ant-e2e",
+    api_key: "sk-ant-e2e",
   });
   expect(credential.status(), await credential.text()).toBe(201);
   const model = await apiClient.post("/models", {

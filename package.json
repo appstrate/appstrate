@@ -18,29 +18,29 @@
   ],
   "license": "Apache-2.0",
   "devDependencies": {
-    "@commitlint/cli": "^21.2.2",
-    "@commitlint/config-conventional": "^21.2.2",
-    "@earendil-works/pi-ai": "0.85.1",
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "@earendil-works/pi-ai": "0.87.1",
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^9.0.0",
-    "@redocly/openapi-core": "^2.51.2",
+    "@redocly/openapi-core": "^2.54.3",
     "@types/bun": "latest",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.6",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.12.0",
     "husky": "^9.1.7",
-    "knip": "^6.34.0",
-    "lint-staged": "^17.5.0",
+    "knip": "^6.38.0",
+    "lint-staged": "^17.6.0",
     "openapi-typescript": "^7.13.0",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "prettier-plugin-tailwindcss": "^0.8.1",
-    "turbo": "^2.10.12",
+    "turbo": "^2.11.4",
     "type-coverage": "^2.30.1",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.69.0"
+    "typescript-eslint": "^8.70.1"
   },
   "engines": {
     "bun": ">=1.3.9"
@@ -90,6 +90,7 @@
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "build-runtime": "bun run docker:build:runtime",
     "docker:check": "bash scripts/docker-check.sh",
+    "audit:deps": "bun scripts/audit-dependencies.ts",
     "audit:empty-integrations": "bun scripts/audit-empty-integration-selections.ts",
     "audit:storage-orphans": "bun scripts/storage-orphans.ts",
     "docker:build:runtime": "bun scripts/docker-build-runtime.ts",
@@ -124,6 +125,8 @@
     "verify:type-coverage": "type-coverage --project apps/web/tsconfig.json --strict --at-least 99 --ignore-files \"apps/web/src/api/schema.d.ts\"",
     "verify:compose-defaults": "bun scripts/verify-compose-defaults.ts",
     "verify:release-version": "bun scripts/verify-release-version.ts",
+    "verify:schema-catalog": "bun scripts/verify-schema-catalog.ts",
+    "verify:system-models": "bun scripts/verify-system-models.ts",
     "verify:env-docs": "bun scripts/verify-env-docs.ts",
     "verify:workflows": "bun scripts/verify-workflows.ts",
     "openapi:baseline": "bun scripts/detect-breaking-changes.ts --update-baseline",
@@ -153,8 +156,8 @@
   "overrides": {
     "zod": "4.5.4",
     "jose": "6.2.12",
-    "ai": "^7.0.48",
-    "@ai-sdk/react": "^4.0.51",
-    "@ai-sdk/provider-utils": "^5.0.18"
+    "ai": "^7.0.118",
+    "@ai-sdk/react": "^4.0.121",
+    "@ai-sdk/provider-utils": "^5.0.49"
   }
 }

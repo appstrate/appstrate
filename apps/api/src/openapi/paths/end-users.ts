@@ -104,7 +104,7 @@ export const endUsersPaths = {
                     detail:
                       "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
                     code: "idempotency_in_progress",
-                    requestId: "req_abc123",
+                    request_id: "req_abc123",
                   },
                 },
                 externalIdTaken: {
@@ -115,7 +115,7 @@ export const endUsersPaths = {
                     status: 409,
                     detail: "An end-user with this externalId already exists in the space.",
                     code: "external_id_taken",
-                    requestId: "req_abc123",
+                    request_id: "req_abc123",
                   },
                 },
               },
@@ -354,7 +354,7 @@ export const endUsersPaths = {
                 status: 409,
                 detail: "An end-user with this externalId already exists in the space.",
                 code: "external_id_taken",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },

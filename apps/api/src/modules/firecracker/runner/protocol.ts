@@ -35,8 +35,12 @@ import type {
 /**
  * Bumped on any wire-incompatible change. The client refuses to start
  * against a daemon speaking a different major protocol.
+ *
+ * History:
+ *   2 — `POST /v1/boundaries` takes `{ runId }` alone (no `opts`).
+ *   1 — initial protocol.
  */
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Platform-type mirrors
@@ -88,10 +92,9 @@ const workspaceHandleSchema = z.looseObject({
 
 const sidecarEndpointsSchema = z.looseObject({
   // The run-launcher (pi.ts) dereferences these to wire the agent's proxy +
-  // sink routing; the firecracker orchestrator always populates all four
-  // (even on skipSidecar runs — that flag gates createSidecar, not the
-  // boundary shape). Pin them so a boundary missing an endpoint is a clean
-  // parse error, not an undefined proxy URL surfacing mid-run.
+  // sink routing; the firecracker orchestrator always populates all four.
+  // Pin them so a boundary missing an endpoint is a clean parse error, not
+  // an undefined proxy URL surfacing mid-run.
   sidecarUrl: z.string().min(1),
   llmProxyUrl: z.string().min(1),
   forwardProxyUrl: z.string().min(1),
@@ -125,11 +128,9 @@ const sidecarLaunchSpecSchema = z.looseObject({
 // `strictObject`, unlike the platform-type mirrors above: these are the
 // daemon's OWN wire contract, not a pass-through of a core shape, so an
 // unknown key is a caller mistake and must be a 400 rather than a silent
-// drop. `{ opts: { skip_sidecar: true } }` on an open object is the shape of
-// that failure — the field is stripped, `skipSidecar` reads undefined, the
-// sidecar starts although the caller asked to skip it, and the answer is 200.
-// The nested option objects are closed for the same reason; the loose mirrors
-// above are deliberately NOT, per the note on them.
+// drop: an open object would strip a misspelled field and answer 200 as if
+// the caller had been understood. The loose mirrors above are deliberately
+// NOT closed, per the note on them.
 
 /**
  * Safe run-identifier charset. A runId reaches the daemon filesystem
@@ -148,7 +149,6 @@ export const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
 
 export const createBoundaryBodySchema = z.strictObject({
   runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),
-  opts: z.strictObject({ skipSidecar: z.boolean().optional() }).optional(),
 });
 
 /**

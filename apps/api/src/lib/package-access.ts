@@ -3,7 +3,14 @@
 import type { Context } from "hono";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
+import {
+  packages,
+  packageShares,
+  spaceMembers,
+  spacePackages,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
@@ -17,10 +24,17 @@ import { getLatestVersionId } from "../services/package-versions.ts";
 import { isPackageActiveHere } from "../services/space-packages.ts";
 import { activeHereSql } from "../services/package-activation.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
-import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
+import {
+  makePermissionGuard,
+  packagePermission,
+  packageSightPermissions,
+  reportPermissionDenial,
+  spacePackagePermission,
+} from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { PackageHome } from "@appstrate/shared-types";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
@@ -29,63 +43,27 @@ import { isUserPrincipal } from "./principal.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMemberships,
   effectiveInSpace,
+  personaFor,
+  personaMemberships,
 } from "./view-as.ts";
-import { resolveSpaceRole } from "./space-role.ts";
+import {
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  membershipOn,
+  resolveSpaceRole,
+} from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
 import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
-
-const PACKAGE_RESOURCES = {
-  agent: "agents",
-  skill: "skills",
-  integration: "integrations",
-  "mcp-server": "mcp-servers",
-} as const;
-
-/**
- * Permissions BEYOND `<resource>:read` that also let a caller SEE a package of
- * this type (RBAC spec §3.4) — a table, because it is a fact of the permission
- * catalogue and not a branch of behaviour.
- *
- * `agents:run` is the one entry: it opens the list, the detail and the resolved
- * model the launch form reads, in a summary projection. So a `runner` reaches
- * an agent, and every predicate that asks "may this caller know this package
- * exists" — {@link requireAgentRead} as a route guard,
- * {@link assertPackageIsReachable} as the 403-vs-404 decision — reads this same
- * table. A type absent from it has exactly one read permission.
- */
-const PACKAGE_EXTRA_READ_PERMISSIONS: Partial<Record<PackageType, readonly Permission[]>> = {
-  agent: ["agents:run"],
-};
-
-export function packagePermission(
-  type: PackageType,
-  action: "read" | "write" | "delete" | "share",
-): Permission {
-  return `${PACKAGE_RESOURCES[type]}:${action}`;
-}
-
-export const PACKAGE_WRITE_PERMISSIONS = Object.values(PACKAGE_RESOURCES).map(
-  (resource) => `${resource}:write` as Permission,
-);
-
-/**
- * Which permissions let a caller SEE a package of this type — the one statement
- * of that rule (RBAC spec §3.4), read off
- * {@link PACKAGE_EXTRA_READ_PERMISSIONS} so the disjunction is data.
- */
-function packageReadPermissions(type: PackageType): readonly Permission[] {
-  return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_READ_PERMISSIONS[type] ?? [])];
-}
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
  * the detail, and the resolved model the launch form reads (RBAC spec §3.4).
  * Every other agent surface keeps its `agents:read` / `agents:write` guard.
  */
-export const requireAgentRead = requireAnyPermission(packageReadPermissions("agent"));
+export const requireAgentRead = requireAnyPermission(packageSightPermissions("agent"));
 
 /**
  * `agents:run` without `agents:read` — the caller sees what the launch form
@@ -96,26 +74,6 @@ export const requireAgentRead = requireAnyPermission(packageReadPermissions("age
  */
 export function agentReadIsSummary(c: Context<AppEnv>): boolean {
   return !callerPermissions(c).has("agents:read");
-}
-
-/**
- * The permission one ACT on a space placement asks for, per package type.
- *
- * The act is spelled activate / configure / deactivate everywhere the platform
- * talks about it; the permission STRINGS keep the spelling they have in
- * `space_roles` rows and in every API key's scope list
- * (`integrations:install` / `integrations:uninstall`). Those are data, and
- * renaming a grant is a migration of rows, not of code — so the mapping is the
- * one place where the two vocabularies meet.
- */
-export function spacePackagePermission(
-  type: PackageType,
-  op: "activate" | "configure" | "deactivate",
-): Permission {
-  if (type === "agent") return "agents:configure";
-  if (type === "integration")
-    return op === "deactivate" ? "integrations:uninstall" : "integrations:install";
-  return packagePermission(type, "write");
 }
 
 /**
@@ -241,41 +199,48 @@ async function resolvePackageAccessSpaces(
   orgRole: OrgRole,
 ): Promise<PackageAccessSpace[]> {
   const callerId = callerPersonalOwnerId(c, orgId);
-  const [rows, memberships] = await Promise.all([
-    db
-      .select({
+  const tokenOnly = Boolean(c.get("endUser")) && !c.get("orgRole");
+  const persona = personaFor(c, orgId);
+  // Spaces and the caller's rows in one statement (RBAC spec §4.4); none under a
+  // preview (the overlay replaces them) or for an end-user token (no org role).
+  const joined = await db
+    .select({
+      space: {
         id: spaces.id,
         name: spaces.name,
         isDefault: spaces.isDefault,
         visibility: spaces.visibility,
         defaultRole: spaces.defaultRole,
         ownerUserId: spaces.ownerUserId,
-      })
-      .from(spaces)
-      .where(
-        and(
-          eq(spaces.orgId, orgId),
-          c.get("authMethod") === "api_key" || c.get("endUser")
-            ? eq(spaces.id, c.get("spaceId"))
-            : undefined,
-          // Someone else's personal space is never even LOADED. `resolveSpaceRole`
-          // would drop it anyway, but with one personal space per member this
-          // query would otherwise grow with the organization's headcount on
-          // every catalog read (RBAC spec §3.6).
-          callerId === null
-            ? isNull(spaces.ownerUserId)
-            : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
-        ),
+      },
+      ...MEMBERSHIP_COLUMNS,
+    })
+    .from(spaces)
+    .leftJoin(spaceMembers, membershipOn(tokenOnly || persona ? null : c.get("user").id))
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(
+      and(
+        eq(spaces.orgId, orgId),
+        c.get("authMethod") === "api_key" || c.get("endUser")
+          ? eq(spaces.id, c.get("spaceId"))
+          : undefined,
+        // Someone else's personal space is never even LOADED. `resolveSpaceRole`
+        // would drop it anyway, but with one personal space per member this
+        // query would otherwise grow with the organization's headcount on
+        // every catalog read (RBAC spec §3.6).
+        callerId === null
+          ? isNull(spaces.ownerUserId)
+          : or(isNull(spaces.ownerUserId), eq(spaces.ownerUserId, callerId)),
       ),
-    c.get("endUser") && !c.get("orgRole")
-      ? Promise.resolve(new Map())
-      : callerSpaceMemberships(c, orgId),
-  ]);
-  return rows.flatMap((space) => {
-    if (c.get("endUser") && !c.get("orgRole")) {
+    );
+  const overlay = personaMemberships(persona);
+  return joined.flatMap((row) => {
+    const { space } = row;
+    if (tokenOnly) {
       return space.id === c.get("spaceId") ? [{ ...space, permissions: callerPermissions(c) }] : [];
     }
-    const ref = resolveSpaceRole(orgRole, space, memberships.get(space.id) ?? null, callerId);
+    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
+    const ref = resolveSpaceRole(orgRole, space, member, callerId);
     if (!ref) return [];
     return [
       {
@@ -485,17 +450,68 @@ function assertPackageIsReachable(
   sharedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): void {
-  const opens = packageReadPermissions(pkg.type);
-  const permitted = accessible.filter((space) =>
-    opens.some((permission) => space.permissions.has(permission)),
-  );
-  const readable = new Set(permitted.map((space) => space.id));
-  if (
-    permitted.length === 0 ||
-    (pkg.source !== "system" && !placementGrantsRead(pkg, sharedIn, readable))
-  ) {
+  if (packageReadSpaces(pkg, sharedIn, accessible).length === 0) {
     throw notFound(`Package '${packageId}' not found`);
   }
+}
+
+/**
+ * Every space of the caller's reach this package is READ from — the type's
+ * sight permission held there (`packageSightPermissions`) and the placement
+ * granting it there ({@link placementGrantsRead}); every such space for a
+ * system package, which the platform places everywhere. Reachable = non-empty.
+ */
+function packageReadSpaces(
+  pkg: PackageAccessRow,
+  sharedIn: readonly string[],
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): PackageAccessSpace[] {
+  const opens = packageSightPermissions(pkg.type);
+  return accessible.filter(
+    (space) =>
+      opens.some((permission) => space.permissions.has(permission)) &&
+      (isSystemPackageRow(pkg) || placementGrantsRead(pkg, sharedIn, new Set([space.id]))),
+  );
+}
+
+/**
+ * A package's home and its reach, resolved across EVERY space the caller
+ * reaches rather than the one in `X-Space-Id` — `GET …/home`.
+ *
+ * That is the question the per-type detail cannot answer: it reads from the
+ * current space alone, so a package homed in the caller's personal space and
+ * offered nowhere is a 404 from every team space. A client holding only an id
+ * — the CLI, pointed at a working folder — asks here which space to address.
+ *
+ * `null` exactly when {@link assertCatalogPackageAccess} would refuse, from the
+ * same predicate. `home_*` is {@link homeWireForCaller}, so a home the caller
+ * does not reach stays `null` even when a share makes the package readable;
+ * `read_space_ids` puts the home first when it is one of them, then sorts by
+ * id so the answer does not depend on row order.
+ */
+export async function resolvePackageHome(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<PackageHome | null> {
+  const orgId = c.get("orgId");
+  const [pkg, accessible, sharedIn] = await Promise.all([
+    findPackageRow(packageId, orgId),
+    packageAccessSpaces(c),
+    loadPackageShares(packageId, orgId),
+  ]);
+  if (!pkg) return null;
+  const readSpaces = packageReadSpaces(pkg, sharedIn, accessible);
+  if (readSpaces.length === 0) return null;
+  const rank = (id: string) => (id === pkg.homeSpaceId ? 0 : 1);
+  const readSpaceIds = readSpaces
+    .map((space) => space.id)
+    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return {
+    id: pkg.id,
+    type: pkg.type,
+    ...homeWireForCaller(pkg, accessible),
+    read_space_ids: readSpaceIds,
+  };
 }
 
 /**
@@ -879,7 +895,7 @@ export function holdsHomeAuthority(
  * mandatory and the two rows it exempts are refused above. An owner or admin
  * governs a package by reaching its home space (RBAC spec §13.7).
  *
- * Three exemptions. SKILLS, in both settings: the CLI's skills sync downloads
+ * Three exemptions. SKILLS, in both settings: the CLI's `code sync` downloads
  * them into a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`).
  * RUNS, since a run's bundle is assembled server-side and never travels as a
  * copy. SYSTEM packages, stated HERE rather than left to the home rule — they

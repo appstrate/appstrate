@@ -22,6 +22,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
 
 const app = getTestApp();
@@ -130,9 +131,10 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     await seedPackage({ orgId: ctx.orgId, id: agentId, type: "agent" });
   });
 
-  afterAll(() => {
-    // Don't leak the spy module into sibling test files.
-    resetModules();
+  afterAll(async () => {
+    // Don't leak the spy module into sibling test files — and leave the
+    // registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   it("cancelling a running run with cost broadcasts the SUM(llm_usage) cost", async () => {
@@ -275,6 +277,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
       status: "success",
       output: { ok: true },
       durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
     });
     const finalizeRes = await app.request(`/api/runs/${runId}/events/finalize`, {
       method: "POST",

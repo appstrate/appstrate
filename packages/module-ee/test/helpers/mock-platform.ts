@@ -9,6 +9,7 @@
  * platform-owned `llm_usage` table (which no longer lives in EE's DB).
  */
 
+import type { Context } from "hono";
 import type { LlmUsageLedgerRow, PlatformServices } from "@appstrate/core/module";
 
 /** Ordered ledger rows the platform would return, ascending by `id`. */
@@ -77,7 +78,28 @@ export function setMockStorageLimitHook(fn: (() => void | Promise<void>) | null)
   mockStorageLimitHook = fn;
 }
 
+/** Recorded `audit.record` entries, with the org the request context carried. */
+export const mockAuditEntries: Array<{
+  orgId: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string | null;
+  after?: Record<string, unknown> | null;
+}> = [];
+
+export function resetMockAudit(): void {
+  mockAuditEntries.length = 0;
+}
+
 export const mockPlatformServices = {
+  audit: {
+    record: async (
+      c: Context,
+      entry: Omit<(typeof mockAuditEntries)[number], "orgId">,
+    ): Promise<void> => {
+      mockAuditEntries.push({ orgId: c.get("orgId"), ...entry });
+    },
+  },
   usage: {
     list: async ({
       afterId = 0,

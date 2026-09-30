@@ -27,8 +27,9 @@ import {
   enterSpaceContext,
 } from "@appstrate/core/permissions";
 import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
+import { markSpaceRescope } from "../../middleware/require-permission.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
-import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
+import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
@@ -41,6 +42,7 @@ import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
 import { callerOrgRole, callerPersonalOwnerId } from "../../lib/view-as.ts";
 import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
 import { getOrgSettings } from "../../services/organizations.ts";
+import { recordAuditFromContext } from "../../services/audit.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
@@ -201,15 +203,15 @@ export const smtpConfigUpsertSchema = z
     port: z.number().int().min(1).max(65535),
     username: z.string().min(1).max(320),
     pass: z.string().min(1).max(1024),
-    fromAddress: z.email(),
+    from_address: z.email(),
     // Reject CRLF/quotes to prevent email header injection — value is
     // concatenated into `"${fromName}" <${fromAddress}>` at send time.
-    fromName: z
+    from_name: z
       .string()
       .max(200)
-      .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
+      .regex(/^[^"\r\n]*$/, "from_name must not contain quotes or line breaks")
       .optional(),
-    secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+    secure_mode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
   })
   .strict();
 
@@ -223,8 +225,8 @@ const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
 export const socialProviderUpsertSchema = z
   .object({
-    clientId: z.string().min(1).max(512),
-    clientSecret: z.string().min(1).max(2048),
+    client_id: z.string().min(1).max(512),
+    client_secret: z.string().min(1).max(2048),
     scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
   })
   .strict();
@@ -487,6 +489,8 @@ export function createOidcRouter() {
 
   // ── Admin: CRUD ─────────────────────────────────────────────────────────────
 
+  // Create and update: `isFirstParty` skips consent, so the handler asks for
+  // owner/admin on top of the mounted write permission (`requireAdminForFirstParty`).
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
@@ -532,6 +536,12 @@ export function createOidcRouter() {
 
       try {
         const created = await createClient(data);
+        await recordAuditFromContext(c, {
+          action: "oauth_client.created",
+          resourceType: "oauth_client",
+          resourceId: created.clientId,
+          after: { name: created.name, level: created.level, isFirstParty: created.isFirstParty },
+        });
         return c.json(created, 201);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -570,7 +580,7 @@ export function createOidcRouter() {
     "/api/oauth/scopes",
     rateLimit(300),
     requireModulePermission("oauth-clients", "read"),
-    async (c) => c.json({ data: [...getAppstrateScopes()] }),
+    async (c) => c.json(listResponse([...getAppstrateScopes()])),
   );
 
   router.get(
@@ -614,6 +624,16 @@ export function createOidcRouter() {
       try {
         const updated = await updateClient(clientId, data);
         if (!updated) throw notFound("OAuth client not found");
+        await recordAuditFromContext(c, {
+          action: "oauth_client.updated",
+          resourceType: "oauth_client",
+          resourceId: clientId,
+          after: {
+            ...data,
+            signupSpaceAssignments:
+              data.signupSpaceAssignments && auditSpaceAssignments(data.signupSpaceAssignments),
+          },
+        });
         return c.json(updated);
       } catch (err) {
         if (err instanceof OAuthAdminValidationError) {
@@ -635,6 +655,11 @@ export function createOidcRouter() {
       if (!owning || owning !== orgId) throw notFound("OAuth client not found");
       const deleted = await deleteClient(clientId);
       if (!deleted) throw notFound("OAuth client not found");
+      await recordAuditFromContext(c, {
+        action: "oauth_client.deleted",
+        resourceType: "oauth_client",
+        resourceId: clientId,
+      });
       return c.body(null, 204);
     },
   );
@@ -659,6 +684,11 @@ export function createOidcRouter() {
 
       const rotated = await rotateClientSecret(clientId);
       if (!rotated) throw notFound("OAuth client not found");
+      await recordAuditFromContext(c, {
+        action: "oauth_client.secret_rotated",
+        resourceType: "oauth_client",
+        resourceId: clientId,
+      });
       return c.json(rotated);
     },
   );
@@ -682,11 +712,14 @@ export function createOidcRouter() {
    * `pinnedSpaceScopeGuard` runs first: an API key's membership is resolved
    * from its CREATOR, so without it a key bound to space A whose creator
    * administers space B would reach B through the path param.
+   *
+   * Marked: the guards behind it are asked in the path's space, which the
+   * route-table reader cannot see from the mounts alone.
    */
-  const enterParamSpace = async (c: Context<AppEnv>, next: Next) => {
+  const enterParamSpace = markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
     await enterSpaceContext(c, c.req.param("id")!);
     return next();
-  };
+  });
 
   router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
   router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);
@@ -734,7 +767,22 @@ export function createOidcRouter() {
       if (hostCheck.blocked && hostCheck.reason === "blocked-resolved") {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
-      const saved = await upsertSmtpConfig(spaceId, data);
+      const saved = await upsertSmtpConfig(spaceId, {
+        host: data.host,
+        port: data.port,
+        username: data.username,
+        pass: data.pass,
+        fromAddress: data.from_address,
+        fromName: data.from_name,
+        secureMode: data.secure_mode,
+      });
+      // `pass` and `username` stay out of the trail.
+      await recordAuditFromContext(c, {
+        action: "space.smtp_config.set",
+        resourceType: "smtp_config",
+        resourceId: spaceId,
+        after: { host: data.host, port: data.port, fromAddress: data.from_address },
+      });
       return c.json(saved);
     },
   );
@@ -747,6 +795,11 @@ export function createOidcRouter() {
       const spaceId = c.req.param("id")!;
       const deleted = await deleteSmtpConfig(spaceId);
       if (!deleted) throw notFound("SMTP configuration not found");
+      await recordAuditFromContext(c, {
+        action: "space.smtp_config.deleted",
+        resourceType: "smtp_config",
+        resourceId: spaceId,
+      });
       return c.body(null, 204);
     },
   );
@@ -760,7 +813,7 @@ export function createOidcRouter() {
       const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
         const result = await sendTestEmail(spaceId, data.to);
-        return c.json({ ok: true, messageId: result.messageId });
+        return c.json({ ok: true, message_id: result.messageId });
       } catch (err) {
         const message = getErrorMessage(err);
         // Surface the SMTP server's response verbatim — DKIM/SPF/auth
@@ -810,7 +863,17 @@ export function createOidcRouter() {
       const spaceId = c.req.param("id")!;
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
-      const saved = await upsertSocialProvider(spaceId, provider, data);
+      const saved = await upsertSocialProvider(spaceId, provider, {
+        clientId: data.client_id,
+        clientSecret: data.client_secret,
+        scopes: data.scopes,
+      });
+      await recordAuditFromContext(c, {
+        action: "space.social_provider.set",
+        resourceType: "social_provider",
+        resourceId: provider,
+        after: { clientId: data.client_id, scopes: data.scopes ?? null },
+      });
       return c.json(saved);
     },
   );
@@ -824,6 +887,11 @@ export function createOidcRouter() {
       const provider = parseProvider(c.req.param("provider")!);
       const deleted = await deleteSocialProvider(spaceId, provider);
       if (!deleted) throw notFound("Social provider configuration not found");
+      await recordAuditFromContext(c, {
+        action: "space.social_provider.deleted",
+        resourceType: "social_provider",
+        resourceId: provider,
+      });
       return c.body(null, 204);
     },
   );

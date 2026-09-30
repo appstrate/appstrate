@@ -20,11 +20,11 @@
  * zero-footprint invariant (no modules → no module routes, no module
  * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
-import { Hono } from "hono";
-import { cors } from "hono/cors";
+import { Hono, type Context } from "hono";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { clientIp } from "../../src/middleware/client-ip.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { apiCors } from "../../src/lib/cors.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
@@ -45,7 +45,10 @@ import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
 import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
+import { markFallback } from "../../src/lib/route-requirements.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
+import { createOpenApiSpecRouter } from "../../src/routes/openapi-spec.ts";
+import { swaggerUI } from "@hono/swagger-ui";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
 
 // Route imports
@@ -55,7 +58,6 @@ import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
 import { createLibraryRouter } from "../../src/routes/library.ts";
-import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
 import { createModelsRouter } from "../../src/routes/models.ts";
@@ -72,10 +74,12 @@ import { createUploadsRouter, createUploadContentRouter } from "../../src/routes
 import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/files.ts";
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
-import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { createLlmProxyRouter, createRunLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
+import { LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT } from "@appstrate/runner-pi";
 import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
+import { createOrgIntegrationsRouter } from "../../src/routes/org-integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
 import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
@@ -122,7 +126,7 @@ await initAppConfig(); // initializes app config (routes like organizations.ts c
  * Mirrors the production middleware chain from index.ts:
  * CORS → error handler → request ID → Better Auth → API key auth → org context → routes
  *
- * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, ee routes.
+ * Skips: boot(), static files, SPA fallback, shutdown gate, ee routes.
  */
 export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the
@@ -171,7 +175,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", clientIp());
 
   // CORS
-  app.use("*", cors({ origin: "*", credentials: true }));
+  app.use("*", apiCors("*"));
 
   // Response-contract gate: validate every JSON response against its OpenAPI
   // schema, fail-closed. The spec is assembled from the SAME module set this
@@ -184,19 +188,23 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     ...extraModules.map((m) => m.openApiComponentSchemas?.() ?? {}),
   );
   const moduleApiTags = extraModules.flatMap((m) => m.openApiTags?.() ?? []);
+  const spec = buildOpenApiSpec(moduleApiPaths, moduleApiSchemas, moduleApiTags);
   // On by default (CI enforces it). `DISABLE_RESPONSE_CONTRACT=1` is an
   // escape hatch for debugging an unrelated failing test in isolation.
   if (process.env.DISABLE_RESPONSE_CONTRACT !== "1") {
-    app.use(
-      "*",
-      createResponseValidationMiddleware(
-        buildOpenApiSpec(moduleApiPaths, moduleApiSchemas, moduleApiTags),
-      ),
-    );
+    app.use("*", createResponseValidationMiddleware(spec));
   }
 
   // Health check (no auth)
   app.route("/", healthRouter);
+
+  // Public OpenAPI document + viewer, pre-auth as in production — documented
+  // operations, so the platform-app registration requires a route for them.
+  app.route(
+    "/",
+    createOpenApiSpecRouter(() => spec),
+  );
+  app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
   // Cookie-less HTML preview — mounted BEFORE the auth pipeline (mirrors
   // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/space
@@ -252,7 +260,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.use("*", idempotencyGuard());
 
   // Mount routes (same order as production)
-  const userAgentsRouter = createUserAgentsRouter();
   const agentsRouter = createAgentsRouter();
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
@@ -266,7 +273,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
   app.route("/api/library", createLibraryRouter());
-  app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
   // HMAC-signed event ingestion. Must mount BEFORE runsRouter so the
@@ -308,17 +314,22 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());
+  app.route("/api/org-integrations", createOrgIntegrationsRouter());
   app.route("/api/credential-proxy", createCredentialProxyRouter());
-  app.route("/api/llm-proxy", createLlmProxyRouter());
+  app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
+  app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());
 
   // Mirrors production: unknown /api/* → 404 problem+json (no SPA fallback in tests).
-  app.all("/api/*", (c) => {
-    const pathname = new URL(c.req.url).pathname;
-    throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
-  });
+  app.all(
+    "/api/*",
+    markFallback((c: Context<AppEnv>) => {
+      const pathname = new URL(c.req.url).pathname;
+      throw notFound(`API endpoint not found: ${c.req.method} ${pathname}`);
+    }),
+  );
 
   if (!explicit) cachedApp = app;
   return app;

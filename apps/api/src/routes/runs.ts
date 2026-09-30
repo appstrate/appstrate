@@ -40,6 +40,7 @@ import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
 import { prepareAndExecuteRun, resolveRunPreflight } from "../services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
+import { toLaunchOverrides } from "../services/integration-connection-resolver.ts";
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
@@ -62,7 +63,8 @@ import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
-import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
+import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -133,12 +135,12 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (resolver mechanism #2).
+     * Per-integration connection picks for this run (cascade layer 3, the launch override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
      *
-     * `.min(1)` and the reason it is owned at the schema rather than in
+     * The uuid-set rule and the reason it is owned at the schema rather than in
      * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
      */
     connection_overrides: connectionOverridesSchema.optional(),
@@ -261,6 +263,10 @@ export function createRunsRouter() {
   const router = new Hono<AppEnv>();
 
   // POST /api/agents/:scope/:name/run — execute an agent (fire-and-forget, returns JSON)
+  // `agents:run` launches a PUBLISHED version. Asking for the
+  // working copy — `version=draft`, or a draft `dependency_overrides` key — is
+  // judged in the handler against the package's home space, and refused there
+  // with `403 draft_not_writable`.
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
@@ -358,12 +364,10 @@ export function createRunsRouter() {
         // default downstream (or crash the uuid cast — see loadModel).
         await assertExplicitModelExists(orgId, modelIdOverride);
 
-        // Shared preflight: validate readiness. Threading
-        // `connectionOverrides` here is what makes the
+        // Shared preflight: validate readiness. Threading the caller's
+        // `connection_overrides` here is what makes the
         // MissingConnectionsModal retry actually work — readiness sees the
         // caller's pick and skips the must_choose error on >1 candidates.
-        // Pre-fix, the readiness gate fired must_choose regardless of the
-        // override, so the picker UX loop never exited.
         // One manifest memo for the whole trigger — readiness (preflight),
         // the connection-snapshot pass, and the spawn resolver inside
         // `prepareAndExecuteRun` all load the same integration manifests;
@@ -373,15 +377,16 @@ export function createRunsRouter() {
         // reads anything, so the advisory verdict and the kickoff's gates
         // judge the same versions.
         const manifestCache: IntegrationManifestCache = new Map();
+        const launchOverrides = toLaunchOverrides(connectionOverrides, "run_override");
 
         await resolveRunPreflight({
           agent: effectiveAgent,
           spaceId: c.get("spaceId"),
           orgId,
           actor,
-          // Opt-in only: absent header ⇒ null ⇒ a 412 with no connect link.
+          // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
-          connectionOverrides: connectionOverrides ?? null,
+          launchOverrides,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
           dependencyOverrides: dependencyOverrides ?? null,
@@ -414,7 +419,7 @@ export function createRunsRouter() {
           dependencyOverrides: dependencyOverrides ?? null,
           spaceId: c.get("spaceId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
-          connectionOverrides: connectionOverrides ?? null,
+          launchOverrides,
           traceparent: runTraceparent(c),
           runnerName: runner.name,
           runnerKind: runner.kind,
@@ -491,16 +496,21 @@ export function createRunsRouter() {
   // GET /api/agents/:scope/:name/run-activity — one 30-day aggregate for the
   // operational overview. This remains a separate read from the paginated run
   // list so the browser never has to download every page to compute a rate.
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/run-activity`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const scope = getSpaceScope(c);
-    const endUser = c.get("endUser");
-    return c.json(
-      await getPackageRunActivity(scope, agent.id, {
-        endUserId: endUser?.id,
-      }),
-    );
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/run-activity`,
+    requireRunsRead,
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const scope = getSpaceScope(c);
+      const endUser = c.get("endUser");
+      return c.json(
+        await getPackageRunActivity(scope, agent.id, {
+          endUserId: endUser?.id,
+        }),
+      );
+    },
+  );
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
@@ -661,7 +671,8 @@ export function createRunsRouter() {
     let sinceId: number | undefined;
     if (sinceParam !== undefined && sinceParam !== "") {
       const parsed = Number(sinceParam);
-      if (Number.isInteger(parsed) && parsed >= 0) sinceId = parsed;
+      // Safe-integer bound keeps the value inside int8, so a huge cursor falls back instead of a 500.
+      if (Number.isSafeInteger(parsed) && parsed >= 0) sinceId = parsed;
     }
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
@@ -773,7 +784,13 @@ export function createRunsRouter() {
     // each time the middleware is constructed. We read it at route-build
     // time; changes to the env require a reboot.
     rateLimit(getInlineRunLimits().rate_per_min),
+    // Composing: mirror of `canComposeInline` (@appstrate/core/permissions),
+    // one guard per grant so a refusal names the one missing.
+    requirePermission("agents", "write"),
     requirePermission("agents", "run"),
+    // The two guards say the caller may compose; every package the posted
+    // manifest DEPENDS on is then judged one by one in the handler
+    // (`assertPackageDependenciesAccessible`).
     idempotency(replayRun),
     async (c) => {
       const orgId = c.get("orgId");
@@ -905,6 +922,9 @@ export function createRunsRouter() {
   router.post(
     "/runs/inline/validate",
     rateLimit(getInlineRunLimits().rate_per_min),
+    // Same guard as the run surface it validates for (`canComposeInline`), and
+    // the same per-dependency authority behind it.
+    requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     async (c) => {
       const orgId = c.get("orgId");

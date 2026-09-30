@@ -91,11 +91,11 @@ export function connectClaimsFor(input: {
 
 /**
  * Mint the initial capability token and build the agent-facing connect URL.
- * Returns the URL + absolute expiry (ms) for the API response.
+ * Returns the URL + absolute expiry (RFC 3339) for the API response.
  */
 export function buildConnectUrl(input: ConnectSessionInput): {
   connectUrl: string;
-  expiresAt: number;
+  expiresAt: string;
 } {
   const ttlMs = getEnv().CONNECT_SESSION_TTL_MS;
   const expSeconds = nowSeconds() + Math.floor(ttlMs / 1000);
@@ -108,7 +108,7 @@ export function buildConnectUrl(input: ConnectSessionInput): {
   const token = mintConnectSession(claims, connectSessionSecret());
   const base = getEnv().APP_URL;
   const connectUrl = `${base}/api/integrations/connect/start?token=${encodeURIComponent(token)}`;
-  return { connectUrl, expiresAt: expSeconds * 1000 };
+  return { connectUrl, expiresAt: new Date(expSeconds * 1000).toISOString() };
 }
 
 /** Verify a capability/page token. Returns claims or null. */

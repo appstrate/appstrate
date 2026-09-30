@@ -79,7 +79,12 @@ jobs:
         # credential-less monitor stays quiet until a genuine mismatch lands.
         # The same condition gates the failure step below — issue and red run
         # are two readings of one signal, never one without the other.
-        if: steps.run.outputs.code != '0'
+        #
+        # Only on `main`: the issue tracks what `main` ships. A run dispatched
+        # on a fix branch (to verify the fix against the live servers before
+        # merging) is a statement about that branch — it must neither file
+        # drift that `main` does not have nor comment on the open issue.
+        if: steps.run.outputs.code != '0' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -111,7 +116,11 @@ jobs:
         # WARNs are deliberately not consulted here, for the same reason they
         # do not open the issue: "couldn't test" is not drift, and 29 of them
         # are a standing backlog that would keep the issue open forever.
-        if: steps.run.outputs.code == '0'
+        #
+        # Only on `main`, for the reason given on the step above — and this is
+        # the direction that bit: a green run dispatched on the #1480 fix
+        # branch closed #1480 while `main` still shipped the drift.
+        if: steps.run.outputs.code == '0' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

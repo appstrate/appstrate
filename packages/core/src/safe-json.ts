@@ -5,6 +5,8 @@
  * untyped manifest payloads. Pure runtime predicates — no external deps.
  */
 
+import type { z } from "zod";
+
 /** Narrow a JSONB value to a record, returning {} if null/non-object/array. */
 export function asRecord(val: unknown): Record<string, unknown> {
   return val !== null && typeof val === "object" && !Array.isArray(val)
@@ -22,4 +24,17 @@ export function asRecordOrNull(val: unknown): Record<string, unknown> | null {
 /** Type guard — `true` for values that are plain objects (not arrays, not null). */
 export function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
+}
+
+/** Zod refinement capping the UTF-8 byte size of a value's JSON serialization. */
+export function withByteCap(maxBytes: number) {
+  return (value: unknown, ctx: z.RefinementCtx): void => {
+    const size = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    if (size > maxBytes) {
+      ctx.addIssue({
+        code: "custom",
+        message: `JSON payload is ${size} bytes; max is ${maxBytes}`,
+      });
+    }
+  };
 }

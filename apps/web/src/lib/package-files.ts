@@ -73,7 +73,7 @@ export function packageFilesErrorKey(error: unknown): string | null {
   switch (error.code) {
     // The tree moved under this editor: the fix is to re-read it, and the
     // buffered edits are kept so the author can save them again.
-    case "conflict":
+    case "precondition_failed":
       return "files.errorConflict";
     case "invalid_path":
       return "files.errorInvalidPath";

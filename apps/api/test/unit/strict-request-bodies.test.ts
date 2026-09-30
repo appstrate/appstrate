@@ -6,7 +6,7 @@
  * `routes/runs.ts` states the rule as universal — "the launch body was the last
  * place the rule did not hold" — but only six route files applied `.strict()`;
  * ~45 `z.object()` bodies stripped unknown fields in silence. The concrete cost:
- * `PUT /api/spaces/{spaceId}/packages/{scope}/{name}` with `generation_config`
+ * `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` with `generation_config`
  * (the snake spelling a client would reasonably guess, since `schedules.ts`
  * spells the same concept `generation_config_override`) answered 200 and
  * changed nothing.

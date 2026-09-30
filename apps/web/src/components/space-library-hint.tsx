@@ -4,8 +4,9 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { catalogueHref } from "../lib/catalogue-link";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import { packagePermission } from "@appstrate/core/permissions";
 
 /**
  * Where the rest of the space's packages are, said on the screen that does not
@@ -26,18 +27,22 @@ import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
  * `agents:read`, so the page answers 200 with an empty list rather than a 403.
  * Gating on reachability alone therefore sent the one preset that can act on
  * NOTHING in that library — no activation, no deactivation, no configuration —
- * to a page that is empty for it by design.
+ * to a page that is empty for it by design. Reachability is still asked, of
+ * the one route declaration (`lib/route-access.ts`), so the link never names a
+ * page the route gate would refuse.
  */
 export function SpaceLibraryHint({ type }: { type: PackageType }) {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
-  if (!can(`${PACKAGE_PERMISSIONS[type].resource}:read`)) return null;
+  const canReach = useCanReach();
+  const href = catalogueHref(type);
+  if (!can(packagePermission(type, "read")) || !canReach(href)) return null;
   return (
     <Trans
       t={t}
       i18nKey="library.indexEmptyHint"
       components={{
-        1: <Link to={catalogueHref(type)} className="text-primary hover:underline" />,
+        1: <Link to={href} className="text-primary hover:underline" />,
       }}
     />
   );

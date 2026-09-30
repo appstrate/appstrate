@@ -4,7 +4,16 @@ import { and, asc, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { files, organizations, packages, runs, spaces, uploads } from "@appstrate/db/schema";
+import {
+  files,
+  organizations,
+  packages,
+  runs,
+  spaceMembers,
+  spaceRoles,
+  spaces,
+  uploads,
+} from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
@@ -15,10 +24,14 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
+import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
-  loadSpaceMemberships,
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  membershipOn,
   resolveSpaceRole,
   type SpaceMemberRow,
   type SpaceRoleRef,
@@ -38,8 +51,9 @@ type SpaceSettings = z.infer<typeof spaceSettingsSchema>;
 
 /**
  * Every space of `orgId` the caller reaches, with their role in each (RBAC spec
- * §6.3): one query for spaces, one for memberships, `isSpaceVisibleTo` filters.
- * `overlay` replaces the caller's own rows (role preview, `lib/view-as.ts`).
+ * §6.3): spaces and the caller's rows in one statement (§4.4), then
+ * `isSpaceVisibleTo` filters. `overlay` replaces the caller's own rows (role
+ * preview, `lib/view-as.ts`).
  */
 export async function listSpacesForPrincipal(
   orgId: string,
@@ -49,18 +63,16 @@ export async function listSpacesForPrincipal(
   overlay?: ReadonlyMap<string, SpaceMemberRow>,
 ): Promise<Array<{ space: SpaceRow; role: SpaceRoleRef | null }>> {
   const administersOrg = orgRole === "owner" || orgRole === "admin";
-  const [rows, memberships] = await Promise.all([
-    listVisibleSpaces(orgId, personalOwnerId, administersOrg),
-    overlay ?? loadSpaceMemberships(orgId, userId),
-  ]);
+  const rows = await listVisibleSpaces(
+    orgId,
+    personalOwnerId,
+    administersOrg,
+    overlay ? null : userId,
+  );
   const out: Array<{ space: SpaceRow; role: SpaceRoleRef | null }> = [];
-  for (const space of rows) {
-    const role = resolveSpaceRole(
-      orgRole,
-      space,
-      memberships.get(space.id) ?? null,
-      personalOwnerId,
-    );
+  for (const { space, ...membership } of rows) {
+    const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(membership);
+    const role = resolveSpaceRole(orgRole, space, member, personalOwnerId);
     if (!isSpaceVisibleTo(orgRole, space, role)) continue;
     out.push({ space, role });
   }
@@ -154,10 +166,14 @@ async function listVisibleSpaces(
   orgId: string,
   personalOwnerId: string | null,
   administersOrg: boolean,
+  /** `null` joins no row: a preview's overlay replaces them. */
+  userId: string | null,
 ) {
   return db
-    .select()
+    .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
     .from(spaces)
+    .leftJoin(spaceMembers, membershipOn(userId))
+    .leftJoin(spaceRoles, customRoleOn)
     .where(
       and(
         eq(spaces.orgId, orgId),
@@ -206,7 +222,12 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
   }
 }
 
-/** Update a space. Throws 404 if not found. */
+/**
+ * Update a space. Throws 404 if not found. `judged` is the row the request was
+ * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
+ * written only while the row still holds both, else 409 `space_access_changed`
+ * (RBAC spec §4.4). Returns the connections a close unshared, for the audit.
+ */
 export async function updateSpace(
   orgId: string,
   spaceId: string,
@@ -216,11 +237,12 @@ export async function updateSpace(
     visibility?: SpaceVisibility;
     defaultRole?: SpaceRolePreset;
   },
+  judged: Pick<SpaceRow, "visibility" | "defaultRole" | "ownerUserId" | "isDefault">,
 ) {
+  const changesAccess = params.visibility !== undefined || params.defaultRole !== undefined;
   // Both rules are DB CHECKs too, but a named 4xx beats a 23514.
-  if (params.visibility !== undefined || params.defaultRole !== undefined) {
-    const current = await getSpace(orgId, spaceId);
-    if (current.ownerUserId !== null) {
+  if (changesAccess) {
+    if (judged.ownerUserId !== null) {
       // A personal space is `private` with one member by construction; there is
       // no visibility to choose and no implicit member to give a default role
       // to (RBAC spec §3.6). `name` stays editable, and `is_default` is not a
@@ -230,27 +252,52 @@ export async function updateSpace(
         "A personal space is always private and has no implicit members: only its name can be changed.",
       );
     }
-    if (params.visibility !== undefined && params.visibility !== "open" && current.isDefault) {
+    if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
       throw invalidRequest(
         "The default space must stay open — every org member lands there.",
         "visibility",
       );
     }
   }
-  const [space] = await db
-    .update(spaces)
-    .set({
-      ...(params.name !== undefined && { name: params.name }),
-      ...(params.settings !== undefined && { settings: params.settings }),
-      ...(params.visibility !== undefined && { visibility: params.visibility }),
-      ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
-      updatedAt: new Date(),
-    })
-    .where(scopedWhere(spaces, { orgId, extra: [eq(spaces.id, spaceId)] }))
-    .returning();
+  const { space, unsharedConnectionIds } = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(spaces)
+      .set({
+        ...(params.name !== undefined && { name: params.name }),
+        ...(params.settings !== undefined && { settings: params.settings }),
+        ...(params.visibility !== undefined && { visibility: params.visibility }),
+        ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
+        updatedAt: new Date(),
+      })
+      .where(
+        scopedWhere(spaces, {
+          orgId,
+          extra: [
+            eq(spaces.id, spaceId),
+            changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
+            changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
+          ],
+        }),
+      )
+      .returning();
+    // Closing an open space ends every implicit member's access. The UPDATE above holds the
+    // space row lock a removal or a share waits on (`lockSpaceRow`, space-members.ts).
+    const unshared =
+      updated && changesAccess
+        ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
+        : [];
+    return { space: updated, unsharedConnectionIds: unshared };
+  });
 
-  if (!space) throw notFound("Space not found");
-  return space;
+  if (space) return { space, unsharedConnectionIds };
+  if (changesAccess) {
+    await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
+    throw conflict(
+      "space_access_changed",
+      "The space's visibility or default role changed while this request was being handled. Reload it and retry.",
+    );
+  }
+  throw notFound("Space not found");
 }
 
 /**

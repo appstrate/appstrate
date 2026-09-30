@@ -39,7 +39,7 @@ export type ModelPricingFields = Pick<OrgModelInfo, "source" | "aliased" | "cost
  *     unconditionally (it would fingerprint the backing) — a priced alias
  *     would otherwise always flag.
  *   - `built-in` rows are excluded because their rates come from
- *     `SYSTEM_PROVIDER_KEYS`, and `PUT /api/models/{id}` answers
+ *     `SYSTEM_PROVIDER_KEYS`, and `PATCH /api/models/{id}` answers
  *     `systemEntityForbidden` on a system id: the viewer has no remedy to
  *     point at.
  */

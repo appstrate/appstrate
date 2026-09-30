@@ -7,7 +7,7 @@
  *
  * ## Why a loop, when the orchestrator already pulls at boot
  *
- * `DockerOrchestrator.initialize()` pre-pulls both images once per process
+ * `DockerOrchestrator.initialize()` pre-pulls both images at boot (retried until it succeeds)
  * and caches "verified" for the process lifetime. That cache is a claim about
  * the host, and the host is shared: any external janitor — Coolify's nightly
  * automated cleanup, a cron `docker system prune`, a disk-pressure sweep —
@@ -76,13 +76,20 @@ export async function reconcileRuntimeImages(
   for (const { image, slot } of deps.images) {
     try {
       const outcome = await ensureImagePin(image, slot);
-      if (outcome !== "unchanged") {
-        // Deliberately loud: a converged pin is the steady state, so a pass
-        // that had to create or replace one means something on this host
-        // removed it — the very janitor whose invisible nightly re-pull this
+      if (outcome === "unchanged") continue;
+      pinned.push(slot);
+      if (outcome === "created") {
+        // Deliberately loud: a running pin is the steady state, so finding none
+        // means something on this host removed or stopped it — the janitor this
         // module exists to stop. Silent self-healing would hide it again.
-        logger.warn("runtime image pin was missing — recreated", { image, slot, outcome });
-        pinned.push(slot);
+        logger.warn("runtime image pin was missing or stopped — recreated", {
+          image,
+          slot,
+          outcome,
+        });
+      } else {
+        // Spec drift: expected once per host after a release, not an alarm.
+        logger.info("runtime image pin replaced — spec drifted", { image, slot, outcome });
       }
     } catch (err) {
       logger.warn("runtime image warm pass failed for image", {

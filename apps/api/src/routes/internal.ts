@@ -2,23 +2,30 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, packages, packageVersions, runs } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  packages,
+  packageVersions,
+  type runs,
+} from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
-import { downloadVersionZip } from "../services/package-storage.ts";
+import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
+import { verifyRunToken } from "../lib/verify-run-token.ts";
+import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
   recordRunDegradedIntegration,
-  runAgentIdentity,
   RUN_HISTORY_FIELDS,
   type RunHistoryField,
 } from "../services/state/runs.ts";
@@ -38,7 +45,6 @@ import {
 import type { RunAgentGone, RunPinnedVersionGone } from "../services/run-effective-agent.ts";
 import {
   ApiError,
-  unauthorized,
   forbidden,
   notFound,
   conflict,
@@ -50,6 +56,7 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
+import { serializeOAuthTokenResponse } from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -64,113 +71,6 @@ import {
   readConnectRunGrant,
   type ConnectRunGrant,
 } from "../services/connect/connect-run-grant.ts";
-
-/**
- * Verify the run token from the Authorization header.
- * Returns the run data or throws an ApiError.
- */
-async function verifyRunToken(c: Context): Promise<{
-  runId: string;
-  run: {
-    packageId: string;
-    userId: string | null;
-    endUserId: string | null;
-    orgId: string;
-    spaceId: string;
-    status: string;
-    modelCredentialId: string | null;
-    runOrigin: "platform" | "remote";
-    /**
-     * The agent definition the run executes — `"draft"` or a concrete semver
-     * stamped at kickoff (#636). The dependency guards read the manifest AT
-     * this ref so a post-kickoff draft edit cannot retroactively change a
-     * pinned run's authorization set.
-     */
-    versionRef: string | null;
-    /**
-     * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199). The credentials resolver uses it to honour admin pins and
-     * per-run overrides past the kickoff handoff.
-     */
-    resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
-    /**
-     * Snapshot of each declared integration's resolved manifest version frozen
-     * at run kickoff (#686). The credentials resolver reads the integration
-     * manifest AT this version so a mid-run MITM refresh sees the same
-     * delivery/auth plan the spawn used.
-     */
-    resolvedIntegrationVersions: Record<
-      string,
-      { version: string | null; source: "version" | "draft" | "system" }
-    > | null;
-  };
-}> {
-  const rawToken = parseBearer(c.req.header("Authorization"));
-  if (!rawToken) {
-    throw unauthorized("Missing run token");
-  }
-
-  // Verify HMAC signature before DB lookup
-  const runId = parseSignedToken(rawToken);
-  if (!runId) {
-    throw unauthorized("Invalid run token");
-  }
-
-  const rows = await db
-    .select({
-      packageId: runs.packageId,
-      // The INSERT-time `@scope/name` snapshot. `runs.package_id` is
-      // `ON DELETE SET NULL` (schema/runs.ts), so deleting the agent mid-run
-      // nulls the column while the run keeps executing — and this token stays
-      // valid until the run leaves `running`. Without the snapshot the guards
-      // below would report the agent id as `null`.
-      agentScope: runs.agentScope,
-      agentName: runs.agentName,
-      userId: runs.userId,
-      endUserId: runs.endUserId,
-      orgId: runs.orgId,
-      spaceId: runs.spaceId,
-      status: runs.status,
-      modelCredentialId: runs.modelCredentialId,
-      runOrigin: runs.runOrigin,
-      versionRef: runs.versionRef,
-      resolvedConnections: runs.resolvedConnections,
-      resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
-    })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .limit(1);
-
-  const run = rows[0];
-  if (!run) {
-    throw notFound("Run not found");
-  }
-
-  if (run.status !== "running") {
-    throw forbidden("Run is not running");
-  }
-
-  return {
-    runId,
-    run: {
-      // Shared with `getRunSinkContext` (one fallback chain, one sentinel). The
-      // previous `run.packageId!` asserted away a null that this endpoint can
-      // genuinely see, and it reached `getRunEffectiveAgent` — which now
-      // reports `agent_deleted` and needs a printable id for its message.
-      packageId: runAgentIdentity(run),
-      userId: run.userId,
-      endUserId: run.endUserId,
-      orgId: run.orgId,
-      spaceId: run.spaceId,
-      status: run.status,
-      modelCredentialId: run.modelCredentialId ?? null,
-      runOrigin: run.runOrigin,
-      versionRef: run.versionRef ?? null,
-      resolvedConnections: run.resolvedConnections ?? null,
-      resolvedIntegrationVersions: run.resolvedIntegrationVersions ?? null,
-    },
-  };
-}
 
 /**
  * The caller behind a connect-run token, when the request carries one.
@@ -446,7 +346,9 @@ export function createInternalRouter() {
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
-    return c.json(await resolveOAuthTokenForSidecar(credentialId, run.orgId));
+    return c.json(
+      serializeOAuthTokenResponse(await resolveOAuthTokenForSidecar(credentialId, run.orgId)),
+    );
   });
 
   router.post("/oauth-token/:credentialId/refresh", async (c) => {
@@ -454,7 +356,11 @@ export function createInternalRouter() {
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
     await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
-    return c.json(await forceRefreshOAuthModelProviderToken(credentialId, run.orgId));
+    return c.json(
+      serializeOAuthTokenResponse(
+        await forceRefreshOAuthModelProviderToken(credentialId, run.orgId),
+      ),
+    );
   });
 
   /**
@@ -498,6 +404,30 @@ export function createInternalRouter() {
     }
   }
 
+  /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
+  function requireBoundConnection(
+    c: Context,
+    packageId: string,
+    run: { resolvedConnections: typeof runs.$inferSelect.resolvedConnections },
+    runId: string,
+  ) {
+    const parsed = z.uuid().safeParse(c.req.query("connection_id"));
+    if (!parsed.success) {
+      throw invalidRequest(
+        "`connection_id` is required and must be the uuid of a connection this run bound to " +
+          `'${packageId}'.`,
+        "connection_id",
+      );
+    }
+    return requireRunBoundMember({
+      runId,
+      packageId,
+      connectionId: parsed.data.toLowerCase(),
+      bound: run.resolvedConnections?.[packageId] ?? [],
+      param: "connection_id",
+    });
+  }
+
   /**
    * A terminal credential failure (410) is recorded on the run exactly once,
    * from whichever endpoint sees it. `resolveLiveIntegrationCredentials` has
@@ -520,14 +450,13 @@ export function createInternalRouter() {
 
   // GET /internal/integration-credentials/:scope/:name
   // Sidecar-only. Returns the LIVE credential payload + per-auth HTTP
-  // delivery plans for an integration the running agent depends on.
+  // delivery plans for ONE connection the run bound to an integration it depends on.
   // OAuth tokens are refreshed proactively if within the lead window;
   // POST .../refresh forces a refresh regardless.
   //
-  // A 2xx here always carries a usable credential surface: an EMPTY payload
-  // means the integration declares no auth, and nothing else. Every state where
-  // a credential was expected but could not be produced fails loud — 404 (no
-  // connection for the actor / the run's pinned connection is gone), 409
+  // A 2xx on the run path always carries a usable credential surface. Every state
+  // where a credential was expected but could not be produced fails loud — 400
+  // (see `requireBoundConnection`), 404 (the bound connection is gone), 409
   // `integration_auth_undeclared` (the pinned manifest version no longer
   // declares the connection's auth), 410 (dead credential, connection flagged).
   // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
@@ -549,6 +478,7 @@ export function createInternalRouter() {
     }
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
     let result;
     try {
@@ -558,7 +488,8 @@ export function createInternalRouter() {
         spaceId: run.spaceId,
         agentPackageId: run.packageId,
         actor,
-        resolvedConnections: run.resolvedConnections,
+        connectionId: bound.connectionId,
+        connectionSource: bound.source,
         resolvedIntegrationVersions: run.resolvedIntegrationVersions,
       });
     } catch (err) {
@@ -568,6 +499,7 @@ export function createInternalRouter() {
     logger.info("Integration credentials delivered", {
       runId,
       packageId,
+      connectionId: bound.connectionId,
       authCount: result.auths.length,
       deliveryPlanCount: Object.keys(result.deliveryPlans).length,
     });
@@ -575,15 +507,11 @@ export function createInternalRouter() {
   });
 
   // POST /internal/integration-credentials/:scope/:name/refresh
-  // Sidecar-only. Called by the sidecar (api_call adapter + MITM listener) when
-  // an upstream 401 is seen. Force-refreshes the integration's credential and
-  // returns the fresh payload (200). When the credential cannot be recovered —
-  // a revoked OAuth refresh token, an unrefreshable OAuth auth, OR any
-  // non-OAuth auth (api_key/basic), since there is nothing to refresh after a
-  // 401 — `resolveLiveIntegrationCredentials` flags the connection
-  // `needsReconnection` and throws 410, which `recordTerminalCredentialFailure`
-  // stamps onto the run. The sidecar maps the 410 to "don't retry"; the
-  // next-launch readiness gate + live badge do the user-facing surfacing.
+  // Sidecar-only, on an upstream 401: force-refreshes that connection's credential (200).
+  // An auth with nothing to refresh (api_key, basic, unrefreshable OAuth) answers 502 below
+  // the reconnect threshold and 410 once reached; a revoked refresh token is 410 at once.
+  // A 410 has flagged the connection `needsReconnection`, is stamped onto the run, and
+  // tells the sidecar not to retry.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     // A connect run has no stored credential to force-refresh: the platform
@@ -605,6 +533,7 @@ export function createInternalRouter() {
     }
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
     const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
     let result;
     try {
@@ -616,7 +545,8 @@ export function createInternalRouter() {
           spaceId: run.spaceId,
           agentPackageId: run.packageId,
           actor,
-          resolvedConnections: run.resolvedConnections,
+          connectionId: bound.connectionId,
+          connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
         { forceRefresh: true },
@@ -631,6 +561,7 @@ export function createInternalRouter() {
     logger.info("Integration credentials refreshed", {
       runId,
       packageId,
+      connectionId: bound.connectionId,
       authCount: result.auths.length,
     });
     return c.json(serializeIntegrationCredentialsWire(result));
@@ -751,7 +682,11 @@ export function createInternalRouter() {
     if (!resolved) {
       throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
     }
-    const bytes = await downloadVersionZip(mcpServerId, resolved.version, resolved.integrity);
+    const bytes = await downloadVersionZipForExecution(
+      mcpServerId,
+      resolved.version,
+      resolved.integrity,
+    );
     if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
     logger.info("mcp-server bundle delivered (storage)", {
       ...caller,

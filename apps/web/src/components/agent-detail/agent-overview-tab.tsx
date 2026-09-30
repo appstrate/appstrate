@@ -354,7 +354,7 @@ export function AgentOverviewTab({
   const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
   const connectionCount = connectionRows.filter(
-    (row) => row.resolution?.resolved_connection_id,
+    (row) => (row.resolution?.resolved_connection_ids.length ?? 0) > 0,
   ).length;
   const connectionsKnown =
     detail.dependencies.integrations.length === 0 || (!!connections && !connectionsError);

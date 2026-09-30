@@ -27,6 +27,9 @@ import {
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
+
+/** Runtime-event drainer whose journal is always empty. */
+const EMPTY_DRAINER: RuntimeEventDrainer = { drain: async () => [] };
 import { McpHost } from "../sidecar/mcp-host.ts";
 import {
   createApiCallToolDefs,
@@ -101,6 +104,8 @@ const apiCallToolDeps = {
   proxyDeps: { fetchFn: unreachableApiCallDependency },
 } as unknown as ApiCallToolDeps;
 
+const CONN_A = { label: "work", accountId: "work@example.com" };
+
 function apiIntegration(
   namespace: string,
   integrationId: string,
@@ -110,6 +115,8 @@ function apiIntegration(
   return {
     namespace,
     integrationId,
+    connectionId: "conn-1",
+    declaredUris: [],
     fetchCredentials:
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials:
@@ -135,6 +142,7 @@ async function registerApiSurface(
   );
   const pair = await createInProcessPair(defs);
   await host.register({
+    connection: CONN_A,
     namespace: integration.namespace,
     client: wrapClient(pair.client, { close: () => pair.close() }),
     trusted: true,
@@ -158,6 +166,7 @@ describe("buildMcpDirectFactories — runtime-injected tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -179,6 +188,7 @@ describe("buildMcpDirectFactories — run_history dispatch", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -203,6 +213,7 @@ describe("buildMcpDirectFactories — recall_memory dispatch", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -227,6 +238,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -266,6 +278,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -281,6 +294,91 @@ describe("buildMcpDirectFactories — integration tools", () => {
       expect(result.details).toEqual(structured);
     } finally {
       await pair.close();
+    }
+  });
+
+  it("throws an MCP `isError` result as a Pi tool error after reporting it (#1490)", async () => {
+    const pair = await createInProcessPair([
+      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+      {
+        descriptor: { name: "ssh__ssh_read", inputSchema: { type: "object" } },
+        handler: async () => ({
+          content: [{ type: "text" as const, text: '{ "error": "sftp failed (exit 1)" }' }],
+          isError: true,
+        }),
+      },
+    ]);
+    const emitted: Array<Record<string, unknown>> = [];
+    try {
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(pair.client, { close: () => Promise.resolve() }),
+        runId: "run-1",
+        emit: (event) => emitted.push(event),
+        workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const read = captured.find((c) => c.name === "ssh__ssh_read");
+
+      await expect(read!.execute("call-1", {})).rejects.toThrow(
+        '{ "error": "sftp failed (exit 1)" }',
+      );
+      expect(emitted.find((e) => e.type === "integration_tool.completed")).toMatchObject({
+        toolCallId: "call-1",
+        isError: true,
+      });
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("throws an upstream api_call error with its own text, not as a response-write failure", async () => {
+    const host = new McpHost();
+    let gateway: Awaited<ReturnType<typeof createInProcessPair>> | undefined;
+    try {
+      await registerApiSurface(host, apiIntegration("gh", "@appstrate/github"), async () => ({
+        ...upstreamResult(404, {}, '{"message":"Not Found"}'),
+        isError: true,
+      }));
+      gateway = await createInProcessPair([
+        { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+        { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+        ...host.buildTools(),
+      ]);
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
+      });
+      const captured: CapturedTool[] = [];
+      const api = makeMockExtensionApi(captured);
+      for (const f of factories) f(api);
+      const apiCall = captured.find((c) => c.name === "gh__api_call");
+
+      const failure = (await apiCall!
+        .execute("call-1", { target: "https://api.github.com/repos/x/y" })
+        .catch((err: Error) => err)) as Error;
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain("[api_call status=404]");
+      expect(failure.message).toContain('{"message":"Not Found"}');
+      expect(failure.message).not.toContain("could not write response");
+
+      // A `{ fromFile }` body that cannot be read fails before the call.
+      await expect(
+        apiCall!.execute("call-2", {
+          target: "https://api.github.com/repos/x/y",
+          method: "POST",
+          body: { fromFile: "missing.bin" },
+        }),
+      ).rejects.toThrow('api_call: cannot read body file "missing.bin"');
+    } finally {
+      await gateway?.close();
+      await host.dispose();
     }
   });
 
@@ -322,6 +420,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         },
       ]);
       await host.register({
+        connection: CONN_A,
         namespace: "drive",
         intoNamespace: "drive",
         client: wrapClient(forged.client, { close: () => forged.close() }),
@@ -350,6 +449,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-slack",
         emit: () => {},
         workspace,
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -362,9 +462,9 @@ describe("buildMcpDirectFactories — integration tools", () => {
         fromFile: "payload.txt",
         uploadProtocol: "google-resumable",
         metadata: { name: "payload.txt" },
-      })) as { isError?: boolean };
+      })) as { content: Array<{ text: string }> };
 
-      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text).ok).toBe(true);
       expect(routedCalls).toEqual(["drive__api_call", "drive__api_call"]);
     } finally {
       await gateway?.close();
@@ -410,6 +510,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-multiauth",
         emit: () => {},
         workspace,
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -422,9 +523,9 @@ describe("buildMcpDirectFactories — integration tools", () => {
         fromFile: "payload.txt",
         uploadProtocol: "google-resumable",
         metadata: { name: "payload.txt" },
-      })) as { isError?: boolean };
+      })) as { content: Array<{ text: string }> };
 
-      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0]!.text).ok).toBe(true);
       expect(routedCalls).toEqual(["drive__api_call__primary", "drive__api_call__primary"]);
     } finally {
       await gateway?.close();
@@ -472,6 +573,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-ambiguous",
         emit: () => {},
         workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -517,7 +619,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
     };
   }
 
-  async function setup(toolName: string, drainer: RuntimeEventDrainer | undefined) {
+  async function setup(toolName: string, drainer: RuntimeEventDrainer) {
     const pair = await createInProcessPair([
       {
         descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
@@ -536,7 +638,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
-      ...(drainer ? { drainer } : {}),
+      drainer,
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -599,7 +701,13 @@ describe("buildMcpDirectFactories — failure modes", () => {
     const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
     try {
       await expect(
-        buildMcpDirectFactories({ mcp, runId: "run-1", emit: () => {}, workspace: "/tmp" }),
+        buildMcpDirectFactories({
+          mcp,
+          runId: "run-1",
+          emit: () => {},
+          workspace: "/tmp",
+          drainer: EMPTY_DRAINER,
+        }),
       ).rejects.toThrow(/run_history/);
     } finally {
       await pair.close();

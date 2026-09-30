@@ -42,11 +42,18 @@ import {
   type RunAndWaitFile,
 } from "@appstrate/core/run-and-wait-client";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
-import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
+import {
+  getCatalog,
+  collectReferencedSchemas,
+  operationGranted,
+  operationIdGranted,
+  type CatalogOperation,
+} from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import { canReadRuns } from "../../lib/run-visibility.ts";
+import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -57,8 +64,10 @@ import {
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
-import { asString, textResult } from "./tool-results.ts";
+import { filePurposeValues } from "@appstrate/db/schema";
+import { asString, RESOURCE_BLOB_MAX_BYTES, textResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -71,6 +80,7 @@ export type McpToolName =
   | "run_and_wait"
   | "list_files"
   | "read_file"
+  | "read_skill"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -78,8 +88,6 @@ export type McpToolName =
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
-  /** Caller lacks `mcp:invoke` — no dispatch happened (security-relevant). */
-  | "denied"
   /** Client error before dispatch (unknown operationId, missing path params). */
   | "rejected"
   /** Dispatched in-process; `status` carries the operation's HTTP status. */
@@ -95,8 +103,10 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** `search_operations`: number of matches returned. */
-  resultCount?: number;
+  /** Rows returned to the caller (after `limit`), not rows matched. */
+  shownCount?: number;
+  /** `search_operations`: matches withheld for lack of permission. */
+  deniedCount?: number;
   /** `invoke_operation`: which operation, its method/path, and the outcome. */
   operationId?: string;
   method?: string;
@@ -114,6 +124,8 @@ export interface McpToolContext {
   authHeaders: Headers;
   /** Effective permissions of the caller (from the session/token). */
   permissions: ReadonlySet<string>;
+  /** A delegated credential's scopes (`scopeCeiling`); `undefined` for a session. Caps ceiling guards. */
+  ceiling: ReadonlySet<string> | undefined;
   /**
    * The resolved caller identity (from the same forwarded auth the dispatched
    * requests carry). Lets the file resource provider call the files
@@ -125,15 +137,11 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
-  /**
-   * Whether the caller may OFFER a package from its home space — the
-   * predicate `import_package_file` needs to place a re-imported root the
-   * same way the REST import route places it. Optional so a non-HTTP caller
-   * (a unit test, an in-process consumer with no request) can omit it and
-   * get the fail-closed answer: the root is not activated and the result
-   * says so.
-   */
-  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
+  readSkill: SkillToolContext["readSkill"];
+  /** The inbound request's id, for the problem bodies a tool builds itself. */
+  requestId: string;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -209,6 +217,16 @@ const PROTECTED_HEADERS = new Set<string>([
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
 
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -227,14 +245,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * no partial-content standard, so we keep it simple.
  */
 const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
-
-/**
- * Ceiling on inlining a NON-textual file's RAW bytes as a base64 `blob` in a
- * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
- * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
- * it (either kind) the read returns metadata only.
- */
-const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
 /** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
 function fileResourceLink(doc: RunAndWaitFile): {
@@ -293,6 +303,7 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling">,
 ): Record<string, unknown> {
   return {
     operation_id: op.operationId,
@@ -301,6 +312,13 @@ function describePayload(
     path_params: op.pathParams,
     summary: op.summary,
     description: op.description,
+    // Only caller-space requirements decide `granted` — merging target-space ones
+    // would pre-refuse an allowed cross-space call.
+    required_permissions: op.requirement.requirements,
+    target_space_permissions: op.requirement.targetSpaceRequirements,
+    // Asked of a delegated credential's scopes only, never of the role.
+    ceiling_permissions: op.requirement.ceilingRequirements,
+    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -308,15 +326,32 @@ function describePayload(
   };
 }
 
-function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
+/** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
+function deniedCeiling(
+  op: CatalogOperation,
+  ctx: Pick<McpToolContext, "ceiling">,
+): { ceiling_permissions?: readonly string[] } {
+  return ctx.ceiling !== undefined && !ceilingHolds(op.requirement.ceilingRequirements, ctx.ceiling)
+    ? { ceiling_permissions: op.requirement.ceilingRequirements }
+    : {};
+}
+
+function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "search_operations",
     description:
       "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
       "operationIds with their HTTP method, path, and summary. Use this first to discover " +
       "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema — when it matches your " +
-      "intent you can call invoke_operation directly, no describe_operation needed.",
+      "`best_match` carrying the top result's full input schema" +
+      (invokes
+        ? " — when it matches your intent you can call invoke_operation directly, no " +
+          "describe_operation needed. "
+        : ", so a clear single hit needs no follow-up describe_operation call. ") +
+      "Operations your role may not invoke are listed separately under `denied` with the " +
+      "permissions they need in YOUR space: report that to the user instead of trying them. " +
+      "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
+      "capped at `limit`.",
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -325,6 +360,7 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         query: {
           type: "string",
@@ -356,32 +392,42 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
     const scored = matches
       .map((op) => ({ op, score: scoreOperation(op, tokens) }))
       .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId))
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
+
+    // A denied match is answered, not hidden — its id and requirement only.
+    const granted: CatalogOperation[] = [];
+    const denied: CatalogOperation[] = [];
+    for (const { op } of scored) {
+      (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
+    }
+    const shown = granted.slice(0, limit);
 
     emit(ctx, {
       tool: "search_operations",
       durationMs: performance.now() - start,
-      resultCount: scored.length,
+      shownCount: shown.length,
+      deniedCount: denied.length,
     });
 
-    // For a keyword search with at least one hit, embed the top match's full
-    // invoke-ready definition so the common single-target case needs no
-    // follow-up describe_operation call. Only the top result carries the
-    // schema, to keep the response bounded; the rest stay compact.
-    const top = scored[0];
+    // Only the top granted hit carries its schema: one describe saved, response bounded.
+    const top = shown[0];
     const bestMatch =
-      tokens.length > 0 && top ? describePayload(top.op, componentSchemas) : undefined;
+      tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
 
     return textResult({
-      count: scored.length,
-      total: matches.length,
-      operations: scored.map(({ op }) => ({
+      total: granted.length,
+      operations: shown.map((op) => ({
         operation_id: op.operationId,
         method: op.method,
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
+      })),
+      denied_total: denied.length,
+      denied: denied.slice(0, limit).map((op) => ({
+        operation_id: op.operationId,
+        required_permissions: op.requirement.requirements,
+        ...deniedCeiling(op, ctx),
       })),
       best_match: bestMatch,
     });
@@ -390,13 +436,23 @@ function buildSearchTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "describe_operation",
     description:
       "Return the full OpenAPI definition for one operation (parameters, request body, " +
-      "responses) with all referenced component schemas inlined, so you can construct a " +
-      "valid invoke_operation call.",
+      "responses) with all referenced component schemas inlined, " +
+      (invokes
+        ? "so you can construct a valid invoke_operation call. "
+        : "so you can see exactly what it takes and what it answers with. ") +
+      "It also reports whether your role clears the route's guards (`granted`) and which " +
+      "permissions the route requires in YOUR space (`required_permissions`). " +
+      "`target_space_permissions` is separate on purpose: those are decided in the space the " +
+      "path names, not here, so they never make an operation unavailable to you. " +
+      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
+      "OAuth token): its scopes must include each, so they make an operation unavailable when " +
+      "your credential's scopes omit one, whatever your role holds. A granted " +
+      "operation can still be refused on the record it acts on; that refusal names its reason.",
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -405,6 +461,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: {
           type: "string",
@@ -441,7 +498,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas));
+    return textResult(describePayload(op, componentSchemas, ctx));
   };
 
   return { descriptor, handler };
@@ -511,8 +568,12 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
  *    server promise (the platform exposes SSE GET operations).
  *  - Non-text bodies (downloads, tarballs) are summarised, not decoded.
  *  - Text bodies are capped to bound context size.
+ *  - `extra` is merged into the payload (e.g. what a 403 required).
  */
-export async function readResponse(response: Response): Promise<CallToolResult> {
+export async function readResponse(
+  response: Response,
+  extra?: Record<string, unknown>,
+): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
 
@@ -522,6 +583,7 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
         status: response.status,
         error:
           "This operation streams (text/event-stream) and is not supported via invoke_operation. Consume the realtime/SSE endpoint directly.",
+        ...extra,
       },
       true,
     );
@@ -542,6 +604,7 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
         note: "Non-text response body omitted.",
         content_type: contentType,
         bytes: len ? Number(len) : null,
+        ...extra,
       },
       isError,
     );
@@ -563,8 +626,16 @@ export async function readResponse(response: Response): Promise<CallToolResult> 
     }
   }
 
+  // The version to send back as `if_match` on the next write to this resource.
+  const etag = response.headers.get("etag");
   return textResult(
-    { status: response.status, ...(truncated ? { truncated: true } : {}), body },
+    {
+      status: response.status,
+      ...(etag ? { etag } : {}),
+      ...(truncated ? { truncated: true } : {}),
+      body,
+      ...extra,
+    },
     isError,
   );
 }
@@ -586,7 +657,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "Execute an Appstrate API operation. Call describe_operation first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
-      "the request is validated and authorized exactly as the equivalent REST call.",
+      "the request is validated and authorized exactly as the equivalent REST call. " +
+      "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
+      "pass it back as `if_match` on the next write to that resource. A write refused with " +
+      "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
+      "the write requires `if_match` (package draft updates do — read the package first).",
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -599,6 +674,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
@@ -615,6 +691,12 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description: "JSON request body (for POST/PUT/PATCH).",
           additionalProperties: true,
+        },
+        if_match: {
+          type: "string",
+          description:
+            "The `etag` of the representation this write is based on, sent as the If-Match " +
+            "header (copy it verbatim from the result that returned it, quotes included).",
         },
         headers: {
           type: "object",
@@ -633,19 +715,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const operationId = asString(args.operation_id);
-
-    if (!ctx.permissions.has("mcp:invoke")) {
-      emit(ctx, {
-        tool: "invoke_operation",
-        durationMs: performance.now() - start,
-        operationId,
-        outcome: "denied",
-      });
-      return textResult(
-        { error: "Permission 'mcp:invoke' is required to invoke operations." },
-        true,
-      );
-    }
 
     // Structural protocol errors (-32602 InvalidParams): missing required
     // argument / unknown operationId — the call itself is malformed, per the
@@ -692,27 +761,26 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
     const query = asRecord(args.query) ?? {};
 
+    // An invalid model-supplied header is a tool error, not a 500.
+    const rejectHeader = (name: string): CallToolResult => {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+    };
     const headers = new Headers(ctx.authHeaders);
+    const ifMatch = asString(args.if_match);
+    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch)) return rejectHeader("If-Match");
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
         if (typeof value !== "string") continue;
-        // A model-supplied header name/value may be syntactically invalid
-        // (`Headers.set` throws a TypeError). Surface a graceful tool error
-        // instead of a 500 so the model can self-correct.
-        try {
-          headers.set(name, value);
-        } catch {
-          emit(ctx, {
-            tool: "invoke_operation",
-            durationMs: performance.now() - start,
-            operationId,
-            method: op.method,
-            outcome: "rejected",
-          });
-          return textResult({ error: `Invalid header name or value: ${name}` }, true);
-        }
+        if (!trySetHeader(headers, name, value)) return rejectHeader(name);
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
@@ -727,7 +795,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       if (queryKey === undefined) continue;
       const value = query[queryKey];
       if (typeof value === "string" || typeof value === "number") {
-        headers.set(headerName, String(value));
+        if (!trySetHeader(headers, headerName, String(value))) return rejectHeader(headerName);
         delete query[queryKey];
       }
     }
@@ -778,7 +846,22 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    return readResponse(response);
+    // Only a 403 the permission set explains gets the permission answer; one the
+    // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
+    const denial =
+      response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
+        ? {
+            required_permissions: op.requirement.requirements,
+            ...deniedCeiling(op, ctx),
+            hint:
+              (ctx.ceiling === undefined
+                ? "Your role does not hold this permission."
+                : "Your role, or your credential's scopes, do not hold this permission.") +
+              " Report it to the user; do not retry and do not look for another operation " +
+              "that does the same thing.",
+          }
+        : undefined;
+    return readResponse(response, denial);
   };
 
   return { descriptor, handler };
@@ -791,39 +874,134 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
-function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
+/**
+ * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
+ * to a caller whose surface `composes`; another caller sending one gets the
+ * undeclared-argument refusal (`refuseUndeclaredArguments`), and the route's
+ * 403 still owns the rule behind it.
+ */
+const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
+  manifest: {
+    type: "object",
+    description:
+      "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
+      "plus task-specific dependencies/configuration are needed; `name` is derived and " +
+      "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
+      "provided field is an exact top-level replacement: arrays and nested objects are not " +
+      "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
+      "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
+      "the manifest — it goes in the separate top-level `prompt` argument.",
+    properties: {
+      display_name: {
+        type: "string",
+        description:
+          "Task-specific human title. When name is omitted, the platform derives " +
+          "@inline/<slug> from this value.",
+      },
+      name: {
+        type: "string",
+        description:
+          "Optional exact canonical @scope/name override. Usually omit and provide " +
+          "display_name.",
+      },
+      dependencies: {
+        type: "object",
+        description: "Exact AFPS dependencies override.",
+        additionalProperties: true,
+      },
+      integrations_configuration: {
+        type: "object",
+        description: "Exact AFPS integration configuration override.",
+        additionalProperties: true,
+      },
+      runtime_tools: {
+        type: "array",
+        description:
+          "Exact runtime-tool selection. Omit for " +
+          "log/output/publish_file defaults; " +
+          "an explicit [] disables them all.",
+        items: { type: "string" },
+      },
+      output: {
+        type: "object",
+        description: "Exact AFPS output contract override, including a deterministic JSON schema.",
+        additionalProperties: true,
+      },
+    },
+    additionalProperties: true,
+  },
+  prompt: {
+    type: "string",
+    description:
+      "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
+      "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
+      "to report each meaningful step — those lines are what the chat shows live. When the " +
+      "run produces files, require descriptive, task-specific names that remain clear " +
+      `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
+  },
+  context_files: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
+      "`files` result — mounted read-only into this run's `files/` directory and " +
+      "listed in its prompt. This is how you chain runs: to give a run the output of " +
+      "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
+      "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
+      "and date you retype is one you can get wrong — the file itself cannot be. No " +
+      "manifest change is needed; the platform declares the input field for you. For " +
+      "kind:agent this argument is rejected — a published agent's input schema is a " +
+      "versioned contract, so pass the URI through one of its declared file fields instead.",
+  },
+};
+
+function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToolDefinition {
+  // The route is the gate; this only decides what the model is told.
+  // Inline-only descriptor spans are absent, not contradicted, for a caller
+  // who cannot launch one.
   const descriptor: Tool = {
     name: "run_and_wait",
     description:
-      'Launch a run and wait for its final status in one call: starts an agent run (`kind:"agent"`, ' +
-      'by `scope`/`name`) or an inline run (`kind:"inline"`, by `manifest`+`prompt`), exposes ' +
-      "the created run to chat for live progress, then returns " +
+      "Launch a run and wait for its final status in one call: starts " +
+      (inline
+        ? 'an agent run (`kind:"agent"`, by `scope`/`name`) or an inline run (`kind:"inline"`, ' +
+          "by `manifest`+`prompt`)"
+        : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
+      ", exposes the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
       "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
-      "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-      "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_file), and an open object output schema. Defaults apply only " +
-      "to fields you omit; " +
-      "every field you provide replaces its default exactly, with no array or nested-object merge. " +
-      "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
-      "A complete deterministic manifest may override every field, including a strict " +
-      "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
-      "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
-      "that tool is selected. Never use an id or a generic display name such as `one-shot`. " +
+      "waits. " +
+      (inline
+        ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
+          "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
+          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
+          "publish_file), and an open object output schema. Defaults apply only " +
+          "to fields you omit; " +
+          "every field you provide replaces its default exactly, with no array or nested-object merge. " +
+          "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
+          "A complete deterministic manifest may override every field, including a strict " +
+          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+          "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
+          "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
+        : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
-      "published as a file when the run ends and returned here as a `resource_link` — when the " +
-      "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
-      "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
-      `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
-      "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
-      "archive with its normal shell tools, then publish that single archive with " +
-      "`publish_file`. " +
-      "Content merely returned in the output payload never becomes a file. " +
-      "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
-      "their `appfile://` URIs in `context_files` — never by copying their content into " +
-      "`prompt`. " +
-      "Prefer an existing agent over an inline manifest when one matches the intent.",
+      "published as a file when the run ends and returned here as a `resource_link`" +
+      (inline
+        ? " — when the " +
+          "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
+          "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
+          `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
+          "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
+          "archive with its normal shell tools, then publish that single archive with " +
+          "`publish_file`. "
+        : ". ") +
+      "Content merely returned in the output payload never becomes a file." +
+      (inline
+        ? " Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
+          "their `appfile://` URIs in `context_files` — never by copying their content into " +
+          "`prompt`. " +
+          "Prefer an existing agent over an inline manifest when one matches the intent."
+        : ""),
     annotations: {
       title: "Run and wait",
       readOnlyHint: false,
@@ -836,9 +1014,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       properties: {
         kind: {
           type: "string",
-          enum: ["agent", "inline"],
-          description:
-            "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest.",
+          enum: inline ? ["agent", "inline"] : ["agent"],
+          description: inline
+            ? "`agent` runs a published/draft agent by scope+name; `inline` runs a manifest."
+            : "`agent` runs a published/draft agent by scope+name.",
         },
         scope: { type: "string", description: "Agent scope, keep the leading `@` (kind:agent)." },
         name: { type: "string", description: "Agent name (kind:agent)." },
@@ -853,104 +1032,47 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         input: {
           type: "object",
           description:
-            "Run input, validated against the agent's input schema (either kind — for " +
-            "kind:inline, against `manifest.input.schema`). File fields (typed `format: uri` " +
+            "Run input, validated against the agent's input schema" +
+            (inline ? " (either kind — for kind:inline, against `manifest.input.schema`)" : "") +
+            ". File fields (typed `format: uri` " +
             "with a `contentMediaType`) accept `appfile://` and `upload://` URIs directly — " +
             "pass an attached file's `appfile://` URI verbatim and the file is streamed " +
             "into the run's workspace.",
           additionalProperties: true,
         },
-        manifest: {
-          type: "object",
-          description:
-            "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
-            "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-            "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
-            "provided field is an exact top-level replacement: arrays and nested objects are not " +
-            "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
-            "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
-            "the manifest — it goes in the separate top-level `prompt` argument.",
-          properties: {
-            display_name: {
-              type: "string",
-              description:
-                "Task-specific human title. When name is omitted, the platform derives " +
-                "@inline/<slug> from this value.",
-            },
-            name: {
-              type: "string",
-              description:
-                "Optional exact canonical @scope/name override. Usually omit and provide " +
-                "display_name.",
-            },
-            dependencies: {
-              type: "object",
-              description: "Exact AFPS dependencies override.",
-              additionalProperties: true,
-            },
-            integrations_configuration: {
-              type: "object",
-              description: "Exact AFPS integration configuration override.",
-              additionalProperties: true,
-            },
-            runtime_tools: {
-              type: "array",
-              description:
-                "Exact runtime-tool selection. Omit for " +
-                "log/output/publish_file defaults; " +
-                "an explicit [] disables them all.",
-              items: { type: "string" },
-            },
-            output: {
-              type: "object",
-              description:
-                "Exact AFPS output contract override, including a deterministic JSON schema.",
-              additionalProperties: true,
-            },
-          },
-          additionalProperties: true,
-        },
-        prompt: {
-          type: "string",
-          description:
-            "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
-            "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
-            "to report each meaningful step — those lines are what the chat shows live. When the " +
-            "run produces files, require descriptive, task-specific names that remain clear " +
-            `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
-        },
+        ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
         connection_overrides: {
           type: "object",
-          additionalProperties: { type: "string" },
+          additionalProperties: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+          },
           description:
-            'Which connection to use per integration (either kind): `{ "@scope/integration": ' +
-            '"<connection_id>" }`, exactly one connection id per integration. This is the retry ' +
-            "path for a `412 must_choose_connection` launch error — that error lists the " +
-            "ambiguous integration and its `candidate_connections`, each with a `label`, an " +
-            "`account_id` and `owned_by_actor`; pick one candidate's `id` and retry the SAME " +
-            "call with it here. Those fields are what tells the candidates apart, so read them " +
-            "rather than listing connections separately. Each key is the integration id itself " +
-            "(`@scope/integration`) — NOT the `integrations.<id>` field path the error reports " +
-            "it under, which matches no integration and is ignored. TOP-LEVEL argument, " +
-            "alongside `manifest`/`input` — pass the object itself; JSON-encoding it is " +
+            "Which connections to use per integration" +
+            (inline ? " (either kind)" : "") +
+            ': `{ "@scope/integration": ' +
+            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "Naming several binds them all: the run's tools then take a " +
+            "required `connection` argument carrying the connection's label. This is also the " +
+            "retry path for a `409 must_choose_connection` launch error — that error lists the " +
+            "integration and its `candidate_connections`, each with a `label`, an " +
+            "`account_id`, `owned_by_actor` and `needs_reconnection`; pick the candidates the " +
+            "task needs — never one with `needs_reconnection: true`, the run fails on it — and " +
+            "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
+            "apart, so read them rather than listing connections separately. Each key is the " +
+            "integration id itself (`@scope/integration`) — NOT the " +
+            "`integrations.<id>` field path the error reports it under, which matches no " +
+            "integration and is ignored. TOP-LEVEL argument, " +
+            (inline ? "alongside `manifest`/`input`" : "alongside `input`") +
+            " — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
-        },
-        context_files: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
-            "`files` result — mounted read-only into this run's `files/` directory and " +
-            "listed in its prompt. This is how you chain runs: to give a run the output of " +
-            "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
-            "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
-            "and date you retype is one you can get wrong — the file itself cannot be. No " +
-            "manifest change is needed; the platform declares the input field for you. For " +
-            "kind:agent this argument is rejected — a published agent's input schema is a " +
-            "versioned contract, so pass the URI through one of its declared file fields instead.",
         },
       },
       required: ["kind"],
+      additionalProperties: false,
     },
   };
 
@@ -961,34 +1083,6 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const signal = extra.signal;
     throwIfAborted(signal);
-    if (!ctx.permissions.has("mcp:invoke")) {
-      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
-      return textResult({ error: "Permission 'mcp:invoke' is required to launch runs." }, true);
-    }
-    // Checked HERE, before the launch, because this tool's second half polls
-    // `GET /api/runs/{id}` through the same in-process dispatch — and
-    // `internal-dispatch.ts` is explicit that the marker "does not
-    // authenticate, elevate, or alter identity", so the caller's own scopes
-    // gate the poll. Without this, a credential holding `agents:run` but no
-    // run-read permission provisions the container, incurs the LLM spend, and
-    // only THEN takes a 403 on the first poll: a billed orphan instead of a
-    // refusal. The description above also tells the model not to fall back to
-    // `getRun`, so there is no recovery path once the run is away. The predicate
-    // is `canReadRuns`, never a literal `runs:read` test: `runs:read-all` is a
-    // superset, so a principal holding only the wide permission reads the poll
-    // route fine and must not be refused here.
-    if (!canReadRuns(ctx.permissions)) {
-      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
-      return textResult(
-        {
-          error:
-            "Permission 'runs:read' or 'runs:read-all' is required to wait for a run. Launching " +
-            "without one would start the run and then fail to read its status.",
-        },
-        true,
-      );
-    }
-
     const kind = asString(args.kind);
     if (kind !== "agent" && kind !== "inline") {
       emit(ctx, {
@@ -1135,9 +1229,9 @@ function projectFileRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
-    // camelCase carve-outs; `run_id` a snake_case domain field.
-    run_id: asString(r?.run_id) ?? null,
+    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `runId`/`packageId`/
+    // `createdAt` are camelCase carve-outs.
+    runId: asString(r?.runId) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
     // Surface the same access capabilities the REST DTO carries (computed by the
@@ -1155,9 +1249,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     description:
       "List the files visible to you — files you attached to this conversation " +
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
-      "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
+      "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], has_more }`.",
+      "or read with read_file. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1166,8 +1260,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
-        run_id: {
+        runId: {
           type: "string",
           description: "Only files produced by / attached to this run.",
         },
@@ -1177,7 +1272,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         purpose: {
           type: "string",
-          enum: ["user_upload", "agent_output"],
+          enum: [...filePurposeValues],
           description: "`user_upload` = files you attached; `agent_output` = agent deliverables.",
         },
         limit: {
@@ -1193,8 +1288,8 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const query: Record<string, unknown> = {};
-    const runId = asString(args.run_id);
-    if (runId) query.run_id = runId;
+    const runId = asString(args.runId);
+    if (runId) query.runId = runId;
     const chatSessionId = asString(args.chat_session_id);
     if (chatSessionId) query.chat_session_id = chatSessionId;
     const purpose = asString(args.purpose);
@@ -1219,9 +1314,9 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
     emit(ctx, {
       tool: "list_files",
       durationMs: performance.now() - start,
-      resultCount: files.length,
+      shownCount: files.length,
     });
-    return textResult({ files, has_more: body?.hasMore === true });
+    return textResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };
@@ -1398,7 +1493,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
 
   const handler = async (): Promise<CallToolResult> => {
@@ -1428,34 +1523,96 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 }
 
 /**
+ * What one request's caller is offered: the tools `buildMcpTools` declares AND
+ * the acts `buildServerInstructions` teaches, each read off the guards of the
+ * route it dispatches to (or, for `import_package_file`, stands in for). A
+ * withheld act is ABSENT from both — never declared then refused.
+ */
+export interface McpSurface {
+  /** `invoke_operation`; the transport already required `mcp:read`. */
+  invokes: boolean;
+  /** `run_and_wait`: launch AND read back — a run nobody can poll still bills. */
+  runs: boolean;
+  /** `run_and_wait` with `kind:"inline"`. */
+  composes: boolean;
+  /** Creating an agent through `invoke_operation`. */
+  authors: boolean;
+  listsFiles: boolean;
+  importsPackages: boolean;
+}
+
+export function deriveMcpSurface(
+  permissions: ReadonlySet<string>,
+  ceiling: ReadonlySet<string> | undefined,
+  actor: Actor,
+): McpSurface {
+  const granted = (operationId: string): boolean =>
+    operationIdGranted(operationId, permissions, ceiling);
+  const invokes = permissions.has("mcp:invoke");
+  const runs = invokes && granted("runAgent") && granted("getRun");
+  return {
+    invokes,
+    runs,
+    composes: runs && granted("runInline"),
+    authors: invokes && granted("createAgent"),
+    listsFiles: granted("listFiles"),
+    // `import_package_file` calls the import service directly: it re-checks
+    // each package's `write`, but `mcp:invoke` and the user actor (the import
+    // is recorded under a user id) are checked here and nowhere else.
+    importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+  };
+}
+
+/**
+ * The SDK does not validate `tools/call` arguments against `inputSchema`, so an
+ * argument a tool does not read is dropped in silence — a misspelled filter
+ * widens a listing, a misspelled field is simply not applied. A tool declaring
+ * `additionalProperties: false` therefore gets its undeclared top-level keys
+ * refused here, as -32602 naming the accepted ones, before its handler runs.
+ */
+function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
+  const schema = tool.descriptor.inputSchema;
+  if (schema.additionalProperties !== false) return tool;
+  const declared = new Set(Object.keys(schema.properties ?? {}));
+  return {
+    descriptor: tool.descriptor,
+    handler: async (args, extra) => {
+      const unknown = Object.keys(args).filter((k) => !declared.has(k));
+      if (unknown.length > 0) {
+        const accepted =
+          declared.size > 0 ? `Accepted: ${[...declared].join(", ")}.` : "No arguments.";
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
+        );
+      }
+      return tool.handler(args, extra);
+    },
+  };
+}
+
+/**
  * Build the per-request tool set. Handlers close over the caller's auth
  * context.
  *
- * There are no hidden aliases for the pre-#1177 tool names (`list_documents`,
- * `read_document`, `validate_package_document`, `import_package_document`) or
- * the `document_uri` argument. They were kept callable-but-unlisted because
- * the server advertises `tools: { listChanged: false }`, so a client that
- * listed before an upgrade and calls an old name after it is behaving
- * correctly. The cost of removing them is bounded and transient: such a client
- * gets `-32602 Unknown tool` and re-lists, rather than being forwarded
- * silently. The cost of keeping them was a permanent second dispatch path
- * whose only proof of life was its own test.
+ * No aliases for retired tool names: a stale client gets `-32602 Unknown tool`
+ * and re-lists, where an alias would be a permanent second dispatch path.
  */
-export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
-  const tools = [
-    buildSearchTool(ctx),
-    buildDescribeTool(ctx),
-    buildInvokeTool(ctx),
-    buildRunAndWaitTool(ctx),
-    buildListFilesTool(ctx),
+export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
+  return [
+    buildSearchTool(ctx, surface.invokes),
+    buildDescribeTool(ctx, surface.invokes),
+    ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
+    ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
+    ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    ...buildPackageFileTools(ctx),
-  ];
-  // get_me dispatches to GET /api/me/context. A consumer that already injects
-  // that payload into its own system prompt (the chat module) drops the tool —
-  // it would only re-fetch what the model already has. search_operations is
-  // kept either way: the operation index is injected too, but its `best_match`
-  // schema still saves a describe_operation round-trip, so it is not redundant.
-  if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
-  return tools;
+    buildReadSkillTool({
+      readSkill: ctx.readSkill,
+      requestId: ctx.requestId,
+      observe: (event) => emit(ctx, event),
+    }),
+    ...buildPackageFileTools(ctx, surface.importsPackages),
+    // Redundant for a context-injecting caller; search_operations stays for `best_match`.
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
+  ].map(refuseUndeclaredArguments);
 }

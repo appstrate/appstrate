@@ -99,6 +99,9 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/<NNNN>-<slug>.sql
 ```
 
+Exceptions: `0020` is a dry run unless given `-v apply=on` (see its header);
+`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints.
+
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
 **Not a runbook.** The order lives in "Release beta.58" above: these files are its
@@ -584,7 +587,7 @@ idempotent; a second run of either inserts nothing.
   switch it back on there and it returns to the index. The **Intégrations** page
   has no Actives / Toutes tabs — the library is the other half — and an empty
   index names the library rather than pretending the space holds nothing.
-- `appstrate skills sync` writes only the skills a space has ACTIVE. Switch a
+- `appstrate code sync` writes only the skills a space has ACTIVE. Switch a
   skill off in a space, sync again, and its directory disappears from the target;
   switch it back on and the next sync restores it.
 - A SCHEDULE on a switched-off agent creates a **visible failed run** naming the
@@ -711,6 +714,254 @@ if it is needed at all, runs with the platform stopped and before the batch.
    `PUT /api/models/{id}` answers the same when an edit would repoint a row onto
    a binding another row holds.
 
+## Detail — Credentials of departed members (script `0019`)
+
+**Not a runbook.** From the leave-organization release on, every exit — a
+removal or a leave — revokes, in its own transaction (`removeMemberInTx`), the
+member's API keys in the organization and the OAuth tokens that grant only that
+organization. `0019` repairs the members who left BEFORE it: their credentials
+were inert only because every reader joins `org_members`, and they revived the
+moment the person was re-invited.
+
+What it revokes — `revoked_at` / `revoked` = now(), only where NULL, for a user
+who is no longer a member of the organization concerned:
+
+- `api_keys` whose creator has no `org_members` row in the key's organization
+  (a key whose creator was deleted, `created_by` NULL, is left alone);
+- `oauth_refresh_tokens` / `oauth_access_tokens` of an org-level client
+  (`oauth_clients.level = 'org'`) of that organization;
+- the same tables' rows whose `resources` holds the organization's MCP resource
+  URI, `<APP_URL>/api/mcp/o/<org_id>` — so `APP_URL` is passed as the psql
+  variable `app_url`, exactly as the platform runs with it (the script refuses
+  anything that is not `scheme://host[:port]`).
+
+Only opaque tokens are rows: a JWT access token is not stored and stays valid
+until its TTL, the per-request membership check being what stops it.
+
+Run it once, after the release is deployed; the header carries the invocation
+and a read-only pre-flight query that counts exactly what the script captures.
+The three predicates are stated once, as temporary views: the script prints
+their counts before the writes, then re-runs them against the tables after the
+writes and aborts if any departed member still holds an unrevoked credential —
+a check on the end state, not on its own capture. Idempotent without a marker:
+the predicate is the condition the write removes. Not harmless to skip: those
+credentials authenticate again on a re-invite, and a refresh through an
+`allowSignup` org client re-provisions the membership on its own.
+
+## Detail — Custom space roles that act without reading (script `0020`)
+
+**Not a runbook.** `0020` appends to each custom space role (`space_roles`) the
+read every permission it holds requires under #1513 (`schedules:write` →
+`schedules:read`), nothing removed. Run it once BEFORE deploying the enforcing
+image; its dry run, re-run after that deploy, must list 0 rows. Details — the
+rule, the dated catalog snapshot, dry run/apply, rollback — in the file header.
+
+## Detail — Space-assignment key casing (script `0021`)
+
+**Not a runbook.** `SpaceAssignment` spells its space id `spaceId`; `0021`
+renames the stored `space_id` keys. Run it inside the deploy window — each build
+reads only its own spelling. Details in the file header.
+
+## Detail — Retired API-key format (script `0022`)
+
+**Not a runbook.** API keys are `apst_` + 30 base62 characters + a base62
+CRC32; `ask_` keys stop working and cannot be converted. `0022` revokes (never
+deletes) the unrevoked `ask_` keys. Run it once, after the deploy. Details in
+the file header.
+
+## Detail — Integration JSONPaths the release refuses (script `0023`)
+
+**Not a runbook, and it writes nothing.** Manifest JSONPaths are now strict,
+also on every READ of a stored manifest. `0023` parses every integration draft
+and published version with the real `integrationManifestSchema` and prints
+each refused path. Run it BEFORE the deploy; it exits non-zero while any
+remains. Fix a draft by editing it; publish a fixed version for a published one.
+
+## Detail — Runner egress allowlist (script `0024`)
+
+**Not a runbook, and it writes nothing.** #1458 renders a local runner's egress
+from its connection's `authorized_uris`, and `@appstrate/ssh` 1.0.1 now grants
+`ssh://{$credential.host}:{$credential.port}`. `0024` prints the `@appstrate/ssh`
+connections whose bag renders no egress (ids only, never a value) and exits
+non-zero on any. Expected 0 — the provisioner has always written `port`, and no
+other door creates that connection — so a hit means a rewrite is owed before the
+deploy. Run it BEFORE the deploy.
+
+It then prints, informational only (no effect on the exit code), the blast
+radius to review: every `source.kind: "local"` integration outside
+`@appstrate/*`, per draft/published version, with each auth's
+`authorized_uris` / `allow_all_uris` (all its runner will reach) and its
+connection count.
+
+## Detail — Generation-settings key casing (script `0025`)
+
+**Not a runbook.** `ModelGenerationSettings` spells its reasoning effort
+`reasoning_level`; `0025` renames the stored `reasoningLevel` keys in the four
+jsonb columns that hold one. Run it inside the deploy window — each build parses
+its own spelling strictly, so a row left in the other one makes that agent's
+launches answer 500. Details in the file header.
+
+`0025`–`0028` are one-way against the image: after them, the previous build
+reads the new spelling as unknown (launches 500, unread counts empty, branding
+defaulted). Roll forward, or restore the pre-window snapshot — there is no
+inverse script.
+
+## Detail — Identity-claim key casing (script `0026`)
+
+**Not a runbook.** Identity-claim keys are snake_case (`account_id`,
+`avatar_url`, `team_name`, …) and `extractIdentity` keys the account on
+`account_id` only. `0026` rewrites every top-level key of
+`integration_connections.identity_claims` that the write-path rule refuses
+(`findNonSnakeCaseIdentityClaimKeys`) into snake_case, generically, and aborts
+naming any key the conversion cannot make conform. Run it once, after the
+deploy. Details in the file header.
+
+## Detail — Notification payload key casing (script `0027`)
+
+**Not a runbook.** `notifications.payload` is returned verbatim by
+`GET /api/notifications`, and `packageId` / `runId` are universal names
+(CASING_CONVENTIONS 4b). `0027` renames the stored `package_id` / `run_id`
+keys, and `agent_id` — the run's package — to `packageId`; an existing
+camelCase key wins. Run it inside the deploy window — each build reads only
+its own spelling. Details in the file header.
+
+## Detail — Space branding key casing (script `0028`)
+
+**Not a runbook.** `spaces.settings` is returned verbatim by the spaces routes,
+so `settings.branding` is spelled snake_case (`logo_url`, `primary_color`,
+`accent_color`, `support_email`, `from_name`). `0028` renames the stored
+camelCase keys. Run it inside the deploy window — the OIDC resolver's strict
+schema rejects the other spelling. Details in the file header.
+
+## Detail — Identity-claim keys the release no longer reads (script `0029`)
+
+**Not a runbook, and it writes nothing.** `extractIdentity` keys a connection
+on the `account_id` identity claim only. `0029` checks every org integration
+draft and `latest` published version with `findNonSnakeCaseIdentityClaimKeys`
+and prints each camelCase key (`accountId`, …). Run it BEFORE the deploy; it
+exits non-zero while any remains — an unfixed one keys new connects on the
+email / `sub` fallback, and reconnecting a connection made before the deploy
+fails 409 `identity_mismatch`. Fix a draft by editing it; publish a fixed
+version for a published one. Details in the file header.
+
+## Detail — Models Pi's registry does not offer (script `0030`)
+
+From #1549 a named provider's offer is exactly Pi's records of its Pi provider
+on its API shape; the gateways (`openai-compatible`, `anthropic-compatible`) and
+OpenRouter's live search still take any id. `0030` deletes every `org_models`
+row of a named provider whose `model_id` is outside that offer. An org default
+naming one moves to a surviving enabled row of the same credential (the
+provider's first featured model present, else the oldest), else to NULL — each
+such org is printed, since it then falls to the system default (platform-billed
+when that model is). A space pin or schedule override naming one goes to NULL
+(the org default). A row of a provider the loaded `MODULES` does not register
+is left alone and listed — run it with the production `MODULES`. Expected on
+production (measured read-only 2026-09-24): 6 deletions — codex `gpt-5.4`,
+`gpt-5.4-mini`, `gpt-5.4-nano`, deepseek `deepseek-chat`, `deepseek-reasoner`,
+`deepseek-v4-flash`. Rules: the file header.
+
+It runs **inside the deploy window** (the scheduler reloads a schedule's model
+override from the table only at boot), from the release checkout with the
+platform env loaded (`DATABASE_URL`, `MODULES`, `SYSTEM_PROVIDER_KEYS`); it
+needs no running service.
+
+1. **Before the window**, `bun run verify:system-models` with the platform env
+   loaded must print `0` — the new image refuses to boot on a
+   `SYSTEM_PROVIDER_KEYS` model outside the offer, and `--apply` refuses to run.
+   Production declares `deepseek` / `deepseek-v4-flash` (entry id `sys-flash`,
+   aliased, the default): change its `modelId` to `deepseek-flash`, keeping the
+   `id` so the pointers naming it survive (an entry without one derives it as
+   `<key id>:<modelId>` — set it to the old derived value). Confirm DeepSeek
+   serves `deepseek-flash` with the production key (release runbook).
+2. With the platform stopped, dry run:
+   `set -a && . ./.env && set +a && bun scripts/migration/0030-pi-catalog-org-models.ts`.
+   Check the deletions against the expectation above, and read the orgs set to
+   NULL and the `left alone` list.
+3. `--apply`, from a directory you keep: it writes `0030-backup-<timestamp>.json`
+   there (path printed) — the deleted rows in full and every pointer changed,
+   before and after — then commits. One transaction; every write is guarded on
+   the value read, and an after-check aborts unless nothing is left. A failure
+   after the backup is written names that file as not committed.
+4. Start the new image.
+
+## Detail — Retired `google-ai` model provider (script `0031`)
+
+**Not a runbook.** The release drops the `google-ai` provider and the
+`google-generative-ai` shape; at runtime a model bound to a surviving credential
+of it is refused (409 `model_provider_unregistered`). `0031` deletes those
+credentials and their `org_models`, and NULLs the three pointers that name one
+first — an org default, space pin or schedule override that named one silently
+falls back to the next model in line. It lists every row it deletes or
+re-points, with the value it held, before writing: that psql output is the only
+record, keep it. Run it inside the deploy window, before the new image boots.
+Details in the file header.
+
+## Detail — Connection sets (script `0032`, drizzle `0077`)
+
+**Not a runbook.** The release turns every pinned, overridden and resolved
+connection into a SET and makes a label unique per (space, integration). Two
+scripts run before its drizzle batch, in this order, with the app container
+stopped (`docker stop`), not a Coolify stop — that takes the whole compose down,
+Postgres included, and prunes the images:
+
+1. stop, THEN `pg_dump` — the only rollback, so no write may follow it;
+2. `0033 --apply` (next section), which prints the `0032` command on commit;
+3. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v ran_0033=1 -f scripts/migration/0032-connection-sets.sql`
+   — without `-v ran_0033=1` the file refuses before its transaction opens;
+4. deploy (`0077` applies at boot), reopen.
+
+Five sections in one transaction (rules: the file header): (1) SHAPE —
+`runs.connection_overrides` / `resolved_connections` and
+`package_schedules.connection_overrides` become sets (a string override or an
+object snapshot becomes one element; any other value raises first); (2)
+OUTRANKED — a schedule override key an admin pin, else the enforced org default,
+outranks is dropped (ignored before, `override_outranked` at every fire now),
+emptied → NULL, `enabled` kept; (3) FREEZE — the old fallback's implicit shared
+picks, from 30 days of runs and each enabled schedule's latest resolved run,
+become member pins (end-users are not covered — a standalone query in the file
+lists them); (4) NORMALIZE — labels only as far as `connectionLabelProblem`
+and `CONNECTION_LABEL_MAX` require, else verbatim; (5) DEDUPE — `<base> (n)`, ≤ 80 UTF-16 units. It needs
+psql (`\if`), PostgreSQL 16+ (its `0x…` integer literals) and a UTF8 database
+(NORMALIZE reads code points with `ascii()`; it refuses another encoding).
+Skipped, `0077`'s first statement refuses a scalar snapshot or override value or
+a label held twice, rolling the batch back and naming both scripts; a skipped
+drop, freeze or normalization it cannot detect.
+
+## Detail — Connections shared by owners who lost their space (script `0033`)
+
+**Not a runbook**; its place in the window is in the section above. It runs
+before `0032` because `0032` freezes a colleague's still-shared connection as a
+member pin: run after it, `0033` would unshare connections just frozen, and
+those members would fail on pins they never set. It unshares every user-owned
+shared connection whose owner no longer reaches its space, with
+`unshareConnectionsOfOwnersWithoutAccess` — the predicate the release applies at
+every live access loss. An admin pin or org default naming one is left as it is
+and fails its runs with `pinned_connection_unavailable`, as after a live loss.
+It touches no column `0077` changes.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0033-unshare-space-access-loss.ts`
+is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL` (the
+client would open `./data/pglite`) and prints the database it reached first.
+
+## Detail — Per-connection URL allowlists (script `0034`)
+
+**Not a runbook.** `@appstrate/activecampaign` 1.0.3, `wordpress` / `woocommerce` 1.0.4 and
+`webhooks` 1.0.3 replace `allow_all_uris` with `authorized_uris` rendered from one URL field of
+the connection (#1627, #1628); a connection whose field does not render has every call refused.
+From this release a new or updated connection with such a value is refused at connect time, so
+only connections stored before it can be in that state.
+`0034` gives each ActiveCampaign connection without one `api_url = https://<account_name>.api-us1.com`
+and keeps `account_name` (1.0.3 still declares it, optional, so `https://{{account_name}}.api-us1.com/…`
+in saved prompts and skills keeps resolving), then lists every connection of the four
+integrations whose URL field would not render — id and the form the field must take, never a
+value (a query string passes only in the bare `webhook_url` entry). Run `--apply` just BEFORE
+the deploy: it only adds a field, which the running 1.0.2 manifest ignores, so nothing is
+refused in between; then the dry run again after it.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0034-integration-url-allowlists.ts` is the
+dry run; `--apply` commits. Exit 1 while any connection is refused: its owner fixes the URL, and
+an ActiveCampaign account on another API domain than `api-us1.com` edits its `api_url`.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -731,3 +982,20 @@ if it is needed at all, runs with the platform stopped and before the batch.
 | 0015 | not run — by design | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0. **Deliberately outstanding.** Read back 2026-09-18: 6 personal spaces against 50 memberships, the 6 created by `provisionMember` at a membership door rather than by this script. Pre-flight the space count before running it                                                                                                                                                                                                                                                                                                                                                              |
 | 0016 | 2026-09-17          | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0063` + `0065` carry — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0. **Ran in the beta.58 window.** Read back 2026-09-18: 4 `package_shares` rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 0017 | 2026-09-17          | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair. **Ran in the beta.58 window**, right after `0008` and `0012`; the end-state witness is the one in `0008`'s row                                                                                                                                                                                                                                                                                                                                            |
+| 0018 | not applied         | realign a database created before the `0000_init.sql` squash with the schema the chain builds (#1507): 60 `timestamp` → `timestamptz` (values read as UTC, triggers read back and recreated), `package_type` rebuilt without `provider`/`tool` after deleting the 16 packages of those types and the 148 derived dependency rows, 19 auto-named constraints renamed, 6 missing constraints added and validated, `idx_runs_space_id` dropped — **run with the app container stopped** (`docker stop`, not a Coolify stop); list the 19 deleted versions' object-storage keys first (query in the header)                   | rehearsed 2026-09-23 on the pre-beta.60 dump: 6.0 s, idempotent (second run 0.3 s, nothing changed), catalog diff against a migrate-built DB **empty**, beta.60 boots clean on it — deletes 148 / 2 / 16 / 19 / 16 rows, nothing else moves                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 0019 | 2026-09-23          | credentials of members removed before the leave-organization release: `api_keys` whose creator is no longer a member of the key's org, and opaque OAuth refresh/access tokens of the org's own clients or bound to its MCP resource URI (`<APP_URL>/api/mcp/o/<org_id>`) whose user is no longer a member — `revoked_at` / `revoked` set where NULL; **run once after deploying the release**, with `-v app_url=<APP_URL>`                                                                                                                                                                                                | 0 / 0 / 0 counted on production read-only 2026-09-23, NOT rehearsed against a restored dump — prints the key / refresh / access counts before, re-runs the same predicates against the tables after and aborts if any is non-zero. **Ran on production 2026-09-23 as a witness**: before 0 / 0 / 0, after 0 / 0 / 0, `COMMIT`                                                                                                                                                                                                                                                                                                                                                                                |
+| 0020 | not applied         | custom space roles (`space_roles`) holding a permission without the read it requires (#1513; the gated list is in the file header): the canonical read appended once, `updated_at` bumped, nothing removed — **run once BEFORE deploying the image that enforces the rule**; dry run by default, `-v apply=on` to commit                                                                                                                                                                                                                                                                                                  | unmeasured on production, NOT rehearsed on a production dump — count there and rehearse on a restored dump before applying. Rehearsed 2026-09-23 on an 8-role synthetic fixture covering every rule branch (incl. `runs:delete` alone): apply → 4 roles / 7 reads added, the other 4 untouched; rerun → 0 rows. SQL body run in PGlite; psql wrapper (dry run / invalid `apply` → ROLLBACK) on postgres:16-alpine against the previous `gated` list; `gated` machine-checked equal (33/33) to `readGrantsFor`. The dry run lists every offending role; the apply aborts unless 0 are left and every captured row holds its old entries plus its new reads                                                    |
+| 0021 | not applied         | `space_id` → `spaceId` inside `org_invitations.space_assignments` and `oauth_clients.signup_space_assignments` — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | unmeasured — prints before/after counts, aborts if any row still carries `space_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 0022 | not applied         | unrevoked `api_keys` whose `key_prefix` starts with `ask_` (the retired format) → `revoked_at` = now() — **run once after deploying the release carrying the `apst_` format**                                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any `ask_` key is left unrevoked                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 0023 | not applied         | READ-ONLY pre-flight: integration drafts and published versions whose JSONPaths (`identity_claims`, `connect.login` `jsonpath` selectors and criteria) the strict subset refuses on read — **run BEFORE deploying; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                                                                                              |
+| 0024 | not applied         | READ-ONLY pre-flight for #1458: `@appstrate/ssh` connections rendering no egress under 1.0.1 (expected 0); informational blast radius (third-party local integrations' `authorized_uris` / `allow_all_uris` + connection counts) — **run BEFORE deploying, with the platform env loaded; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                        |
+| 0025 | not applied         | `reasoningLevel` → `reasoning_level` inside `runs.generation_config`, `runs.generation_config_override`, `space_packages.generation_config` and `package_schedules.generation_config_override` (an existing `reasoning_level` wins) — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                    | unmeasured — prints before/after counts, aborts if any row still carries `reasoningLevel`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 0026 | not applied         | snake_case for every non-conforming top-level key of `integration_connections.identity_claims` (`accountId` → `account_id`, `avatarUrl` → `avatar_url`, …; generic regexp, an existing snake_case twin wins) — **run once after the deploy**                                                                                                                                                                                                                                                                                                                                                                              | unmeasured — prints the rows to rewrite (and those holding both spellings) before, aborts naming any key the write-path rule still refuses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 0027 | not applied         | `package_id` / `agent_id` → `packageId`, `run_id` → `runId` inside `notifications.payload` — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any row still carries a snake key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 0028 | not applied         | `logoUrl` / `primaryColor` / `accentColor` / `supportEmail` / `fromName` → snake_case inside `spaces.settings.branding` (an existing snake_case twin wins) — **run inside the deploy window**                                                                                                                                                                                                                                                                                                                                                                                                                             | unmeasured — prints before/after counts, aborts if any camelCase branding key survives                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0029 | not applied         | READ-ONLY pre-flight: org integration drafts and `latest` published versions declaring a non-snake_case `identity_claims` key (`accountId`, …) or `identity_outputs` entry, which `extractIdentity` no longer reads (system packages skipped — fixed by this release) — **run BEFORE deploying; exits non-zero until every one is fixed**                                                                                                                                                                                                                                                                                 |
+| 0030 | not applied         | `org_models` of a named provider outside Pi's offer deleted (backed up to a file), an org default naming one repointed to a surviving row of its credential or NULL, other pointers set to NULL (#1549) — **run inside the deploy window, before the new image boots, after `bun run verify:system-models` passes**; `.ts`, dry-run by default, `--apply` to commit                                                                                                                                                                                                                                                       |
+| 0031 | not applied         | `google-ai` model provider retired (#1568): its `model_provider_credentials` and every `org_models` row bound to one deleted, the org default / space pin / schedule override naming such a model set to NULL — **run inside the deploy window, before the new image boots**                                                                                                                                                                                                                                                                                                                                              | 0 — rehearsed 2026-09-25 on a restored production dump (PostgreSQL 16.15, drizzle `0068` + `0069`–`0073`): every before count 0, production holding no `google-ai` credential; `COMMIT` in 214 ms, a rerun a no-op. Prints before counts, aborts unless all zero after                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0032 | not applied         | connection snapshots and overrides → sets, schedule override keys a governing admin pin or enforced default outranks dropped, the old fallback's implicit shared picks frozen as member pins, labels normalized and deduped per (space, integration) (#1610) — **run with the app container stopped** (`docker stop`, not a Coolify stop), **after `0033`, before the drizzle batch** (`0077`); psql only, with `-v ran_0033=1` (it refuses without), PostgreSQL 16+, a UTF8 database                                                                                                                                     | unmeasured, NOT rehearsed on a production dump — rehearse on a restored dump and record every count in the header. Prints before/after counts (every after reads 0); skipped, `0077` refuses a scalar or a duplicate label, not a missing drop, freeze or normalization                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 0033 | not applied         | user-owned shared connections whose owner no longer reaches the space (left the organization, removed, demoted, the space closed) unshared with the service's predicate, every organization in one transaction — **run FIRST in the window, app container stopped, before `0032`**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                                                                                        | unmeasured, NOT rehearsed on a production dump — prints the database it is connected to and every id it unshares; idempotent, a second run prints 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 0034 | not applied         | ActiveCampaign connections without `api_url`: `api_url` derived from `account_name` (`https://<account_name>.api-us1.com`), `account_name` kept; then a READ-ONLY audit of `@appstrate/{activecampaign,wordpress,woocommerce,webhooks}` connections whose URL field no longer renders an allowlist (#1627, #1628) — **`--apply` just BEFORE the deploy, dry run again after it**, env loaded (it decrypts); `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                | unmeasured — prints every rewritten id and every refused id with its reason, exit 1 while any is refused; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

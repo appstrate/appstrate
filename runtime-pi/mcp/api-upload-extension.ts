@@ -33,7 +33,7 @@
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
-import type { RuntimeEventEmitter } from "@appstrate/runner-pi";
+import { piToolResultOrThrow, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
 import { UPLOAD_PROTOCOLS, type UploadProtocol } from "./upload-adapters/index.ts";
 
@@ -124,25 +124,25 @@ function makeExtension(
           metadata?: Record<string, unknown>;
           sourceMimeType?: string;
           partSizeBytes?: number;
+          connection?: string;
         };
 
         const protocol = args.uploadProtocol;
         if (!protocol || !args.target || !args.fromFile) {
-          return {
+          return piToolResultOrThrow({
             content: [
               {
                 type: "text",
                 text: `${toolName}: missing one of target/fromFile/uploadProtocol`,
               },
             ],
-            details: undefined,
             isError: true,
-          };
+          });
         }
         // Defence-in-depth: the LLM-facing schema's `enum` can be dropped
         // by older clients that don't enforce schemas — re-check here.
         if (!allowed.has(protocol as UploadProtocol)) {
-          return {
+          return piToolResultOrThrow({
             content: [
               {
                 type: "text",
@@ -151,9 +151,8 @@ function makeExtension(
                   `Allowed: ${protocols.join(", ")}`,
               },
             ],
-            details: undefined,
             isError: true,
-          };
+          });
         }
 
         const startedAt = Date.now();
@@ -169,6 +168,7 @@ function makeExtension(
         const result = await resolver.executeUpload(
           {
             apiCallToolName: apiCallTool,
+            ...(args.connection !== undefined ? { connection: args.connection } : {}),
             target: args.target,
             fromFile: args.fromFile,
             uploadProtocol: protocol as UploadProtocol,
@@ -198,11 +198,10 @@ function makeExtension(
 
         // Return a single text block with the structured result as JSON
         // so the LLM gets a uniform shape regardless of protocol.
-        return {
+        return piToolResultOrThrow({
           content: [{ type: "text", text: JSON.stringify(result) }],
-          details: undefined,
           isError: !result.ok,
-        };
+        });
       },
     });
   };

@@ -91,6 +91,7 @@ stamps disagree.
 | `bun run build`                | Build frontend + shared packages                               |
 | `bun run db:migrate`           | Apply database migrations                                      |
 | `bun run verify:openapi`       | OpenAPI spec validation                                        |
+| `bun run audit:deps`           | Known-CVE scan of `bun.lock` — CI job, not part of `check`     |
 
 **Working on the Firecracker execution backend?** It's an opt-in built-in module (`apps/api/src/modules/firecracker/`, not in the default `MODULES`). The privileged engine runs as the `appstrate-runner` daemon (`bun run firecracker:runner`) and needs a Linux KVM host (`/dev/kvm`) — on macOS, run it inside a Lima VM with nested virtualization. Guest artifacts build via `bun run firecracker:build:{kernel,rootfs}`. Architecture + dev workflow: [`docs/architecture/FIRECRACKER.md`](./docs/architecture/FIRECRACKER.md).
 
@@ -162,6 +163,7 @@ The set that should gate a merge. Names are the GitHub check-run names, verbatim
 | `Unit tests`                                            | `test.yml`     |
 | `Platform container health e2e`                         | `test.yml`     |
 | `Secret Scanning`                                       | `security.yml` |
+| `Dependency Audit`                                      | `security.yml` |
 | `Analyze`                                               | `codeql.yml`   |
 
 Deliberately **not** required, because a required check that does not report blocks the PR forever:
@@ -169,7 +171,8 @@ Deliberately **not** required, because a required check that does not report blo
 (`if: contains(github.event.pull_request.labels.*.name, …) || github.ref == 'refs/heads/main'`), so
 they are absent from an unlabelled PR, and `Scorecard Analysis` has no `pull_request` trigger at all.
 The same rule applies to any check added later: require it only once it is observed reporting on an
-ordinary PR.
+ordinary PR. `Dependency Audit` meets it: it triggers on `pull_request` like `Secret Scanning`, so it
+reports on every PR — confirm it appears in the `check-runs` listing above before applying.
 
 Applying it — a ruleset `PUT` **replaces** the whole ruleset, so read the live one and merge into it
 rather than writing a body from scratch:
@@ -189,6 +192,7 @@ jq '.rules += [{
           { context: "Unit tests" },
           { context: "Platform container health e2e" },
           { context: "Secret Scanning" },
+          { context: "Dependency Audit" },
           { context: "Analyze" }
         ]
       }

@@ -2,19 +2,18 @@
 
 /**
  * What we know about a model id an endpoint serves: the listing's own hints
- * win field by field, the vendored catalog fills the rest (`label` is
- * catalog-only). Catalog lookup: the provider's own, then any by exact id,
- * then any by the id with one leading `<vendor>/` stripped. Cost is never
+ * win field by field, the catalog fills the rest (`label` is catalog-only).
+ * Catalog lookup: the provider's own offer, then any Pi provider by exact id,
+ * then by the id with one leading `<vendor>/` stripped. Cost is never
  * returned: an endpoint serving a vendor's id is not billed at the vendor's
  * rate, and a wrong price would corrupt `llm_usage`.
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import { INPUT_MODALITIES, type ServedModelHints } from "./model-listing.ts";
-import { listCatalogProviderIds, lookupCatalogModel } from "../pricing-catalog.ts";
+import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
+import type { ServedModelHints } from "./model-listing.ts";
+import { describeKnownModel, lookupCatalogModel } from "../model-catalog.ts";
 import { getModelProvider } from "./registry.ts";
-
-const MODALITIES: readonly string[] = INPUT_MODALITIES;
 
 /** Everything we can tell about a served id, minus its price. */
 interface ServedModelDescription {
@@ -22,7 +21,7 @@ interface ServedModelDescription {
   contextWindow: number | null;
   maxTokens: number | null;
   /** Accepted input modalities — the `text`/`image` subset of the capabilities. */
-  input: string[] | null;
+  input: ModelInputModality[] | null;
   reasoning: boolean | null;
   /** `endpoint` when the listing published any field, `catalog` on a pure hit, else `null`. */
   source: "endpoint" | "catalog" | null;
@@ -37,26 +36,17 @@ function stripVendorPrefix(modelId: string): string | null {
 }
 
 /** The catalog entry describing `modelId` as served by `providerId`, if any. */
-function lookupServedEntry(providerId: string, modelId: string): CatalogModelEntry | null {
-  const ownCatalog = getModelProvider(providerId)?.catalogProviderId ?? providerId;
-  const own = lookupCatalogModel(ownCatalog, modelId);
-  if (own) return own;
-
-  const catalogIds = listCatalogProviderIds();
-  for (const catalogId of catalogIds) {
-    const entry = lookupCatalogModel(catalogId, modelId);
-    if (entry) return entry;
-  }
-
+function lookupServedEntry(
+  providerId: string,
+  modelId: string,
+): Omit<CatalogModelEntry, "cost"> | null {
+  const def = getModelProvider(providerId);
   const stripped = stripVendorPrefix(modelId);
-  if (stripped !== null) {
-    for (const catalogId of catalogIds) {
-      const entry = lookupCatalogModel(catalogId, stripped);
-      if (entry) return entry;
-    }
-  }
-
-  return null;
+  return (
+    (def && lookupCatalogModel(def, modelId)) ||
+    describeKnownModel(modelId) ||
+    (stripped !== null ? describeKnownModel(stripped) : null)
+  );
 }
 
 export function describeServedModel(
@@ -70,7 +60,9 @@ export function describeServedModel(
     label: entry?.label ?? null,
     contextWindow: hints.contextWindow ?? entry?.contextWindow ?? null,
     maxTokens: hints.maxTokens ?? entry?.maxTokens ?? null,
-    input: hints.input ?? entry?.capabilities.filter((c) => MODALITIES.includes(c)) ?? null,
+    input:
+      hints.input ??
+      (entry ? MODEL_INPUT_MODALITIES.filter((m) => entry.capabilities.includes(m)) : null),
     reasoning: hints.reasoning ?? entry?.capabilities.includes("reasoning") ?? null,
     source: hinted ? "endpoint" : entry ? "catalog" : null,
     endpointCapabilities: hints,

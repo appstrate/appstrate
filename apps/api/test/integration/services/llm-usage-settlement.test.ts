@@ -45,7 +45,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage, runs } from "@appstrate/db/schema";
+import { llmUsage, runs, type InferenceRoute } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
@@ -68,7 +68,7 @@ import {
   listLlmUsage,
   getSettledFrontierId,
 } from "../../../src/services/state/runs.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 
 const AGENT = "@settleorg/settle-agent";
 const RUN_SECRET = "c".repeat(43);
@@ -95,6 +95,8 @@ async function seedSinkRun(
   ctx: TestContext,
   overrides: {
     modelSource?: string | null;
+    modelId?: string | null;
+    inferenceRoute?: InferenceRoute | null;
     runOrigin?: "platform" | "remote";
     tokenUsage?: Record<string, number> | null;
     /**
@@ -115,7 +117,11 @@ async function seedSinkRun(
     spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: overrides.runOrigin ?? "platform",
-    modelSource: overrides.modelSource ?? "system",
+    // An OAuth run: its sidecar serves it, so its runner row is its ledger (a
+    // proxy-served run's is the proxy's per-call rows).
+    modelSource: overrides.modelSource ?? "org",
+    modelId: overrides.modelId ?? null,
+    inferenceRoute: overrides.inferenceRoute === undefined ? "sidecar" : overrides.inferenceRoute,
     modelCost: overrides.modelCost ?? null,
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
@@ -227,6 +233,30 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     errorSpy.mockRestore();
   });
 
+  it("the terminal barrier skips a proxy-served run and keeps one with no recorded route", async () => {
+    const usage = { input_tokens: 100, output_tokens: 50 };
+    const rates = { input: 1, output: 2 };
+    const proxied = await seedSinkRun(ctx, {
+      modelSource: "org",
+      modelId: "org-preset",
+      inferenceRoute: "proxy",
+      tokenUsage: usage,
+      modelCost: rates,
+    });
+    const unrouted = await seedSinkRun(ctx, {
+      modelSource: "system",
+      modelId: "sys-preset",
+      inferenceRoute: null,
+      tokenUsage: usage,
+      modelCost: rates,
+    });
+    await synthesisedFinalize(proxied);
+    await synthesisedFinalize(unrouted);
+
+    expect(await runnerRow(proxied)).toBeUndefined();
+    expect((await runnerRow(unrouted))?.credentialSource).toBe("system");
+  });
+
   it("a runner snapshot arriving after the run settled is refused, leaving the billed total intact", async () => {
     // The loss scenario, end to end: a metric event's ledger write fails and is
     // replayed asynchronously; the run closes meanwhile; the replay lands.
@@ -332,8 +362,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
 
     // 1. The container's own finalize: cost + usage, barrier writes, CAS settles.
     const run = await getRunSinkContext(runId);
-    const result = emptyRunResult();
-    result.status = "success";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
     result.cost = 5;
     result.usage = { input_tokens: 1_000_000, output_tokens: 500_000 };
     await finalizeRun({ run: run!, result });
@@ -684,8 +713,7 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     );
     try {
       const run = await getRunSinkContext(runId);
-      const result = emptyRunResult();
-      result.status = "success";
+      const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
       // The terminal snapshot the barrier must make durable: $7, superseding $3.
       // 0.5M×10/1e6 + 0.1M×20/1e6 = 5 + 2.
       result.usage = { input_tokens: 500_000, output_tokens: 100_000 };

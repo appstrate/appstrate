@@ -12,10 +12,18 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
-import { runPreflightGates } from "../../../src/services/run-preflight-gates.ts";
+import {
+  preflightGateApiError,
+  runPreflightGates,
+} from "../../../src/services/run-preflight-gates.ts";
+import {
+  checkOrgRunRateLimit,
+  _resetOrgRunRateLimitForTesting,
+} from "../../../src/services/org-run-rate-limit.ts";
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
 import { initRunLimits } from "../../../src/services/run-limits.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type { LoadedPackage } from "../../../src/types/index.ts";
 import type {
   AppstrateModule,
@@ -56,8 +64,9 @@ describe("runPreflightGates", () => {
     await seedPackage({ orgId: ctx.orgId, id: "@gates/agent", type: "agent" });
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   it("returns ok with an untouched agent when the manifest timeout is below the ceiling", async () => {
@@ -106,6 +115,31 @@ describe("runPreflightGates", () => {
       // The caller's reference is untouched — rebinding happens via the
       // returned value, not by mutating the shared object.
       expect(agent.manifest.timeout).toBe(limits.timeout_ceiling_seconds + 60);
+    }
+  });
+
+  it("carries the rate limiter's retry delay into the gate error and its ApiError", async () => {
+    _resetOrgRunRateLimitForTesting();
+    try {
+      const cap = getPlatformRunLimits().per_org_global_rate_per_min;
+      for (let i = 0; i < cap; i++) await checkOrgRunRateLimit(ctx.orgId, cap);
+
+      const res = await runPreflightGates({
+        orgId: ctx.orgId,
+        agent: loadedPackage("@gates/agent", 60),
+        credentialSource: "system",
+        executionPlane: "platform",
+      });
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.error.code).toBe("org_run_rate_limited");
+      expect(res.error.retryAfterSeconds).toBeGreaterThan(0);
+
+      const err = preflightGateApiError(res.error);
+      expect(err.status).toBe(429);
+      expect(err.retryAfter).toBe(res.error.retryAfterSeconds);
+    } finally {
+      _resetOrgRunRateLimitForTesting();
     }
   });
 });
@@ -158,8 +192,9 @@ describe("runPreflightGates — beforeUsage execution facts", () => {
     await seedPackage({ orgId: ctx.orgId, id: "@gates/agent", type: "agent" });
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    // Leave the registry as the preload populated it, not empty.
+    await restoreDiscoveredModules();
   });
 
   it("dispatches beforeUsage (run context) for a system model and returns its 402 rejection", async () => {

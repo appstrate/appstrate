@@ -33,7 +33,7 @@ import {
   getRunSinkContext,
   synthesiseFinalize,
 } from "../../../src/services/run-event-ingestion.ts";
-import { emptyRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 
 const app = getTestApp();
 
@@ -264,8 +264,7 @@ describe("platform-synthesised terminals — emitted `output` recovery", () => {
     await emitOutput(runId, { fromRunLogs: true }, 1);
 
     const run = (await getRunSinkContext(runId))!;
-    const result = emptyRunResult();
-    result.status = "success";
+    const result: TerminalRunResult = { ...emptyRunResult(), status: "success" };
     result.output = { fromRunner: true };
 
     await applyRecoveredOutput(run, result);

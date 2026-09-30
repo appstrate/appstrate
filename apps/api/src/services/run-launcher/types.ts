@@ -52,9 +52,8 @@ export interface AppstrateRunPlan {
   outputSchema?: JSONSchemaObject;
   /**
    * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * `output` / `log` / `note` / `pin`. Forwarded to the sidecar
-   * (when present) which hosts the selected ones as MCP tools; the
-   * no-sidecar path reads the same selection from the bundle manifest.
+   * `output` / `log` / `note` / `pin`. Forwarded to the sidecar, which
+   * hosts the selected ones as MCP tools.
    */
   runtimeTools?: string[];
 

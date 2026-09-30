@@ -20,7 +20,7 @@
 
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -28,16 +28,13 @@ import {
   LLM_NON_STREAMING_TIMEOUT_MS,
   parseProxyRequest,
 } from "./helpers.ts";
-import { forwardMeteredResponse } from "./metering.ts";
+import { DEFAULT_MAX_REQUEST_BYTES, forwardMeteredResponse, usageFrameBound } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-
-/** Maximum request body the proxy will accept before refusing up-front. */
-const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
@@ -50,6 +47,13 @@ interface ProxyCallInputs {
    * null for headless/CLI proxy calls.
    */
   chatSessionId: string | null;
+  /**
+   * The preset this call is bound to, when the caller is: a run's own inference
+   * serves the run's model, so the body's `model` then selects nothing.
+   */
+  presetId?: string;
+  /** Platform `Request-Id`, for the upstream-error log. */
+  requestId: string;
   /** Request URL path *after* the route prefix, e.g. `/v1/chat/completions`. */
   upstreamPath: string;
   incomingHeaders: Headers;
@@ -85,8 +89,8 @@ export class LlmProxyUnsupportedModelError extends Error {
    * @param presetId - The preset the caller asked for
    * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising
    *   this from a `catch`. The message is a CONCLUSION ("not enabled"), and
-   *   the catch below reaches it for any `loadModel` failure — a DB outage
-   *   included. Without the cause that misdiagnosis is unfalsifiable.
+   *   the catch below reaches it for any non-`ApiError` `loadModel` failure —
+   *   a DB outage included. Without the cause that misdiagnosis is unfalsifiable.
    */
   constructor(presetId: string, options?: ErrorOptions) {
     super(`Model preset "${presetId}" is not enabled for this organization.`, options);
@@ -108,7 +112,7 @@ export class LlmProxyModelApiMismatchError extends Error {
       // for server-side logging; only non-aliased presets get the detail.
       aliased
         ? `Model "${presetId}" is not served by this endpoint.`
-        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the corresponding /api/llm-proxy/<api>/… route.`,
+        : `Model "${presetId}" uses "${actual}"; this endpoint serves "${expected}". Use the endpoint for "${actual}".`,
     );
     this.name = "LlmProxyModelApiMismatchError";
   }
@@ -143,7 +147,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   const request = parseProxyRequest(inputs.rawBody);
-  const presetId = request.presetId;
+  const presetId = inputs.presetId ?? request.presetId;
   const resolved = await resolvePresetForOrg(
     presetId,
     inputs.principal.orgId,
@@ -158,14 +162,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     throw new LlmProxyUnsupportedSubscriptionError(resolved.providerId);
   }
 
-  // Usage reporting is forced by the ADAPTER (the protocol registry), not by an
-  // apiShape check here: each wire family knows what its own upstream needs to
-  // emit usage (openai-compatible: `stream_options.include_usage`; anthropic:
-  // nothing). It applies to EVERY preset — a call on an org-owned preset that
-  // returns no parseable usage is just as unaccounted as a system one, and the
-  // ledger feeds `runs.cost` and the org's own usage views either way.
+  // The ADAPTER makes the body meterable, for EVERY preset: an org-owned call
+  // with no parseable usage is as unaccounted as a system one.
   const rewrittenBody = request.rewriteModel(resolved.modelId, (body) =>
-    inputs.adapter.forceUsageReporting?.(body),
+    inputs.adapter.prepareRequest?.(body),
   );
 
   // Model-alias swap (issue #727). When the resolved preset is an alias, the
@@ -334,12 +334,14 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       presetId,
       resolved,
       started,
+      requestId: inputs.requestId,
     },
     {
       swap,
       cache: cacheKeyForWrite
         ? { cacheKey: cacheKeyForWrite, ttlSeconds: cacheConfig.ttlSeconds }
         : null,
+      maxFrameChars: usageFrameBound(maxBytes),
     },
   );
 }
@@ -349,18 +351,13 @@ async function resolvePresetForOrg(
   orgId: string,
   expectedApi: string,
 ): Promise<ResolvedModel> {
-  // `loadModel` hits `org_models` by UUID — passing a string that isn't a
-  // UUID raises a DB-level error rather than returning null. Catch and
-  // normalise into "preset not found" so the caller sees a clean 400
-  // instead of a 500.
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded = await loadModel(orgId, presetId);
   } catch (err) {
-    // The comment above names ONE expected failure (a non-UUID presetId), but
-    // this catch swallows every other one too — a dropped connection, a
-    // migration mid-flight — and reports all of them to the operator as
-    // "preset not found". Keep what actually failed.
+    // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
+    // and keeps its status; anything else reads as "not enabled", cause kept.
+    if (err instanceof ApiError) throw err;
     throw new LlmProxyUnsupportedModelError(presetId, { cause: err });
   }
   if (!loaded) {

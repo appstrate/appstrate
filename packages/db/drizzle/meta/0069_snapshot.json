@@ -1,5 +1,5 @@
 {
-  "id": "7713a192-6a63-46fa-80c0-a25fe6c57c8f",
+  "id": "1fda171f-0f85-4a59-9783-42da5f1b7919",
   "prevId": "287f825a-4f22-49a8-81e9-ca81535f1c9e",
   "version": "7",
   "dialect": "postgresql",
@@ -1461,12 +1461,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "org_settings": {
           "name": "org_settings",
@@ -3013,7 +3007,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -3617,7 +3611,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -8795,7 +8789,7 @@
       "columns": {
         "seq": {
           "name": "seq",
-          "type": "serial",
+          "type": "bigserial",
           "primaryKey": true,
           "notNull": true
         },
@@ -8913,13 +8907,13 @@
         },
         "last_assistant_seq": {
           "name": "last_assistant_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
         "last_read_seq": {
           "name": "last_read_seq",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },

@@ -6,7 +6,8 @@ import { useSpaces } from "./use-spaces.ts";
 import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
-import { ORG_ROLES_WITH_FULL_ACCESS, type CorePermission } from "@appstrate/core/permissions";
+import type { CorePermission } from "@appstrate/core/permissions";
+import { hasFullOrgAccess } from "../lib/org-role.ts";
 
 /**
  * A permission string `can()` accepts.
@@ -40,8 +41,7 @@ export function roleI18nKey(role: OrgRole): string {
  * hide for anyone else; the server refuses them (`view_as_forbidden`) anyway.
  */
 export function useCanPreviewRole(): boolean {
-  const { orgRole } = usePermissions();
-  return orgRole !== null && (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(orgRole);
+  return hasFullOrgAccess(usePermissions().orgRole);
 }
 
 /**
@@ -68,8 +68,9 @@ export function useHomeSpaceName(homeSpaceId: string | null | undefined): string
  * guard checks. Actual enforcement stays server-side; this only controls what
  * is rendered.
  *
- * `orgRole` is display only (badges, labels); a space role is read off the
- * space itself (`GET /api/spaces` → `role`), where the renderer already is.
+ * `orgRole` serves labels and the few rules the server keys on the role itself
+ * ({@link hasFullOrgAccess}); a space role is read off the space itself
+ * (`GET /api/spaces` → `role`), where the renderer already is.
  */
 export function usePermissions() {
   const { currentOrg } = useOrg();
@@ -91,7 +92,9 @@ export function usePermissions() {
   // same as a denial. A gate that REFUSES on that answer (rather than merely
   // hiding a button) has to wait, or a hard reload flashes "no access" before
   // the two lists land. Ready = the org is known AND either a space is resolved
-  // or there is none this caller can enter.
+  // or there is none this caller can enter. Only `useSpaceResolver` resolves
+  // one, so `ready` never settles outside MainLayout; an org-level answer there
+  // needs no wait, the org's set arriving with `currentOrg` itself.
   const enterableSpaceExists = spaces?.some((s) => s.access === "member") ?? false;
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 

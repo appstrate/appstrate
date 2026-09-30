@@ -36,7 +36,6 @@ import { usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationClients } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
 import { authMethodLabel } from "../../lib/integration-presentation";
-import { connectionDisplayLabel } from "../integration-connect/connection-label";
 
 function accessInfo(detail: IntegrationDetailWire) {
   const source = readIntegrationSource(detail.manifest.source);
@@ -157,6 +156,7 @@ function OAuthClientsNode(props: NodeProps<Node<StructureNodeData>>) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
   const clients = useIntegrationClients(
+    "space",
     can("integrations:configure") ? props.data.packageId : undefined,
     props.data.authKey,
   );
@@ -266,7 +266,7 @@ export function IntegrationMap({
         title: `${t("integration.structure.accounts")} · ${labelFor(auth)}`,
         rows: auth.connections.map((connection) => ({
           id: connection.id,
-          label: connectionDisplayLabel(connection),
+          label: connection.label,
           sublabel: labelFor(auth),
           warning: connection.needs_reconnection
             ? t("integration.health.reconnect", { method: labelFor(auth), count: 1 })

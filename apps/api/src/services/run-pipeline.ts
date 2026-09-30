@@ -9,6 +9,8 @@ import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
   recordDroppedIntegrations,
+  recordDroppedGenerationSettings,
+  type DroppedGenerationSetting,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
 } from "./run-context-builder.ts";
@@ -18,15 +20,19 @@ import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
+import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
-import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
+import {
+  resolveRunConnectionsOrError,
+  type LaunchOverrides,
+} from "./integration-connection-resolver.ts";
 import {
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
 import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
-import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
@@ -38,7 +44,7 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import type { FileReference } from "./run-launcher/types.ts";
-import { runPreflightGates } from "./run-preflight-gates.ts";
+import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { runWithSpan } from "@appstrate/core/telemetry";
 import {
@@ -114,18 +120,12 @@ interface RunPipelineParams {
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
-   * Per-(integration, authKey) connection id chosen by the caller for
-   * THIS run (#199). Persisted on `runs.connection_overrides` as the
-   * audit trail and fed into the resolver's mechanism #2 so the snapshot
-   * pins the right row. Loses to admin pins (mechanism #1).
+   * The resolver's launch-override layer (#199): the caller's per-integration
+   * connection sets for THIS run (`run_override`, persisted on
+   * `runs.connection_overrides` for the audit) or the firing schedule's frozen
+   * ones (`schedule_override`, already on the schedule row).
    */
-  connectionOverrides?: ConnectionOverrides | null;
-  /**
-   * Schedule-frozen overrides loaded from `package_schedules.connection_overrides`.
-   * Same shape as `connectionOverrides`; loses to both admin pins and
-   * per-run overrides. Scheduler path only.
-   */
-  scheduleConnectionOverrides?: ConnectionOverrides | null;
+  launchOverrides?: LaunchOverrides | null;
   /**
    * W3C `traceparent` to seed the run-execution trace tree with. Forwarded
    * into the runtime so its outbound traffic becomes child spans of the
@@ -147,17 +147,6 @@ interface RunPipelineParams {
    * intra-pipeline dedupe via the default Map created below.
    */
   manifestCache?: IntegrationManifestCache;
-}
-
-interface RunPipelineSuccess {
-  runId: string;
-  /**
-   * Resolved model label snapshot — same value persisted on
-   * `runs.model_label`. Echoed by the run route so callers can detect
-   * org-default drift at trigger time (#635).
-   */
-  modelLabel: string | null;
-  modelSource: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,8 +173,7 @@ export async function resolveRunPreflight(params: {
   spaceId: string;
   orgId: string;
   actor: Actor | null;
-  connectionOverrides?: ConnectionOverrides | null;
-  scheduleConnectionOverrides?: ConnectionOverrides | null;
+  launchOverrides?: LaunchOverrides | null;
   /**
    * The run's `dependency_overrides` — forwarded so the seeding below resolves
    * each integration to the SAME version the kickoff will. A run pinned to a
@@ -221,7 +209,7 @@ export async function resolveRunPreflight(params: {
   //
   // The damaging direction is the false negative: an integration whose pinned
   // version is perfectly satisfiable was refused because its author had since
-  // tightened their working copy. On the run route that surfaces as a 412
+  // tightened their working copy. On the run route that surfaces as a 409
   // naming scopes the version actually being run does not require. On the
   // SCHEDULER it is worse — `triggerScheduledRun` turns any ApiError from this
   // function into `failSchedule(...)`, so a background schedule with no user in
@@ -239,7 +227,7 @@ export async function resolveRunPreflight(params: {
   // disabled, or carrying an invalid draft manifest would stop reporting
   // `integration_not_active` / `integration_invalid_manifest` / `not_connected`
   // and report an unresolved dependency instead — measured at 9 of the 15 cases
-  // in `runs-412-missing-connection.test.ts`. That is a defensible product
+  // in `runs-missing-connection.test.ts`. That is a defensible product
   // position (those runs cannot succeed either way) but it rewrites the
   // `missing_integration_connection` envelope the MissingConnectionsModal
   // consumes, and it would silently convert schedule failures from one cause to
@@ -251,12 +239,11 @@ export async function resolveRunPreflight(params: {
   // The caller's own Map is seeded when given (never a second one created
   // behind its back), so the route still shares one memo across preflight,
   // snapshot and spawn.
-  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
-  await resolveRunIntegrationVersions({
-    agentManifest: agent.manifest as Record<string, unknown>,
+  const manifestCache = await seedPinnedIntegrationManifests({
+    agent,
     orgId,
     dependencyOverrides: params.dependencyOverrides ?? null,
-    manifestCache,
+    manifestCache: params.manifestCache,
   });
 
   await validateAgentReadiness({
@@ -264,13 +251,27 @@ export async function resolveRunPreflight(params: {
     orgId,
     spaceId,
     actor,
-    ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
-    ...(params.scheduleConnectionOverrides
-      ? { scheduleOverrides: params.scheduleConnectionOverrides }
-      : {}),
+    ...(params.launchOverrides ? { launchOverrides: params.launchOverrides } : {}),
     manifestCache,
     ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
   });
+}
+
+/** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
+export async function seedPinnedIntegrationManifests(params: {
+  agent: LoadedPackage;
+  orgId: string;
+  dependencyOverrides: Record<string, string> | null;
+  manifestCache?: IntegrationManifestCache;
+}): Promise<IntegrationManifestCache> {
+  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
+  await resolveRunIntegrationVersions({
+    agentManifest: params.agent.manifest as Record<string, unknown>,
+    orgId: params.orgId,
+    dependencyOverrides: params.dependencyOverrides,
+    manifestCache,
+  });
+  return manifestCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,7 +351,7 @@ export async function freezeRunSpawnDependencies(params: {
  * can surface RFC 9457 problem details directly. Background callers (scheduler)
  * catch `ApiError` to translate into their own failure semantics.
  */
-export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<RunPipelineSuccess> {
+export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<void> {
   const {
     runId,
     orgId,
@@ -409,14 +410,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     }),
   );
   const gatesMs = Date.now() - gatesStart;
-  if (!gates.ok) {
-    throw new ApiError({
-      status: gates.error.status ?? 500,
-      code: gates.error.code,
-      title: gates.error.code.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
-      detail: gates.error.message,
-    });
-  }
+  if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
   // --- Step 2a: Integration manifest version snapshot (#686) ---
@@ -445,15 +439,15 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // --- Step 2b: Connection resolution snapshot (#199) ---
   //
-  // Apply the 4-mechanism cascade once at kickoff so:
-  //  - the spawn loader (run-context-builder) pins the same row admin/run intended,
-  //  - the credentials resolver (sidecar MITM refresh) honours that pick
+  // Apply the cascade (integration-connection-resolver.ts) once at kickoff so:
+  //  - the spawn loader (run-context-builder) spawns the set the cascade bound,
+  //  - the credentials route (sidecar MITM refresh) authorises only that set
   //    long after kickoff via runs.resolved_connections.
   //
   // Readiness already ran in resolveRunPreflight WITH the same overrides
   // (so the must_choose retry exits its loop). This second pass produces
   // the persisted resolution snapshot and re-checks under the current DB
-  // state — any error here is hard 412: either the override points at an
+  // state — any error here is hard 409: either the override points at an
   // invalid id (caller's mistake), or a race after readiness mutated DB
   // state (connection deleted / pin shifted). Either way the caller
   // needs structured feedback, not a silent fallback. The cascade reads the
@@ -474,21 +468,12 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
           packageId: agent.id,
           actor,
           scope: { orgId, spaceId },
-          runOverrides: params.connectionOverrides ?? null,
-          scheduleOverrides: params.scheduleConnectionOverrides ?? null,
+          launchOverrides: params.launchOverrides ?? null,
           manifestCache,
         }),
     );
     connectionsMs = Date.now() - connectionsStart;
-    if (!outcome.ok) {
-      throw new ApiError({
-        status: outcome.error.status,
-        code: outcome.error.code,
-        title: outcome.error.title,
-        detail: outcome.error.detail,
-        errors: outcome.error.errors,
-      });
-    }
+    if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
   }
 
@@ -499,7 +484,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   let versionLabel: string | null;
   let versionRef: string;
   let proxyLabel: string | null;
-  let modelLabel: string | null;
+  let modelLabel: string;
   let modelSource: string | null;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
@@ -507,6 +492,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // after `createRun` below — the `run_logs.run_id` FK forbids writing them
   // any earlier.
   let droppedIntegrations: DroppedIntegration[];
+  let droppedGenerationSettings: DroppedGenerationSetting[];
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -522,6 +508,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       modelCost,
       generationConfig,
       droppedIntegrations,
+      droppedGenerationSettings,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -534,6 +521,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         modelId,
         generationConfig: params.generationConfig,
         generationConfigOverride: params.generationConfigOverride,
+        scheduleId: params.scheduleId,
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
@@ -613,8 +601,10 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         versionLabel: versionLabel ?? undefined,
         versionRef,
         proxyLabel: proxyLabel ?? undefined,
-        modelLabel: modelLabel ?? undefined,
+        modelLabel,
         modelSource: modelSource ?? undefined,
+        modelId: plan.llmConfig.aliasId,
+        inferenceRoute: inferenceRouteOf(plan.llmConfig),
         // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on
         // the run row so the runner's ledger row (whose cost the container
         // computes) can be classified without trusting the container.
@@ -628,7 +618,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         runOrigin: "platform",
         sinkSecretEncrypted: encrypt(sinkCredentials.secret),
         sinkExpiresAt: new Date(sinkCredentials.expiresAt),
-        connectionOverrides: params.connectionOverrides ?? null,
+        connectionOverrides:
+          params.launchOverrides?.source === "run_override" ? params.launchOverrides.ids : null,
         resolvedConnections,
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,
@@ -636,7 +627,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
         // emits `modelCredentialId` to any dashboard user who can read the run,
         // and a credential id cross-references — via GET /api/model-provider-
-        // credentials → `available_model_ids` — straight to the backing model.
+        // credentials → its provider and endpoint — straight to the backing.
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
@@ -703,13 +694,15 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
 
   // Degradation marker — one `warn` run log per integration the agent
   // declared but that could not be resolved (not active / not connected /
-  // unresolvable reference). Without it a run that started with a subset of
-  // its tools is indistinguishable from an agent that chose not to call them.
+  // unresolvable reference), and per stored generation setting the model
+  // refuses. Without it a degraded run is indistinguishable from a healthy
+  // one: an agent that chose not to call a tool, a setting that took effect.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is
   // ordered BEFORE the container's own logs; it is the empty-array no-op on
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
   await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
+  await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({
@@ -728,6 +721,4 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
       error: getErrorMessage(err),
     });
   });
-
-  return { runId, modelLabel, modelSource };
 }

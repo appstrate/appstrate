@@ -26,21 +26,15 @@
  */
 
 import { Hono, type Context } from "hono";
+import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
-import { z } from "zod";
 import { getSpaceScope } from "../lib/scope.ts";
-import { callerPermissions } from "../lib/permissions.ts";
-import {
-  forbidden,
-  invalidRequest,
-  notFound,
-  payloadTooLarge,
-  unauthorized,
-} from "../lib/errors.ts";
+import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
+import { forbidden, notFound, parseBody, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -70,8 +64,6 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/file-preview.ts";
 
-const fileSearchSchema = z.string().trim().max(200).optional();
-
 /**
  * The lifecycle half of the file ACL for THIS request. Every file resolution in
  * this router passes it, so the DTO's `capabilities` and the two enforcement
@@ -79,42 +71,49 @@ const fileSearchSchema = z.string().trim().max(200).optional();
  */
 function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
   // Ownership is not a role grant, so `permissions` cannot cap it — the
-  // credential's own scope ceiling does (RBAC spec §7.1). A cookie session
-  // carries no ceiling and keeps the right.
-  const ceiling = c.get("scopeCeiling");
-  return { creatorCanManage: ceiling === undefined || ceiling.has("files:delete") };
+  // credential's own scope ceiling does (RBAC spec §7.1).
+  return { creatorCanManage: ceilingAllows(c, "files:delete") };
 }
+
+const listFilesQuerySchema = z
+  .object({
+    purpose: zFilePurposeEnum.optional(),
+    runId: z.string().optional(),
+    packageId: z.string().optional(),
+    chat_session_id: z.string().optional(),
+    context_chat_session_id: z.string().optional(),
+    q: z.string().trim().max(200).optional(),
+    startingAfter: z.string().optional(),
+    // Coerced by `parseListPagination` (out-of-range falls back to the default).
+    limit: z.string().optional(),
+  })
+  .strict();
 
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/files — gallery list. Filters: purpose, run_id, packageId,
+  // GET /api/files — gallery list. Filters: purpose, runId, packageId,
   // chat_session_id, context_chat_session_id; keyset pagination via
   // startingAfter + limit. Query-param
-  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
-  // and the `startingAfter` pagination param are camelCase; `run_id` /
-  // `chat_session_id` are snake_case domain fields.
+  // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `runId`,
+  // `packageId` and the `startingAfter` pagination param are camelCase;
+  // `chat_session_id` is a snake_case domain field. Strict: an unknown or
+  // misspelled filter is a 400, never a silently widened listing.
   router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
 
+    const query = parseBody(listFilesQuerySchema, c.req.query());
     const filters: ListFilesFilters = {};
-    const purpose = zFilePurposeEnum.safeParse(c.req.query("purpose"));
-    if (purpose.success) filters.purpose = purpose.data;
-    const runId = c.req.query("run_id");
-    if (runId) filters.runId = runId;
-    const packageId = c.req.query("packageId");
-    if (packageId) filters.packageId = packageId;
-    const chatSessionId = c.req.query("chat_session_id");
-    if (chatSessionId) filters.chatSessionId = chatSessionId;
-    const contextChatSessionId = c.req.query("context_chat_session_id");
-    if (contextChatSessionId) filters.contextChatSessionId = contextChatSessionId;
-    const searchResult = fileSearchSchema.safeParse(c.req.query("q"));
-    if (!searchResult.success) throw invalidRequest("Invalid query parameter", "q");
-    const search = searchResult.data;
-    if (search) filters.search = search;
-    const startingAfter = c.req.query("startingAfter");
-    if (startingAfter) filters.startingAfter = startingAfter;
+    if (query.purpose) filters.purpose = query.purpose;
+    if (query.runId) filters.runId = query.runId;
+    if (query.packageId) filters.packageId = query.packageId;
+    if (query.chat_session_id) filters.chatSessionId = query.chat_session_id;
+    if (query.context_chat_session_id) {
+      filters.contextChatSessionId = query.context_chat_session_id;
+    }
+    if (query.q) filters.search = query.q;
+    if (query.startingAfter) filters.startingAfter = query.startingAfter;
     filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
 
     const page = await listFilesForActor(
@@ -129,6 +128,8 @@ export function createFilesRouter() {
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
+  // On every by-id route layer 1 is mounted, layer 2 — the per-file container
+  // ACL — is decided on the row the handler loads.
   router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);

@@ -18,20 +18,20 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
-import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
+import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
 
 /**
- * @param buildSpec - Assembles the spec. Called at most once per router
- *   instance, lazily on the first request (module OpenAPI paths are only
- *   available after boot).
+ * @param getSpec - Returns the spec registered at boot (`getPlatformOperations().spec`).
+ *   Called at most once per router instance, on the first request: the router
+ *   is created before `registerPlatformApp()` runs.
  */
-export function createOpenApiSpecRouter(buildSpec: () => unknown) {
+export function createOpenApiSpecRouter(getSpec: () => unknown) {
   const router = new Hono<AppEnv>();
 
   let payload: { body: string; etag: string } | null = null;
   const getPayload = () => {
     if (!payload) {
-      const body = JSON.stringify(buildSpec());
+      const body = JSON.stringify(getSpec());
       const digest = new Bun.CryptoHasher("sha256").update(body).digest("hex").slice(0, 32);
       payload = { body, etag: `"${digest}"` };
     }

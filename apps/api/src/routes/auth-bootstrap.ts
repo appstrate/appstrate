@@ -353,7 +353,7 @@ export function createAuthBootstrapRouter(): Hono {
           ...baBody,
           bootstrap: {
             orgId: orgInfo.orgId,
-            orgSlug: orgInfo.slug,
+            org_slug: orgInfo.slug,
             ...(warnings.length > 0 ? { warnings } : {}),
           },
         }),

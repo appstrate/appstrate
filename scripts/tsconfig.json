@@ -7,9 +7,8 @@
   // named 4 of the 17 root scripts, so `verify-openapi.ts`,
   // `detect-breaking-changes.ts`, `generate-api-types.ts`,
   // `verify-module-isolation.ts`, `build-system-packages.ts`,
-  // `lint-manifest-casing.ts`, `docker-build-runtime.ts`, `setup.ts` and
-  // `refresh-pricing-catalog.ts` — several of them CI gates — shipped
-  // unchecked. Inverting it surfaced 11 real errors, since fixed. There is
+  // `lint-manifest-casing.ts`, `docker-build-runtime.ts` and `setup.ts` —
+  // several of them CI gates — shipped unchecked. Inverting it surfaced 11 real errors, since fixed. There is
   // deliberately no `exclude`: every file under scripts/ resolves and
   // typechecks, and excluding one to keep this gate green would rebuild the
   // hole it exists to close.

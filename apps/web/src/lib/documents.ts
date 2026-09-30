@@ -22,7 +22,7 @@ import type { Location } from "react-router-dom";
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface DocumentLike {
   purpose: "user_upload" | "agent_output";
-  run_id: string | null;
+  runId: string | null;
   packageId: string | null;
   mime: string;
 }
@@ -89,8 +89,8 @@ export function mimeIconFor(mime: string): LucideIcon {
  * Hono route; only the run id is percent-encoded.
  */
 export function documentRunHref(doc: DocumentLike): string | undefined {
-  if (!doc.run_id || !doc.packageId) return undefined;
-  return `/agents/${doc.packageId}/runs/${encodeURIComponent(doc.run_id)}`;
+  if (!doc.runId || !doc.packageId) return undefined;
+  return `/agents/${doc.packageId}/runs/${encodeURIComponent(doc.runId)}`;
 }
 
 /**

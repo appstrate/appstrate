@@ -50,9 +50,10 @@ export function setPreset(next: LabPreset): void {
 /**
  * What the lab's modules contribute (`permissionsContribution`), which the core
  * catalogs cannot list: oidc (`oauth-clients`, `cli-sessions`), webhooks
- * (`webhooks` per space, `org-webhooks`) and ee (`billing`). Without them an
- * owner lost SSO collaborateurs, Sessions CLI, Facturation and Webhooks from
- * the settings rail, which no real owner does.
+ * (`webhooks` per space, `org-webhooks`), ee (`billing`), chat (`chat`) and
+ * mcp (`mcp`). Without them an owner lost SSO collaborateurs, Sessions CLI,
+ * Facturation and Webhooks from the settings rail, and every persona lost the
+ * chat, which the route gate reads as `chat:read`.
  */
 const MODULE_ORG_ADMIN = [
   "oauth-clients:read",
@@ -68,9 +69,18 @@ const MODULE_ORG_ADMIN = [
 ];
 const MODULE_ORG_MEMBER = ["billing:read"];
 const MODULE_SPACE_AUTHORING = ["webhooks:read", "webhooks:write", "webhooks:delete"];
+/** chat and mcp read: every preset. Their writes (`chat:write`, `mcp:invoke`): all but `viewer`. */
+const MODULE_SPACE_READ = ["chat:read", "mcp:read"];
+const MODULE_SPACE_USE = ["chat:write", "mcp:invoke"];
 
 const orgAll = [...ORG_LEVEL_PERMISSIONS, ...MODULE_ORG_ADMIN] as string[];
-const spaceAll = [...SPACE_LEVEL_PERMISSIONS, ...MODULE_SPACE_AUTHORING] as string[];
+/** Every space-level permission the lab's deployment can name: core, then its modules'. */
+export const spaceAll = [
+  ...SPACE_LEVEL_PERMISSIONS,
+  ...MODULE_SPACE_AUTHORING,
+  ...MODULE_SPACE_READ,
+  ...MODULE_SPACE_USE,
+] as string[];
 
 // `admin` is owner minus the org's identity — re-slugging is owner-only.
 const ORG_ADMIN = orgAll.filter((p) => p !== "org:delete" && p !== "org:update");
@@ -115,7 +125,10 @@ const SPACE_OPERATOR = [
   "integrations:disconnect",
   "end-users:read",
   "end-users:write",
+  ...MODULE_SPACE_READ,
+  ...MODULE_SPACE_USE,
 ];
+/** `viewer` keeps `chat:read` without `chat:write`: the read-only chat. */
 const SPACE_VIEWER = SPACE_OPERATOR.filter((p) => p.endsWith(":read"));
 
 /** `runner`: launch, and see only its own — no reading of what the agent is made of. */
@@ -128,6 +141,8 @@ const SPACE_RUNNER = [
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
+  ...MODULE_SPACE_READ,
+  ...MODULE_SPACE_USE,
 ];
 
 const SPACE_PERMISSIONS: Record<LabPreset, string[]> = {

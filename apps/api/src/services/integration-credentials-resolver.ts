@@ -5,7 +5,7 @@
  * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
  * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
  *
- * For each declared auth on the integration's manifest:
+ * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
  *   2. If the auth is OAuth2 AND (forced OR within the lead window),
@@ -28,9 +28,10 @@ import {
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { expandScopesGranted } from "@appstrate/core/integration";
+import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
-import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { getEnv } from "@appstrate/env";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
@@ -42,8 +43,9 @@ import {
 } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
-  selectAccessibleConnection,
+  loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
+  recordIntegrationRefreshFailure,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import {
@@ -64,28 +66,23 @@ interface ResolveLiveCredentialsOptions {
 }
 
 /**
- * An EMPTY payload from this function means exactly one thing: the integration
- * declares no auth at all. Every state in which a credential was expected but
- * could not be produced throws — because the sidecar reads an empty payload as
- * "no `delivery.http` auths, skip the MITM listener entirely" and boots the run
- * anyway, so a silent empty return turns a broken connection into an agent
- * reporting "the API is unavailable" against a fleet of uncredentialed 401s.
+ * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
+ * listener" and boot uncredentialed — so every unproducible credential throws.
  *
  * Throws ApiError on:
- *   - 404: integration not declared by the agent, not active, or no
- *     connection for the actor (including a run-pinned connection that has
- *     since been deleted or unshared). Nothing exists to flag, so this is
- *     deliberately NOT the 410 below.
+ *   - 404: integration not declared by the agent, not active, or the named connection
+ *     is gone. Nothing exists to flag, so this is deliberately NOT the 410 below.
  *   - 409 `integration_auth_undeclared`: the connection's `auth_key` is not
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
  *     be valid under another version, so it is NOT flagged.
  *   - 410: the credential is dead and the connection has been flagged
  *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
- *     auth on a forced refresh, or stored credentials that cannot be
- *     decrypted. The sidecar propagates it as a 401 to the integration so the
+ *     auth whose forced refreshes reached the failure threshold, or stored
+ *     credentials that cannot be decrypted. The sidecar propagates it as a 401 to the integration so the
  *     LLM sees a clean "please re-connect" surface, and stops retrying.
- *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc).
+ *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
+ *     an unrefreshable auth rejected fewer times than the failure threshold.
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
@@ -98,16 +95,9 @@ export async function resolveLiveIntegrationCredentials(
     spaceId: string;
     agentPackageId: string;
     actor: Actor | null;
-    /**
-     * Snapshot from `runs.resolved_connections`. When present, the
-     * `[integrationId].connectionId` entry pins which row the MITM listener
-     * decrypts — so the cascade's pick (admin pin / run override /
-     * schedule override / member pin / auto fallback) survives past
-     * kickoff into the live credential surface. One connection per
-     * integration; its authKey drives which `manifest.auths[X]`
-     * declaration is materialised.
-     */
-    resolvedConnections?: Record<string, { connectionId: string; source: string }> | null;
+    /** A member of the run's bound set (the route checked it), and its cascade layer. */
+    connectionId: string;
+    connectionSource: string;
     /**
      * Snapshot from `runs.resolved_integration_versions` (#686). When present,
      * `[integrationId]` pins the manifest VERSION this resolver reads — so the
@@ -131,15 +121,6 @@ export async function resolveLiveIntegrationCredentials(
   await assertIntegrationActive(integrationId, context.spaceId);
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
-  if (Object.keys(auths).length === 0) {
-    // The ONLY legitimate empty payload on this endpoint: the integration
-    // genuinely declares no auth, so there is nothing to inject and nothing
-    // has failed. Every other empty-looking state below is a broken one and
-    // throws — an empty payload tells the sidecar "no `delivery.http` auths,
-    // skip the MITM listener", which for a broken state means the run boots
-    // and every upstream call goes out uncredentialed.
-    return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
-  }
 
   const out: MutableCredentialsWire = {
     auths: [],
@@ -147,43 +128,24 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
-  // Flat model: one connection per integration, chosen by the cascade
-  // at kickoff. The snapshot pins which row to load; without a snapshot
-  // (legacy/manual paths) fall back to the actor's accessible connections
-  // (first-found across declared auths — matches the spawn resolver).
-  const snapshotEntry = context.resolvedConnections?.[integrationId] ?? null;
-  const connection = await selectAccessibleConnection(
-    integrationId,
-    Object.keys(auths),
-    snapshotEntry?.connectionId ?? null,
-    { spaceId: context.spaceId, actor: context.actor },
-  );
+  const connection = await loadAccessibleConnectionById(context.connectionId, integrationId, null, {
+    spaceId: context.spaceId,
+    actor: context.actor,
+  });
   if (!connection) {
-    // STATE A — nothing to decrypt. Either the row the run PINNED at kickoff is
-    // no longer reachable (deleted, unshared, moved to another space), or
-    // the actor never connected this integration at all. Both are 404: the
-    // doc comment above already promises "no connection for the actor", there
-    // is no row to flag `needsReconnection` on, and 410 would lie about one
-    // having been flagged. Returning the empty payload here (the old
-    // behaviour) was indistinguishable from "declares no auth" — the sidecar
-    // skipped the MITM listener, every upstream call left uncredentialed, and
-    // the agent reported a generic "the API is unavailable".
+    // STATE A — 404 and not 410: no row is left to flag `needsReconnection` on.
     logger.warn("Integration credentials unavailable — no accessible connection", {
       runId: context.runId,
       integrationId,
+      connectionId: context.connectionId,
       declaredAuthKeys: Object.keys(auths),
-      ...(snapshotEntry ? { pinnedConnectionId: snapshotEntry.connectionId } : {}),
-      ...(snapshotEntry ? { pinnedSource: snapshotEntry.source } : {}),
+      pinnedSource: context.connectionSource,
     });
     throw notFound(
-      snapshotEntry
-        ? `Integration '${integrationId}': the connection pinned for this run ` +
-            `(${snapshotEntry.connectionId}, source '${snapshotEntry.source}') is no longer ` +
-            `reachable — it was deleted, unshared, or moved to another space after the ` +
-            `run started. Re-connect '${integrationId}' and relaunch the run.`
-        : `Integration '${integrationId}' has no connection for this run's actor ` +
-            `(declared auths: ${Object.keys(auths).join(", ")}). Connect '${integrationId}' ` +
-            `for this user, then relaunch the run.`,
+      `Integration '${integrationId}': the connection bound to this run ` +
+        `(${context.connectionId}, source '${context.connectionSource}') ` +
+        `is no longer reachable — it was deleted, unshared, or moved to another space after ` +
+        `the run started. Re-connect '${integrationId}' and relaunch the run.`,
     );
   }
 
@@ -221,15 +183,8 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
-  // The credential is terminally unusable and the connection must be re-made.
-  // Two entry classes, one behaviour so they cannot drift:
-  //   • a FORCED refresh (the sidecar already saw an upstream 401) that cannot
-  //     recover the credential — an oauth2 auth with no refresh client, or any
-  //     non-oauth2 auth, which has nothing to refresh;
-  //   • a credential nobody can decrypt (below), on ANY read — forced or not.
-  // Both flag the connection for re-connect and surface 410 so the sidecar
-  // stops retrying and the next-launch readiness gate fires. (A revoked refresh
-  // token is handled inline further down, with the same flag + status.)
+  // Terminally unusable: flag for re-connect and surface 410 so the sidecar
+  // stops retrying and the next-launch readiness gate fires.
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
     await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn("Integration credential terminally unusable — flagging needsReconnection", {
@@ -245,6 +200,34 @@ export async function resolveLiveIntegrationCredentials(
       `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
         `the connection has been flagged as needing re-connection. Re-connect ` +
         `'${integrationId}' and relaunch the run.`,
+    );
+  };
+
+  // A forced refresh nothing can recover (no refresh client, or not oauth2).
+  // One 401 can be a transient upstream fault, so it is counted: 502 until
+  // INTEGRATION_REFRESH_MAX_FAILURES, then terminal. Not a streak — only a
+  // credential write (reconnect) resets the counter, so isolated 401s add up.
+  const rejectUnrefreshable = async (reason: string): Promise<never> => {
+    const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    const { failures, needsReconnection } = await recordIntegrationRefreshFailure(
+      connection.id,
+      maxFailures,
+      null,
+    );
+    if (needsReconnection) return flagTerminalAndThrow(reason);
+    logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
+      runId: context.runId,
+      integrationId,
+      authKey,
+      connectionId: connection.id,
+      failures,
+      maxFailures,
+      reason,
+    });
+    throw badGateway(
+      `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
+        `${failures}/${maxFailures} upstream rejections since the connection was last ` +
+        `(re)connected before it is flagged`,
     );
   };
 
@@ -389,12 +372,9 @@ export async function resolveLiveIntegrationCredentials(
           integrationId: integrationId,
           authKey,
         });
-        // Expand the granted set through the manifest `implies` hierarchy
-        // before diffing — a parent grant (e.g. GitHub `repo`) covers the
-        // children it implies (`public_repo`), so a raw membership check
-        // would falsely flag the connection as below the required floor.
-        const expandedGranted = expandScopesGranted(granted, manifest, authKey);
-        const missing = required.filter((s) => !expandedGranted.includes(s));
+        // Diff through the manifest `implies` hierarchy: a parent grant (e.g.
+        // GitHub `repo`) covers the children it implies (`public_repo`).
+        const missing = scopesNotCovered(required, granted, manifest, authKey);
         if (missing.length > 0) {
           await markIntegrationConnectionNeedsReconnection(connection.id);
           logger.warn("Integration scope shrink dropped below required floor", {
@@ -417,18 +397,15 @@ export async function resolveLiveIntegrationCredentials(
       }
     } else if (options.forceRefresh === true) {
       // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
-      // per-space OAuth client (DCR / system-wide / shared) or no token_endpoint,
-      // so the token can never be refreshed. Terminal.
-      await flagTerminalAndThrow("no OAuth client or token endpoint");
+      // resolvable pinned OAuth client or no token_endpoint, so the token can
+      // never be refreshed. Terminal.
+      await rejectUnrefreshable("no OAuth client or token endpoint");
     }
   } else if (options.forceRefresh === true) {
     // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
     // with no connect.tool re-login handler — those route to re-login in the
-    // sidecar and never reach here). There is nothing to refresh and the
-    // sidecar only forces a refresh after a 401, so the credential is dead.
-    // This is what restores the "any terminal 401 invalidates the connection"
-    // guarantee for non-OAuth integrations — without a separate report path.
-    await flagTerminalAndThrow(`auth type '${authDef.type}' is not refreshable`);
+    // sidecar and never reach here). There is nothing to refresh.
+    await rejectUnrefreshable(`auth type '${authDef.type}' is not refreshable`);
   }
 
   const http = authDef.delivery?.http;
@@ -443,7 +420,8 @@ export async function resolveLiveIntegrationCredentials(
     authKey,
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
-    authorizedUris: Object.freeze([...(authDef.authorized_uris ?? [])]),
+    // Rendered from the post-refresh fields.
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),

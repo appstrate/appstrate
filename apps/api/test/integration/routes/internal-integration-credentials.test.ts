@@ -17,13 +17,18 @@
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
  * scope-shrink behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
- * the HTTP route boundary: auth, dep, install, response shape.
+ * the HTTP route boundary: auth, dep, install, the `connection_id` selector,
+ * response shape.
+ *
+ * The endpoint is per-CONNECTION: a run binds a SET of connections to an
+ * integration (`runs.resolved_connections`), so every request names one with
+ * `?connection_id=` and the snapshot is the third authorization layer.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedPackage,
@@ -33,6 +38,7 @@ import {
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { leaveOrganization } from "../../../src/services/organizations.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -40,6 +46,7 @@ import {
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { integrationConnections, packages, runs } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 
 const app = getTestApp();
 
@@ -87,6 +94,33 @@ function buildIntegrationManifest(id: string) {
   });
 }
 
+/**
+ * The endpoint is per-CONNECTION: a run binds a set of connections to an
+ * integration and names the one it wants. Both halves are required — the query
+ * param AND the run's kickoff snapshot authorising it.
+ */
+function credentialsUrl(integrationId: string, connectionId: string, refresh = false): string {
+  return (
+    `/internal/integration-credentials/${integrationId}${refresh ? "/refresh" : ""}` +
+    `?connection_id=${connectionId}`
+  );
+}
+
+/** Write the kickoff snapshot the cascade would have written for this run. */
+async function bindConnectionsToRun(
+  runIdToBind: string,
+  bindings: Record<string, string[]>,
+): Promise<void> {
+  const resolved: Record<string, { connectionId: string; source: "member_pin" }[]> = {};
+  for (const [integrationId, ids] of Object.entries(bindings)) {
+    resolved[integrationId] = ids.map((connectionId) => ({
+      connectionId,
+      source: "member_pin" as const,
+    }));
+  }
+  await db.update(runs).set({ resolvedConnections: resolved }).where(eq(runs.id, runIdToBind));
+}
+
 describe("GET /internal/integration-credentials/:scope/:name", () => {
   let ctx: TestContext;
   let runId: string;
@@ -106,24 +140,37 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     }
   }
 
-  /** Seed a connection for the test user with an explicit auth key + blob. */
+  /**
+   * Seed a connection (the test user's unless `userId` says otherwise) with an explicit auth key +
+   * blob. The label is distinct per call: several tests below bind TWO connections of the
+   * same integration to one run, and the label is what tells them apart.
+   */
+  let seededConnections = 0;
   async function seedConnectionRow(
     integrationId: string,
-    opts: { authKey?: string; credentialsEncrypted?: string } = {},
+    opts: {
+      authKey?: string;
+      credentialsEncrypted?: string;
+      userId?: string;
+      sharedWithOrg?: boolean;
+    } = {},
   ): Promise<string> {
+    const label = `acct-test-${++seededConnections}`;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: integrationId,
         authKey: opts.authKey ?? "primary",
-        accountId: "acct-test",
+        accountId: label,
+        label,
         spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
+        userId: opts.userId ?? ctx.user.id,
         endUserId: null,
         credentialsEncrypted:
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
+        sharedWithOrg: opts.sharedWithOrg ?? false,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -227,9 +274,10 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
   it("ALLOW: returns the live credentials payload for a declared + installed integration", async () => {
     await seedIntegration(INTEGRATION, true);
-    await seedConnection(INTEGRATION);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -247,15 +295,14 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  // NOTE — the one legitimate empty payload (the integration declares no auth
-  // at all) has no route-level test on purpose: it is currently UNREACHABLE
-  // through a stored manifest. `@afps-spec/schema` requires every integration
-  // to declare at least one auth ("integration MUST declare at least one auth
-  // method"), so a zero-auth manifest fails validation on read and this
-  // endpoint answers 500 `invalid_manifest` long before the resolver's empty
-  // return. The branch is kept in `resolveLiveIntegrationCredentials` because
-  // it is the correct category-3 answer if that spec rule ever relaxes — it
-  // just cannot be exercised from here today.
+  // NOTE — a RUN token never gets an empty payload from this endpoint. The
+  // zero-auth branch that used to produce one is gone: `@afps-spec/schema`
+  // requires every integration to declare at least one auth ("integration MUST
+  // declare at least one auth method"), so a zero-auth manifest fails
+  // validation on read and this endpoint answers 500 `invalid_manifest` long
+  // before any resolver code. The one empty payload that remains belongs to the
+  // CONNECT-run branch, which never reaches the resolver — it is covered in
+  // `internal-connect-run-grant.test.ts`.
 
   // ─── Fail-loud: the three states that used to answer 200-with-empty ───
   //
@@ -264,21 +311,149 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   // uncredentialed, and every upstream call 401'd — reported by the agent as a
   // generic "the API is unavailable", indistinguishable from a real outage.
 
-  it("DENY: 404 when the actor has NO connection for a declared-auth integration", async () => {
-    // STATE A. The integration declares `primary`, but this actor never
-    // connected it (or the connection was deleted). Nothing to inject.
+  it("DENY: 404 when the connection this run bound is no longer reachable", async () => {
+    // STATE A. The run bound a connection at kickoff and it went away
+    // (deleted, unshared, moved). Nothing to inject for THAT connection.
     await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    await db.delete(integrationConnections).where(eq(integrationConnections.id, connectionId));
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
       headers: { Authorization: `Bearer ${token}` },
     });
 
     expect(res.status).toBe(404);
     const body = (await res.json()) as { detail?: string };
-    // Cause AND remedy, both naming the integration.
-    expect(body.detail).toContain("no connection for this run's actor");
+    // Cause AND remedy — naming the integration AND which of its connections,
+    // because a run can bind several and only one of them is gone.
+    expect(body.detail).toContain("no longer reachable");
     expect(body.detail).toContain(INTEGRATION);
+    expect(body.detail).toContain(connectionId);
     expect(body.detail).toMatch(/relaunch the run/i);
+  });
+
+  it("DENY: 404 once a bound colleague's shared connection is unshared by its owner leaving", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const colleague = await memberContext(ctx, "member");
+    const connectionId = await seedConnectionRow(INTEGRATION, {
+      userId: colleague.user.id,
+      sharedWithOrg: true,
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const fetchCredentials = () =>
+      app.request(credentialsUrl(INTEGRATION, connectionId), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    expect((await fetchCredentials()).status).toBe(200);
+
+    await leaveOrganization(ctx.orgId, colleague.user.id);
+
+    expect((await fetchCredentials()).status).toBe(404);
+  });
+
+  // ─── The connection selector (plan §8 row 8) ───
+  //
+  // A run may bind several connections to one integration, so the caller
+  // names one and the run's kickoff snapshot is what authorises it. Both
+  // refusals are 400: a request that cannot say which connection it means gets
+  // no guess, and one naming a connection this run never bound is asking for a
+  // credential its run token does not cover.
+
+  it("DENY: 400 when `connection_id` is absent", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { param?: string; detail?: string };
+    expect(body.param).toBe("connection_id");
+
+    // CONTROL — the very same run, integration and connection answer 200 as
+    // soon as the caller names it.
+    const ok = await app.request(credentialsUrl(INTEGRATION, connectionId), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("DENY: 400 connection_not_in_run for a connection this run did not bind", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const bound = await seedConnectionRow(INTEGRATION);
+    // A second, real connection on the same integration and the same actor —
+    // accessible, decryptable, and simply not part of THIS run's set.
+    const unbound = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [bound] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, unbound), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("connection_not_in_run");
+    expect(body.detail).toContain(unbound);
+
+    // CONTROL — the bound sibling resolves, so the refusal is about the
+    // binding and not about the connection being unusable.
+    const ok = await app.request(credentialsUrl(INTEGRATION, bound), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("DENY: 400 for a syntactically invalid `connection_id`", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, "not-a-uuid"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  // `z.uuid()` accepts `A1B2…` while the snapshot holds what Postgres returned.
+  it("ALLOW: an uppercase `connection_id` names the same bound connection", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId.toUpperCase()), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("serves EACH bound connection of one integration its own credentials", async () => {
+    // The whole point of the set: two connections, one integration, one run —
+    // two distinct credential surfaces under the same `packageId`.
+    await seedIntegration(INTEGRATION, true);
+    const first = await seedConnectionRow(INTEGRATION, {
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-one" } }),
+    });
+    const second = await seedConnectionRow(INTEGRATION, {
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-two" } }),
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [first, second] });
+
+    const read = async (connectionId: string): Promise<string | undefined> => {
+      const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { auths: Array<{ fields: Record<string, string> }> };
+      return body.auths[0]?.fields.api_key;
+    };
+
+    expect(await read(first)).toBe("secret-one");
+    expect(await read(second)).toBe("secret-two");
   });
 
   it("DENY: 409 integration_auth_undeclared when the pinned manifest dropped the connection's auth", async () => {
@@ -294,10 +469,10 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
-      resolvedConnections: { [INTEGRATION]: { connectionId, source: "member_pin" } },
+      resolvedConnections: { [INTEGRATION]: [{ connectionId, source: "member_pin" }] },
     });
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
       headers: { Authorization: `Bearer ${signRunToken(pinnedRun.id)}` },
     });
 
@@ -323,8 +498,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     // this state actually surfaces (the sidecar fetches once at spawn).
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedUndecryptableConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -366,18 +542,23 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     }
   }
 
-  async function seedConnection(integrationId: string) {
+  async function seedConnection(integrationId: string): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
-    await db.insert(integrationConnections).values({
-      integrationId: integrationId,
-      authKey: "primary",
-      accountId: "acct-test",
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: ciphertext,
-      scopesGranted: [],
-    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: integrationId,
+        authKey: "primary",
+        accountId: "acct-test",
+        label: "acct-test",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: ciphertext,
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
   }
 
   beforeEach(async () => {
@@ -444,19 +625,30 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
   // ─── Terminal on a non-OAuth auth (the unified flagging path) ──
 
-  it("flags needsReconnection + records run metadata + 410 for a non-OAuth auth on a forced refresh", async () => {
+  it("flags needsReconnection + records run metadata + 410 once a non-OAuth auth's forced refreshes reach the threshold", async () => {
     // A forced /refresh only happens after an upstream 401. A non-OAuth
-    // (api_key) credential cannot be refreshed → it is dead → the route flags
-    // the connection, stamps the run's degraded_integrations, and returns 410
-    // (the sidecar maps that to "don't retry"). This is the single place a
-    // terminal auth failure is recorded — no separate report endpoint.
+    // (api_key) credential cannot be refreshed; one 401 may be transient, so
+    // the route answers 502 until the rejection count reaches the threshold,
+    // then flags the connection, stamps the run's degraded_integrations, and
+    // returns 410 (the sidecar maps that to "don't retry"). This is the single
+    // place a terminal auth failure is recorded — no separate report endpoint.
     await seedIntegration(INTEGRATION, true);
-    await seedConnection(INTEGRATION);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const refresh = () =>
+      app.request(credentialsUrl(INTEGRATION, connectionId, true), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
+      expect((await refresh()).status).toBe(502);
+    }
+    const [before] = await db.select().from(runs).where(eq(runs.id, runId));
+    const beforeMeta = before!.metadata as { degraded_integrations?: string[] } | null;
+    expect(beforeMeta?.degraded_integrations ?? []).not.toContain(INTEGRATION);
+
+    const res = await refresh();
     expect(res.status).toBe(410);
 
     const [row] = await db
@@ -468,6 +660,27 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("DENY: 400 without `connection_id` — the selector guards BOTH routes", async () => {
+    // Control for the test above: same seed, same run, same token — only the
+    // selector is missing, and the refresh never reaches the credential.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}/refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    // A refused request must not have touched the credential it never read.
+    expect(row!.needsReconnection).toBe(false);
   });
 });
 
@@ -486,7 +699,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 describe("GET /internal/integration-credentials — version-pinned runs", () => {
   let ctx: TestContext;
 
-  async function seedIntegration(id: string) {
+  async function seedIntegration(id: string): Promise<string> {
     await seedPackage({
       id,
       orgId: ctx.orgId,
@@ -497,19 +710,24 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     await seedPackageShare(ctx.defaultSpaceId, id);
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
-    await db.insert(integrationConnections).values({
-      integrationId: id,
-      authKey: "primary",
-      accountId: "acct-test",
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: ciphertext,
-      scopesGranted: [],
-    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: id,
+        authKey: "primary",
+        accountId: "acct-test",
+        label: "acct-test",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        endUserId: null,
+        credentialsEncrypted: ciphertext,
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
   }
 
-  async function seedPinnedRun(versionRef: string): Promise<string> {
+  async function seedPinnedRun(versionRef: string, bindings?: Record<string, string[]>) {
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
@@ -523,6 +741,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       agentScope: "credsorg",
       agentName: "Creds Test Agent",
     });
+    if (bindings) await bindConnectionsToRun(run.id, bindings);
     return signRunToken(run.id);
   }
 
@@ -546,10 +765,10 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       version: "1.0.0",
       manifest: buildAgentManifest([INTEGRATION]),
     });
-    await seedIntegration(INTEGRATION);
-    const token = await seedPinnedRun("1.0.0");
+    const connectionId = await seedIntegration(INTEGRATION);
+    const token = await seedPinnedRun("1.0.0", { [INTEGRATION]: [connectionId] });
 
-    const res = await app.request(`/internal/integration-credentials/${INTEGRATION}`, {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
       headers: { Authorization: `Bearer ${token}` },
     });
 

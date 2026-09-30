@@ -4,17 +4,17 @@
  * MCP `run_and_wait` × `connection_overrides` — the joined seam.
  *
  * An org with two connections on one integration auth makes run readiness answer
- * `412 missing_integration_connection` / `must_choose_connection`, and the only
+ * `409 missing_integration_connection` / `must_choose_connection`, and the only
  * documented way out is retrying with a `connection_overrides` map. That remedy
  * crosses TWO layers, and it was broken in both at once:
  *
  *   - the MCP tool did not declare the argument and the shared launch client
  *     did not put it in the launch body (unit-covered in
- *     `packages/core/test/run-and-wait-client.test.ts` + this module's
- *     `test/unit/run-and-wait.test.ts`);
+ *     `packages/core/test/run-and-wait-client.test.ts` +
+ *     `apps/api/test/unit/modules/mcp/run-and-wait.test.ts`);
  *   - `POST /api/runs/inline` stripped the field and never handed it to the
  *     readiness resolver (covered in
- *     `apps/api/test/integration/routes/inline-run-412-missing-connection.test.ts`).
+ *     `apps/api/test/integration/routes/inline-run-missing-connection.test.ts`).
  *
  * Each side is now pinned in isolation, and isolation is exactly what let the
  * bug ship: either half could regress — a dropped tool property, a renamed wire
@@ -22,8 +22,8 @@
  * whole chain runs: a real MCP `tools/call` over the real router, the real
  * in-process dispatch, the real inline route, the real DB.
  *
- * Both directions live here on purpose. The 412 is what makes the override
- * necessary and the override is what makes the 412 escapable; asserting them
+ * Both directions live here on purpose. The 409 is what makes the override
+ * necessary and the override is what makes the 409 escapable; asserting them
  * apart would let one drift into no longer describing the other.
  */
 
@@ -46,22 +46,16 @@ import {
   waitForRunPipelineSettled,
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
-import { setPlatformApp } from "../../../../lib/platform-app.ts";
-import { resetCatalog } from "../../catalog.ts";
+import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
-// platform to launch the run against (production sets this in
-// registerModuleRoutes; the test harness mounts modules inline).
-setPlatformApp(app);
+// platform to launch the run against (production registers its app in
+// `index.ts` once every route is mounted).
+await registerTestPlatformApp();
 
-const MCP_ACCEPT = "application/json, text/event-stream";
 const INTEGRATION = "@mcpconn/svc";
-
-interface JsonRpcEnvelope {
-  result?: Record<string, unknown>;
-  error?: { code: number; message: string };
-}
 
 /** Call an MCP tool on the caller's per-org endpoint and parse its JSON payload. */
 async function callTool(
@@ -98,6 +92,7 @@ interface ValidationFieldError {
     label: string | null;
     account_id: string;
     owned_by_actor: boolean;
+    needs_reconnection: boolean;
   }[];
 }
 
@@ -121,7 +116,6 @@ describe("mcp run_and_wait — connection_overrides", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    resetCatalog();
     // A session owner: it holds mcp:read + mcp:invoke AND the `agents:run`
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
@@ -135,7 +129,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
   // red test would cascade into unrelated FK failures.
   afterEach(waitForRunPipelineSettled);
 
-  it("returns the 412 must_choose_connection payload through the tool when no pick is given", async () => {
+  it("returns the 409 must_choose_connection payload through the tool when no pick is given", async () => {
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     const conn1 = await seedIntegrationConnection(ctx, INTEGRATION);
     const conn2 = await seedIntegrationConnection(ctx, INTEGRATION);
@@ -149,7 +143,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(result.isError).toBe(true);
     // The tool surfaces the route's own status + body — the model needs BOTH
     // the code and the candidates to build the retry.
-    expect(result.data.status).toBe(412);
+    expect(result.data.status).toBe(409);
     const body = result.data.body as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
@@ -180,10 +174,10 @@ describe("mcp run_and_wait — connection_overrides", () => {
       kind: "inline",
       manifest: inlineAgentManifest([INTEGRATION]),
       prompt: "do the thing",
-      connection_overrides: { [INTEGRATION]: picked },
+      connection_overrides: { [INTEGRATION]: [picked] },
     });
 
-    // No 412 this time: the tool waited on a real run instead of reporting a
+    // No 409 this time: the tool waited on a real run instead of reporting a
     // launch failure. A launch failure payload is `{ status: <number>, body }`;
     // a launched one is the run projection `{ id, packageId, status, done }`,
     // whose `status` is a run status string. (Which terminal status the fake
@@ -199,11 +193,55 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(row).toBeDefined();
     // The audit trail of what the MODEL asked for — this is the field that was
     // silently dropped somewhere between the tool schema and the route.
-    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: picked });
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
     // …and the resolver snapshot the spawn loader + MITM refresh read back,
     // proving the pick was honoured rather than merely stored.
     expect(row!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: { connectionId: picked },
+      [INTEGRATION]: [{ connectionId: picked, source: "run_override" }],
     });
   }, 60_000);
+
+  // Two ids bind two connections end to end; a layer keeping only the first passes the test above,
+  // not this one.
+  it("binds every connection the override names, in the run's snapshot", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const first = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-a" });
+    const second = await seedIntegrationConnection(ctx, INTEGRATION, { label: "compte-b" });
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [first, second] },
+    });
+
+    expect(result.data.body).toBeUndefined();
+    const runId = result.data.id as string;
+    expect(runId).toStartWith("run_");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [first, second] });
+    const resolved = row!.resolvedConnections![INTEGRATION];
+    expect(resolved!.map((c) => c.connectionId).sort()).toEqual([first, second].sort());
+  }, 60_000);
+
+  // A string where a set belongs is refused (400), never wrapped into a one-element set.
+  it("refuses a string where a set belongs, without launching", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    const picked = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: picked },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
 });

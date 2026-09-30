@@ -48,7 +48,7 @@
 import type { RunEvent } from "@afps-spec/types";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import { emptyRunResult, foldEvent } from "../runner/reducer.ts";
-import type { RunResult } from "../types/run-result.ts";
+import type { RunResult, TerminalRunResult } from "../types/run-result.ts";
 import { isCanonicalRunEvent } from "../types/canonical-events.ts";
 
 export interface StdoutBridgeOptions {
@@ -122,26 +122,25 @@ export function isStdoutEventLine(value: unknown): value is RunEvent {
  *     runner's. Lets a runner that already produced a complete result
  *     (anything that doesn't go through stdout-JSONL tools) pass through
  *     unchanged.
- *   - Terminal metadata (status / error / durationMs / usage / cost)
- *     comes from the runner exclusively — the bridge only sees AFPS
- *     domain events, never `appstrate.metric`-derived totals or the
+ *   - Terminal metadata (status / error / durationMs / usage / cost /
+ *     artifacts) comes from the runner exclusively — the bridge only sees
+ *     AFPS domain events, never `appstrate.metric`-derived totals or the
  *     terminal status that the runner determines.
  */
-export function mergeTerminalResult(aggregate: RunResult, runnerResult: RunResult): RunResult {
+export function mergeTerminalResult(
+  aggregate: RunResult,
+  runnerResult: TerminalRunResult,
+): TerminalRunResult {
   const pinned =
     aggregate.pinned !== undefined && Object.keys(aggregate.pinned).length > 0
       ? aggregate.pinned
       : runnerResult.pinned;
   return {
+    ...runnerResult,
     memories: aggregate.memories.length > 0 ? aggregate.memories : runnerResult.memories,
     ...(pinned !== undefined ? { pinned } : {}),
     output: aggregate.output ?? runnerResult.output,
     logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
-    ...(runnerResult.status !== undefined ? { status: runnerResult.status } : {}),
-    ...(runnerResult.error !== undefined ? { error: runnerResult.error } : {}),
-    ...(runnerResult.durationMs !== undefined ? { durationMs: runnerResult.durationMs } : {}),
-    ...(runnerResult.usage !== undefined ? { usage: runnerResult.usage } : {}),
-    ...(runnerResult.cost !== undefined ? { cost: runnerResult.cost } : {}),
   };
 }
 

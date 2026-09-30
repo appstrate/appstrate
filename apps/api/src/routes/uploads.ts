@@ -17,6 +17,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
+import { requireCeiling } from "../middleware/require-permission.ts";
 import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { invalidRequest, unauthorized } from "../lib/errors.ts";
@@ -48,8 +49,10 @@ export function createUploadsRouter() {
   // 20/min/user — aligned with POST /agents/:id/run. Each descriptor reserves
   // up to `UPLOAD_MAX_BYTES` of signed PUT capacity, so a higher ceiling would
   // let a single session book multi-GB of storage slots per minute before GC
-  // catches up.
-  router.post("/", rateLimit(20), async (c) => {
+  // catches up. A staged upload is consumed only as a run input (a chat
+  // attachment rides a session), so a delegated credential is capped by
+  // `agents:run`; no role grant is asked of the owner (RBAC spec §7.1).
+  router.post("/", rateLimit(20), requireCeiling("agents", "run"), async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
     // Record BOTH creator identities (dashboard/API-key user OR end-user) so the

@@ -238,7 +238,7 @@ export function PackageFilesView({
   const updatePackage = useUpdatePackage(type, packageId);
   const [operations, setOperations] = useState<PackageFileWriteOperation[]>([]);
   // The tree the first edit started from. A refetch cannot rebase staged edits;
-  // the original lock version rejects the save if the package moved meanwhile.
+  // the original ETag (sent as If-Match) rejects the save if the package moved meanwhile.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
   const [dialog, setDialog] = useState<FileDialog>(null);
   const [busy, setBusy] = useState(false);
@@ -249,9 +249,9 @@ export function PackageFilesView({
   const dirty = operations.length > 0;
   const { blocker } = useUnsavedChanges(dirty);
   const limit = formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES);
-  const bundleBase = base ?? bundleIndex?.entries;
+  const bundleBase = base ?? bundleIndex?.data;
   const bundleEntries: readonly DraftFile[] | undefined =
-    editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.entries;
+    editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.data;
 
   const stage = (added: PackageFileWriteOperation[]) => {
     if (!bundleBase) return;
@@ -321,13 +321,10 @@ export function PackageFilesView({
     setBusy(true);
     setSaveError(null);
     try {
-      await updatePackage.mutateAsync(
-        packageUpdateBody({
-          manifest: writableDraft.manifest ?? {},
-          lock_version: writableDraft.lock_version,
-          operations,
-        }),
-      );
+      await updatePackage.mutateAsync({
+        etag: writableDraft.etag ?? "",
+        body: packageUpdateBody({ manifest: writableDraft.manifest ?? {}, operations }),
+      });
       // Start again from what the server now holds, not from the staged tree.
       await queryClient.refetchQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
       discardEdits();
@@ -396,7 +393,7 @@ export function PackageFilesView({
           { params: { path: splitPackageRef(server.id), header: scope.header } },
         );
         if (filesError) throw filesError;
-        const paths = new Set(files.entries.map((entry) => entry.path));
+        const paths = new Set(files.data.map((entry) => entry.path));
         if (!paths.has("manifest.json") || !paths.has(serverManifest.entry_point)) return null;
         return files;
       },
@@ -414,7 +411,7 @@ export function PackageFilesView({
         treeEntry: { ...entry, path: `${BUNDLE_ROOT}${entry.path}` },
       })) ?? [];
     const runtimeSkills = skills.flatMap((skill, index) => {
-      const entries = skillIndexes[index]?.data?.entries ?? [];
+      const entries = skillIndexes[index]?.data?.data ?? [];
       return entries
         .filter((entry) => entry.path !== "manifest.json")
         .map((entry) => ({
@@ -429,7 +426,7 @@ export function PackageFilesView({
         }));
     });
     const localServers = mcpServers.flatMap((server, index) => {
-      const entries = localMcpIndexes[index]?.data?.entries ?? [];
+      const entries = localMcpIndexes[index]?.data?.data ?? [];
       return entries.map((entry) => ({
         source: "dependency" as const,
         packageId: server.id,
@@ -634,7 +631,10 @@ export function PackageFilesView({
               {bundleError ? (
                 <ErrorState
                   message={t(
-                    bundleError instanceof ApiError && bundleError.status === 404
+                    // Only this code says the version's archive is gone; a 404
+                    // means the package or version itself does not resolve.
+                    bundleError instanceof ApiError &&
+                      bundleError.code === "version_artifact_unavailable"
                       ? "agents:files.errorMissingArtifact"
                       : "agents:files.errorLoad",
                   )}

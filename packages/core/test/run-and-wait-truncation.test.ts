@@ -127,7 +127,7 @@ describe("run_and_wait terminal step", () => {
         // run produced.
         const data = files.map((doc) => ({
           ...doc,
-          run_id: "run_1",
+          runId: "run_1",
           purpose: "agent_output",
         }));
         return json({ object: "list", data, hasMore: false });

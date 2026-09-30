@@ -13,6 +13,11 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
 import { ApiError } from "../../api/client";
+import {
+  dependentsLabel,
+  lockedReads,
+  withRequiredReads,
+} from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useModalParam } from "../../hooks/use-modal-param";
 import {
@@ -391,17 +396,22 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
 
   // The same picker API keys use for their scopes: a role's permissions are
   // the same vocabulary, so they are chosen the same way.
-  const available = (vocabulary ?? []).flatMap((group) =>
-    group.permissions.map((entry) => entry.permission),
-  );
+  const entries = (vocabulary ?? []).flatMap((group) => group.permissions);
+  const available = entries.map((entry) => entry.permission);
   const availableSet = new Set(available);
   const sessionOnly = new Set(
-    (vocabulary ?? []).flatMap((group) =>
-      group.permissions
-        .filter((entry) => !entry.api_key_grantable)
-        .map((entry) => entry.permission),
-    ),
+    entries.filter((entry) => !entry.api_key_grantable).map((entry) => entry.permission),
   );
+  // A read a selected action depends on alone is held: ticking the action
+  // ticks it, unticking it is undone, and its note names what needs it. The
+  // server refuses a role missing one (issue #1513); the picker answers first.
+  const locked = lockedReads(selected, entries);
+  const requiredBy = (permission: string) => {
+    const dependents = locked.get(permission);
+    return dependents
+      ? t("roles.requiredBy", { actions: dependentsLabel(permission, dependents) })
+      : null;
+  };
   // Named by the server against its own vocabulary, and listed as it sends
   // them. NOT intersected with the selection: `selected` is seeded from the
   // GRANTED half alone, so the two sets are disjoint by construction and the
@@ -512,11 +522,18 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
               // lists stays selected until it is removed on purpose, below.
               onChange={(next) => {
                 setSelected(
-                  new Set([...next, ...[...selected].filter((p) => !availableSet.has(p))]),
+                  withRequiredReads(
+                    new Set([...next, ...[...selected].filter((p) => !availableSet.has(p))]),
+                    entries,
+                  ),
                 );
                 setFormError(null);
               }}
-              hint={(permission) => (sessionOnly.has(permission) ? t("roles.sessionOnly") : null)}
+              hint={(permission) =>
+                [requiredBy(permission), sessionOnly.has(permission) && t("roles.sessionOnly")]
+                  .filter(Boolean)
+                  .join(" ") || null
+              }
               labels={{
                 all: t("roles.allPermissions"),
                 none: t("roles.permissionsPlaceholder"),

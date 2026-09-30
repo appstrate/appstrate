@@ -36,8 +36,6 @@ import { isSpaceRoleId } from "./ids.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
-  loadSpaceMember,
-  loadSpaceMemberships,
   resolveSpaceRole,
   spacePermissions,
   toSpaceRoleWire,
@@ -45,7 +43,7 @@ import {
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
-import { validateSpaceInOrg } from "./space-lookup.ts";
+import { loadSpaceAccess, validateSpaceInOrg, type SpaceContextRow } from "./space-lookup.ts";
 import { isUserPrincipal } from "./principal.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -451,17 +449,39 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
   return persona.space?.spaceId === spaceId ? { ref: persona.space.role } : null;
 }
 
-export async function callerSpaceMember(
+/**
+ * `space` re-read with the caller's row as one snapshot (RBAC spec §4.4), `null`
+ * if it was deleted in between. Under a preview, `space` as passed with the persona's overlay.
+ */
+export async function callerSpaceAccess(
   c: Context<AppEnv>,
-  orgId: string,
-  spaceId: string,
-): Promise<SpaceMemberRow | null> {
-  const persona = personaFor(c, orgId);
-  if (persona) return personaSpaceMember(persona, spaceId);
-  return loadSpaceMember(spaceId, c.get("user").id);
+  space: SpaceContextRow,
+): Promise<{ space: SpaceContextRow; member: SpaceMemberRow | null } | null> {
+  const persona = personaFor(c, space.orgId);
+  if (persona) return { space, member: personaSpaceMember(persona, space.id) };
+  const snapshot = await loadSpaceAccess(space.id, space.orgId, c.get("user").id);
+  return snapshot && { space: snapshot.space, member: snapshot.member };
 }
 
-/** The `listSpacesForPrincipal` overlay, so a preview never reads the caller's own rows. */
+/**
+ * {@link callerSpaceAccess} from an id: one read either way. Without a preview the
+ * membership join IS the space∈org lookup (`loadSpaceAccess` filters on `(id, orgId)`).
+ */
+export async function callerSpaceAccessById(
+  c: Context<AppEnv>,
+  spaceId: string,
+  orgId: string,
+): Promise<{ space: SpaceContextRow; member: SpaceMemberRow | null } | null> {
+  const persona = personaFor(c, orgId);
+  if (persona) {
+    const space = await validateSpaceInOrg(spaceId, orgId);
+    return space && { space, member: personaSpaceMember(persona, space.id) };
+  }
+  const snapshot = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
+  return snapshot && { space: snapshot.space, member: snapshot.member };
+}
+
+/** The persona overlay for multi-space reads (the listing, `package-access`), so a preview never reads the caller's own rows. */
 export function personaMemberships(
   persona: ViewAsPersona | undefined,
 ): Map<string, SpaceMemberRow> | undefined {
@@ -471,21 +491,12 @@ export function personaMemberships(
   return overlay;
 }
 
-export async function callerSpaceMemberships(
-  c: Context<AppEnv>,
-  orgId: string,
-): Promise<Map<string, SpaceMemberRow>> {
-  return (
-    personaMemberships(personaFor(c, orgId)) ??
-    (await loadSpaceMemberships(orgId, c.get("user").id))
-  );
-}
-
-export function viewAsWire(persona: ViewAsPersona): Record<string, unknown> {
+/** The persona as an audit payload records it — camelCase explicit keys (CASING_CONVENTIONS 4m). */
+export function viewAsAudit(persona: ViewAsPersona): Record<string, unknown> {
   return {
-    org_role: persona.orgRole,
+    orgRole: persona.orgRole,
     space: persona.space
-      ? { space_id: persona.space.spaceId, role: toSpaceRoleWire(persona.space.role) }
+      ? { spaceId: persona.space.spaceId, role: toSpaceRoleWire(persona.space.role) }
       : null,
   };
 }

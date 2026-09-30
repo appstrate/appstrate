@@ -48,28 +48,17 @@ const TURN_TIMEOUT_MS = 20_000;
 /**
  * One in-process transport playing the platform MCP endpoint.
  *
- * The GET is answered with a LIVE, never-ending SSE stream rather than the 405
- * the other suites use, because tearing that channel down is the only
- * externally visible consequence of `mcpTools.close()`: the Streamable-HTTP
- * client holds the inbound stream open for the session's life and aborts it
- * when the session closes. Without it, "the MCP client was closed" is not
- * observable from outside the engine at all.
+ * The SDK's Streamable-HTTP transport hands every POST the signal of its own
+ * `AbortController` and aborts it in `close()` — the one externally visible
+ * trace of the client being closed, since the standalone SSE GET that used to
+ * show it is answered locally now (`answerStatelessHopsLocally`).
  */
 function mcpTransport() {
-  const seen: Array<{ method: string; path: string }> = [];
-  let inboundClosed = false;
+  const postSignals: AbortSignal[] = [];
   const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
-    seen.push({ method: req.method, path: new URL(req.url).pathname });
-    if (req.method === "GET") {
-      req.signal.addEventListener("abort", () => {
-        inboundClosed = true;
-      });
-      return new Response(new ReadableStream<Uint8Array>({ start() {} }), {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    }
+    if (req.method === "POST" && init?.signal) postSignals.push(init.signal);
+    if (req.method === "GET") return new Response(null, { status: 405 });
     if (req.method === "DELETE") return new Response(null, { status: 202 });
     const msg = (await req.json()) as { id?: unknown; method?: string };
     if (!("id" in msg) || msg.id === undefined) return new Response(null, { status: 202 });
@@ -91,7 +80,11 @@ function mcpTransport() {
     if (msg.method === "tools/list") return reply({ tools: [] });
     return reply({});
   }) as typeof fetch;
-  return { fetch: impl, seen, inboundClosed: () => inboundClosed };
+  return {
+    fetch: impl,
+    /** The client's transport was opened AND closed. */
+    closed: () => postSignals.length > 0 && postSignals.every((s) => s.aborted),
+  };
 }
 
 function orgModel(): OrgModel {
@@ -100,6 +93,7 @@ function orgModel(): OrgModel {
     modelId: "upstream-model-never-called",
     apiShape: "openai-completions",
     providerId: "openai",
+    pi_provider: "openai",
     label: "Teardown test model",
     enabled: true,
     input: ["text"],
@@ -191,6 +185,7 @@ async function runStubbedTurn(abortSettles: boolean) {
     },
     modelBinding: binding,
     presetId: "preset_teardown",
+    modelLabel: "Teardown preset",
     orgId: "org_teardown",
     userId: "user_teardown",
     chatSessionId: null,
@@ -213,7 +208,7 @@ async function runStubbedTurn(abortSettles: boolean) {
   stop.abort(new Error("stopped by user"));
 
   const text = await res.text();
-  return { text, released: () => released, stub, transport };
+  return { text, released: () => released, stub, mcpClosed: transport.closed };
 }
 
 describe("pi chat turn teardown", () => {
@@ -223,14 +218,14 @@ describe("pi chat turn teardown", () => {
       // The regression: with an unbounded `await typedSession.abort()`, this
       // `res.text()` never resolves and the test times out instead of failing —
       // the producer is wedged, so nothing below it runs.
-      const { released, stub, transport } = await runStubbedTurn(false);
+      const { released, stub, mcpClosed } = await runStubbedTurn(false);
 
       expect(stub.aborted()).toBe(true);
       // (1) The subscription was taken AND released, exactly once.
       expect(stub.subscribed()).toBe(true);
       expect(stub.unsubscribeCount()).toBe(1);
-      // (2) The MCP client was closed — its inbound channel was torn down.
-      expect(transport.inboundClosed()).toBe(true);
+      // (2) The MCP client was closed, down to its transport.
+      expect(mcpClosed()).toBe(true);
       // (3) The concurrency slot was released when the body drained. Without it,
       // `CHAT_PI_MAX_CONCURRENCY` turns like this one 429 every later chat.
       expect(released()).toBe(1);
@@ -244,11 +239,11 @@ describe("pi chat turn teardown", () => {
       // Control: identical turn, cooperative session. Passes before and after —
       // a failure here means the bound displaced the normal path rather than
       // adding a floor under it.
-      const { released, stub, transport } = await runStubbedTurn(true);
+      const { released, stub, mcpClosed } = await runStubbedTurn(true);
 
       expect(stub.aborted()).toBe(true);
       expect(stub.unsubscribeCount()).toBe(1);
-      expect(transport.inboundClosed()).toBe(true);
+      expect(mcpClosed()).toBe(true);
       expect(released()).toBe(1);
     },
     TURN_TIMEOUT_MS,

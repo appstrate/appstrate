@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
@@ -11,7 +12,7 @@ import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/ag
 import { DetailSectionCard } from "../components/detail-section-card";
 import { FactGrid } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
-import { runStatusValues, type RunStatus } from "@appstrate/shared-types";
+import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -20,6 +21,7 @@ import {
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
@@ -28,7 +30,10 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
+import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
 import {
   ChevronDown,
@@ -42,6 +47,8 @@ import {
   CirclePlay,
 } from "lucide-react";
 
+type ScheduleTab = "details" | "runs";
+
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { can } = usePermissions();
@@ -51,8 +58,11 @@ export function ScheduleDetailPage() {
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  const mayWrite = useCanWriteSchedule(schedule);
 
-  const tabs = ["details", "runs"] as const;
+  // A schedule's runs are runs: `schedules:read` alone does not list them.
+  const readsRuns = canReadRuns(can);
+  const tabs: readonly ScheduleTab[] = readsRuns ? ["details", "runs"] : ["details"];
   const [activeTab, setActiveTab] = useTabWithHash(tabs, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -60,12 +70,15 @@ export function ScheduleDetailPage() {
   if (error || !schedule) return <ErrorState message={error?.message} />;
 
   const handleToggle = () => {
-    updateSchedule.mutate({ id: schedule.id, enabled: !schedule.enabled });
+    updateSchedule.mutate(
+      { id: schedule.id, enabled: !schedule.enabled },
+      { onError: toastScheduleConnectionChoice },
+    );
   };
 
   return (
     <div>
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
           title={schedule.name || schedule.id}
           titleClassName="text-xl"
@@ -85,7 +98,18 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {can("schedules:write") && (
+              {/* A schedule running as ANOTHER member is an org owner/admin
+                  act (#1611): the page deed stays where it always is, disabled,
+                  and says why. */}
+              {can("schedules:write") && !mayWrite && (
+                <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5" disabled>
+                    {t("pageActions.label", { ns: "common" })}
+                    <ChevronDown size={16} />
+                  </Button>
+                </DisabledReasonTooltip>
+              )}
+              {can("schedules:write") && mayWrite && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5">
@@ -123,12 +147,14 @@ export function ScheduleDetailPage() {
         />
         <DetailTabsList className="mt-6 mb-3">
           <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
-          <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
+          {readsRuns && <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>}
         </DetailTabsList>
 
-        <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-          <ScheduleHistory schedule={schedule} />
-        </TabsContent>
+        {readsRuns && (
+          <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            <ScheduleHistory schedule={schedule} />
+          </TabsContent>
+        )}
 
         <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <ScheduleParams schedule={schedule} />
@@ -173,6 +199,8 @@ function ScheduleParams({
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
+  const canReach = useCanReach();
+  const agentPath = `/agents/${schedule.packageId}`;
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
@@ -184,9 +212,13 @@ function ScheduleParams({
           <div className="min-w-0">
             <dt className="text-muted-foreground text-xs">{t("schedule.paramAgent")}</dt>
             <dd className="mt-1 text-sm">
-              <Link className="text-primary hover:underline" to={`/agents/${schedule.packageId}`}>
-                {agentDisplayName}
-              </Link>
+              {canReach(agentPath) ? (
+                <Link className="text-primary hover:underline" to={agentPath}>
+                  {agentDisplayName}
+                </Link>
+              ) : (
+                agentDisplayName
+              )}
             </dd>
           </div>
           <div className="min-w-0">
@@ -205,7 +237,7 @@ function ScheduleParams({
         <FactGrid
           facts={[
             { labelKey: "schedule.paramCron", value: schedule.cron_expression },
-            { labelKey: "schedule.paramTimezone", value: schedule.timezone ?? "UTC" },
+            { labelKey: "schedule.paramTimezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value:

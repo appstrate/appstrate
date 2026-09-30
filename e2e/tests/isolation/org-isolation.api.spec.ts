@@ -79,7 +79,7 @@ test.describe("Cross-org webhook isolation", () => {
 
   test("OrgB cannot update OrgA webhook", async ({ clientA, clientB }) => {
     const wh = await createWebhook(clientA);
-    const res = await clientB.put(`/webhooks/${wh.id}`, { url: "https://hacked.com" });
+    const res = await clientB.patch(`/webhooks/${wh.id}`, { url: "https://hacked.com" });
     expect(res.status()).toBe(404);
   });
 
@@ -212,7 +212,7 @@ test.describe("Cross-org schedule isolation", () => {
 
     const schedule = await createSchedule(clientA, scope, agentName);
 
-    const res = await clientB.put(`/schedules/${schedule.id}`, { name: "Hijacked" });
+    const res = await clientB.patch(`/schedules/${schedule.id}`, { name: "Hijacked" });
     expect(res.status()).toBe(404);
   });
 

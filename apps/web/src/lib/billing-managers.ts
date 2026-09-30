@@ -56,7 +56,7 @@ export interface BillingManagerRow {
 }
 
 /**
- * Join the grant rows (`user_id` only) with the org listing that carries names.
+ * Join the grant rows (`userId` only) with the org listing that carries names.
  *
  * A grant the server would now refuse is kept rather than dropped: hiding it
  * would leave the operator with a Save button that 400s on an id nothing on

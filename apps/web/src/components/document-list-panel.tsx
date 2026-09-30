@@ -29,6 +29,7 @@ import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 import { TableRowActions } from "./table-row-actions";
 import { documentPreviewHref } from "../lib/documents";
+import { runFileDirection } from "../lib/files";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export type PurposeFilter = "all" | "agent_output" | "user_upload";
@@ -66,8 +67,9 @@ export function DocumentListPanel({
   showRunLink?: boolean;
   /**
    * Run-tab only: the run this panel belongs to. When set, each tile shows an
-   * input/output badge — a doc anchored to this run is an output, anything else
-   * (a differently-anchored or unanchored upload) is an input the run consumed.
+   * input/output badge, read through `runFileDirection`: only this run's own
+   * `agent_output` is an output; an upload made for it or a file chained in
+   * from an earlier run is an input the run consumed.
    */
   runId?: string;
   /** Gallery's "Load more" control, rendered after the grid. */
@@ -308,7 +310,7 @@ export function DocumentListPanel({
                 onKeep={onKeep}
                 onPreview={(d) => setPreviewParam(d.id)}
                 showRunLink={showRunLink}
-                direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
+                direction={runId ? runFileDirection(doc, runId) : undefined}
               />
             )}
           />

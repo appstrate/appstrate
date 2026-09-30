@@ -23,7 +23,6 @@ import { RunTokensReadout } from "./run-tokens-readout";
 import { RunDuration } from "./run-duration";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 function DetailLine({ label, children }: { label: string; children: ReactNode }) {
@@ -59,7 +58,7 @@ export function RunDetailPanel({ run }: { run: EnrichedRun }) {
         </DetailLine>
       )}
       <DetailLine label={t("run.usageTokensTotal")}>
-        <RunTokensReadout usage={run.token_usage as TokenUsage | null} />
+        <RunTokensReadout usage={run.token_usage} />
       </DetailLine>
     </div>
   );

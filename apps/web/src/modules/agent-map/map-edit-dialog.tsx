@@ -102,16 +102,16 @@ export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) 
   return (
     <Modal open onClose={closeAndRefresh} title={t(TITLE_KEY[kind])} className="sm:max-w-2xl">
       {detail?.manifest ? (
-        // Keyed on the optimistic-lock token: a save bumps it, which remounts
-        // the form on the freshly saved definition instead of keeping a draft
-        // that no longer matches the server.
+        // Keyed on the draft's ETag: a save moves it, which remounts the form
+        // on the freshly saved definition instead of keeping a draft that no
+        // longer matches the server.
         <MapEditForm
-          key={detail.lock_version}
+          key={detail.etag ?? undefined}
           kind={kind}
           packageId={packageId}
           manifest={detail.manifest}
           prompt={detail.prompt ?? ""}
-          lockVersion={detail.lock_version ?? 0}
+          etag={detail.etag}
           onClose={closeAndRefresh}
         />
       ) : (
@@ -128,14 +128,15 @@ function MapEditForm({
   packageId,
   manifest,
   prompt,
-  lockVersion,
+  etag,
   onClose,
 }: {
   kind: MapEditKind;
   packageId: string;
   manifest: Record<string, unknown>;
   prompt: string;
-  lockVersion: number;
+  /** The draft version the dialog read, sent as `If-Match`: a save over a moved draft is refused. */
+  etag: string | null;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["agents", "agent-map", "common"]);
@@ -189,15 +190,17 @@ function MapEditForm({
     // The same body the explorer's save bar sends. The prompt is a FILE, so it
     // travels as a file operation rather than through `content`, the legacy
     // field that names a different file per package type. The other kinds
-    // touch the manifest alone, and a PUT carrying no file operation leaves
+    // touch the manifest alone, and a PATCH carrying no file operation leaves
     // the stored draft as it is — echoing the prompt as it was read when the
     // dialog opened would be the only way to lose a concurrent edit of it.
     update.mutate(
-      packageUpdateBody({
-        manifest: next,
-        lock_version: lockVersion,
-        operations: kind === "prompt" ? [fileTextOperation(PROMPT_FILE, draftPrompt)] : [],
-      }),
+      {
+        etag: etag ?? "",
+        body: packageUpdateBody({
+          manifest: next,
+          operations: kind === "prompt" ? [fileTextOperation(PROMPT_FILE, draftPrompt)] : [],
+        }),
+      },
       {
         onSuccess: () => {
           // The map is a projection of what we just changed, and it is the very

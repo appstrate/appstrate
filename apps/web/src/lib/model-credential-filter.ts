@@ -16,7 +16,7 @@ import type {
 
 type CredentialCandidate = Pick<
   ModelProviderCredentialInfo,
-  "source" | "authMode" | "apiShape" | "baseUrl" | "providerId"
+  "source" | "authMode" | "apiShape" | "base_url" | "providerId"
 >;
 
 function withoutTrailingSlash(url: string): string {
@@ -47,7 +47,7 @@ export function selectableCredentials<T extends CredentialCandidate>(input: {
     (k) =>
       k.authMode === "api_key" &&
       k.apiShape === apiShape &&
-      k.baseUrl != null &&
-      withoutTrailingSlash(k.baseUrl) === normalized,
+      k.base_url != null &&
+      withoutTrailingSlash(k.base_url) === normalized,
   );
 }

@@ -76,6 +76,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "OrgPackageItemDetail",
     description: "OrgPackageItemDetail",
   },
+  { specSchemaName: "PackageHome", sharedTypeName: "PackageHome", description: "PackageHome" },
   {
     specSchemaName: "AgentVersion",
     sharedTypeName: "VersionListItem",
@@ -156,6 +157,28 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationOAuthClient",
     description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
+  {
+    path: "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+    method: "post",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST .../oauth-clients/{clientId}/promote 200 ↔ IntegrationOAuthClient",
+  },
+  {
+    path: "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients",
+    method: "post",
+    status: "201",
+    sharedTypeName: "IntegrationOAuthClient",
+    description: "POST /api/org-integrations/.../oauth-clients 201 ↔ IntegrationOAuthClient",
+  },
+  {
+    path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
+    method: "put",
+    status: "200",
+    sharedTypeName: "IntegrationOAuthClient",
+    description:
+      "PUT /api/org-integrations/.../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
+  },
   // Inline connection response (import-connection 200) — the PR added `client_ref`
   // to both the schema and the type; register so they stay locked together.
   {
@@ -233,10 +256,16 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  // Canonical TS shape: `HandoffStep` in services/connect/provisioning.ts.
+  HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
+  HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",
+  HandoffStep: "handoff step union; derived from a credential bundle, no shared-type",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",
   ModelGenerationCapabilities:
     "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
+  ModelCostTier:
+    "embedded model-cost value object; canonical runtime type lives in @appstrate/core",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   AgentDiagnostics: "agent diagnostics envelope; SPA consumes the generated OpenAPI type directly",

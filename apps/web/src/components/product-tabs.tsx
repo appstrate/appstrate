@@ -26,7 +26,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { useAppConfig } from "@/hooks/use-app-config";
+import { useCanReach } from "@/hooks/use-can-reach";
 import { useChatUnreadCount } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
 
@@ -44,10 +44,11 @@ interface Product {
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const { features } = useAppConfig();
+  const canReach = useCanReach();
+  const chatReachable = canReach("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides
   // on the tab that switches to it.
-  const chatUnread = useChatUnreadCount(buildScopingHeaders, Boolean(features.chat));
+  const chatUnread = useChatUnreadCount(buildScopingHeaders, chatReachable);
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.
@@ -68,7 +69,7 @@ export function ProductTabs() {
       icon: <MessageSquare className="size-4" />,
       to: "/chat",
       active: inChat,
-      enabled: Boolean(features.chat),
+      enabled: chatReachable,
       unread: chatUnread,
     },
   ].filter((p) => p.enabled);

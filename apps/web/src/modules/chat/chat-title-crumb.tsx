@@ -18,16 +18,18 @@
  */
 
 import { useEffect } from "react";
-import { ChatConversationTitle, type ChatTranslate } from "@appstrate/module-chat/ui";
+import { ChatConversationTitle, type ChatCan, type ChatTranslate } from "@appstrate/module-chat/ui";
 import { useSessions } from "@appstrate/module-chat/unread";
 import { useBreadcrumbStore } from "@/stores/breadcrumb-store";
 
 export function ChatTitleCrumb({
   conversationId,
   t,
+  can,
 }: {
   conversationId: string | null;
   t: ChatTranslate;
+  can: ChatCan;
 }) {
   const { data: sessions } = useSessions();
   const setEntries = useBreadcrumbStore((s) => s.setEntries);
@@ -39,9 +41,14 @@ export function ChatTitleCrumb({
       setEntries([]);
       return;
     }
-    setEntries([{ label: title, node: <ChatConversationTitle activeId={conversationId} t={t} /> }]);
+    setEntries([
+      {
+        label: title,
+        node: <ChatConversationTitle activeId={conversationId} t={t} can={can} />,
+      },
+    ]);
     return () => setEntries([]);
-  }, [conversationId, title, t, setEntries]);
+  }, [conversationId, title, t, can, setEntries]);
 
   return null;
 }

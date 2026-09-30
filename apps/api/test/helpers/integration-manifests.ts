@@ -108,6 +108,8 @@ interface AuthSpec {
   identityClaims?: Record<string, string>;
   // credentials schema (api_key/basic/custom)
   credentialFields?: string[];
+  /** `credentials.schema.required` — needed by fields an `authorized_uris` template references. */
+  requiredCredentialFields?: string[];
   // delivery
   delivery?: Record<string, unknown>;
   // connect (custom)
@@ -147,6 +149,7 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
         properties: Object.fromEntries(
           (spec.credentialFields ?? ["api_key"]).map((f) => [f, { type: "string" }]),
         ),
+        ...(spec.requiredCredentialFields ? { required: spec.requiredCredentialFields } : {}),
       },
     };
     // `default_scopes` is OPTIONAL on non-oauth2 auths (the field is purely
@@ -292,6 +295,24 @@ export function apiIntegrationManifest(opts: {
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),
   } as unknown as IntegrationManifest;
+}
+
+/**
+ * An `api_call` integration whose two api_key auths, `primary` and `backup`, both expose `api_call`:
+ * an agent selecting `api_call__primary` is served by a `primary` connection only.
+ */
+export function twoAuthApiIntegrationManifest(
+  name: string,
+  authorizedUris = { primary: "https://api.example.com/**", backup: "https://api.example.com/**" },
+): IntegrationManifest {
+  const auth = (uri: string) => ({ type: "api_key" as const, authorizedUris: [uri] });
+  return {
+    ...apiIntegrationManifest({
+      name,
+      auths: { primary: auth(authorizedUris.primary), backup: auth(authorizedUris.backup) },
+    }),
+    _meta: { "dev.appstrate/api": { auths: { primary: {}, backup: {} } } },
+  } as IntegrationManifest;
 }
 
 /**

@@ -22,7 +22,9 @@
  * package every parse.
  */
 
-const PACKAGE_ID_RE = /^@[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*(?:@(.+))?$/;
+import { PackageSpecError, splitPackageSpec } from "../../lib/package-spec.ts";
+
+const PACKAGE_ID_RE = /^@[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
 
 /** Result of classifying `<arg>` for `appstrate run`. */
 type ParsedRunTarget =
@@ -46,16 +48,6 @@ type ParsedRunTarget =
       spec: string | undefined;
     };
 
-export class PackageSpecError extends Error {
-  constructor(
-    message: string,
-    public readonly hint?: string,
-  ) {
-    super(message);
-    this.name = "PackageSpecError";
-  }
-}
-
 export function parseRunTarget(raw: string): ParsedRunTarget {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
@@ -70,23 +62,16 @@ export function parseRunTarget(raw: string): ParsedRunTarget {
   }
 
   if (trimmed.startsWith("@")) {
-    const match = PACKAGE_ID_RE.exec(trimmed);
-    if (!match) {
+    const { ref, spec } = splitPackageSpec(trimmed);
+    if (!PACKAGE_ID_RE.test(ref)) {
       throw new PackageSpecError(
         `"${trimmed}" is not a valid package id`,
         "Expected @scope/name[@<version|tag|range|draft|published>] (e.g. @system/hello-world, @scope/agent@1.2.3, @scope/agent@draft).",
       );
     }
-    const head = match[1] ? trimmed.slice(0, trimmed.length - match[1].length - 1) : trimmed;
-    // head is `@scope/name`; split deliberately — slash is the only valid separator.
-    const [scope, name] = head.split("/") as [string, string];
-    return {
-      kind: "id",
-      packageId: head,
-      scope,
-      name,
-      spec: match[1],
-    };
+    // `ref` is `@scope/name`; the slash is the only valid separator.
+    const [scope, name] = ref.split("/") as [string, string];
+    return { kind: "id", packageId: ref, scope, name, spec };
   }
 
   // Unscoped: treat as path so `bundle.afps` (cwd-relative) keeps working.

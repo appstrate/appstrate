@@ -88,7 +88,7 @@ export function useModelColumns({
       tier: 2,
       cell: (m) => (
         <span className="text-muted-foreground block truncate text-xs">
-          {m.providerName ?? m.providerId ?? m.apiShape}
+          {m.provider_name ?? m.providerId ?? m.apiShape}
         </span>
       ),
     },
@@ -235,7 +235,7 @@ export function useCredentialColumns({
       width: "minmax(96px,1.4fr)",
       cell: (pk) => {
         const ProviderIcon = getProviderIcon(
-          findProviderByApiShapeAndBaseUrl(pk.apiShape, pk.baseUrl, registry ?? []),
+          findProviderByApiShapeAndBaseUrl(pk.apiShape, pk.base_url, registry ?? []),
         );
         return (
           <div className="flex min-w-0 items-center gap-2">

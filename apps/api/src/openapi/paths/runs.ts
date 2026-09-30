@@ -1,9 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
+
+const runConnectionOverrides = {
+  type: "object",
+  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
+  additionalProperties: connectionIdSetJsonSchema,
+} as const;
+
+const inlineRunPermission =
+  " **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.";
 
 /**
  * One entry of the run input-file manifest. A TS const rather than a component
@@ -114,12 +126,7 @@ const canonicalRunsPaths = {
                   description:
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
                 },
-                connection_overrides: {
-                  type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
-                },
+                connection_overrides: runConnectionOverrides,
                 dependency_overrides: {
                   type: "object",
                   description:
@@ -169,8 +176,8 @@ const canonicalRunsPaths = {
                 checkpoint: {},
                 error: null,
                 metadata: null,
-                generation: { temperature: 0.2, reasoningLevel: "high" },
-                generation_override: { temperature: 0.2, reasoningLevel: "high" },
+                generation: { temperature: 0.2, reasoning_level: "high" },
+                generation_override: { temperature: 0.2, reasoning_level: "high" },
                 started_at: "2026-01-15T10:30:00Z",
                 completed_at: null,
                 duration: null,
@@ -235,7 +242,7 @@ const canonicalRunsPaths = {
         },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
+            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -268,17 +275,9 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "422": {
           description:
-            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a published version is selected whose archive is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`; the working copy is never substituted) or expands past the decompression ceiling (`package_archive_unreadable`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
@@ -411,7 +410,7 @@ const canonicalRunsPaths = {
                 status: 409,
                 detail: "Cannot delete runs while agent has active runs",
                 code: "conflict",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -470,7 +469,8 @@ const canonicalRunsPaths = {
       summary: "Execute an inline agent (no persisted package)",
       description:
         "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored." +
-        inlineDependencyAuthorization,
+        inlineDependencyAuthorization +
+        inlineRunPermission,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -520,12 +520,7 @@ const canonicalRunsPaths = {
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
                     "`_context_files` is rejected with a `400` — the name is reserved.",
                 },
-                connection_overrides: {
-                  type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
-                },
+                connection_overrides: runConnectionOverrides,
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
                 generation: {
@@ -557,7 +552,7 @@ const canonicalRunsPaths = {
                 display_name: "Summarize attached file",
                 version: "0.0.0",
                 type: "agent",
-                schema_version: "0.1",
+                schema_version: "0.3",
                 dependencies: {},
               },
               prompt: "Summarize the attached file in three bullet points.",
@@ -636,7 +631,7 @@ const canonicalRunsPaths = {
                   display_name: "Summarize attached file",
                   version: "0.0.0",
                   type: "agent",
-                  schema_version: "0.1",
+                  schema_version: "0.3",
                   dependencies: {},
                 },
                 inline_prompt: "Summarize the attached file in three bullet points.",
@@ -682,14 +677,6 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
         "422": {
           description:
             "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
@@ -720,7 +707,8 @@ const canonicalRunsPaths = {
       summary: "Validate an inline manifest without firing a run",
       description:
         "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`." +
-        inlineDependencyAuthorization,
+        inlineDependencyAuthorization +
+        inlineRunPermission,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -753,12 +741,12 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  additionalProperties: { type: "string", minLength: 1 },
+                  additionalProperties: connectionIdSetJsonSchema,
                   description:
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
-                    "real launch too. Never persisted; no run is created. Values must be " +
-                    "non-empty, same rule and same reason as on the launch surfaces.",
+                    "real launch too. Never persisted; no run is created. Same array shape and " +
+                    "same bounds as on the launch surfaces.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -960,7 +948,7 @@ const canonicalRunsPaths = {
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,
                 metadata: null,
-                generation: { reasoningLevel: "medium" },
+                generation: { reasoning_level: "medium" },
                 generation_override: null,
                 started_at: "2026-01-15T10:30:00Z",
                 completed_at: "2026-01-15T10:31:12Z",
@@ -1013,7 +1001,7 @@ const canonicalRunsPaths = {
                 detail:
                   "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
                 code: "invalid_request",
-                requestId: "req_abc123",
+                request_id: "req_abc123",
               },
             },
           },
@@ -1030,7 +1018,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Get run logs",
       description:
-        'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
+        'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic int64 (one sequence across all runs, so consecutive entries of a run are not contiguous); invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1181,7 +1169,7 @@ const canonicalRunsPaths = {
                 status: 409,
                 detail: "Run has already completed and cannot be cancelled",
                 code: "conflict",
-                requestId: "req_def456",
+                request_id: "req_def456",
               },
             },
           },
@@ -1195,7 +1183,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 agent_not_ready` naming it: pick one with a member pin, or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1367,16 +1355,26 @@ const canonicalRunsPaths = {
             'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/RunAdmissionConflict" },
-        "412": {
-          description: "Missing integration connection (`missing_integration_connection`)",
+        "409": {
+          description:
+            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared with a member pin, since this body takes no `connection_overrides`. Or `agent_not_ready` — the connection cascade binds several connections to one integration (see above), or changed between the readiness check and the run's creation.",
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "422": {
+          description:
+            'Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is `required`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable`',
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
@@ -1488,7 +1486,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Terminal RunResult — close the sink (HMAC, idempotent)",
       description:
-        "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.",
+        'Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent\'s declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a "could not reach the LLM API" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.',
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1502,7 +1500,8 @@ const canonicalRunsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `RunResult` — `memories`, `pinned`, `output`, `logs` plus optional terminal `status`/`error`/`durationMs` and authoritative `usage`/`cost`. Unknown keys are ignored, so a runner older than the platform still finalizes cleanly.",
+                "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown keys are ignored.",
+              required: ["status"],
               properties: {
                 memories: { type: "array" },
                 pinned: { type: "object" },
@@ -1517,12 +1516,14 @@ const canonicalRunsPaths = {
                 },
                 status: {
                   type: "string",
-                  enum: ["success", "failed", "timeout", "cancelled"],
+                  enum: [...terminalRunStatusValues],
+                  description: "Terminal outcome as the runner saw it.",
                 },
                 durationMs: { type: "integer", minimum: 0 },
                 usage: {
                   type: "object",
-                  description: "Authoritative terminal token usage written to the `runs` row.",
+                  description:
+                    "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached).",
                   properties: {
                     input_tokens: { type: "integer", minimum: 0 },
                     output_tokens: { type: "integer", minimum: 0 },

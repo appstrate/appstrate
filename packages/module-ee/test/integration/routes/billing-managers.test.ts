@@ -57,11 +57,12 @@ describe("billing managers", () => {
       const res = await app.request("/api/billing/managers", { headers: headers() });
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { managers: Array<Record<string, unknown>> };
-      expect(body.managers).toHaveLength(1);
-      expect(body.managers[0]!.user_id).toBe("user-finance");
-      expect(body.managers[0]!.added_by).toBe("user-owner");
-      expect(typeof body.managers[0]!.created_at).toBe("string");
+      const body = (await res.json()) as { object: string; data: Array<Record<string, unknown>> };
+      expect(body.object).toBe("list");
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0]!.userId).toBe("user-finance");
+      expect(body.data[0]!.added_by).toBe("user-owner");
+      expect(typeof body.data[0]!.createdAt).toBe("string");
     });
 
     it("refuses a plain member", async () => {
@@ -95,8 +96,8 @@ describe("billing managers", () => {
       });
       expect(res.status).toBe(200);
 
-      const body = (await res.json()) as { managers: Array<{ user_id: string }> };
-      expect(body.managers.map((m) => m.user_id).sort()).toEqual(["user-dev", "user-finance"]);
+      const body = (await res.json()) as { data: Array<{ userId: string }> };
+      expect(body.data.map((m) => m.userId).sort()).toEqual(["user-dev", "user-finance"]);
       expect(await isBillingManager(orgId, "user-finance")).toBe(true);
       expect((await listBillingManagers(orgId))[0]!.addedBy).toBe("user-owner");
     });
@@ -229,6 +230,64 @@ describe("billing managers", () => {
       } finally {
         setPrincipalPermissionsProviders(null);
       }
+    });
+  });
+
+  /**
+   * The platform emits `onOrgMemberRemove` after the membership row is gone.
+   * The grant is keyed on (org, user), not on that row, so without this handler
+   * a re-invited ex-manager would silently hold `billing:manage` again.
+   */
+  describe("onOrgMemberRemove", () => {
+    const otherOrgId = "00000000-0000-4000-a000-0000000000b1";
+    const onOrgMemberRemove = eeModule.events!.onOrgMemberRemove!;
+
+    it("drops the manager's row and grant, and re-joining does not restore it", async () => {
+      await seedBillingManager({ orgId, userId: "user-finance" });
+      setPrincipalPermissionsProviders([{ moduleId: "EE", ...eeModule.principalPermissions! }]);
+      try {
+        const ctx = { orgId, userId: "user-finance" };
+        // Warm the platform's cache with the grant: the handler must invalidate it.
+        expect([...(await resolvePrincipalPermissions(ctx))].sort()).toEqual([
+          "billing:manage",
+          "billing:read",
+        ]);
+
+        await onOrgMemberRemove(orgId, "user-finance");
+        expect(await isBillingManager(orgId, "user-finance")).toBe(false);
+        expect([...(await resolvePrincipalPermissions(ctx))]).toEqual([]);
+
+        // Witness: the same user invited back is a plain member again.
+        seedOrgMembers(orgId, [
+          { userId: "user-owner", email: "owner@example.com", role: "owner" },
+          { userId: "user-finance", email: "finance@example.com", role: "member" },
+        ]);
+        expect([...(await resolvePrincipalPermissions(ctx))]).toEqual([]);
+      } finally {
+        setPrincipalPermissionsProviders(null);
+      }
+    });
+
+    it("leaves the other managers and other orgs' rows alone", async () => {
+      await seedBillingManager({ orgId, userId: "user-finance" });
+      await seedBillingManager({ orgId, userId: "user-dev" });
+      await seedBillingManager({ orgId: otherOrgId, userId: "user-finance" });
+
+      await onOrgMemberRemove(orgId, "user-finance");
+
+      expect(await isBillingManager(orgId, "user-dev")).toBe(true);
+      expect(await isBillingManager(otherOrgId, "user-finance")).toBe(true);
+    });
+
+    it("is a no-op for a user who was not a manager, and when repeated", async () => {
+      await seedBillingManager({ orgId, userId: "user-finance" });
+
+      await onOrgMemberRemove(orgId, "user-dev");
+      expect((await listBillingManagers(orgId)).map((m) => m.userId)).toEqual(["user-finance"]);
+
+      await onOrgMemberRemove(orgId, "user-finance");
+      await onOrgMemberRemove(orgId, "user-finance");
+      expect(await listBillingManagers(orgId)).toEqual([]);
     });
   });
 });

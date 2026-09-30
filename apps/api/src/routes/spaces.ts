@@ -6,8 +6,10 @@ import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
   makePermissionGuard,
+  packagePermission,
   SPACE_ROLE_PRESETS,
   SPACE_VISIBILITIES,
+  spacePackagePermission,
 } from "@appstrate/core/permissions";
 import type { SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -44,33 +46,35 @@ import {
 import {
   callerOrgRole,
   callerPersonalOwnerId,
-  callerSpaceMember,
+  callerSpaceAccess,
   effectiveInSpace,
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
-import { applySpacePermissions } from "../middleware/space-context.ts";
-import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
   deactivatePackage,
   listSpacePackages,
   getSpacePackage,
-  updateSpacePackage,
   getResolvedRunConfig,
+  updatePlacementSettings,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  packagePermission,
-  spacePackagePermission,
 } from "../lib/package-access.ts";
-import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import {
+  markSpaceRescope,
+  requireAnyPermission,
+  requirePermission,
+} from "../middleware/require-permission.ts";
+import {
+  auditSpaceRole,
   exactlyOneRole,
   spaceRoleAssignmentShape,
   toAssignment,
@@ -223,9 +227,11 @@ export const activatePackageSchema = z
 // than a silent no-op.
 export const updatePackageSchema = z
   .object({
-    generationConfig: modelGenerationSettingsSchema.nullable().optional(),
+    generation_config: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
+    // Skills only: inject the published SKILL.md in every chat turn held here.
+    chat_enforced: z.boolean().optional(),
   })
   .strict();
 
@@ -239,14 +245,13 @@ export const updatePackageSchema = z
  * instead, through the same helper the middleware uses (spec §4.3).
  */
 function requireSpaceFromParam(param: "id" | "spaceId") {
-  return async (c: Context<AppEnv>, next: Next) => {
-    const spaceId = c.req.param(param)!;
-    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
-    if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
-    await applySpacePermissions(c, space);
-    c.set("space", space);
+  // Marked: every guard mounted behind this one reads the caller's set in the
+  // space the PATH names, not in the space the request entered — a reader of
+  // the route table cannot see that from the mounts alone.
+  return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
+    await enterSpaceById(c, c.req.param(param)!, c.get("orgId"));
     return next();
-  };
+  });
 }
 
 // ─── Space packages: the permission is per PACKAGE TYPE ────────────────
@@ -302,7 +307,7 @@ async function coarseSpacePackageGate(
  *      so the route is not an enumeration oracle.
  *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
  *      reachability rule the READ routes obey, for all three ops, so `POST`,
- *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `DELETE` and `PATCH` cannot be told apart by their refusals. Two different
  *      `detail` strings here (org-visible but unreachable vs nonexistent) would
  *      be an existence oracle over the whole catalogue.
  *   3. **Exact gate** for the resolved type.
@@ -347,14 +352,14 @@ async function gateSpacePackageWrite(
   return type;
 }
 
-/** snake_case on the wire, camelCase in the service that counted them. */
+/** Counts go snake_case on the wire; `spaceId` is the universal-id carve-out. */
 function toSweepWire(
   spaceId: string,
   counts: { rehomedPackages: number; deletedPackages: number },
 ): SpaceSweepResult {
   return {
     object: "space_sweep",
-    space_id: spaceId,
+    spaceId,
     rehomed_packages: counts.rehomedPackages,
     deleted_packages: counts.deletedPackages,
   };
@@ -363,7 +368,8 @@ function toSweepWire(
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  router.use("/:id", pinnedSpaceScopeGuard);
+  // `/:spaceId/*` also matches the bare `/:spaceId`. An exact twin would run the
+  // guard twice and, as an `ALL` exact mount, serve every method at `/:id`.
   router.use("/:spaceId/*", pinnedSpaceScopeGuard);
 
   router.get(
@@ -454,18 +460,15 @@ export function createSpacesRouter() {
     try {
       const space = await getSpace(orgId, spaceId);
       const orgRole = callerOrgRole(c);
-      // One PK lookup, not the whole membership set: a single-space read has
-      // exactly one row to find.
-      const role = resolveSpaceRole(
-        orgRole,
-        space,
-        await callerSpaceMember(c, orgId, space.id),
-        callerPersonalOwnerId(c),
-      );
-      if (!isSpaceVisibleTo(orgRole, space, role)) {
+      // Judged on the snapshot (RBAC spec §4.4); its access columns overlay the
+      // full row in the response, so the body shows the state that was judged.
+      const access = await callerSpaceAccess(c, space);
+      if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
+      const role = resolveSpaceRole(orgRole, access.space, access.member, callerPersonalOwnerId(c));
+      if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
-      return c.json(spaceWireForCaller(c, space, role));
+      return c.json(spaceWireForCaller(c, { ...space, ...access.space }, role));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Failed to get space", {
@@ -506,12 +509,23 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const space = await updateSpace(orgId, spaceId, { ...rest, defaultRole: default_role });
+        const { space, unsharedConnectionIds } = await updateSpace(
+          orgId,
+          spaceId,
+          { ...rest, defaultRole: default_role },
+          current,
+        );
         await recordAuditFromContext(c, {
           action: "space.updated",
           resourceType: "space",
           resourceId: space.id,
-          after: data,
+          after: {
+            name: data.name,
+            settings: data.settings,
+            visibility: data.visibility,
+            defaultRole: default_role,
+            unsharedConnectionIds,
+          },
         });
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
@@ -608,8 +622,8 @@ export function createSpacesRouter() {
   // ─── Space members (RBAC spec §6.4) ────────────────────────────────
 
   // Every member route resolves the PATH space first, so `space-members:*`
-  // (preset `admin`) is read from the caller's set in THAT space.
-  router.use("/:id/members", requireSpaceFromParam("id"));
+  // (preset `admin`) is read from the caller's set in THAT space. Hono runs a
+  // `/x/*` middleware on bare `/x` too, so one mount covers the collection.
   router.use("/:id/members/*", requireSpaceFromParam("id"));
 
   router.get(
@@ -652,9 +666,10 @@ export function createSpacesRouter() {
   // spec §6.4). A guest holding preset `admin` here manages the roles this
   // space granted and enumerates nothing else.
   router.get("/:id/members", requirePermission("space-members", "read"), async (c) => {
-    const space = c.get("space")!;
     const includeImplicit = c.get("permissions")?.has("members:read") ?? false;
-    return c.json(listResponse(await listSpaceMembers(c.get("orgId"), space, includeImplicit)));
+    return c.json(
+      listResponse(await listSpaceMembers(c.get("orgId"), c.get("space")!.id, includeImplicit)),
+    );
   });
 
   // POST /api/spaces/:id/members — grant an explicit role
@@ -677,7 +692,7 @@ export function createSpacesRouter() {
       action: "space.member_added",
       resourceType: "space_member",
       resourceId: `${spaceId}:${userId}`,
-      after: assignment,
+      after: auditSpaceRole(assignment),
     });
     return c.json({ object: "space_member", userId, ...assignment }, 201);
   });
@@ -706,7 +721,7 @@ export function createSpacesRouter() {
         action: "space.member_role_changed",
         resourceType: "space_member",
         resourceId: `${spaceId}:${userId}`,
-        after: assignment,
+        after: auditSpaceRole(assignment),
       });
       return c.json({ object: "space_member", userId, ...assignment });
     },
@@ -727,7 +742,7 @@ export function createSpacesRouter() {
     // a concurrent promotion can move between the read and the DELETE (#1439),
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter } = await removeSpaceMember({
+    const { removed, accessAfter, unsharedConnectionIds } = await removeSpaceMember({
       orgId: c.get("orgId"),
       space,
       userId,
@@ -738,6 +753,7 @@ export function createSpacesRouter() {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
+      after: { unsharedConnectionIds },
     });
 
     return c.json({ access_after: accessAfter ? "implicit" : "none" });
@@ -750,10 +766,9 @@ export function createSpacesRouter() {
   // `X-Space-Id`, so they resolve their own space — `run-config` gates on
   // `agents:read`, a space-level string that org context alone never carries.
   router.use("/:spaceId/packages/*", requireSpaceFromParam("spaceId"));
-  router.use("/:spaceId/packages", requireSpaceFromParam("spaceId"));
 
   // GET /api/spaces/:spaceId/packages — list this space's placements.
-  // The `router.use` guards above only prove the space belongs to the org;
+  // The `router.use` guard above only proves the space belongs to the org;
   // `spaces:read` is the read twin of the `spaces:write` the mutating routes
   // carry, and matches this route being package-type agnostic.
   router.get("/:spaceId/packages", requirePermission("spaces", "read"), async (c) => {
@@ -781,6 +796,9 @@ export function createSpacesRouter() {
   // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
   // to hand out). Activating is therefore not a way around `share`. An API key
   // never carries it, so a key activates the already-placed and nothing else.
+  //
+  // No permission guard is mounted: the gate below reads the package's own rows
+  // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
   router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
@@ -871,8 +889,8 @@ export function createSpacesRouter() {
     },
   );
 
-  // PUT /api/spaces/:spaceId/packages/:packageId — update config
-  router.put(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+  // PATCH /api/spaces/:spaceId/packages/:packageId — merge-update config
+  router.patch(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
@@ -889,11 +907,20 @@ export function createSpacesRouter() {
     // package runs, and nothing else. Activation left it when it got its own
     // pair of doors, so an empty body is gated exactly like a full one and can
     // never be a free existence probe.
-    await gateSpacePackageWrite(c, orgId, packageId, "configure");
+    const type = await gateSpacePackageWrite(c, orgId, packageId, "configure");
     const data = await readJsonBody(c, updatePackageSchema);
+    if (data.chat_enforced !== undefined && type !== "skill") {
+      throw new ApiError({
+        status: 400,
+        code: "chat_enforced_not_skill",
+        title: "Not A Skill",
+        detail: `Only a skill can be enforced in the chat; '${packageId}' is a ${type}`,
+        param: "chat_enforced",
+      });
+    }
 
     const placement = await getSpacePackage(scope, packageId);
-    let generationConfig = data.generationConfig;
+    let generationConfig = data.generation_config;
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
@@ -905,12 +932,12 @@ export function createSpacesRouter() {
         generationConfig = validateGenerationOverride(
           generationConfig,
           selectedModel,
-          "generationConfig",
+          "generation_config",
         );
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        placement.generationConfig
+        placement.generation_config
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly
@@ -919,23 +946,30 @@ export function createSpacesRouter() {
         // silently rewrite `generation_config` on a request that never named
         // it.
         generationConfig = reconcileModelGenerationSettings(
-          placement.generationConfig,
+          placement.generation_config,
           selectedModel?.generation,
         );
       }
     }
 
-    const { generationConfig: _generationConfig, ...rest } = data;
+    const { generation_config: _generationConfig, chat_enforced: chatEnforced, ...rest } = data;
     void _generationConfig;
-    // `requirePlacement` — this route updates an EXISTING placement; a
-    // packageId that is not placed here (or not visible to the org) is a 404,
-    // never an implicit activation via upsert.
-    await updateSpacePackage(
-      scope,
-      packageId,
-      { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
-      { requirePlacement: true },
-    );
+    const updates = {
+      ...rest,
+      ...(generationConfig !== undefined ? { generationConfig } : {}),
+      ...(chatEnforced !== undefined ? { chatEnforced } : {}),
+    };
+    // An EXISTING placement only: a package not placed here (or not visible
+    // to the org) is a 404, never an implicit activation via upsert.
+    const { chatEnforcedChanged } = await updatePlacementSettings(scope, packageId, updates);
+    if (chatEnforcedChanged) {
+      await recordAuditFromContext(c, {
+        action: chatEnforced ? "package.chat_enforced" : "package.chat_released",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { spaceId },
+      });
+    }
     const updated = await getSpacePackage(scope, packageId);
     return c.json({ object: "space_package", ...updated });
   });

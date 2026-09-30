@@ -46,8 +46,9 @@ export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const { features } = useAppConfig();
-  // The route is mounted behind `RequirePermission permission="billing:read"`,
-  // which only `@appstrate/module-ee` contributes, so `/api/billing` answers.
+  // The route opens on `billing:read` under the `billing` feature
+  // (`lib/route-access.ts`), both only `@appstrate/module-ee` contributes, so
+  // `/api/billing` answers.
   const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
   const changePlanMutation = useChangePlan();

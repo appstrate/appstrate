@@ -28,6 +28,7 @@ import { useOrg } from "../../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { useModalParam } from "../../../hooks/use-modal-param";
+import { useCanReach } from "../../../hooks/use-can-reach";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
   memberRoleValue,
@@ -332,6 +333,7 @@ function AddSpaceMemberModal({
   excludedUserIds: Set<string>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const canManageInvitations = useCanReach()("/org-settings/members");
   const {
     options: roleOptions,
     roles,
@@ -418,7 +420,7 @@ function AddSpaceMemberModal({
         body: {
           email: email.trim(),
           role: "guest",
-          space_assignments: [{ space_id: spaceId, ...spaceRoleAssignment(effectiveRole) }],
+          space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
         },
       });
       return;
@@ -486,12 +488,14 @@ function AddSpaceMemberModal({
           <p>{t("spaceMembers.invited", { email: email.trim() })}</p>
           <p className="text-muted-foreground text-sm">{t("spaceMembers.invitationLinkHint")}</p>
           <CopyLinkButton token={invitationToken} />
-          <Link
-            to="/org-settings/members"
-            className="text-primary text-sm underline underline-offset-4"
-          >
-            {t("spaceMembers.manageInvitations")}
-          </Link>
+          {canManageInvitations && (
+            <Link
+              to="/org-settings/members"
+              className="text-primary text-sm underline underline-offset-4"
+            >
+              {t("spaceMembers.manageInvitations")}
+            </Link>
+          )}
         </div>
       ) : (
         <form id="space-member-form" onSubmit={submit}>
@@ -629,7 +633,7 @@ function AddSpaceMemberModal({
               <Alert variant="destructive">
                 <AlertDescription>
                   <p>{formError}</p>
-                  {pendingConflict && (
+                  {pendingConflict && canManageInvitations && (
                     <Link to="/org-settings/members" className="underline underline-offset-4">
                       {t("spaceMembers.manageInvitations")}
                     </Link>

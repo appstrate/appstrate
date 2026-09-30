@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { CheckCheck, SearchX } from "lucide-react";
-import { runStatusValues } from "@appstrate/shared-types";
+import { runStatusValues } from "@appstrate/core/run-status";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";

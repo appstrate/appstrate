@@ -1593,6 +1593,42 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 30 September merge of main (94 commits, 86 conflicted files)**
+
+Resolved by domain (chat, integrations, org and shell, packages, runs), each on
+the rule above, then compared screen by screen against the lab of the branch
+before the merge: 66 of the lab's 75 screens are pixel-identical, and the nine
+that differ are where main's features landed. What main brought, and where it
+now lives in the redesign:
+
+- Several connections per integration (#1611): the space default and the
+  per-agent pins are connection SETS, as checklists in Règles d'accès; each
+  tick saves on its own, and a default naming an unreachable connection says
+  so with a button that drops it. The run snapshot lists every connection an
+  integration bound.
+- Org-level OAuth clients (#1594): a second table, "Clients de
+  l'organisation", under the space's in Authentification; promote is a row
+  menu item.
+- Skills in the chat (#1494, #1593) and the assistant's access (#1481): in the
+  composer row, beside the model picker. Imposing a skill in a space's chat is
+  a switch on the catalogue sheet, skills only.
+- The reasoning phase (#1601): ONE implementation, the redesign's disclosure
+  (open while streaming), carrying main's i18n keys and status region.
+- Leaving an organization and several owners (#1505): a Danger zone of two
+  action rows in Organisation › Général; "Propriétaire" in the role select.
+- Route access from one table (#1569): every route behind `RouteGate`, keyed
+  on the redesign's paths (`/workspace-settings/*`, `/catalogue`); the
+  breadcrumb, the product tabs and the nav only link where the caller can go.
+- The migration trap, a third time: the redesign's `0069_org_logo` met main's
+  `0069`–`0077` and is now `0078_org_logo`.
+
+Two routes the redesign added (agent diagnostics, the agent map) looked the
+agent up before checking the permission; main's guard-order test caught them.
+Found in passing and NOT caused by the merge (they fail the same on the branch
+before it): the map's config-card test, `?user=me` dropping unattributed runs,
+and the file search test. The run snapshot also still detects input files by
+`document://` instead of `appfile://`.
+
 **One body for every package write**
 
 Every save the SPA sends is now built by `packageUpdateBody`
