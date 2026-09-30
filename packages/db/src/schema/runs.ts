@@ -28,6 +28,7 @@ import {
   runOriginEnum,
   credentialSourceEnum,
   inferenceRouteEnum,
+  scheduleDisabledReasonEnum,
 } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces, endUsers } from "./spaces.ts";
@@ -160,7 +161,10 @@ export const runs = pgTable(
     versionRef: text("version_ref").default("draft").notNull(),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
-    modelSource: text("model_source"),
+    // Whose credential the run's inference spends, stamped at launch. NULL on a
+    // remote-origin run (`runs_remote_has_no_platform_model`) and on a run
+    // refused before launch (`createFailedRun`), which resolved no model.
+    modelSource: credentialSourceEnum("model_source"),
     // The model the run launched with — a system model id or an `org_models.id`,
     // the same pointer as `packages.model_id`. The platform LLM proxy serves a
     // run's own inference from it, never from a model the request names. NULL
@@ -421,6 +425,12 @@ export const runs = pgTable(
     ),
     // The proxy serves the run's pinned model, never one the request names.
     check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
+    // A remote runner brings its own model and credentials: no platform model,
+    // source or inference route is ever recorded for it.
+    check(
+      "runs_remote_has_no_platform_model",
+      sql`run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)`,
+    ),
   ],
 );
 
@@ -774,6 +784,8 @@ export const schedules = pgTable(
       .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
+    // Why the row is disabled; NULL exactly while enabled.
+    disabledReason: scheduleDisabledReasonEnum("disabled_reason"),
     cronExpression: text("cron_expression").notNull(),
     // NOT NULL (migration 0051): the column always had `DEFAULT 'UTC'`, so a
     // NULL could only come from a writer passing one explicitly — and three
@@ -815,5 +827,6 @@ export const schedules = pgTable(
       "package_schedules_exactly_one_actor",
       sql`(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)`,
     ),
+    check("package_schedules_disabled_reason_matches", sql`enabled = (disabled_reason IS NULL)`),
   ],
 );

@@ -6425,8 +6425,11 @@ export interface components {
             proxy_label: string | null;
             /** @description Model label used at run time */
             model_label: string | null;
-            /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. */
-            model_source: string | null;
+            /**
+             * @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.
+             * @enum {string|null}
+             */
+            model_source: "system" | "org" | null;
             /** @description Run cost in dollars */
             cost: number | null;
             /**
@@ -6545,6 +6548,11 @@ export interface components {
             spaceId: string;
             name: string | null;
             enabled: boolean;
+            /**
+             * @description Why the schedule is disabled; `null` exactly while `enabled` is true. `user`: switched off by a write (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted, which emptied that integration's set — re-enabling it resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. Cleared by re-enabling.
+             * @enum {string|null}
+             */
+            disabled_reason: "user" | "actor_invalid" | "actor_left_org" | "connection_deleted" | null;
             cron_expression: string;
             timezone: string;
             input: {
@@ -8566,6 +8574,7 @@ export interface operations {
                      *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
+                     *       "disabled_reason": null,
                      *       "cron_expression": "0 9 * * 1-5",
                      *       "timezone": "Europe/Paris",
                      *       "input": {
@@ -22338,6 +22347,7 @@ export interface operations {
                      *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
+                     *       "disabled_reason": null,
                      *       "cron_expression": "0 9 * * 1-5",
                      *       "timezone": "Europe/Paris",
                      *       "input": {

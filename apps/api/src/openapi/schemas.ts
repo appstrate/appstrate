@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  credentialSourceValues,
   orgRoleEnum,
   packageSourceValues,
   packageTypeValues,
   runOriginValues,
+  scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
+import {
+  MODEL_REASONING_LEVELS,
+  modelCapabilitySupportSchema,
+} from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -282,7 +288,7 @@ export const schemas = {
       },
       reasoning_level: {
         type: ["string", "null"],
-        enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max", null],
+        enum: [...MODEL_REASONING_LEVELS, null],
         description:
           "Portable reasoning effort normalized across providers; null or omission inherits the next lower-precedence layer, and `medium` applies when no layer sets one. `off` sends the provider an explicit disable.",
       },
@@ -308,16 +314,16 @@ export const schemas = {
     description:
       "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
     properties: {
-      temperature: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+      temperature: { type: "string", enum: [...modelCapabilitySupportSchema.options] },
       reasoning: {
         type: "object",
         additionalProperties: false,
         required: ["supported", "adaptive", "levels"],
         properties: {
-          supported: { type: "string", enum: ["supported", "unsupported", "unknown"] },
+          supported: { type: "string", enum: [...modelCapabilitySupportSchema.options] },
           temperature_compatible: {
             type: "string",
-            enum: ["supported", "unsupported", "unknown"],
+            enum: [...modelCapabilitySupportSchema.options],
             description:
               "Optional compatibility fact for combining a custom temperature with active reasoning. Omission means unknown.",
           },
@@ -326,10 +332,10 @@ export const schemas = {
             type: "object",
             additionalProperties: {
               type: "string",
-              enum: ["supported", "unsupported", "unknown"],
+              enum: [...modelCapabilitySupportSchema.options],
             },
             propertyNames: {
-              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+              enum: [...MODEL_REASONING_LEVELS],
             },
           },
         },
@@ -1157,8 +1163,9 @@ export const schemas = {
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
       model_source: {
         type: ["string", "null"],
+        enum: [...credentialSourceValues, null],
         description:
-          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override.",
+          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.",
       },
       cost: { type: ["number", "null"], description: "Run cost in dollars" },
       cost_pricing_status: {
@@ -1370,6 +1377,7 @@ export const schemas = {
       "spaceId",
       "name",
       "enabled",
+      "disabled_reason",
       "cron_expression",
       "timezone",
       "input",
@@ -1402,6 +1410,12 @@ export const schemas = {
       },
       name: { type: ["string", "null"] },
       enabled: { type: "boolean" },
+      disabled_reason: {
+        type: ["string", "null"],
+        enum: [...scheduleDisabledReasonValues, null],
+        description:
+          "Why the schedule is disabled; `null` exactly while `enabled` is true. `user`: switched off by a write (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted, which emptied that integration's set — re-enabling it resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. Cleared by re-enabling.",
+      },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
       input: { type: ["object", "null"], additionalProperties: true },

@@ -37,6 +37,7 @@ import {
   chatSessions,
   type PricingStatus,
   type InferenceRoute,
+  type CredentialSource,
 } from "@appstrate/db/schema";
 import {
   activeRunStatusValues,
@@ -566,7 +567,7 @@ interface CreateRunParams {
   versionRef?: string;
   proxyLabel?: string;
   modelLabel?: string;
-  modelSource?: string;
+  modelSource?: CredentialSource;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
   /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
@@ -930,7 +931,7 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
 )`;
 
 /** `runs.model_source` of a resolved model: whose credential its inference spends. */
-export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "org" {
+export function modelSourceOf(model: { isSystemModel: boolean }): CredentialSource {
   return model.isSystemModel ? "system" : "org";
 }
 
@@ -1029,7 +1030,7 @@ export async function getRunAttribution(
   packageId: string | null;
   status: RunStatus;
   runOrigin: "platform" | "remote";
-  modelSource: string | null;
+  modelSource: CredentialSource | null;
   spaceId: string;
   userId: string | null;
   endUserId: string | null;

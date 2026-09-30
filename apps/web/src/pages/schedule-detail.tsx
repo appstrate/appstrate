@@ -24,6 +24,7 @@ import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
+import { useScheduleDisabledReason } from "../hooks/use-schedule-disabled-reason";
 import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
@@ -52,6 +53,7 @@ export function ScheduleDetailPage() {
   const tabs: readonly ScheduleTab[] = readsRuns ? ["runs", "details"] : ["details"];
   const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const disabledReason = useScheduleDisabledReason(schedule?.disabled_reason ?? null);
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
@@ -130,6 +132,12 @@ export function ScheduleDetailPage() {
           </TabsList>
         </PageHeader>
 
+        {disabledReason && (
+          <p className="border-border bg-muted/30 text-muted-foreground mb-4 rounded-lg border p-4 text-sm">
+            {disabledReason}
+          </p>
+        )}
+
         {readsRuns && (
           <TabsContent value="runs">
             <ScheduleHistory schedule={schedule} />
@@ -167,7 +175,7 @@ function LiveScheduleStatusBadge({
 }: {
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
-  return <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
+  return <ScheduleStatusBadge schedule={schedule} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────

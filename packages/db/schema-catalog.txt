@@ -197,6 +197,7 @@ column model_provider_credentials.label text not null
 column model_provider_credentials.org_id uuid not null
 column model_provider_credentials.provider_id text not null
 column model_provider_credentials.refresh_failure_count integer not null default 0
+column model_provider_credentials.refresh_failures_since timestamp with time zone
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
 column model_provider_pairings.consumed_at timestamp with time zone
 column model_provider_pairings.created_at timestamp with time zone not null default now()
@@ -403,6 +404,7 @@ column package_schedules.connection_overrides jsonb
 column package_schedules.created_at timestamp with time zone not null default now()
 column package_schedules.cron_expression text not null
 column package_schedules.dependency_overrides jsonb
+column package_schedules.disabled_reason schedule_disabled_reason
 column package_schedules.enabled boolean not null default true
 column package_schedules.end_user_id text
 column package_schedules.generation_config_override jsonb
@@ -496,7 +498,7 @@ column runs.model_cost jsonb
 column runs.model_credential_id uuid
 column runs.model_id text
 column runs.model_label text
-column runs.model_source text
+column runs.model_source credential_source
 column runs.org_id uuid not null
 column runs.package_id text
 column runs.proxy_label text
@@ -799,6 +801,7 @@ constraint package_persistence package_persistence_run_id_runs_id_fk FOREIGN KEY
 constraint package_persistence package_persistence_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint package_persistence pkp_actor_id_shape CHECK ((((actor_type = 'shared'::text) AND (actor_id IS NULL)) OR ((actor_type <> 'shared'::text) AND (actor_id IS NOT NULL))))
 constraint package_persistence pkp_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text, 'shared'::text])))
+constraint package_schedules package_schedules_disabled_reason_matches CHECK ((enabled = (disabled_reason IS NULL)))
 constraint package_schedules package_schedules_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
 constraint package_schedules package_schedules_exactly_one_actor CHECK (((user_id IS NOT NULL) <> (end_user_id IS NOT NULL)))
 constraint package_schedules package_schedules_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -842,6 +845,7 @@ constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES 
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
 constraint runs runs_pkey PRIMARY KEY (id)
 constraint runs runs_proxy_route_has_model CHECK (((inference_route <> 'proxy'::inference_route) OR (model_id IS NOT NULL)))
+constraint runs runs_remote_has_no_platform_model CHECK (((run_origin = 'platform'::run_origin) OR ((model_source IS NULL) AND (model_id IS NULL) AND (inference_route IS NULL))))
 constraint runs runs_schedule_id_package_schedules_id_fk FOREIGN KEY (schedule_id) REFERENCES package_schedules(id) ON DELETE SET NULL
 constraint runs runs_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint runs runs_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
@@ -908,6 +912,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
+enum schedule_disabled_reason user,actor_invalid,actor_left_org,connection_deleted
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)

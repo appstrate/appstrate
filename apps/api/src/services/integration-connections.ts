@@ -2971,7 +2971,9 @@ async function dropConnectionFromOwnSchedules(
       .update(schedules)
       .set({
         connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        ...(emptiedASet ? { enabled: false, nextRunAt: null } : {}),
+        ...(emptiedASet
+          ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
+          : {}),
         updatedAt: new Date(),
       })
       .where(eq(schedules.id, id));

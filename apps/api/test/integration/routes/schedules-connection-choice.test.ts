@@ -176,6 +176,7 @@ describe("schedule writes — the connection choice is made up front", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       enabled: false,
+      disabledReason: "user",
     });
 
     await expectRefusal(await patch(schedule.id, { enabled: true }), ["must_choose_connection"]);
@@ -306,7 +307,10 @@ describe("schedule writes — the connection choice is made up front", () => {
     await expectRefusal(await patch(inherit.id, { version_override: "draft" }), [
       "must_choose_connection",
     ]);
-    await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, inherit.id));
+    await db
+      .update(schedules)
+      .set({ enabled: false, disabledReason: "user" })
+      .where(eq(schedules.id, inherit.id));
     expect((await patch(inherit.id, { version_override: "draft" })).status).toBe(200);
   });
 });
@@ -424,6 +428,7 @@ describe("schedule writes for another actor — only what both reach", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       enabled: false,
+      disabledReason: "user",
     });
     const patch = (body: Record<string, unknown>) =>
       app.request(`/api/schedules/${schedule.id}`, {
@@ -464,6 +469,7 @@ describe("schedule writes for another actor — only what both reach", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       enabled: false,
+      disabledReason: "user",
     });
     const judged = (await getSchedule(seeded.id, scope, null, undefined))!;
     // P1 commits between P2's read and P2's write, bumping the stamp as every schedule write does.

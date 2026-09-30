@@ -41,7 +41,11 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type {
+  CredentialSource,
+  RunArtifactsSummary,
+  ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -118,7 +122,7 @@ export interface RunWireDto {
   version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
-  model_source: string | null;
+  model_source: CredentialSource | null;
   /** Effective generation controls frozen at kickoff and raw override layer. */
   generation: ModelGenerationSettings | null;
   generation_override: ModelGenerationSettings | null;
@@ -322,6 +326,8 @@ export interface ScheduleWireDto {
   spaceId: string;
   name: string | null;
   enabled: boolean;
+  /** Why the schedule is disabled — `null` exactly while it is enabled. */
+  disabled_reason: ScheduleDisabledReason | null;
   cron_expression: string;
   timezone: string;
   input: Record<string, unknown> | null;
@@ -937,9 +943,11 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — an OAuth credential flagged `needsReconnection` (revoked
-   * refresh token), or, for either auth mode, a stored blob that no longer
-   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * inference — a credential flagged `needsReconnection` (an OAuth grant whose
+   * refresh token was revoked, or a BYOK API key rejected upstream
+   * `INTEGRATION_REFRESH_MAX_FAILURES` times within an hour), or, for either
+   * auth mode, a stored blob that no longer decrypts (e.g. a key rotation that
+   * retired a kid still in use). The model
    * is listed (so it can be inspected/detached/deleted) but must never be
    * selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.

@@ -66,6 +66,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
+    disabled_reason: row.disabledReason,
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
@@ -184,7 +185,12 @@ export async function assertScheduleActorValid(
 async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
   await db
     .update(schedules)
-    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
+    .set({
+      enabled: false,
+      disabledReason: "actor_invalid",
+      nextRunAt: null,
+      updatedAt: new Date(),
+    })
     .where(eq(schedules.id, scheduleId));
   await removeScheduleJobs([scheduleId]);
 }
@@ -990,6 +996,9 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
+  // Only a switch this write makes is the user's: re-sending the current state
+  // (the edit form always does) keeps a system disable's reason.
+  if (enabled !== expected.enabled) payload.disabledReason = enabled ? null : "user";
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.

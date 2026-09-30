@@ -25,7 +25,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
 
   const isActive = schedule.enabled ?? true;
 
-  const statusBadge = <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
+  const statusBadge = <ScheduleStatusBadge schedule={schedule} />;
 
   return (
     <Link
