@@ -191,8 +191,7 @@ const proxyResponses = {
       "responses include `X-Truncated` when the body exceeded the platform truncation " +
       "cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or " +
       "a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other " +
-      "upstream status is relayed the same way, marked `Proxy-Status: appstrate; " +
-      "received-status=<n>`.",
+      "upstream status is relayed the same way (`default`).",
     headers: {
       ...PROXY_STATUS_HEADER,
       "X-Truncated": {
@@ -293,6 +292,15 @@ const proxyResponses = {
       "(`Proxy-Status` error `http_response_timeout`).",
     headers: PROXY_STATUS_HEADER,
     content: problem,
+  },
+  default: {
+    description:
+      "An upstream response relayed verbatim at the upstream's own status (a status listed " +
+      "above included) with its headers and body, marked `Proxy-Status: appstrate; " +
+      "received-status=<n>` — which is how a caller tells it from the proxy's own problem " +
+      "document. `Set-Cookie` is never relayed.",
+    headers: PROXY_STATUS_HEADER,
+    content: { "*/*": {} },
   },
 } as const;
 

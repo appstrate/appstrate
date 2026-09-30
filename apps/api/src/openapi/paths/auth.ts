@@ -2,6 +2,23 @@
 
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 
+const problem = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
+/**
+ * Better Auth answers `sign-up/email` and `sign-in/email` itself: its errors are
+ * `application/json` `{ code, message }`, not the platform's ProblemDetail.
+ */
+const betterAuthError = {
+  "application/json": {
+    schema: {
+      type: "object",
+      properties: { code: { type: "string" }, message: { type: "string" } },
+    },
+  },
+} as const;
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
@@ -53,10 +70,11 @@ export const authPaths = {
             },
           },
         },
-        "400": { description: "Validation error" },
+        "400": { description: "Validation error", content: betterAuthError },
         "403": {
           description:
-            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth.",
+            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
+          content: betterAuthError,
         },
       },
     },
@@ -110,7 +128,7 @@ export const authPaths = {
             },
           },
         },
-        "401": { description: "Invalid credentials" },
+        "401": { description: "Invalid credentials", content: betterAuthError },
       },
     },
   },
@@ -209,22 +227,29 @@ export const authPaths = {
             },
           },
         },
-        "400": { description: "Validation error" },
-        "401": { description: "Invalid bootstrap token" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { description: "Invalid bootstrap token", content: problem },
         "403": {
           description:
             "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies.",
+          content: problem,
         },
         "409": {
           description:
             "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS).",
+          content: problem,
         },
         "410": {
           description:
             "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
+          content: problem,
         },
-        "422": { description: "Signup rejected (weak password, duplicate email)" },
+        "422": {
+          description: "Signup rejected (weak password, duplicate email)",
+          content: problem,
+        },
         "429": {
+          $ref: "#/components/responses/RateLimited",
           description:
             "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens.",
         },

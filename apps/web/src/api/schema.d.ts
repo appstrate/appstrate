@@ -7355,19 +7355,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Invalid code format. */
+            /** @description Invalid code format (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description Code not found or already used. */
+            /** @description Code not found or already used (HTML error page). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -7388,19 +7392,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Empty user_code. */
+            /** @description Empty user_code (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -7421,19 +7429,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Approval failed (expired, already processed, realm mismatch). */
+            /** @description Approval failed — expired, already processed, realm mismatch (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -7454,12 +7466,14 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["ValidationError"];
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -8876,55 +8890,54 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             /** @description Invalid bootstrap token */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL) */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Signup rejected (weak password, duplicate email) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -8956,12 +8969,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown or disabled client / unregistered grant type. */
+            /** @description `invalid_client` — unknown or disabled client, or one not registered for the CLI grant types. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9001,12 +9019,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9036,12 +9059,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9065,12 +9093,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9121,12 +9154,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown or disabled client / unregistered grant type. */
+            /** @description `invalid_client` — unknown or disabled client, or one not registered for the CLI grant types. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9270,7 +9308,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
             /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
             429: {
@@ -9327,7 +9370,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9406,21 +9454,36 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
             /** @description Invalid client credentials (unknown client or secret mismatch). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
-            /** @description Access denied — realm guard, signup gate, or resource mismatch. */
+            /** @description `access_denied` — realm guard, signup gate, or resource mismatch. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
             /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
             429: {
@@ -9460,7 +9523,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9510,7 +9578,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
         };
     };
@@ -9582,14 +9655,24 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
-            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth. */
+            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
         };
     };
@@ -10133,18 +10216,15 @@ export interface operations {
                 };
             };
             /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -10153,7 +10233,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
@@ -10206,12 +10288,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
             /** @description `enforced_skills_unavailable` — the space's enforced skills could not be loaded. RFC 9457 problem+json. */
             503: {
                 headers: {
@@ -10298,12 +10375,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (30/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getChatSession: {
@@ -10426,12 +10498,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     stopChatStream: {
@@ -10460,12 +10527,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (60/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     resumeChatStream: {
@@ -10504,12 +10566,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     credentialProxyGet: {
@@ -10544,7 +10601,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -10647,6 +10704,17 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
                 };
             };
         };
@@ -10688,7 +10756,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -10791,6 +10859,17 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
                 };
             };
         };
@@ -10832,7 +10911,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -10935,6 +11014,17 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
                 };
             };
         };
@@ -10971,7 +11061,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11074,6 +11164,17 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
                 };
             };
         };
@@ -11115,7 +11216,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11218,6 +11319,17 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
                 };
             };
         };
@@ -12102,21 +12214,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description Invalid, expired, or already-used token (HTML error page). */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
             /** @description Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable. */
@@ -12124,14 +12242,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry. */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -13743,8 +13865,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -13854,8 +13978,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -13965,8 +14091,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -14076,8 +14204,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -14103,12 +14233,15 @@ export interface operations {
         responses: {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Method Not Allowed — stateless server has no GET stream. */
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
             405: {
                 headers: {
+                    Allow?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
         };
     };
@@ -14560,12 +14693,7 @@ export interface operations {
                 };
             };
             /** @description Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
             403: components["responses"]["Forbidden"];
@@ -16211,12 +16339,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description The referenced space does not exist or is inaccessible. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             /** @description `referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`). */
             409: {
                 headers: {
@@ -16258,12 +16381,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16290,12 +16408,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16350,12 +16463,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16388,12 +16496,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17109,20 +17212,9 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is not an admin/owner of the org. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17145,27 +17237,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is not an admin/owner of the org. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            403: components["responses"]["Forbidden"];
             /** @description Session not found / not in this org / already revoked. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -21801,26 +21877,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            /** @description missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired | sink_not_configured */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21891,26 +21973,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21946,26 +22034,32 @@ export interface operations {
                     };
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22002,33 +22096,41 @@ export interface operations {
                     };
                 };
             };
-            /** @description duplicate_file_name — the stored manifest has colliding workspace names */
+            /** @description `duplicate_file_name` — the stored manifest has colliding workspace names */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | no input files */
+            /** @description `not_found` — no run with this id, or it carries no input files. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22094,49 +22196,63 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description storage_limit_exceeded */
+            /** @description `storage_limit_exceeded` — the write would overrun the organization's storage limit. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22166,26 +22282,32 @@ export interface operations {
                     "application/octet-stream": Blob;
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | file not found */
+            /** @description `not_found` — no run with this id, or no input file of that name. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22255,26 +22377,32 @@ export interface operations {
                     "application/zip": Blob;
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | no workspace provisioned */
+            /** @description `not_found` — no run with this id, or no workspace was provisioned for it. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -23171,20 +23299,10 @@ export interface operations {
                 };
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23224,20 +23342,10 @@ export interface operations {
                 };
             };
             /** @description Validation error (invalid host / SSRF block) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23260,20 +23368,10 @@ export interface operations {
                 content?: never;
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23310,12 +23408,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23341,20 +23434,10 @@ export interface operations {
                 };
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23387,21 +23470,10 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23425,20 +23497,10 @@ export interface operations {
                 content?: never;
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -24902,8 +24964,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -25006,8 +25070,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -25110,8 +25176,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -25214,8 +25282,10 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded. */
-            502: {
+            /** @description `internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included. */
+            500: components["responses"]["InternalServerError"];
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;

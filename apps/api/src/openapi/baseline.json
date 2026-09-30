@@ -333,10 +333,40 @@
             }
           },
           "400": {
-            "description": "Validation error"
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "403": {
-            "description": "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth."
+            "description": "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -400,7 +430,22 @@
             }
           },
           "401": {
-            "description": "Invalid credentials"
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -513,24 +558,60 @@
             }
           },
           "400": {
-            "description": "Validation error"
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "description": "Invalid bootstrap token"
+            "description": "Invalid bootstrap token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
-            "description": "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies."
+            "description": "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "409": {
-            "description": "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS)."
+            "description": "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)"
+            "description": "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "422": {
-            "description": "Signup rejected (weak password, duplicate email)"
+            "description": "Signup rejected (weak password, duplicate email)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
+            "$ref": "#/components/responses/RateLimited",
             "description": "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens."
           },
           "500": {
@@ -3376,13 +3457,34 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "description": "missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found"
+            "description": "`not_found` — no run with this id.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired | sink_not_configured"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3555,13 +3657,34 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found"
+            "description": "`not_found` — no run with this id.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3639,13 +3762,34 @@
             }
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found"
+            "description": "`not_found` — no run with this id.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3707,13 +3851,34 @@
             }
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found | no workspace provisioned"
+            "description": "`not_found` — no run with this id, or no workspace was provisioned for it.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3797,16 +3962,44 @@
             }
           },
           "400": {
-            "description": "duplicate_file_name — the stored manifest has colliding workspace names"
+            "description": "`duplicate_file_name` — the stored manifest has colliding workspace names",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found | no input files"
+            "description": "`not_found` — no run with this id, or it carries no input files.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3947,25 +4140,74 @@
             }
           },
           "400": {
-            "description": "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body"
+            "description": "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "403": {
-            "description": "storage_limit_exceeded"
+            "description": "`storage_limit_exceeded` — the write would overrun the organization's storage limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found"
+            "description": "`not_found` — no run with this id.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "409": {
-            "description": "`run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected."
+            "description": "`run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "413": {
-            "description": "`payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell \"one file too big\" from \"too many files\"."
+            "description": "`payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell \"one file too big\" from \"too many files\".",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -4035,13 +4277,34 @@
             }
           },
           "401": {
-            "description": "Signature verification failed"
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "404": {
-            "description": "run_not_found | file not found"
+            "description": "`not_found` — no run with this id, or no input file of that name.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "410": {
-            "description": "run_sink_closed | run_sink_expired"
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -6639,22 +6902,57 @@
             "description": "Redirect to the provider OAuth screen or the hosted form."
           },
           "400": {
-            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it."
+            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "403": {
-            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead."
+            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "410": {
-            "description": "Invalid, expired, or already-used token (HTML error page)."
+            "description": "Invalid, expired, or already-used token (HTML error page).",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable."
+            "description": "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "502": {
-            "description": "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry."
+            "description": "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -12967,6 +13265,7 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/ValidationError",
             "description": "Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively)."
           },
           "401": {
@@ -23080,7 +23379,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -23264,6 +23563,21 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            }
+          },
+          "default": {
+            "description": "An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed.",
+            "headers": {
+              "Proxy-Status": {
+                "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+                "schema": {
+                  "type": "string",
+                  "example": "appstrate; received-status=401"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
             }
           }
         }
@@ -23389,7 +23703,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -23573,6 +23887,21 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            }
+          },
+          "default": {
+            "description": "An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed.",
+            "headers": {
+              "Proxy-Status": {
+                "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+                "schema": {
+                  "type": "string",
+                  "example": "appstrate; received-status=401"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
             }
           }
         },
@@ -23705,7 +24034,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -23889,6 +24218,21 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            }
+          },
+          "default": {
+            "description": "An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed.",
+            "headers": {
+              "Proxy-Status": {
+                "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+                "schema": {
+                  "type": "string",
+                  "example": "appstrate; received-status=401"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
             }
           }
         },
@@ -24021,7 +24365,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -24205,6 +24549,21 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            }
+          },
+          "default": {
+            "description": "An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed.",
+            "headers": {
+              "Proxy-Status": {
+                "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+                "schema": {
+                  "type": "string",
+                  "example": "appstrate; received-status=401"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
             }
           }
         },
@@ -24337,7 +24696,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way, marked `Proxy-Status: appstrate; received-status=<n>`.",
+            "description": "Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -24521,6 +24880,21 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            }
+          },
+          "default": {
+            "description": "An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed.",
+            "headers": {
+              "Proxy-Status": {
+                "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+                "schema": {
+                  "type": "string",
+                  "example": "appstrate; received-status=401"
+                }
+              }
+            },
+            "content": {
+              "*/*": {}
             }
           }
         }
@@ -24717,8 +25091,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -24937,8 +25315,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25181,8 +25563,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25394,8 +25780,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25580,8 +25970,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25766,8 +26160,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25952,8 +26350,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -26138,8 +26540,12 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
-          "502": {
-            "description": "Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503), marked `Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+          "500": {
+            "$ref": "#/components/responses/InternalServerError",
+            "description": "`internal_error` — the proxy's own failure, an upstream that could not be reached or did not answer in time included."
+          },
+          "default": {
+            "description": "An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",

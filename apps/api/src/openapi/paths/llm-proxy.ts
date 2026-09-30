@@ -133,12 +133,18 @@ const baseResponses = {
     content: problem,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
-  "502": {
+  "500": {
+    $ref: "#/components/responses/InternalServerError",
     description:
-      "Upstream provider error — the upstream's status and body are " +
-      "forwarded verbatim (the documented status may be any non-2xx the " +
-      "upstream returns, e.g. 400/401/404/429/500/503), marked " +
-      "`Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+      "`internal_error` — the proxy's own failure, an upstream that could not be reached or " +
+      "did not answer in time included.",
+  },
+  default: {
+    description:
+      "An upstream provider error, relayed verbatim at the upstream's own status (any " +
+      "non-2xx, a status listed above included) with its body, marked " +
+      "`Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it " +
+      "from the proxy's own problem document. No usage recorded.",
     headers: PROXY_STATUS_HEADER,
     content: { "application/json": { schema: { type: "object" } } },
   },
@@ -420,7 +426,8 @@ export const runLlmProxyPaths = Object.fromEntries(
             content: problem,
           },
           "429": { $ref: "#/components/responses/RateLimited" },
-          "502": baseResponses["502"],
+          "500": baseResponses["500"],
+          default: baseResponses.default,
         },
       },
     },

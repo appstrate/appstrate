@@ -40,6 +40,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (OpenAPI): the LLM proxies document a relayed upstream error as
+  `default`, not `502`** (#1641). They relay a provider error at the
+  provider's own status; the `502` was never one they answer themselves. Both
+  proxies carry the relay as `default`, told apart from the proxy's own
+  problem document by `Proxy-Status: appstrate; received-status=<n>`.
 - **`runs.model_source` is the `credential_source` enum** (#1641): the
   column, the run DTO and OpenAPI accept only `system`, `org` or `null`, and
   the CHECK `runs_remote_has_no_platform_model` forbids a model source, model
@@ -139,6 +144,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Every error response in the OpenAPI document declares its body**
+  (#1641), and `verify:openapi` §6b enforces it: `application/problem+json`
+  (`ProblemDetail`), or the media type a reviewed exemption names (Better
+  Auth's OAuth endpoints, HTML pages, the health report, the Stripe webhook,
+  proxied upstream responses). 100 responses were backfilled.
 - **A revoked BYOK API key is flagged** (#1641). Upstream 401s through the
   LLM proxy count against the organization's credential; the
   `INTEGRATION_REFRESH_MAX_FAILURES`-th within an hour sets

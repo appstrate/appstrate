@@ -39,6 +39,25 @@ const runFileManifestEntry = {
   },
 } as const;
 
+const problem = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
+/** Refusals of the run-sink HMAC guard (`middleware/verify-run-signature.ts`), one per route behind it. */
+const runSinkUnauthorized = {
+  description:
+    "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+  content: problem,
+} as const;
+const runSinkNotFound = {
+  description: "`not_found` — no run with this id.",
+  content: problem,
+} as const;
+const runSinkGone = {
+  description: "`run_sink_closed` | `run_sink_expired`",
+  content: problem,
+} as const;
+
 const canonicalRunsPaths = {
   "/api/agents/{scope}/{name}/run": {
     post: {
@@ -1412,12 +1431,9 @@ const canonicalRunsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "401": {
-          description:
-            "missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance",
-        },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired | sink_not_configured" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1519,9 +1535,9 @@ const canonicalRunsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1564,9 +1580,9 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1594,9 +1610,12 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | no workspace provisioned" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or no workspace was provisioned for it.",
+          content: problem,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1634,11 +1653,15 @@ const canonicalRunsPaths = {
           },
         },
         "400": {
-          description: "duplicate_file_name — the stored manifest has colliding workspace names",
+          description: "`duplicate_file_name` — the stored manifest has colliding workspace names",
+          content: problem,
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | no input files" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or it carries no input files.",
+          content: problem,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1721,10 +1744,15 @@ const canonicalRunsPaths = {
         "400": {
           description:
             "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+          content: problem,
         },
-        "401": { description: "Signature verification failed" },
-        "403": { description: "storage_limit_exceeded" },
-        "404": { description: "run_not_found" },
+        "401": runSinkUnauthorized,
+        "403": {
+          description:
+            "`storage_limit_exceeded` — the write would overrun the organization's storage limit.",
+          content: problem,
+        },
+        "404": runSinkNotFound,
         "409": {
           description:
             "`run_not_running` — the run is not in `running` state. Or `message_replayed` — this " +
@@ -1734,8 +1762,9 @@ const canonicalRunsPaths = {
             "the (run, sha256, name) dedup), each spending the org quota and the run's file " +
             "budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. " +
             "The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
+          content: problem,
         },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "410": runSinkGone,
         "413": {
           description:
             "`payload_too_large` — the file exceeds the per-file cap " +
@@ -1743,6 +1772,7 @@ const canonicalRunsPaths = {
             "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
             "already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
+          content: problem,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -1772,9 +1802,12 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | file not found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or no input file of that name.",
+          content: problem,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

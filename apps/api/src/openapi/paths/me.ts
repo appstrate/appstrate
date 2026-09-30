@@ -307,6 +307,7 @@ export const mePaths = {
           },
         },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description: `Refused: ${connectionSetRefusals}.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },

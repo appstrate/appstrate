@@ -25,6 +25,8 @@
  *    some router, or listed in SPEC_ONLY_ALLOWLIST. Replaces the hand-typed 242-entry
  *    `expectedEndpoints` array, whose only unique signal this was.
  * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
+ * 6b. Error response bodies — every 4xx/5xx/`default` response declares application/problem+json
+ *    → ProblemDetail, or the media type its NON_PROBLEM_ERROR_BODIES exemption names
  * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
  *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts the two agree on which
  *    fields are guaranteed, in BOTH directions: every type-required field is required in the
@@ -63,6 +65,10 @@ import {
   type ProxiedApiShape,
 } from "../packages/runner-pi/src/llm-proxy-routes.ts";
 import { validateOpenApiStructure } from "./lib/openapi-structure.ts";
+import {
+  checkErrorResponseBodies,
+  type ErrorBodyExemptions,
+} from "./lib/openapi-error-responses.ts";
 import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
@@ -2223,6 +2229,93 @@ if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
       `\n  Delete the stale entries. An exemption that outlives its response pre-approves ` +
         `a schema-less body the day that path returns.`,
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// 6b. Error Response Bodies
+// ═══════════════════════════════════════════════════
+//
+// Every 4xx/5xx/`default` response declares `application/problem+json` →
+// `ProblemDetail` (inline, or through a shared `#/components/responses/*`): the
+// body every `ApiError` produces. Without this a refusal documented by a bare
+// `description` passed every other step. The rule lives in
+// scripts/lib/openapi-error-responses.ts.
+
+console.log(`\n  6b. Error Response Bodies`);
+console.log(`  --------------------------`);
+
+// Error responses the platform's `ApiError` does not author, keyed "VERB /path"
+// (every error status of the operation) or "VERB /path STATUS", valued with the
+// media type they declare instead.
+const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
+  // Better Auth's handler (`/api/auth/*`, lib/auth-pipeline.ts) answers these: the
+  // OAuth 2.1 / OIDC / RFC 8628 device endpoints and the CLI plugin return the
+  // RFC 6749 §5.2 `{ error, error_description }` JSON their clients parse — the
+  // 429 `oauthRateLimitResponse` restates in that shape included.
+  "GET /api/auth/oauth2/authorize": "application/json",
+  "POST /api/auth/oauth2/token": "application/json",
+  "GET /api/auth/oauth2/userinfo": "application/json",
+  "POST /api/auth/oauth2/introspect": "application/json",
+  "POST /api/auth/device/code": "application/json",
+  "POST /api/auth/cli/token": "application/json",
+  "POST /api/auth/cli/revoke": "application/json",
+  "GET /api/auth/cli/sessions": "application/json",
+  "POST /api/auth/cli/sessions/revoke": "application/json",
+  "POST /api/auth/cli/sessions/revoke-all": "application/json",
+  // Better Auth's account endpoints: its own `APIError` body, `{ code, message }`.
+  "POST /api/auth/sign-up/email": "application/json",
+  "POST /api/auth/sign-in/email": "application/json",
+  // Browser navigations: every refusal renders an HTML page.
+  "GET /activate": "text/html",
+  "POST /activate": "text/html",
+  "POST /activate/approve": "text/html",
+  "POST /activate/deny": "text/html",
+  "GET /api/integrations/connect/start": "text/html",
+  // The health report: the 503 is the 200's document with `status: unhealthy`.
+  "GET /health 503": "application/json",
+  // Stripe's webhook receiver (module-ee) answers plain text; Stripe reads the status only.
+  "POST /api/billing/webhooks": "text/plain",
+  // An upstream response the proxies relay verbatim, at the upstream's status, with
+  // the upstream's body and media type. The proxies' own refusals stay ProblemDetail.
+  ...Object.fromEntries(
+    ["GET", "POST", "PUT", "PATCH", "DELETE"].map((verb) => [
+      `${verb} /api/credential-proxy/proxy default`,
+      "*/*",
+    ]),
+  ),
+  ...Object.fromEntries(
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) =>
+      [LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT].map((mount) => [
+        `POST ${mount}${llmProxyUrlPath(shape)} default`,
+        "application/json",
+      ]),
+    ),
+  ),
+};
+
+const errorBodies = checkErrorResponseBodies(openApiSpec, NON_PROBLEM_ERROR_BODIES);
+if (errorBodies.gaps.length === 0 && errorBodies.stale.length === 0) {
+  console.log(
+    `  OK — all ${errorBodies.checked} error responses declare a ProblemDetail body ` +
+      `(exemptions: ${Object.keys(NON_PROBLEM_ERROR_BODIES).length}, all live).`,
+  );
+} else {
+  exitCode = 1;
+  if (errorBodies.gaps.length > 0) {
+    console.log(`\n  Error responses without a ProblemDetail body (${errorBodies.gaps.length}):`);
+    for (const gap of errorBodies.gaps) console.log(`    - ${gap}`);
+    console.log(
+      `\n  An \`ApiError\` answers application/problem+json: \`$ref\` the matching ` +
+        `#/components/responses/* or declare that content. A response another component ` +
+        `authors goes in NON_PROBLEM_ERROR_BODIES in this file, with a reason.`,
+    );
+  }
+  if (errorBodies.stale.length > 0) {
+    console.log(
+      `\n  Stale NON_PROBLEM_ERROR_BODIES entries — they excuse no response (${errorBodies.stale.length}):`,
+    );
+    for (const key of errorBodies.stale) console.log(`    - ${key}`);
   }
 }
 
