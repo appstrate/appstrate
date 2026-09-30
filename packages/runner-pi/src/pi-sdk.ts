@@ -17,9 +17,10 @@
  */
 
 // --- cheap value (pi-ai, ~40ms) ---
-// Used synchronously at tool-registration time to build parameter schemas,
-// so it stays a static export.
-export { Type } from "@earendil-works/pi-ai";
+// `Type` is used synchronously at tool-registration time to build parameter
+// schemas, so it stays a static export. `InMemoryCredentialStore` backs the
+// chat's per-turn ModelRuntime.
+export { InMemoryCredentialStore, Type } from "@earendil-works/pi-ai";
 // NOTHING TEST-ONLY BELONGS IN THIS FILE: the `no-restricted-imports` guard
 // covers `src/**` only, so tests import the vendor entrypoints directly. Pi's
 // registry (`pi-ai/providers/all`) stays in `pi-model.ts`: ~14 ms to import,

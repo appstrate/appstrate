@@ -7,7 +7,8 @@
  * Appstrate preset id, a proxy URL and the inert runtime key `proxy`; the
  * transport mints a fresh process-local bearer immediately before every model
  * request. OAuth subscriptions use Pi's native provider request shape with the
- * freshly resolved access token held only in the in-memory AuthStorage.
+ * freshly resolved access token held only in the turn's in-memory credential
+ * store.
  */
 
 import type {
@@ -15,7 +16,13 @@ import type {
   SubscriptionChatModel,
   ChatModelResolution,
 } from "@appstrate/core/chat-contract";
-import { llmProxyBaseUrl, type Api, type ExtensionFactory, type Model } from "@appstrate/runner-pi";
+import {
+  InMemoryCredentialStore,
+  llmProxyBaseUrl,
+  type Api,
+  type ExtensionFactory,
+  type Model,
+} from "@appstrate/runner-pi";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
 
@@ -54,12 +61,20 @@ export type ResolvedPiChatModelBinding = PiProxyModelBinding | PiOAuthModelBindi
  * Chat already resolves one concrete model before entering Pi. The targeted
  * credential setup refreshes that provider afterwards, so a full catalog and
  * availability refresh during every runtime construction is redundant.
+ *
+ * The credential store is in memory and fresh per turn. Pi's default is the
+ * host's `~/.pi/agent/auth.json`, and a stored credential outranks the key the
+ * turn registers: a Pi CLI login on the host would answer for the org's own
+ * credential. Nothing is persisted and no store is shared between orgs.
  */
-export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
-  modelsPath: null,
-  allowModelNetwork: false,
-  refreshOnCreate: false,
-} as const;
+export function piChatModelRuntimeOptions() {
+  return {
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    allowModelNetwork: false,
+    refreshOnCreate: false,
+  } as const;
+}
 
 type PiChatModelBindingResolution =
   | { status: "ready"; binding: ResolvedPiChatModelBinding }

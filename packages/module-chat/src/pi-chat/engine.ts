@@ -50,10 +50,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
-import {
-  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
-  type ResolvedPiChatModelBinding,
-} from "./model-binding.ts";
+import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -452,9 +449,7 @@ export function runPiChat(input: PiChatInput): Response {
         // on an abort here; what `untilAborted` adds is that the abort is
         // OBSERVED — none of these calls takes a signal of its own.
         const runtimeStartedAt = Date.now();
-        const modelRuntime = await untilAborted(
-          ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS),
-        );
+        const modelRuntime = await untilAborted(ModelRuntime.create(piChatModelRuntimeOptions()));
         await untilAborted(
           setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
         );
