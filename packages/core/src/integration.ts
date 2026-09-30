@@ -38,7 +38,10 @@ import {
 import {
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
+  parseCredentialRef,
   parseUrlFormPattern,
+  templateExpressions,
+  unsupportedTemplateExpressions,
 } from "@appstrate/afps-shared/credential-template";
 import {
   injectsHttpCredential,
@@ -47,6 +50,11 @@ import {
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
+import {
+  isResponseTextExpression,
+  parseResponseExpression,
+} from "@appstrate/afps-shared/runtime-expression";
+import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 /** RFC 3986 `scheme://` prefix a templated authorized_uris entry must start with. */
@@ -362,6 +370,16 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     });
 
+    // (1f') §7.6 + §7.7 install gate — every template and runtime expression is one the platform
+    // evaluates, so none reaches an upstream as literal text.
+    for (const issue of findUnevaluableExpressions(auth)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${issue.message}${UNEVALUABLE_HINT}`,
+        path: ["auths", authKey, ...issue.at],
+      });
+    }
+
     // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
     // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
     // (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only tokens in the
@@ -657,6 +675,124 @@ interface DeliveryView {
   http?: { value?: string };
   env?: Record<string, { value?: string }>;
   files?: Record<string, { value?: string }>;
+}
+
+/** Appended to every {@link findUnevaluableExpressions} issue (`scripts/migration/0035` keys on it). */
+const UNEVALUABLE_HINT = " — the platform does not evaluate it (AFPS §7.6/§7.7)";
+
+type IntegrationAuth = NonNullable<IntegrationManifest["auths"]>[string];
+type IssuePath = (string | number)[];
+
+/**
+ * The templates and runtime expressions of one auth the platform cannot evaluate: a `{$…}`
+ * other than `{$credential.<field>}` in delivery or `authorized_uris`, the `{{field}}` form in
+ * `delivery.http.value`, any `{$…}` in the login request (its placeholders are `{{input}}`),
+ * and a `connect.login` response expression outside `@appstrate/afps-shared/runtime-expression`.
+ */
+function findUnevaluableExpressions(auth: IntegrationAuth): { message: string; at: IssuePath }[] {
+  const issues: { message: string; at: IssuePath }[] = [];
+  const delivery = auth.delivery as DeliveryView | undefined;
+  const templates: [string | undefined, IssuePath][] = [
+    [delivery?.http?.value, ["delivery", "http", "value"]],
+    ...Object.entries(delivery?.env ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
+      e.value,
+      ["delivery", "env", k],
+    ]),
+    ...Object.entries(delivery?.files ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
+      e.value,
+      ["delivery", "files", k],
+    ]),
+    ...(auth.authorized_uris ?? []).map((u, i): [string, IssuePath] => [u, ["authorized_uris", i]]),
+  ];
+  for (const [template, at] of templates) {
+    for (const expr of unsupportedTemplateExpressions(template ?? "")) {
+      issues.push({ message: `'${expr}' is not a {$credential.<field>} reference`, at });
+    }
+  }
+  if (/\{\{[^}]*\}\}/.test(delivery?.http?.value ?? "")) {
+    issues.push({
+      message:
+        "delivery.http.value references credential fields as {$credential.<field>}, not {{field}}",
+      at: ["delivery", "http", "value"],
+    });
+  }
+
+  const login = auth.connect?.login;
+  if (!login) return issues;
+  const request = login.request;
+  const requestTemplates: [string | undefined, IssuePath][] = [
+    [request.url, ["url"]],
+    [request.body, ["body"]],
+    ...Object.entries(request.headers ?? {}).map(([k, v]): [string, IssuePath] => [
+      v,
+      ["headers", k],
+    ]),
+  ];
+  for (const [template, at] of requestTemplates) {
+    for (const expr of templateExpressions(template ?? "")) {
+      issues.push({
+        message: `'${expr}' is not evaluated in a login request; login inputs are {{name}}`,
+        at: ["connect", "login", "request", ...at],
+      });
+    }
+  }
+
+  const outputs = (login.outputs ?? {}) as Record<string, unknown>;
+  const isJwt = (o: unknown) => (o as { from?: unknown } | null)?.from === "jwt";
+  for (const [name, raw] of Object.entries(outputs)) {
+    const at = ["connect", "login", "outputs", name];
+    const out = raw as { from?: string; context?: string; token?: string; source?: string };
+    if (typeof raw === "string") {
+      if (!parseResponseExpression(raw)) {
+        issues.push({ message: `unsupported runtime expression '${raw}'`, at });
+      }
+    } else if (out.from === undefined) {
+      if (out.context !== "$response.body") {
+        issues.push({
+          message: `selector context '${out.context}' is not supported (only $response.body)`,
+          at: [...at, "context"],
+        });
+      }
+    } else if (out.from === "jwt") {
+      const ref = parseCredentialRef(out.token ?? "");
+      if (
+        ref === null ||
+        !Object.prototype.hasOwnProperty.call(outputs, ref) ||
+        isJwt(outputs[ref])
+      ) {
+        issues.push({
+          message: `jwt token '${out.token}' must be {$credential.<output>} naming a non-jwt output`,
+          at: [...at, "token"],
+        });
+      }
+    } else if (out.from === "regex" && !isResponseTextExpression(out.source ?? "")) {
+      issues.push({
+        message: `regex source '${out.source}' must be $response.body or $response.header.<name>`,
+        at: [...at, "source"],
+      });
+    }
+  }
+
+  (login.success_criteria ?? []).forEach((criterion, index) => {
+    const at = ["connect", "login", "success_criteria", index];
+    const context = criterion.context ?? "$response.body";
+    if (criterion.type === "jsonpath" && context !== "$response.body") {
+      issues.push({ message: `jsonpath context '${context}' is not supported`, at });
+    } else if (criterion.type === "regex" && !isResponseTextExpression(context)) {
+      issues.push({ message: `regex context '${context}' is not supported`, at });
+    } else if ((criterion.type ?? "simple") === "simple") {
+      // The engine compares the two sides of the first `==`.
+      const eq = criterion.condition.indexOf("==");
+      const operands =
+        eq === -1 ? [] : [criterion.condition.slice(0, eq), criterion.condition.slice(eq + 2)];
+      for (const operand of operands.map((o) => o.trim()).filter((o) => o.startsWith("$"))) {
+        if (!parseResponseExpression(operand)) {
+          issues.push({ message: `unsupported runtime expression '${operand}'`, at });
+        }
+      }
+    }
+  });
+  return issues;
 }
 
 /**
@@ -1383,15 +1519,19 @@ export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
  */
 export type ConnectionOverrides = Record<string, string[]>;
 
+/** The cascade layers, in precedence order — the runtime tuple the wire enums derive from. */
+export const CONNECTION_RESOLUTION_SOURCES = [
+  "admin_pin",
+  "org_default_enforced",
+  "run_override",
+  "schedule_override",
+  "member_pin",
+  "org_default",
+  "fallback_auto",
+] as const;
+
 /** The cascade layer that bound a set — drives the audit + UI badge. */
-export type ConnectionResolutionSource =
-  | "admin_pin"
-  | "org_default_enforced"
-  | "run_override"
-  | "schedule_override"
-  | "member_pin"
-  | "org_default"
-  | "fallback_auto";
+export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
 
 /** Per-integration resolution result. */
 export interface ResolvedConnection {
@@ -1412,18 +1552,39 @@ export interface ResolvedConnection {
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
+/**
+ * The persisted snapshot's one shape, parsed wherever `runs.resolved_connections`
+ * is read back: a jsonb column is typed by assertion only, so a row that drifted
+ * from {@link ResolvedConnectionMap} fails here, loudly, not in a caller.
+ */
+export const resolvedConnectionMapSchema: z.ZodType<ResolvedConnectionMap> = z.record(
+  z.string(),
+  z.array(
+    z.object({
+      connectionId: z.string(),
+      source: z.enum(CONNECTION_RESOLUTION_SOURCES),
+      label: z.string(),
+      accountId: z.string(),
+    }),
+  ),
+);
+
+/** The error codes the resolver emits per integration — the runtime tuple the wire enums derive from. */
+export const CONNECTION_RESOLUTION_ERROR_CODES = [
+  "not_connected",
+  "needs_reconnection",
+  "pinned_connection_unavailable",
+  "override_connection_unavailable",
+  "override_outranked",
+  "must_choose_connection",
+  "insufficient_scopes",
+  "auth_key_mismatch",
+  "auth_serves_no_selected_tool",
+  "auth_key_serves_no_selected_tool",
+] as const;
+
 /** Error codes the resolver emits per integration. */
-export type ConnectionResolutionErrorCode =
-  | "not_connected"
-  | "needs_reconnection"
-  | "pinned_connection_unavailable"
-  | "override_connection_unavailable"
-  | "override_outranked"
-  | "must_choose_connection"
-  | "insufficient_scopes"
-  | "auth_key_mismatch"
-  | "auth_serves_no_selected_tool"
-  | "auth_key_serves_no_selected_tool";
+export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.

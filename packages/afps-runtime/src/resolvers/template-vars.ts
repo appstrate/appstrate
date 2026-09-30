@@ -2,21 +2,19 @@
 // Copyright 2025-2026 Appstrate
 
 /**
- * Canonical `{{var}}` credential substitution, shared by every layer that
- * injects credentials into headers / URLs / bodies:
- *
- *   - the platform credential proxy + sidecar MITM (`@appstrate/connect`'s
- *     `substituteVars` re-export — fail-closed, `keepUnresolved: true`),
- *   - the `delivery.http` plan renderer ({@link ./http-delivery.ts}),
- *   - the portable `appstrate run` integration resolver
- *     ({@link ./integration-api-call.ts}).
+ * Canonical `{{var}}` substitution for the AGENT-facing grammar: the
+ * `{{field}}` placeholders an agent writes into an `api_call` target, which the
+ * platform credential proxy + sidecar MITM (`@appstrate/connect`'s
+ * `substituteVars` re-export — fail-closed, `keepUnresolved: true`) and the
+ * portable `appstrate run` integration resolver ({@link ./integration-api-call.ts})
+ * fill from the credential bag; and the `{{name}}` login inputs a `connect`
+ * login request or login tool carries. Manifest value templates use
+ * `{$credential.<field>}` instead (`@appstrate/afps-shared/credential-template`).
  *
  * Whitespace inside `{{ … }}` is tolerated so hand-written templates can
  * keep `{{ field }}`. Two missing-key policies, picked per call site:
  *
  *   - default (`keepUnresolved: false`) → unknown placeholders render empty.
- *     Used by `delivery.http` rendering, where a missing field means "no
- *     value to inject".
  *   - `keepUnresolved: true` → unknown placeholders are left intact so the
  *     caller can fail closed by scanning for survivors (the credential-proxy
  *     pattern — never silently blank a credential into a request).

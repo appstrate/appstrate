@@ -5,10 +5,48 @@ import { describe, it, expect } from "bun:test";
 import {
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
+  parseCredentialRef,
   parseUrlFormPattern,
   renderAuthorizedUris,
+  renderCredentialTemplate,
+  templateExpressions,
   unrenderableAuthorizedUriFields,
+  UnsupportedTemplateExpressionError,
+  unsupportedTemplateExpressions,
 } from "../src/credential-template.ts";
+
+describe("renderCredentialTemplate", () => {
+  it("renders {$credential.<field>} refs and leaves the {{field}} grammar alone", () => {
+    expect(renderCredentialTemplate("{{a}} {$credential.a}", { a: "1" })).toBe("{{a}} 1");
+  });
+
+  it("renders a missing or inherited field empty", () => {
+    expect(renderCredentialTemplate("[{$credential.x}{$credential.constructor}]", {})).toBe("[]");
+  });
+
+  for (const expr of ["{$outputs.token}", "{$credential.a-b}", "{$inputs.password}", "{$}"]) {
+    it(`throws on ${expr} rather than rendering it literally`, () => {
+      expect(() => renderCredentialTemplate(`Bearer ${expr}`, { token: "t" })).toThrow(
+        UnsupportedTemplateExpressionError,
+      );
+    });
+  }
+});
+
+describe("template expressions", () => {
+  it("parseCredentialRef accepts exactly one whole reference", () => {
+    expect(parseCredentialRef("{$credential.access_token}")).toBe("access_token");
+    expect(parseCredentialRef("x{$credential.a}")).toBeNull();
+    expect(parseCredentialRef("{$outputs.a}")).toBeNull();
+    expect(parseCredentialRef("access_token")).toBeNull();
+  });
+
+  it("lists every {$…} expression, and those that are not credential refs", () => {
+    const t = "{$credential.a}:{$outputs.b}/{$credential.a}{{c}}";
+    expect(templateExpressions(t)).toEqual(["{$credential.a}", "{$outputs.b}"]);
+    expect(unsupportedTemplateExpressions(t)).toEqual(["{$outputs.b}"]);
+  });
+});
 
 describe("credentialTemplateRefs", () => {
   it("returns referenced fields in order, deduplicated", () => {

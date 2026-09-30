@@ -24,6 +24,29 @@ consumer's publish rather than the first user's `npm install`.
   fills with a credential, and the per-auth-type default table it reads (moved
   from `@appstrate/afps-runtime`). (#1641)
 
+- **`parseCredentialRef`**, **`templateExpressions`**,
+  **`unsupportedTemplateExpressions`** and
+  **`UnsupportedTemplateExpressionError`** (`./credential-template`). (#1641)
+- **`./runtime-expression`**: `parseResponseExpression`,
+  `isResponseTextExpression` — the Arazzo response expressions a
+  `connect.login` block may use. (#1641)
+- **`guardedFetchChain`** (`./guarded-fetch`): `guardedFetch` that also
+  returns the terminal logical URL and the number of redirects followed.
+  `GuardedFetchOptions` gains `forwardCredentials` (a cross-origin hop it
+  approves keeps the credential headers, Cookie and body) and
+  `followRedirects: false`; `SsrfBlockedError.hop` names the refused hop.
+  (#1641)
+
+### Changed
+
+- **BREAKING: `renderCredentialTemplate` throws
+  `UnsupportedTemplateExpressionError` on any `{$…}` other than
+  `{$credential.<field>}`**, and no longer reads inherited properties. (#1641)
+- **BREAKING: `projectHttpDeliveryConfig` carries `value` verbatim** as
+  `valueFrom: { template, encoding? }` in the `{$credential.<field>}`
+  grammar; no bare-field lowering, no `{{field}}` rewrite. (#1641)
+- The guarded-fetch transport receives the URL as a string. (#1641)
+
 ## [0.9.2] — 2026-09-30
 
 Additive only. Publish before any `@appstrate/core` that imports

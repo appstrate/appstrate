@@ -815,7 +815,11 @@ describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing",
     customWithConnect({
       login: {
         request: { method: "POST", url: "https://x" },
-        outputs: { token: "$response.body#/token", userId: "$response.body#/u", user_id: "$" },
+        outputs: {
+          token: "$response.body#/token",
+          userId: "$response.body#/u",
+          user_id: "$response.body#/v",
+        },
         identity_outputs,
       },
     });
@@ -1140,6 +1144,129 @@ describe("integrationManifestSchema — connect.login", () => {
       customWithConnect({ tool: {} }, { env: { TOKEN: { value: "{$credential.token}" } } }),
     );
     expect(r.success).toBe(true);
+  });
+});
+
+describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", () => {
+  const login = (overrides: Record<string, unknown> = {}) => ({
+    login: {
+      request: { method: "POST", url: "https://api.example.com/login", body: "p={{password}}" },
+      outputs: { token: "$response.body#/token" },
+      ...overrides,
+    },
+  });
+  const tokenHttp = (value: string) => ({ http: { in: "header", name: "Authorization", value } });
+
+  it("accepts every form the engine evaluates", () => {
+    const r = integrationManifestSchema.safeParse(
+      customWithConnect(
+        login({
+          success_criteria: [
+            { condition: "$response.header.X-Ok == 'yes'" },
+            { condition: "ok", type: "regex", context: "$response.header.X-State" },
+          ],
+          outputs: {
+            token: "$response.body#/token",
+            raw: "$response.body",
+            csrf: { from: "regex", source: "$response.header.Set-Cookie", pattern: "c=(\\w+)" },
+            sub: { from: "jwt", token: "{$credential.token}", path: "/sub" },
+          },
+        }),
+        tokenHttp("Bearer {$credential.token}"),
+      ),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects {$outputs.<name>} in delivery — outputs are referenced as {$credential.<name>}", () => {
+    const m = customWithConnect(login(), tokenHttp("Bearer {$outputs.token}"));
+    expect(errorPaths(m)).toContain("auths.session.delivery.http.value");
+  });
+
+  it("rejects a non-credential expression in env, files and authorized_uris", () => {
+    const m = customWithConnect(login(), {
+      env: { A: { value: "{$credential.token}{$inputs.x}" } },
+      files: { "/f": { value: "{$credential.a-b}" } },
+    });
+    const auths = m.auths as Record<string, Record<string, unknown>>;
+    auths.session!.authorized_uris = ["https://{$outputs.host}/**"];
+    const paths = errorPaths(m);
+    expect(paths).toContain("auths.session.delivery.env.A");
+    expect(paths).toContain("auths.session.delivery.files./f");
+    expect(paths).toContain("auths.session.authorized_uris.0");
+  });
+
+  it("rejects the {{field}} form in delivery.http.value", () => {
+    const m = baseManifest();
+    const auths = m.auths as Record<string, Record<string, Record<string, unknown>>>;
+    auths.oauth!.delivery!.http = {
+      in: "header",
+      name: "Authorization",
+      value: "{{access_token}}",
+    };
+    expect(errorPaths(m)).toContain("auths.oauth.delivery.http.value");
+  });
+
+  it("rejects a {$…} expression in the login request", () => {
+    const m = customWithConnect(
+      login({
+        request: {
+          method: "POST",
+          url: "https://api.example.com/login",
+          body: "p={$credential.password}",
+        },
+      }),
+    );
+    expect(errorPaths(m)).toContain("auths.session.connect.login.request.body");
+  });
+
+  it("rejects output expressions the engine cannot evaluate", () => {
+    const paths = errorPaths(
+      customWithConnect(
+        login({
+          outputs: {
+            token: "$response.body#/token",
+            alias: "$outputs.token",
+            sel: { context: "$response.header.X", selector: "$.a", type: "jsonpath" },
+            bare: { from: "jwt", token: "token", path: "/sub" },
+            ext: { from: "jwt", token: "{$outputs.token}", path: "/sub" },
+            missing: { from: "jwt", token: "{$credential.nope}", path: "/sub" },
+            chained: { from: "jwt", token: "{$credential.bare}", path: "/sub" },
+            braced: { from: "regex", source: "{$response.body}", pattern: "(.+)" },
+          },
+        }),
+      ),
+    );
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "auths.session.connect.login.outputs.alias",
+        "auths.session.connect.login.outputs.sel.context",
+        "auths.session.connect.login.outputs.bare.token",
+        "auths.session.connect.login.outputs.ext.token",
+        "auths.session.connect.login.outputs.missing.token",
+        "auths.session.connect.login.outputs.chained.token",
+        "auths.session.connect.login.outputs.braced.source",
+      ]),
+    );
+  });
+
+  it("rejects criteria whose context or operand the engine cannot evaluate", () => {
+    const paths = errorPaths(
+      customWithConnect(
+        login({
+          success_criteria: [
+            { condition: "$status == 200" },
+            { condition: "$.ok", type: "jsonpath", context: "$response.header.X" },
+            { condition: "ok", type: "regex", context: "$response.body#/a" },
+          ],
+        }),
+      ),
+    );
+    expect(paths).toEqual([
+      "auths.session.connect.login.success_criteria.0",
+      "auths.session.connect.login.success_criteria.1",
+      "auths.session.connect.login.success_criteria.2",
+    ]);
   });
 });
 

@@ -52,7 +52,8 @@
     "./archive-prefix": "./src/archive-prefix.ts",
     "./backoff": "./src/backoff.ts",
     "./mime": "./src/mime.ts",
-    "./jsonpath": "./src/jsonpath.ts"
+    "./jsonpath": "./src/jsonpath.ts",
+    "./runtime-expression": "./src/runtime-expression.ts"
   },
   "dependencies": {
     "@types/semver": "^7.8.0",

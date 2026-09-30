@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller. Needs `@appstrate/afps-shared` `isHostUnboundedUriPattern` /
   `injectsHttpCredential`. (#1641)
 
+- **The connection-resolution vocabulary is exported as runtime values**
+  (`@appstrate/core/integration`): `CONNECTION_RESOLUTION_SOURCES` and
+  `CONNECTION_RESOLUTION_ERROR_CODES`, from which the
+  `ConnectionResolutionSource` / `ConnectionResolutionErrorCode` unions now
+  derive, and `resolvedConnectionMapSchema`, the Zod schema of the persisted
+  `ResolvedConnectionMap` snapshot. (#1641)
+
+### Changed
+
+- **`integrationManifestSchema` refuses expressions the platform does not
+  evaluate** (`findUnevaluableExpressions`): a `{$…}` other than
+  `{$credential.<field>}` in delivery or `authorized_uris`, `{{field}}` in
+  `delivery.http.value`, `{$…}` in a `connect.login` request, and
+  `connect.login` output/criterion expressions, jwt `token`s or regex
+  `source`s the login engine cannot read. Needs `@appstrate/afps-shared`
+  `./runtime-expression` and the new `./credential-template` exports. (#1641)
+
 ## [13.0.0] — 2026-09-30
 
 ### Added

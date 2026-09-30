@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { UnsupportedTemplateExpressionError } from "@appstrate/afps-shared/credential-template";
 import { resolveAfpsHttpDelivery } from "../src/afps-delivery.ts";
 
 describe("resolveAfpsHttpDelivery — defaults per auth type", () => {
@@ -55,6 +56,25 @@ describe("resolveAfpsHttpDelivery — value-template resolution", () => {
       value: "abc123",
       allowServerOverride: false,
     });
+  });
+
+  it("never delivers an unrendered expression: {$outputs.<name>} throws", () => {
+    expect(() =>
+      resolveAfpsHttpDelivery(
+        "custom",
+        { token: "abc123" },
+        { in: "header", name: "Authorization", prefix: "Bearer ", value: "{$outputs.token}" },
+      ),
+    ).toThrow(UnsupportedTemplateExpressionError);
+  });
+
+  it("does not substitute a literal {{field}} in the manifest value", () => {
+    const plan = resolveAfpsHttpDelivery(
+      "custom",
+      { token: "abc123" },
+      { in: "header", name: "X-Token", value: "{{token}}" },
+    );
+    expect(plan!.value).toBe("{{token}}");
   });
 
   it("resolves a multi-ref template", () => {

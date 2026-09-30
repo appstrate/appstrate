@@ -13,12 +13,7 @@ describe("projectHttpDeliveryConfig", () => {
     expect(projectHttpDeliveryConfig(undefined)).toBeUndefined();
   });
 
-  it("lowers a single {$credential.field} ref to a bare valueFrom", () => {
-    const cfg = projectHttpDeliveryConfig({ name: "X-Api-Key", value: "{$credential.api_key}" });
-    expect(cfg).toEqual({ headerName: "X-Api-Key", valueFrom: "api_key" });
-  });
-
-  it("rewrites a composite value to a {{field}} template", () => {
+  it("carries the value template verbatim", () => {
     const cfg = projectHttpDeliveryConfig({
       name: "Authorization",
       prefix: "Bearer ",
@@ -27,18 +22,18 @@ describe("projectHttpDeliveryConfig", () => {
     expect(cfg).toEqual({
       headerName: "Authorization",
       headerPrefix: "Bearer ",
-      valueFrom: { template: "{{token_type}} {{access_token}}" },
+      valueFrom: { template: "{$credential.token_type} {$credential.access_token}" },
     });
   });
 
-  it("keeps a single ref as a template when base64 encoding is requested", () => {
+  it("carries base64 encoding with the template", () => {
     const cfg = projectHttpDeliveryConfig({
       name: "Authorization",
       value: "{$credential.user}:{$credential.pass}",
       encoding: "base64",
     });
     expect(cfg).toEqual({
-      valueFrom: { template: "{{user}}:{{pass}}", encoding: "base64" },
+      valueFrom: { template: "{$credential.user}:{$credential.pass}", encoding: "base64" },
       headerName: "Authorization",
     });
   });

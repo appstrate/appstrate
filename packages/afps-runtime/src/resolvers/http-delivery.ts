@@ -18,7 +18,7 @@
  * nothing should be injected).
  */
 
-import { substituteVars } from "./template-vars.ts";
+import { renderCredentialTemplate } from "@appstrate/afps-shared/credential-template";
 
 // The resolver config shape lives once in the zero-dep `@appstrate/afps-shared`
 // (the canonical `delivery.http` projection target). Re-export it here so
@@ -102,7 +102,7 @@ function renderTemplate(
   fields: Readonly<Record<string, string>>,
   encoding: "base64" | undefined,
 ): string {
-  const rendered = substituteVars(template, fields);
+  const rendered = renderCredentialTemplate(template, fields);
   if (encoding === "base64") return Buffer.from(rendered, "utf8").toString("base64");
   return rendered;
 }

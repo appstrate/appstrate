@@ -15,6 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves the host to the caller. `AUTH_TYPE_HTTP_DEFAULTS` moved to
   `@appstrate/afps-shared/delivery-http`.
 
+### Changed — one outbound engine for every api_call path (#1641)
+
+- **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,
+  `preflightUrl` and `MAX_REDIRECTS` are replaced by `fetchApiCall`: the
+  pinned transport by default, `API_CALL_TIMEOUT_MS` combined with the
+  caller's signal, the allowlist as the credential rule across redirects,
+  `trustDeclaredHosts` / `trustedHost`, and `PreflightError` reason
+  `unresolvable`. `RedirectBlockedError(reason, redactedHost)`;
+  `assertAllowlistRendered`, `PreflightError`, `API_CALL_TIMEOUT_MS` and
+  `HostResolver` are exported from the resolvers barrel.
+- **BREAKING:** HTTP delivery renders manifest templates with
+  `renderCredentialTemplate` (`{$credential.<field>}` only); a
+  `{{field}}` in a delivery value is sent as the literal it is, and any
+  other `{$…}` throws.
+
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 
 - `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's

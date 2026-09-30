@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { UnsupportedTemplateExpressionError } from "@appstrate/afps-shared/credential-template";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -63,12 +64,15 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     });
   });
 
-  it("renders template valueFrom with {{var}} substitution and base64 encoding", () => {
+  it("renders a {$credential.<field>} template valueFrom with base64 encoding", () => {
     const plan = resolveHttpDelivery(
       "api_key",
       { email: "pierre@example.com", api_token: "abc123" },
       {
-        valueFrom: { template: "{{email}}/token:{{api_token}}", encoding: "base64" },
+        valueFrom: {
+          template: "{$credential.email}/token:{$credential.api_token}",
+          encoding: "base64",
+        },
       },
     );
     expect(plan!.value).toBe(
@@ -80,9 +84,28 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     const plan = resolveHttpDelivery(
       "api_key",
       { email: "pierre@example.com" },
-      { valueFrom: { template: "{{email}}/{{api_token}}" } },
+      { valueFrom: { template: "{$credential.email}/{$credential.api_token}" } },
     );
     expect(plan!.value).toBe("pierre@example.com/");
+  });
+
+  it("sends a {{field}} in a template as the literal it is — the agent grammar is not rendered", () => {
+    const plan = resolveHttpDelivery(
+      "api_key",
+      { api_key: "k" },
+      { valueFrom: { template: "{{api_key}}:{$credential.api_key}" } },
+    );
+    expect(plan!.value).toBe("{{api_key}}:k");
+  });
+
+  it("refuses a {$…} expression it cannot render instead of sending it upstream", () => {
+    expect(() =>
+      resolveHttpDelivery(
+        "custom",
+        { token: "t" },
+        { headerName: "Authorization", valueFrom: { template: "Bearer {$outputs.token}" } },
+      ),
+    ).toThrow(UnsupportedTemplateExpressionError);
   });
 
   it("allowServerOverride flag is reflected in the plan", () => {

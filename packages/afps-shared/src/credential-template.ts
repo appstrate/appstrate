@@ -12,6 +12,11 @@
  * `@appstrate/afps-runtime`'s `substituteVars` — there is exactly ONE
  * implementation per syntax, and this module owns `{$credential.<field>}`.
  *
+ * It renders every manifest value template: `delivery.http.value` as well as
+ * `delivery.env` / `delivery.files`. Any other `{$…}` expression throws
+ * {@link UnsupportedTemplateExpressionError}, so an unrendered expression never
+ * reaches an upstream.
+ *
  * A missing field renders empty (a missing credential field means "no value to
  * inject"). The empty-value behaviour is parametrised:
  *   - `emptyAs: "string"` (default) → returns `""` for an all-empty render
@@ -23,6 +28,34 @@
  */
 
 export const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
+
+const SINGLE_CREDENTIAL_REF = new RegExp(`^${CREDENTIAL_REF.source}$`);
+
+/** Any `{$…}` runtime expression embedded in a template (AFPS §7.7). */
+const EMBEDDED_EXPRESSION = /\{\$[^{}]*\}/g;
+
+/** A `{$…}` expression a credential template cannot render. */
+export class UnsupportedTemplateExpressionError extends Error {
+  override readonly name = "UnsupportedTemplateExpressionError";
+  constructor(readonly expression: string) {
+    super(`unsupported template expression '${expression}' — only {$credential.<field>} renders`);
+  }
+}
+
+/** The field `expression` names when it is exactly one `{$credential.<field>}`, else `null`. */
+export function parseCredentialRef(expression: string): string | null {
+  return SINGLE_CREDENTIAL_REF.exec(expression)?.[1] ?? null;
+}
+
+/** The distinct `{$…}` expressions embedded in `template`, in order. */
+export function templateExpressions(template: string): string[] {
+  return [...new Set(template.match(EMBEDDED_EXPRESSION) ?? [])];
+}
+
+/** The embedded `{$…}` expressions of `template` that are not `{$credential.<field>}` references. */
+export function unsupportedTemplateExpressions(template: string): string[] {
+  return templateExpressions(template).filter((e) => parseCredentialRef(e) === null);
+}
 
 export interface RenderCredentialTemplateOptions {
   /**
@@ -47,7 +80,11 @@ export function renderCredentialTemplate(
   credential: Readonly<Record<string, string>>,
   opts: RenderCredentialTemplateOptions = {},
 ): string | null {
-  const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => credential[field] ?? "");
+  const rendered = template.replace(EMBEDDED_EXPRESSION, (expression) => {
+    const field = parseCredentialRef(expression);
+    if (field === null) throw new UnsupportedTemplateExpressionError(expression);
+    return Object.prototype.hasOwnProperty.call(credential, field) ? credential[field]! : "";
+  });
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
 }
@@ -60,7 +97,7 @@ export function credentialTemplateRefs(template: string): string[] {
 /** A rendered value may only be a literal host label run or port digits, never dots alone. */
 const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
 
-const URL_FORM_HEAD = /^\{\$credential\.([A-Za-z0-9_]+)\}/;
+const URL_FORM_HEAD = new RegExp(`^${CREDENTIAL_REF.source}`);
 
 /**
  * Split a URL-form pattern (#1627): exactly one placeholder at index 0, followed by nothing or
