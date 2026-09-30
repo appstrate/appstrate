@@ -32,7 +32,8 @@ export function substituteVars(
 ): string {
   const keep = opts?.keepUnresolved === true;
   return input.replace(VAR_PLACEHOLDER, (match, key: string) => {
-    if (key in fields) return fields[key]!;
+    // Own properties only: `{{constructor}}` must not resolve to Object.prototype's.
+    if (Object.hasOwn(fields, key)) return fields[key]!;
     return keep ? match : "";
   });
 }
@@ -46,14 +47,14 @@ export function substituteVars(
 const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
 
 /**
- * True when `input` contains at least one `{{key}}` placeholder whose key
- * exists in `fields`. Used by the credential-exfil guard in
- * {@link ./integration-api-call.ts} to detect calls that substitute a
+ * True when `input` contains at least one `{{key}}` placeholder whose key is
+ * an own property of `fields`. Used by the credential-exfil guard
+ * ({@link ./credential-guard.ts}) to detect calls that substitute a
  * credential field into an agent-controlled URL / header / body.
  */
 export function referencesField(input: string, fields: Readonly<Record<string, unknown>>): boolean {
   for (const match of input.matchAll(VAR_PLACEHOLDER)) {
-    if (match[1]! in fields) return true;
+    if (Object.hasOwn(fields, match[1]!)) return true;
   }
   return false;
 }

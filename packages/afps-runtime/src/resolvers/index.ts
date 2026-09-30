@@ -54,6 +54,14 @@ export {
 // renderer, and the portable integration resolver.
 export { substituteVars } from "./template-vars.ts";
 
+// Credential-exfiltration guard shared by the three `api_call` paths.
+export {
+  credentialUrlPolicy,
+  exfiltrationRefusal,
+  redactionFields,
+  type CredentialUrlPolicy,
+} from "./credential-guard.ts";
+
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
   ABSOLUTE_BODY_CEILING,
@@ -91,6 +99,8 @@ export {
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
   redactHost,
+  redactCredentialHost,
+  scrubTransportError,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,

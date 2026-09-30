@@ -28,7 +28,8 @@
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the integration manifest
- *     (`authorized_uris` / `allow_all_uris`)
+ *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
+ *   - Upstream `Set-Cookie` never relayed to the caller
  *   - Request / response size caps
  */
 
@@ -284,11 +285,10 @@ export function createCredentialProxyRouter() {
         });
 
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
-        // plus the X-Stream-* transport hints between the runtime and this
-        // proxy, which must not reach the caller.
+        // plus the route-specific set (transport hints, Set-Cookie).
         const responseHeaders = stripUpstreamResponseHeaders(
           result.headers,
-          STREAM_CONTROL_HEADERS,
+          CALLER_RESPONSE_SKIP_HEADERS,
         );
         // One URL serves every target and connection (they ride in headers), so an upstream
         // cache policy must not let a client replay one connection's response for another.
@@ -408,8 +408,13 @@ const PROXY_CONTROL_HEADERS = new Set([
   "accept-encoding",
 ]);
 
-/** Transport hints between the runtime and this proxy — never forwarded to the caller. */
-const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);
+/** Not relayed to the caller: transport hints, and Set-Cookie (a cookie can be the credential). */
+const CALLER_RESPONSE_SKIP_HEADERS = new Set([
+  "x-stream-request",
+  "x-stream-response",
+  "set-cookie",
+  "set-cookie2",
+]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */
 interface StreamCapLogCtx {

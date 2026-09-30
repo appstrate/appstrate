@@ -17,6 +17,7 @@
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
  *   - `X-Run-Id` confines the call to the run's bound connections; without it
  *     the space-level rules (org defaults, named, own) pick the connection
+ *   - upstream `Set-Cookie` never relayed; the server-side jar keeps continuity
  *   - cookie-session rejection by the `ACCEPTED_AUTH_METHODS` gate → 403
  *
  * Auth is a Bearer API key scoped with `credential-proxy:call` — cookie
@@ -43,6 +44,10 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import {
+  seedProxyIntegration,
+  seedProxyConnection,
+} from "../../helpers/credential-proxy-fixtures.ts";
 
 const app = getTestApp();
 
@@ -964,5 +969,74 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     expect(body.code).toBe("pinned_connection_unavailable");
     expect(body.errors[0]!.code).toBe("pinned_connection_unavailable");
     expect(upstreamAuth).toEqual([]);
+  });
+});
+
+describe("POST /api/credential-proxy/proxy — upstream Set-Cookie is never relayed", () => {
+  const COOKIE_INTEGRATION = "@cporg/shop";
+  let ctx: TestContext;
+  let apiKey: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    // The credential IS a session cookie: a relayed rotation would hand it out.
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: COOKIE_INTEGRATION,
+        displayName: "Shop",
+        description: "Shop integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            delivery: httpHeaderDelivery({ name: "Cookie", prefix: "SID=", field: "api_key" }),
+          },
+        },
+      }),
+    );
+    await seedProxyConnection(ctx, COOKIE_INTEGRATION, "api", { api_key: "sid-initial" });
+    apiKey = await mintProxyKey(ctx);
+  });
+  afterEach(() => restoreFetch());
+
+  it("drops every Set-Cookie and keeps session continuity in the server-side jar", async () => {
+    const upstreamCookies: Array<string | null> = [];
+    mockUpstream(async (_input, init) => {
+      upstreamCookies.push(new Headers(init?.headers).get("cookie"));
+      const headers = new Headers({ "content-type": "application/json" });
+      headers.append("Set-Cookie", "SID=sid-rotated; Path=/; HttpOnly");
+      headers.append("Set-Cookie", "pref=1; Path=/");
+      return new Response("{}", { status: 200, headers });
+    });
+    const sessionId = uuidV4();
+    const proxyGet = () =>
+      app.request("/api/credential-proxy/proxy", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "X-Integration-Id": COOKIE_INTEGRATION,
+          "X-Target": "https://1.1.1.1/cart",
+          "X-Session-Id": sessionId,
+        },
+      });
+
+    const first = await proxyGet();
+    expect(first.status).toBe(200);
+    expect(first.headers.getSetCookie()).toEqual([]);
+
+    const second = await proxyGet();
+    expect(second.status).toBe(200);
+    expect(second.headers.getSetCookie()).toEqual([]);
+    expect(
+      upstreamCookies[1]
+        ?.split(";")
+        .map((p) => p.trim())
+        .sort(),
+    ).toEqual(["SID=sid-rotated", "pref=1"]);
   });
 });

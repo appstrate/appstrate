@@ -10,7 +10,13 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
-import { MAX_REDIRECTS, preflightUrl } from "../../src/resolvers/api-call-engine.ts";
+import {
+  guardedFetch,
+  MAX_REDIRECTS,
+  preflightUrl,
+  redactCredentialValues,
+  scrubTransportError,
+} from "../../src/resolvers/api-call-engine.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 
 const publicResolver = async () => ["203.0.113.7"];
@@ -26,6 +32,56 @@ describe("redirect budget", () => {
     // Positive control: a budget of 0 would satisfy the equality above while
     // making both followers refuse every redirect.
     expect(MAX_REDIRECTS).toBeGreaterThan(1);
+  });
+});
+
+describe("redactCredentialValues", () => {
+  it("replaces the longest value first, so a value containing another is not half-leaked", () => {
+    const out = redactCredentialValues("x=abcdefgh", { a: "abc", b: "abcdefgh" });
+    expect(out).toBe("x={{b}}");
+    expect(out).not.toContain("defgh");
+  });
+});
+
+describe("scrubTransportError", () => {
+  const bunError = () =>
+    Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+      name: "ConnectionRefused",
+      path: "https://api.example.com/v1?key=SeCrEt-path-7",
+    });
+
+  it("rebuilds a templated call's error without the URL Bun keeps on `.path`", () => {
+    const out = scrubTransportError(bunError(), { api_key: "SeCrEt-path-7" }) as Error;
+    expect(out.name).toBe("ConnectionRefused");
+    expect(out.message).toContain("Unable to connect");
+    expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
+  });
+
+  it("returns an untemplated call's error untouched", () => {
+    const err = bunError();
+    expect(scrubTransportError(err, {})).toBe(err);
+  });
+});
+
+describe("redirect loop error", () => {
+  it("names the redacted host, never the substituted URL", async () => {
+    const secret = "SeCrEt-loop-42";
+    const url = `https://api.acme.com/v1?key=${secret}`;
+    const err = await guardedFetch({
+      url,
+      init: { method: "GET" },
+      fetchFn: (async (u: string) =>
+        new Response(null, { status: 302, headers: { location: u } })) as unknown as typeof fetch,
+      authorizedUris: ["https://api.acme.com/**"],
+      resolveHost: publicResolver,
+      credentialFields: { api_key: secret },
+    }).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(err?.message).toContain("Too many redirects");
+    expect(err!.message).toContain("api.acme.com");
+    expect(err!.message).not.toContain(secret);
   });
 });
 

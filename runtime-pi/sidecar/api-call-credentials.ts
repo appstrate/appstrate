@@ -14,8 +14,8 @@
  *   - the auth's decrypted `fields` are exposed under `credentials` so an
  *     agent can still `{{var}}`-substitute them into the URL / headers /
  *     body;
- *   - `authorizedUris` is the auth's verbatim allowlist (integrations
- *     always declare ≥1 URI, so `allowAllUris` is always false).
+ *   - `authorizedUris` and `allowAllUris` are the auth's verbatim URL
+ *     policy (webhooks, wordpress, woocommerce declare `allow_all_uris`).
  *
  * `refreshCredentials` delegates to the source's `refreshOnUnauthorized`
  * (per-authKey cooldown + in-flight dedup live in the source) and

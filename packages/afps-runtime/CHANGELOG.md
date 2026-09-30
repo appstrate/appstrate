@@ -27,6 +27,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@appstrate/runner-pi` uses it to expose `api_call` only for the tools the
   agent selected.
 
+### Added — credential-exfiltration guard
+
+Exported from `@appstrate/afps-runtime/resolvers` and shared by all three
+`api_call` paths (the sidecar, the local resolver, the platform credential
+proxy):
+
+- `credentialUrlPolicy({ templates, fields, allowAllUris, authorizedUris })`
+  and its result type `CredentialUrlPolicy` (`substitutesCredential`,
+  `allowAllUris`, `refuse`). A call whose `templates` reference a credential
+  field loses `allow_all_uris`; `refuse` is set when `authorizedUris` is empty.
+  `templates` must be exactly the strings substituted — the sidecar now passes
+  a JSON body's string leaves, not `JSON.stringify(body)`, whose escaping hid
+  `{{\tapi_key}}`.
+- `redactionFields(policy, fields)`: the credential values to scrub from an
+  echoed host — `fields` when the call templates a credential, `{}` otherwise.
+- `exfiltrationRefusal(integrationId)`: the one refusal message for
+  `policy.refuse`.
+- `redactCredentialHost(url, fields)`: the URL's host with credential values
+  (compared lowercased) replaced by their `{{field}}` placeholder.
+- `scrubTransportError(err, fields)`: `err` unchanged when `fields` is empty
+  (untemplated call); otherwise a same-`name` `Error` carrying only the message,
+  every URL cut to its redacted host (Bun keeps the full URL on `.path`).
+- `guardedFetch` and `fetchFollowingRedirectsCapturingCookies` take an optional
+  `credentialFields`, scrubbed from every host their refusals and logs name.
+  The "Too many redirects" error names the start URL's host instead of the
+  full URL.
+
+### Changed — local resolver
+
+- Runs the shared guard; its `RESOLVER_CREDENTIAL_EXFIL_BLOCKED` message is
+  `exfiltrationRefusal`'s.
+- A refused target's error `details.target` carries the template
+  (`https://{{api_key}}.x.com/`), never the substituted URL, and the host in
+  the message has credential values scrubbed.
+- A transport error is rethrown through `scrubTransportError`.
+
+### Fixed — own-property placeholders
+
+- `substituteVars` and the guard's placeholder lookup match own properties
+  only: `{{constructor}}` no longer resolves to `Object.prototype`'s.
+
 ### Changed — redirect follower takes a `CookieScope` (BREAKING)
 
 - `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in

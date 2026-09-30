@@ -10463,7 +10463,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
+                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10487,7 +10487,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
             200: {
                 headers: {
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
@@ -10518,7 +10518,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10562,7 +10562,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
+                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10591,7 +10591,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
             200: {
                 headers: {
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
@@ -10622,7 +10622,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10666,7 +10666,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
+                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10695,7 +10695,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
             200: {
                 headers: {
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
@@ -10726,7 +10726,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10770,7 +10770,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
+                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10794,7 +10794,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
             200: {
                 headers: {
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
@@ -10825,7 +10825,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10869,7 +10869,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
+                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10898,7 +10898,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
             200: {
                 headers: {
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
@@ -10929,7 +10929,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -161,6 +161,8 @@ interface PreflightOptions {
    * Production callers omit it (system resolver via `node:dns`).
    */
   resolveHost?: HostResolver;
+  /** Credential values scrubbed from the host a rejection echoes. */
+  credentialFields?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -186,7 +188,11 @@ interface PreflightOptions {
  * them injects a stub. Closing it means giving this module a real transport
  * seam first.
  */
-async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<PreflightResult> {
+async function refuseSsrfUrl(
+  url: string,
+  resolveHost?: HostResolver,
+  credentialFields: Readonly<Record<string, string>> = {},
+): Promise<PreflightResult> {
   const blocked: PreflightResult = {
     ok: false,
     reason: "ssrf",
@@ -205,7 +211,7 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
     return {
       ok: false,
       reason: "ssrf",
-      message: `Target host could not be resolved (${redactHost(url)})`,
+      message: `Target host could not be resolved (${redactCredentialHost(url, credentialFields)})`,
     };
   }
   return blocked;
@@ -226,7 +232,7 @@ async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<P
 export async function preflightUrl(url: string, opts: PreflightOptions): Promise<PreflightResult> {
   const authorizedUris = opts.authorizedUris ?? undefined;
   if (opts.allowAllUris) {
-    return refuseSsrfUrl(url, opts.resolveHost);
+    return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
   }
   if (authorizedUris && authorizedUris.length) {
     if (!matchesAuthorizedUri(url, authorizedUris)) {
@@ -237,12 +243,12 @@ export async function preflightUrl(url: string, opts: PreflightOptions): Promise
       };
     }
     if (!hostLiterallyAllowlisted(url, authorizedUris)) {
-      return refuseSsrfUrl(url, opts.resolveHost);
+      return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
     }
     return { ok: true };
   }
   // No authorized_uris and no allowAllUris — apply the SSRF safety net.
-  return refuseSsrfUrl(url, opts.resolveHost);
+  return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
 }
 
 /** Extract hostname for audit logs, never throwing. */
@@ -252,6 +258,60 @@ export function redactHost(url: string): string {
   } catch {
     return "<unparseable>";
   }
+}
+
+/** Each credential value, raw or percent-encoded, → `{{field}}`; longest first (overlaps). */
+export function redactCredentialValues(
+  value: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  const needles: Array<[string, string]> = [];
+  for (const [name, fieldValue] of Object.entries(fields)) {
+    if (fieldValue.length === 0) continue;
+    needles.push([fieldValue, name]);
+    const encoded = encodeURIComponent(fieldValue);
+    if (encoded !== fieldValue) needles.push([encoded, name]);
+  }
+  needles.sort((a, b) => b[0].length - a[0].length);
+  let out = value;
+  for (const [needle, name] of needles) out = out.split(needle).join(`{{${name}}}`);
+  return out;
+}
+
+/** {@link redactHost}, credential values scrubbed (lowercased, as WHATWG lowercases hosts). */
+export function redactCredentialHost(
+  url: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  const lowered = Object.fromEntries(
+    Object.entries(fields).map(([name, v]) => [name, v.toLowerCase()]),
+  );
+  return redactCredentialValues(redactHost(url), lowered);
+}
+
+/** Every URL cut to its redacted host, then credential values scrubbed. */
+function redactCredentialMessage(
+  message: string,
+  fields: Readonly<Record<string, string>>,
+): string {
+  return redactCredentialValues(
+    message.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactCredentialHost(url, fields)),
+    fields,
+  );
+}
+
+/**
+ * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
+ * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
+ */
+export function scrubTransportError(
+  err: unknown,
+  fields: Readonly<Record<string, string>>,
+): unknown {
+  if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
+  const clean = new Error(redactCredentialMessage(err.message, fields));
+  clean.name = err.name;
+  return clean;
 }
 
 /** Optional observability hook — callers pass a logger; defaults to no-op. */
@@ -286,6 +346,8 @@ interface RedirectFollowOptions {
   allowAllUris?: boolean;
   /** Optional logger for per-hop refusals. Defaults to a no-op. */
   logger?: RedirectLogger;
+  /** Credential values scrubbed from the hosts it logs (a relative hop keeps a templated host). */
+  credentialFields?: Readonly<Record<string, string>>;
   /**
    * DNS resolver for the per-hop SSRF rebind check — injectable for tests.
    * Production callers omit it (system resolver via `node:dns`).
@@ -345,6 +407,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
     allowAllUris,
   } = opts;
   const logger = opts.logger ?? NOOP_LOGGER;
+  const credentialFields = opts.credentialFields ?? {};
   const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
   // Uncomposed, so a cookie deleted mid-chain falls back to it instead of being re-sent.
   let base = new Headers(init.headers as RequestInit["headers"]).get("cookie");
@@ -392,7 +455,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF blocklist)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -408,7 +471,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (SSRF DNS-rebind)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("ssrf", nextUrl);
     }
@@ -416,7 +479,7 @@ export async function fetchFollowingRedirectsCapturingCookies(
       logger.warn("Redirect refused (not in authorizedUris)", {
         integrationId,
         hop,
-        host: redactHost(nextUrl),
+        host: redactCredentialHost(nextUrl, credentialFields),
       });
       throw new RedirectBlockedError("unauthorized", nextUrl);
     }
@@ -453,7 +516,9 @@ export async function fetchFollowingRedirectsCapturingCookies(
     currentUrl = nextUrl;
   }
 
-  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${url}`);
+  throw new Error(
+    `Too many redirects (>${MAX_REDIRECTS}) starting at ${redactCredentialHost(url, credentialFields)}`,
+  );
 }
 
 /**
@@ -489,6 +554,8 @@ interface GuardedFetchOptions {
   logger?: RedirectLogger;
   /** DNS resolver for the SSRF rebind preflight — injectable for tests. */
   resolveHost?: HostResolver;
+  /** Credential values scrubbed from the hosts preflight / redirect refusals echo. */
+  credentialFields?: Readonly<Record<string, string>>;
 }
 
 export class PreflightError extends Error {
@@ -509,6 +576,7 @@ export async function guardedFetch(
     authorizedUris: opts.authorizedUris,
     allowAllUris: opts.allowAllUris,
     resolveHost: opts.resolveHost,
+    credentialFields: opts.credentialFields,
   });
   if (!pre.ok) {
     throw new PreflightError(pre.reason, pre.message);
@@ -543,5 +611,6 @@ export async function guardedFetch(
     allowAllUris: opts.allowAllUris,
     ...(opts.resolveHost ? { resolveHost: opts.resolveHost } : {}),
     ...(opts.logger ? { logger: opts.logger } : {}),
+    ...(opts.credentialFields ? { credentialFields: opts.credentialFields } : {}),
   });
 }
