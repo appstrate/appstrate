@@ -1,10 +1,10 @@
 {
   "name": "@appstrate/webhooks",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Webhooks (API)",
-  "description": "Generic webhook provider — send HTTP requests to any URL with optional authentication",
+  "description": "Generic webhook provider — send HTTP requests to one configured URL with optional authentication",
   "keywords": ["integration", "automation"],
   "license": "Apache-2.0",
   "icon": "logos:webhooks",
@@ -15,15 +15,14 @@
   "auths": {
     "primary": {
       "type": "custom",
-      "authorized_uris": [],
-      "allow_all_uris": true,
+      "authorized_uris": ["{$credential.webhook_url}"],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "webhook_url": {
               "type": "string",
-              "description": "Target webhook URL"
+              "description": "Full target webhook URL with https:// and no query string — calls may reach this exact URL only"
             },
             "secret_header_name": {
               "type": "string",

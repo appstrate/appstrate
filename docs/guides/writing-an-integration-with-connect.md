@@ -683,16 +683,27 @@ open-redirect chains MUST NOT cross the allowlist (§8.6).
 A caller that templates a credential field (`{{field}}`) into the target, a header or
 a substituted body loses `allow_all_uris`: the target and every redirect hop must
 match `authorized_uris`, and the call is refused when there is none. The sidecar, the
-CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`). An
-integration whose endpoint is per-connection (`webhook_url`, `site_url`) therefore
-cannot template it into an `api_call` under this guard.
+CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`).
 
-What the guard covers is narrow. A templated credential cannot leave the declared
+An integration whose endpoint is per-connection declares it as a URL-form entry
+instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
+`"{$credential.webhook_url}"` for one exact URL. The placeholder comes first, alone,
+followed by nothing or a suffix starting with `/`; the field must be declared and
+`required`. Each connection's list is rendered from its value — an absolute
+`http(s)` URL without userinfo, query string, fragment or `*` — and a value that
+does not qualify drops the entry, so a connection left with no entry has every call
+refused.
+Prefer the exact form when the host is shared between tenants (`hooks.slack.com`).
+Rendered entries never exempt a host from the SSRF blocklist, and never share cookies.
+
+What the guard covers is narrow. A templated credential cannot leave
 `authorized_uris`, which bound host and path, not tenant: an allowlisted multi-tenant
 API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
 path. The server-injected credential header (`delivery.http`) is not templated: under
 `allow_all_uris`, an untemplated call sends it to any public host, by design. Set
-`allow_all_uris` only when that is acceptable for the credential.
+`allow_all_uris` only when that is acceptable for the credential; the system
+catalogue refuses it on any auth that injects through `delivery.http`
+(`bun run build:system-packages:check`).
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
 hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
@@ -719,10 +730,11 @@ connection field with `{$credential.<field>}`:
 
 The field must be declared and listed in `credentials.schema.required`, and the entry
 must start with `scheme://` with its placeholders in the host and port only (never in
-the path or query). Templates are refused on an `oauth2` auth, on an auth that declares
-`connect`, and on one exposing `api_call`. At run time a value containing anything but
-letters, digits, `.` and `-`, or made only of dots, drops the pattern, so a user cannot
-add a wildcard, a separator or another host.
+the path or query) — or be a URL-form entry (`{$credential.site_url}/**`, above).
+Templates are refused on an `oauth2` auth and on an auth that declares `connect`. At run
+time a host or port value containing anything but letters, digits, `.` and `-`, or made
+only of dots, drops the pattern, so a user cannot add a wildcard, a separator or another
+host.
 
 ---
 
