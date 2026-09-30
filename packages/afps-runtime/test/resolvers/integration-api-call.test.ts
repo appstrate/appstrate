@@ -1188,6 +1188,28 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     expect(hits).toEqual([]);
   });
 
+  it("refuses every target when the connection's URL does not render", async () => {
+    const { call, hits } = await toolFor(["{$credential.site_url}/**"], { site_url: "mysite.com" });
+    const err = await call("https://attacker.example/steal").catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "AUTHORIZED_URIS_EMPTY" });
+    expect((err as Error).message).toContain("does not render");
+    expect(hits).toEqual([]);
+  });
+
+  it("an off-list refusal names the declared template, never the rendered secret URL", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const { call, hits } = await toolFor(["{$credential.webhook_url}"], { webhook_url: hook });
+    const err = await call("https://example.com/").catch((e: unknown) => e);
+    expect(err).toMatchObject({
+      code: "AUTHORIZED_URIS_MISMATCH",
+      details: { allowlist: ["{$credential.webhook_url}"] },
+    });
+    expect(JSON.stringify({ ...(err as object), message: (err as Error).message })).not.toContain(
+      "SECRETTOKEN",
+    );
+    expect(hits).toEqual([]);
+  });
+
   it("runs the DNS rebind check on a rendered host", async () => {
     const { call, hits } = await toolFor(
       ["https://{$credential.host}/**"],

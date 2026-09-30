@@ -89,6 +89,7 @@ import {
   stripUserInfoAndFragment,
 } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
+import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
 
 // Re-exported from its new home in `http-call-core.ts`, where the
 // `authorized_uris` matcher itself needs it (see
@@ -230,6 +231,7 @@ async function refuseSsrfUrl(
  *     `declaredUris` additionally passes the SSRF safety-net — `https://**`
  *     would otherwise let the agent pick ANY host with zero floor,
  *     strictly weaker than allow_all.
+ *   - `declaredUris` rendering to nothing → refused ({@link allowlistUnrendered}).
  *   - neither → SSRF safety-net (no allowlist means "block internals").
  *
  * The per-hop equivalents live in {@link fetchFollowingRedirectsCapturingCookies}.
@@ -239,12 +241,22 @@ export async function preflightUrl(url: string, opts: PreflightOptions): Promise
   if (opts.allowAllUris) {
     return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
   }
+  if (
+    allowlistUnrendered({
+      declaredUris: opts.declaredUris,
+      authorizedUris: authorizedUris ?? [],
+      allowAllUris: false,
+    })
+  ) {
+    return { ok: false, reason: "not_authorized", message: UNRENDERED_ALLOWLIST_REFUSAL };
+  }
   if (authorizedUris && authorizedUris.length) {
     if (!matchesAuthorizedUri(url, authorizedUris)) {
+      // The declared entries: a rendered one may be a secret (an exact webhook URL).
       return {
         ok: false,
         reason: "not_authorized",
-        message: `URL not in authorized_uris allowlist. Allowed: ${authorizedUris.join(", ")}`,
+        message: `URL not in authorized_uris allowlist. Allowed: ${opts.declaredUris.join(", ")}`,
       };
     }
     if (!hostLiterallyAllowlisted(url, opts.declaredUris)) {

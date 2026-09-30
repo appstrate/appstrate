@@ -450,11 +450,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       const templates = [req.target];
       if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
-      enforceAuthorizedUris(
-        { name: meta.name, authorizedUris, allowAllUris: meta.allowAllUris },
-        req.target,
-        target,
-      );
+      enforceAuthorizedUris(meta, req.target, { target, authorizedUris });
 
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =

@@ -229,6 +229,35 @@ describe("preflightUrl — SSRF gate per branch", () => {
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
+  it("a declared list the connection does not render refuses every target (#1627)", async () => {
+    const resolveHost = mock(publicResolver);
+    const res = await preflightUrl("https://attacker.example/steal", {
+      authorizedUris: [],
+      declaredUris: ["{$credential.site_url}/**"],
+      resolveHost,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe("not_authorized");
+      expect(res.message).toContain("does not render");
+    }
+    expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("an off-allowlist refusal names the declared entries, never a rendered one", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const res = await preflightUrl("https://example.com/", {
+      authorizedUris: [hook],
+      declaredUris: ["{$credential.webhook_url}"],
+      resolveHost: publicResolver,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.message).toContain("{$credential.webhook_url}");
+      expect(res.message).not.toContain("SECRETTOKEN");
+    }
+  });
+
   it("IP-literal internal target is literal-blocked before DNS", async () => {
     const resolveHost = mock(publicResolver);
     const res = await preflightUrl("https://169.254.169.254/latest/meta-data", {

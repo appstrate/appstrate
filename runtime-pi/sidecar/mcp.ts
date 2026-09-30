@@ -64,6 +64,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+import { apiCallTargetJsonSchema } from "@appstrate/afps-runtime/resolvers";
 // The canonical api_call/api_upload naming. NOT copied: the reason this file
 // gave for copying it — "the sidecar bundle deliberately avoids the manifest
 // schema stack" — named `@appstrate/core/integration`, but the definition lives
@@ -658,10 +659,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     required: ["target"],
     properties: {
       target: {
-        type: "string",
-        format: "uri",
+        ...apiCallTargetJsonSchema,
         description:
-          "Absolute target URL. Must match an entry in the integration auth's `authorizedUris` " +
+          "Absolute target URL, or a `{{field}}` holding the connection's base URL followed by a " +
+          "path. Must match an entry in the integration auth's `authorizedUris` " +
           "(or be a non-private URL if the integration is `allowAllUris`).",
       },
       method: {

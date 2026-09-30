@@ -43,6 +43,7 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  allowlistUnrendered,
   cookieScope,
   credentialUrlPolicy,
   exfiltrationRefusal,
@@ -51,6 +52,7 @@ import {
   hostLiterallyAllowlisted,
   redactCredentialHost,
   RedirectBlockedError,
+  UNRENDERED_ALLOWLIST_REFUSAL,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -340,7 +342,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    the AFPS glob grammar lets `**` span the host (`https://**`),
   //    and a glob-matched host is agent-chosen, not operator-chosen —
   //    without the gate that branch would be strictly weaker than
-  //    allow_all.
+  //    allow_all. A declared allowlist rendering to nothing refuses every target.
   // 4a. Credential-exfiltration guard (docs/architecture/SIDECAR.md).
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
@@ -356,7 +358,19 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
 
-  if (policy.refuse) {
+  if (
+    allowlistUnrendered({
+      declaredUris: deps.declaredUris,
+      authorizedUris,
+      allowAllUris: policy.allowAllUris,
+    })
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Integration "${integrationId}": ${UNRENDERED_ALLOWLIST_REFUSAL}`,
+    };
+  } else if (policy.refuse) {
     return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
   } else if (policy.allowAllUris) {
     const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
@@ -366,7 +380,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       return {
         ok: false,
         status: 403,
-        error: `URL not authorized for integration "${integrationId}". Allowed: ${authorizedUris.join(", ")}`,
+        // The declared entries: a rendered one may be a secret (an exact webhook URL).
+        error: `URL not authorized for integration "${integrationId}". Allowed: ${deps.declaredUris.join(", ")}`,
       };
     }
     if (!hostLiterallyAllowlisted(resolvedUrl, deps.declaredUris)) {

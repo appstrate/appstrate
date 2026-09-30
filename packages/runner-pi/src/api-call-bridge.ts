@@ -18,6 +18,7 @@ import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,
+  apiCallTargetJsonSchema,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
   readIntegrationManifest,
@@ -134,7 +135,7 @@ function makeApiCallExtension(
         additionalProperties: false,
         required: ["target"],
         properties: {
-          target: { type: "string", format: "uri" },
+          target: apiCallTargetJsonSchema,
           method: {
             type: "string",
             enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
