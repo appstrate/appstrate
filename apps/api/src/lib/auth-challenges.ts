@@ -27,6 +27,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPublicAppOrigin } from "./public-url.ts";
+import { isRelayedResponse } from "./proxy-status.ts";
 
 interface AuthChallengeArgs {
   /** Canonical public app origin, e.g. `https://instance.example`. */
@@ -101,6 +102,8 @@ export function resolveAuthChallenge(path: string): AuthChallengeBuilder | undef
  * (403).
  *
  * Precedence:
+ *   0. A response a proxy relayed (`Proxy-Status: …; received-status=`) is the
+ *      upstream's: its 401 says nothing about the caller's platform credential.
  *   1. A handler-set `WWW-Authenticate` is left untouched.
  *   2. A registered (RFC 9728) challenge on a matching path prefix —
  *      e.g. the MCP resource-metadata challenge — wins next.
@@ -118,7 +121,7 @@ export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
     await next();
     const status = c.res.status;
     if (status !== 401 && status !== 403) return;
-    if (c.res.headers.has("WWW-Authenticate")) return;
+    if (c.res.headers.has("WWW-Authenticate") || isRelayedResponse(c.res.headers)) return;
     const build = resolveAuthChallenge(c.req.path);
     const generic = c.req.header("Authorization") ? 'Bearer error="invalid_token"' : "Bearer";
     const challenge =

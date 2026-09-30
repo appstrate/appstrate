@@ -21,6 +21,7 @@
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { proxyErrorStatus, relayedProxyStatus } from "../../lib/proxy-status.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -244,7 +245,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       reason: egress.reason,
       detail: egress.detail,
     });
-    throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
+    throw blockedUpstream(presetId);
   }
 
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
@@ -310,9 +311,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         reason: err.reason,
         host: err.host,
       });
-      throw invalidRequest(
-        `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
-      );
+      throw blockedUpstream(presetId);
     }
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
@@ -324,7 +323,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   // Forward + meter, weaving in the alias-swap (every branch) and the
   // response-cache write (non-streaming 2xx).
-  return forwardMeteredResponse(
+  const relayed = await forwardMeteredResponse(
     upstream,
     inputs.adapter,
     {
@@ -344,6 +343,19 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       maxFrameChars: usageFrameBound(maxBytes),
     },
   );
+  relayed.headers.append("Proxy-Status", relayedProxyStatus(upstream.status));
+  return relayed;
+}
+
+/** The model's upstream resolves into a blocked range: never names the host or the reason. */
+function blockedUpstream(presetId: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "invalid_request",
+    title: "Invalid Request",
+    detail: `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
+    headers: { "Proxy-Status": proxyErrorStatus("destination_ip_prohibited") },
+  });
 }
 
 async function resolvePresetForOrg(

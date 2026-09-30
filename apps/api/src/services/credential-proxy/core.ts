@@ -14,10 +14,11 @@
  * machinery behind the sidecar's `/internal/integration-credentials/*`
  * surface) via {@link resolveIntegrationProxyCredentials}.
  *
- * The in-container sidecar uses its own `executeApiCall` helper
- * (`runtime-pi/sidecar/credential-proxy.ts`) — same algorithm, same
- * shared primitives in `@appstrate/connect/proxy-primitives`, but
- * tailored to the per-run-token authorisation model.
+ * The in-container sidecar (`runtime-pi/sidecar/credential-proxy.ts`) and the
+ * CLI's local resolver source their credentials elsewhere; all three send the
+ * call through `fetchApiCall` (`@appstrate/afps-runtime`), so the allowlist +
+ * SSRF gate, the credential rule across redirects, the pinned transport and
+ * the deadline are one implementation.
  *
  * The module deliberately does NOT implement rate-limiting, authz, or
  * audit logging — those are the caller's responsibility. This function
@@ -28,22 +29,24 @@
 import {
   substituteVars,
   findUnresolvedPlaceholders,
-  matchesAuthorizedUriSpec,
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import {
+  assertAllowlistRendered,
   cookieScope,
   credentialUrlPolicy,
   exfiltrationRefusal,
+  fetchApiCall,
+  PreflightError,
   redactCredentialHost,
   redactionFields,
-  scrubTransportError,
+  RedirectBlockedError,
   type CookieJar,
+  type HostResolver,
 } from "@appstrate/afps-runtime/resolvers";
-import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
-import { SsrfBlockedError } from "@appstrate/core/ssrf";
+import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import {
   resolveIntegrationProxyCredentials,
@@ -51,14 +54,6 @@ import {
   IntegrationCredentialNotFoundError,
   type ProxyRunSelection,
 } from "./integration-resolver.ts";
-
-/**
- * Hard cap on the time we wait for the upstream provider. Mirrors the
- * sidecar's `OUTBOUND_TIMEOUT_MS` so CLI-driven calls and in-container
- * calls fail at the same boundary — no accidental hang on a slow
- * upstream.
- */
-const OUTBOUND_TIMEOUT_MS = 30_000;
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -140,18 +135,15 @@ interface ProxyCallInput {
    */
   maxResponseBytes?: number;
 
-  /**
-   * Override the transport (tests). When omitted, the call goes through the
-   * SSRF-guarded platform egress primitive ({@link egressGuardedFetch}) —
-   * per-hop DNS re-validation, manual redirects, connection pinned to the
-   * validated address. An injected fetch is still routed THROUGH that
-   * primitive (keeping the per-hop guard and redirect discipline) but owns
-   * the actual connection, so the address pin is disabled for it.
-   */
+  /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
+  /** DNS resolver of the SSRF gate (tests). */
+  resolveHost?: HostResolver;
 }
 
 interface ProxyCallResult {
+  /** The `integration_connections` row whose credential the call carried. */
+  connectionId: string;
   status: number;
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;
@@ -166,47 +158,59 @@ interface ProxyCallResult {
   authRefreshed?: boolean;
 }
 
-/**
- * Authorization failure for a proxy call. The route reflects `message` to the
- * caller (403 body) and logs it, so it MUST NEVER contain a substituted
- * credential value — build messages from the REDACTED target representation
- * only (see {@link redactCredentialHost}), never from the substituted one.
- */
-export class ProxyAuthorizationError extends Error {
-  readonly code = "UNAUTHORIZED_TARGET";
-  constructor(redactedMessage: string) {
-    super(redactedMessage);
-    this.name = "ProxyAuthorizationError";
-  }
-}
-
-export class ProxyCredentialError extends Error {
-  readonly code = "CREDENTIAL_NOT_FOUND";
-  constructor(message: string) {
-    super(message);
-    this.name = "ProxyCredentialError";
-  }
-}
+/** Stable problem `code` of each call the proxy refuses or cannot relay. */
+export type ProxyErrorCode =
+  | "unauthorized_target"
+  | "blocked_target"
+  | "credential_exfiltration_refused"
+  | "credential_not_found"
+  | "unresolved_placeholder"
+  | "upstream_unresolvable"
+  | "upstream_unreachable"
+  | "upstream_timeout";
 
 /**
- * Thrown when a caller-supplied template references a credential field
- * that does not exist in the resolved payload. Mapped to 400 by the
- * route handler — a misconfigured agent, not an infrastructure error.
+ * A call the proxy answered itself. The route reflects `message` to the caller and logs it, so
+ * it MUST NEVER contain a substituted credential value — build it from redacted hosts only.
  */
-export class ProxySubstitutionError extends Error {
-  readonly code = "UNRESOLVED_PLACEHOLDER";
-  constructor(message: string) {
+export class ProxyCallError extends Error {
+  constructor(
+    readonly code: ProxyErrorCode,
+    message: string,
+  ) {
     super(message);
-    this.name = "ProxySubstitutionError";
+    this.name = new.target.name;
   }
 }
 
-// `substituteVars` and `matchesAuthorizedUriSpec` are imported from
-// `@appstrate/connect` to keep the credential-proxy server path and the
-// in-container sidecar in lockstep. Any fix to placeholder substitution
-// or URL allowlist matching MUST be made in
-// `packages/connect/src/proxy-primitives.ts` so both entrypoints pick
-// it up. Local helpers removed in Phase A.4.
+/** The target, a redirect hop, or the credential policy refused the call (403). */
+export class ProxyAuthorizationError extends ProxyCallError {
+  constructor(
+    redactedMessage: string,
+    code:
+      | "unauthorized_target"
+      | "blocked_target"
+      | "credential_exfiltration_refused" = "unauthorized_target",
+  ) {
+    super(code, redactedMessage);
+  }
+}
+
+class ProxyCredentialError extends ProxyCallError {
+  constructor(message: string) {
+    super("credential_not_found", message);
+  }
+}
+
+/** A caller template names a credential field the connection lacks (400, a misconfigured agent). */
+export class ProxySubstitutionError extends ProxyCallError {
+  constructor(message: string) {
+    super("unresolved_placeholder", message);
+  }
+}
+
+/** The upstream could not be reached, resolved, or did not answer in time (502 / 504). */
+class ProxyUpstreamError extends ProxyCallError {}
 
 /**
  * Execute one authenticated proxy call. Credentials never leak into the
@@ -272,47 +276,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
   const redactFields = redactionFields(policy, fields);
   const redactedHost = redactCredentialHost(target, redactFields);
-  if (policy.refuse) {
-    throw new ProxyAuthorizationError(exfiltrationRefusal(input.integrationId));
+  try {
+    assertAllowlistRendered({ declaredUris, authorizedUris, allowAllUris: policy.allowAllUris });
+  } catch (err) {
+    throw toProxyCallError(err, input.integrationId, redactedHost);
   }
-
-  // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
-  // When `allow_all_uris` is set we still block private/internal network
-  // targets — mirror of the sidecar's SSRF safety net so the public
-  // route can't be turned into an SSRF primitive by flipping a single
-  // flag on an integration manifest. (Internal TS field names stay
-  // camelCase per the documented Zone 3 carve-out — see
-  // docs/CASING_CONVENTIONS.md — but user-facing error strings refer
-  // to the AFPS wire vocabulary.)
-  //
-  // ONE matcher for the whole chain: the same assertion runs on the initial
-  // target here AND — via `guardedFetch`'s `validateHop` — on EVERY redirect
-  // hop, so a 302 cannot walk the request off the allowlist (cross-host OR a
-  // same-host path escape like `/v1/me` → `/internal/dump`). The message is
-  // built from the REDACTED form only: a hop URL can itself embed an
-  // interpolated credential (vendor puts the token in a path, or echoes it
-  // in a Location header).
-  const assertHopAuthorized = (hopTarget: string): void => {
-    if (policy.allowAllUris) return;
-    const ok = authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
-    if (!ok) {
-      throw new ProxyAuthorizationError(
-        `Target host ${redactCredentialHost(hopTarget, redactFields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
-      );
-    }
-  };
-  assertHopAuthorized(target);
-
-  // Canonical egress guard: parse + scheme floor + allowlist-aware literal +
-  // DNS-rebind host gate, one decision shared with the other egress sites
-  // (mirrors the sidecar credential-proxy). Runs for BOTH the authorized_uris
-  // and allow_all_uris paths — a public hostname whose A/AAAA record points at a
-  // private/loopback/link-local address is refused even when it matched an
-  // authorized_uris pattern. Fail closed with the same authorization error.
-  const egress = await checkEgressUrl(target);
-  if (!egress.ok) {
+  if (policy.refuse) {
     throw new ProxyAuthorizationError(
-      `Target host ${redactedHost} resolves to a blocked network range`,
+      exfiltrationRefusal(input.integrationId),
+      "credential_exfiltration_refused",
     );
   }
 
@@ -320,12 +292,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // credential header server-side (mirror of the sidecar — single source
   // of truth in `@appstrate/connect/proxy-primitives`).
   //
-  // Every header whose value carries a decrypted credential is recorded in
-  // `sensitiveHeaderNames`, collected AT INJECTION TIME (not guessed from a
-  // static list): the server-injected credential header can be any vendor
-  // name (`X-Api-Key`, `X-Auth-Token`, …) and a caller template can put a
-  // `{{field}}` in any header. The set is handed to the transport so a
-  // cross-origin redirect strips these exactly like `Authorization`.
+  // Every header whose value carries a decrypted credential, collected AT INJECTION TIME: the
+  // injected header can be any vendor name and a caller template can put a `{{field}}` in any
+  // header. A redirect leaving the allowlist strips them like `Authorization`.
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
   for (const [k, template] of headerTemplates) {
@@ -392,53 +361,34 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     },
   };
 
-  const fetchInit: RequestInit & { duplex?: string } = {
-    method: input.method,
-    headers,
-    body,
-    signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-  };
+  const fetchInit: RequestInit & { duplex?: string } = { method: input.method, headers, body };
   // fetch spec: streaming body requires `duplex: "half"`.
   if (isStreamBody) {
     fetchInit.duplex = "half";
   }
 
-  // Single outbound transport: the SSRF-guarded platform egress primitive.
-  // Per-hop DNS re-validation + manual redirects + connection pinned to the
-  // validated address. The previous raw `fetch` here followed redirects
-  // blindly — an upstream 302 to an internal address bypassed the pre-flight
-  // check entirely.
-  //
-  // `validateHop` re-runs the authorized_uris assertion on EVERY hop
-  // (including hop 0), so a redirect that leaves the allowlist — cross-host
-  // OR same-host off-path — ABORTS the exchange instead of being followed.
-  // `sensitiveHeaders` extends the transport's cross-origin credential strip
-  // to the vendor-specific header names collected at injection time above.
-  //
-  // Every error leaving this transport is scrubbed: `SsrfBlockedError`
-  // embeds the blocked hop's hostname (derived from the SUBSTITUTED target
-  // on the first hop) and Bun's fetch errors embed the full request URL —
-  // both would leak interpolated credential values into the 403 body / logs.
-  // `ProxyAuthorizationError` (thrown by `validateHop` on an off-allowlist
-  // hop) is already redacted at construction and passes through unwrapped.
   const performFetch = async (fetchArgs: RequestInit): Promise<Response> => {
     try {
-      return await egressGuardedFetch(target, fetchArgs, {
-        ...(input.fetch ? { fetchImpl: input.fetch } : {}),
-        validateHop: (url) => assertHopAuthorized(url.toString()),
-        sensitiveHeaders: [...sensitiveHeaderNames],
+      const sent = await fetchApiCall({
+        url: target,
+        init: fetchArgs,
+        authorizedUris,
+        declaredUris,
+        allowAllUris: policy.allowAllUris,
+        credentialHeaders: [...sensitiveHeaderNames],
+        // The platform's network is not the manifest author's to declare: only the operator's
+        // `EGRESS_ALLOW_INTERNAL_HOSTS` skips the SSRF gate here.
+        trustDeclaredHosts: false,
+        trustedHost: isAllowedInternalIdpHost,
         ...(cookies ? { cookies } : {}),
+        integrationId: input.integrationId,
+        ...(input.fetch ? { fetchFn: input.fetch } : {}),
+        ...(input.resolveHost ? { resolveHost: input.resolveHost } : {}),
+        credentialFields: redactFields,
       });
+      return sent.response;
     } catch (err) {
-      if (err instanceof ProxyAuthorizationError) {
-        throw err; // validateHop abort — message already redacted
-      }
-      if (err instanceof SsrfBlockedError) {
-        throw new ProxyAuthorizationError(
-          `Target host ${redactedHost} was blocked by the egress guard (${err.reason})`,
-        );
-      }
-      throw scrubTransportError(err, redactFields);
+      throw toProxyCallError(err, input.integrationId, redactedHost);
     }
   };
 
@@ -518,6 +468,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       // a reconnect prompt.
     }
     return {
+      connectionId,
       status: res.status,
       headers: res.headers,
       body: res.body,
@@ -532,6 +483,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // forward it as a live getter — snapshotting it here (the old
     // `const { truncated } = …`) always captured the initial `false`.
     return {
+      connectionId,
       status: res.status,
       headers: res.headers,
       body: capped.body,
@@ -542,10 +494,36 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   return {
+    connectionId,
     status: res.status,
     headers: res.headers,
     body: res.body,
   };
+}
+
+/** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
+function toProxyCallError(err: unknown, integrationId: string, redactedHost: string): unknown {
+  if (err instanceof PreflightError) {
+    if (err.reason === "unresolvable") {
+      return new ProxyUpstreamError("upstream_unresolvable", err.message);
+    }
+    return new ProxyAuthorizationError(
+      `Integration ${integrationId}: ${err.message} (host ${redactedHost})`,
+      err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
+    );
+  }
+  if (err instanceof RedirectBlockedError) {
+    return new ProxyAuthorizationError(
+      `Integration ${integrationId}: ${err.message}`,
+      err.reason === "ssrf" ? "blocked_target" : "unauthorized_target",
+    );
+  }
+  if (err instanceof Error) {
+    return err.name === "TimeoutError"
+      ? new ProxyUpstreamError("upstream_timeout", `${redactedHost} did not answer in time`)
+      : new ProxyUpstreamError("upstream_unreachable", `${redactedHost} could not be reached`);
+  }
+  return err;
 }
 
 /**

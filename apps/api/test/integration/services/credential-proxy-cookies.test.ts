@@ -268,7 +268,8 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       "POST https://1.1.1.1/cart",
       "POST https://8.8.8.8/landing",
     ]);
-    expect(upstream.seen[1]?.cookie).toBeNull(); // cross-origin hop: credential stripped
+    // An origin the allowlist names keeps the credential cookie, as on the sidecar (#1641).
+    expect(cookiePairs(upstream.seen[1]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
     expect(cookiePairs(upstream.seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
     expect(cookiePairs(upstream.seen[3]?.cookie)).toEqual(["PHPSESSID=planted"]);
   });

@@ -39,10 +39,12 @@ import {
   seedPublishedVersion,
 } from "../../helpers/seed.ts";
 import {
+  auditEvents,
   spacePackages,
   integrationConnections,
   integrationOrgDefaults,
 } from "@appstrate/db/schema";
+import { drainAudits } from "../../../src/services/audit.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -451,8 +453,31 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       },
     });
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized_target");
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; error=http_request_denied");
     // Allowlist gate fires before the upstream fetch.
     expect(upstreamCalls).toBe(0);
+  });
+
+  it("relays an upstream 401 as the upstream's: Proxy-Status, no platform challenge", async () => {
+    await seedIntegrationWithConnection(ctx);
+    mockUpstream(async () => new Response('{"error":"expired"}', { status: 401 }));
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; received-status=401");
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
+    expect(await res.text()).toBe('{"error":"expired"}');
   });
 
   it("maps several own connections and no X-Connection-Id to 409 must_choose_connection", async () => {
@@ -746,6 +771,8 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         [INTEGRATION_ID]: connectionIds.map((connectionId) => ({
           connectionId,
           source: "member_pin",
+          label: connectionId,
+          accountId: connectionId,
         })),
       },
     });
@@ -796,6 +823,32 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     });
   });
   afterEach(() => restoreFetch());
+
+  it("audits a colleague's shared connection once per session, never the caller's own", async () => {
+    const runId = await runBinding([shared]);
+    const session = uuidV4();
+    expect((await call({ "X-Run-Id": runId, "X-Session-Id": session })).status).toBe(200);
+    expect((await call({ "X-Run-Id": runId, "X-Session-Id": session })).status).toBe(200);
+    expect((await call({ "X-Connection-Id": own1 })).status).toBe(200);
+    await drainAudits(5_000);
+
+    const rows = await db
+      .select({ resourceId: auditEvents.resourceId, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.connection.proxied"));
+    expect(rows).toEqual([
+      {
+        resourceId: shared,
+        after: {
+          packageId: INTEGRATION_ID,
+          sessionId: session,
+          runId,
+          ownerType: "user",
+          ownerId: colleagueId,
+        },
+      },
+    ]);
+  });
 
   it("uses the run's single bound connection — even a colleague's shared one — without naming it", async () => {
     const runId = await runBinding([shared]);
@@ -919,7 +972,11 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
       packageId: AGENT_ID,
       userId: ctx.user.id,
       status: "running",
-      resolvedConnections: { [INTEGRATION_ID]: [{ connectionId: own1, source: "member_pin" }] },
+      resolvedConnections: {
+        [INTEGRATION_ID]: [
+          { connectionId: own1, source: "member_pin", label: "own1", accountId: "own1" },
+        ],
+      },
     });
     const res = await call({ "X-Run-Id": run.id });
     expect(res.status).toBe(404);

@@ -9,6 +9,11 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import { Hono } from "hono";
 import type { AppEnv } from "../../src/types/index.ts";
 import {
+  proxyErrorStatus,
+  proxyStatusMarker,
+  relayedProxyStatus,
+} from "../../src/lib/proxy-status.ts";
+import {
   registerAuthChallenge,
   resolveAuthChallenge,
   resetAuthChallenges,
@@ -144,6 +149,33 @@ describe("auth-challenge responder", () => {
       headers: { Authorization: "Bearer apst_invalid" },
     });
     expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
+  });
+
+  it("leaves a relayed upstream 401 without a platform challenge", async () => {
+    const app = new Hono<AppEnv>();
+    app.use("*", authChallengeResponder());
+    app.use("*", proxyStatusMarker());
+    app.all("*", (c) => {
+      c.header("Proxy-Status", relayedProxyStatus(401));
+      return c.body("upstream says no", 401);
+    });
+    const res = await app.request("http://inst.test/api/credential-proxy/proxy", {
+      headers: { Authorization: "Bearer apst_valid" },
+    });
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; received-status=401");
+  });
+
+  it("still challenges a 401 the proxy produced itself", async () => {
+    const app = new Hono<AppEnv>();
+    app.use("*", authChallengeResponder());
+    app.use("*", proxyStatusMarker());
+    app.all("*", (c) => c.body("no", 401));
+    const res = await app.request("http://inst.test/api/credential-proxy/proxy", {
+      headers: { Authorization: "Bearer apst_invalid" },
+    });
+    expect(res.headers.get("WWW-Authenticate")).toBe('Bearer error="invalid_token"');
+    expect(res.headers.get("Proxy-Status")).toBe(proxyErrorStatus("proxy_internal_response"));
   });
 
   it("does not apply the generic fallback to a 403 on an unmatched path", async () => {

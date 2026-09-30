@@ -52,6 +52,8 @@
  *     users) before the upstream call — see `requireAttributableRun`.
  *   - Audit log on every call (authMethod, principalId, preset, status,
  *     duration).
+ *   - RFC 9209 `Proxy-Status`: `received-status` on a relayed upstream
+ *     response, `error` on the proxy's own (`lib/proxy-status.ts`).
  */
 
 import { Hono } from "hono";
@@ -62,6 +64,7 @@ import { bodyLimit } from "../middleware/body-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { proxyStatusMarker } from "../lib/proxy-status.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
@@ -95,6 +98,7 @@ const PROXIED_API_SHAPES = Object.keys(ADAPTERS) as ProxiedApiShape[];
 export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getLlmProxyLimits();
+  router.use("/*", proxyStatusMarker());
 
   for (const apiShape of PROXIED_API_SHAPES) {
     // Past `llm-proxy:call` the RUN named by `X-Run-Id`
@@ -124,6 +128,7 @@ export function createLlmProxyRouter() {
 export function createRunLlmProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getLlmProxyLimits();
+  router.use("/*", proxyStatusMarker());
   router.use("/*", bodyLimit(limits.max_request_bytes));
 
   for (const apiShape of PROXIED_API_SHAPES) {

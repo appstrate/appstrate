@@ -556,8 +556,7 @@ describe("POST /mcp — api_call", () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toBe('{"messages":[]}');
     const init = (fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1];
-    const headers = init.headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer integ-tok-1");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer integ-tok-1");
   });
 
   it("enforces the integration authorizedUris allowlist", async () => {
@@ -571,7 +570,7 @@ describe("POST /mcp — api_call", () => {
     });
     const result = res.json.result as { content: Array<{ text: string }>; isError: boolean };
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("not authorized");
+    expect(result.content[0]!.text).toContain("not in authorized_uris allowlist");
   });
 
   it("registers no api_call tool when no integration opts in", async () => {

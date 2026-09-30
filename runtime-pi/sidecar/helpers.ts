@@ -18,7 +18,11 @@ export type { HostResolver } from "@appstrate/core/ssrf";
 
 // Imported (not just re-exported) because `readPositiveByteEnv` below defaults
 // its `ceiling` parameter to it. See the re-export note further down.
-import { ABSOLUTE_BODY_CEILING, type EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import {
+  ABSOLUTE_BODY_CEILING,
+  API_CALL_TIMEOUT_MS,
+  type EgressPolicy,
+} from "@appstrate/afps-runtime/resolvers";
 import type { Socket } from "node:net";
 // Compiled default for the inter-chunk idle bound, shared with the platform LLM
 // gateway. Imported (not just re-exported) because the env override below falls
@@ -47,7 +51,8 @@ export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
 // something like MAX_INLINE_RESPONSE_BYTES would end the ambiguity, but it
 // lives in packages/afps-runtime.
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
-export const OUTBOUND_TIMEOUT_MS = 30_000;
+/** Every other sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
+export const OUTBOUND_TIMEOUT_MS = API_CALL_TIMEOUT_MS;
 const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**

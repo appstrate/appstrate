@@ -93,20 +93,21 @@ export {
   type SerializeFetchResponseContext,
 } from "./http-call-core.ts";
 
-// Shared, credential-source-agnostic outbound-HTTP engine: authorized_uris
-// + SSRF preflight and the manual redirect-follower (per-hop SSRF + per-hop
-// allowlist + hybrid credential-strip + cookie capture). Consumed by the
-// sidecar's `executeApiCall` (platform path) AND the local CLI resolver.
+// The outbound half of every api_call path (platform proxy, sidecar, local CLI):
+// allowlist + SSRF gate per hop, pinned transport, credential rule across
+// redirects, cookie capture, deadline.
 export {
-  MAX_REDIRECTS,
+  API_CALL_TIMEOUT_MS,
+  assertAllowlistRendered,
+  fetchApiCall,
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
   redactHost,
   redactCredentialHost,
   scrubTransportError,
-  fetchFollowingRedirectsCapturingCookies,
-  guardedFetch,
+  PreflightError,
   RedirectBlockedError,
+  type HostResolver,
 } from "./api-call-engine.ts";
 
 // Sticky-cookie jar shared by both credential proxies and the redirect follower.

@@ -26,7 +26,8 @@
  * - Strips credential headers on any cross-origin hop: the builtin
  *   `authorization`/`cookie`/`proxy-authorization` set UNIONED with the
  *   caller's `sensitiveHeaders` (vendor-specific names like `X-Api-Key` that
- *   the primitive cannot know about).
+ *   the primitive cannot know about) — unless the caller's `forwardCredentials`
+ *   authorizes that hop (an `authorized_uris` allowlist spanning several hosts).
  * - Rejects non-http(s) schemes and strips userinfo/fragment from redirect
  *   targets (defeats `https://user:pass@…` credential-leak + fragment tricks).
  * - CONNECTS TO THE VALIDATED ADDRESS: under Bun with the global `fetch`, each
@@ -58,10 +59,7 @@ import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
  * Redirect hops any guarded chain will chase before giving up — the ONE budget
  * in the codebase, and the default of both followers.
  *
- * It used to be two unrelated numbers: `maxRedirects ?? 5` here and a hard
- * `MAX_REDIRECTS = 10` in `@appstrate/afps-runtime`'s credential-proxy
- * follower, neither aware of the other. 10 is the surviving value because it is
- * the one with a reason: the credential proxy walks multi-step OAuth/CAS dances
+ * 10 is the value because the api_call engine walks multi-step OAuth/CAS dances
  * whose session cookie lands on an intermediate 302 (#473), and five hops does
  * not always reach the end of one. Nothing is weakened by the raise — every hop
  * is independently DNS-checked, allowlist-checked and credential-stripped, so
@@ -83,10 +81,9 @@ import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
  *
  *   on this default, and all of them multi-step credential exchanges — the
  *   exact population #473 is about
- *     - `apps/api/src/services/credential-proxy/core.ts` — the out-of-container
- *       twin of the `@appstrate/afps-runtime` follower this value came from;
- *       same vendor auth dances, and it re-runs the caller's `validateHop`
- *       allowlist assertion on every hop.
+ *     - `@appstrate/afps-runtime`'s `fetchApiCall` — every `api_call` path
+ *       (platform credential proxy, sidecar, local resolver); it re-runs the
+ *       `authorized_uris` assertion (`validateHop`) on every hop.
  *     - `packages/connect/src/oauth-egress.ts` — OAuth discovery, token
  *       exchange and userinfo.
  *     - `apps/api/src/services/integration-connections.ts` — OAuth
@@ -161,14 +158,30 @@ export interface GuardedFetchOptions {
   /**
    * Per-hop cookie state (afps-runtime's `CookieScope` fits): `capture` gets each hop's
    * Set-Cookie; `header` composes each hop's Cookie over `base` (the caller's Cookie header,
-   * null once a cross-origin hop stripped it). Both receive the logical URL, never the pinned one.
+   * null once a cross-origin hop stripped credentials). Both receive the logical URL, never the
+   * pinned one.
    */
   cookies?: {
     header(url: string, base: string | null): string | undefined;
     capture(url: string, setCookieHeaders: string[]): void;
   };
+  /**
+   * A cross-origin hop for which this returns true keeps the credential headers, the caller's
+   * Cookie and the body: the caller's own allowlist authorized that origin (multi-host APIs such
+   * as Dropbox `api.` ⇄ `content.`). Default: every origin change strips them.
+   */
+  forwardCredentials?: (url: URL) => boolean;
+  /** `false` returns the first response even when it is a redirect (a single-use body). Default true. */
+  followRedirects?: boolean;
   /** Structured logger for blocked/hop events. Values are never secrets. */
   logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void };
+}
+
+/** {@link guardedFetchChain}'s result: the terminal response, its logical URL, redirects followed. */
+export interface GuardedFetchResult {
+  response: Response;
+  finalUrl: string;
+  hops: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -188,17 +201,20 @@ const runtimeSupportsFetchTls = (globalThis as { Bun?: unknown }).Bun !== undefi
 export class SsrfBlockedError extends Error {
   readonly reason: string;
   readonly host: string;
-  constructor(host: string, reason: string) {
+  /** Hop of the chain that was refused (0 = the initial URL). */
+  readonly hop: number;
+  constructor(host: string, reason: string, hop = 0) {
     super(`SSRF guard blocked outbound request to host "${host}" (${reason})`);
     this.name = "SsrfBlockedError";
     this.host = host;
     this.reason = reason;
+    this.hop = hop;
   }
 }
 
-function assertHttp(url: URL): void {
+function assertHttp(url: URL, hop: number): void {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new SsrfBlockedError(url.hostname || url.protocol, "non-http-scheme");
+    throw new SsrfBlockedError(url.hostname || url.protocol, "non-http-scheme", hop);
   }
 }
 
@@ -215,7 +231,11 @@ function stripUserInfoAndFragment(url: URL): URL {
  * or `undefined` when there is nothing to pin (operator-trusted host).
  * Throws {@link SsrfBlockedError} on a blocked host (fail closed).
  */
-async function checkHost(url: URL, opts?: GuardedFetchOptions): Promise<string | undefined> {
+async function checkHost(
+  url: URL,
+  hop: number,
+  opts?: GuardedFetchOptions,
+): Promise<string | undefined> {
   if (opts?.allowHost?.(url.hostname)) return undefined; // operator-trusted host — skip blocklist
   const check = await resolveAndCheckHost(url.hostname, { resolve: opts?.resolve });
   if (check.blocked) {
@@ -223,7 +243,7 @@ async function checkHost(url: URL, opts?: GuardedFetchOptions): Promise<string |
       host: url.hostname,
       reason: check.reason,
     });
-    throw new SsrfBlockedError(url.hostname, check.reason);
+    throw new SsrfBlockedError(url.hostname, check.reason, hop);
   }
   return check.pinnedAddress;
 }
@@ -240,14 +260,26 @@ export async function guardedFetch(
   init?: RequestInit,
   opts?: GuardedFetchOptions,
 ): Promise<Response> {
+  return (await guardedFetchChain(input, init, opts)).response;
+}
+
+/**
+ * {@link guardedFetch} that also reports where the chain ended: `finalUrl` is the LOGICAL URL of
+ * the terminal hop (never the pinned address), `hops` the redirects followed.
+ */
+export async function guardedFetchChain(
+  input: string | URL,
+  init?: RequestInit,
+  opts?: GuardedFetchOptions,
+): Promise<GuardedFetchResult> {
   const maxRedirects = opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
 
   let current = stripUserInfoAndFragment(new URL(typeof input === "string" ? input : input.href));
-  assertHttp(current);
+  assertHttp(current, 0);
   // Hop 0 runs the caller's reachability contract too — the initial URL is
   // just the first hop of the chain, not a privileged one.
   opts?.validateHop?.(current, 0);
-  let pinnedAddress = await checkHost(current, opts);
+  let pinnedAddress = await checkHost(current, 0, opts);
 
   // Apply a default deadline when the caller supplied no signal of its own, so
   // a single hostile hop cannot hang forever. A caller-provided signal takes
@@ -337,7 +369,7 @@ export async function guardedFetch(
       }
 
       const doFetch = opts?.fetchImpl ?? fetch;
-      const res = await doFetch(requestUrl, {
+      const res = await doFetch(requestUrl.href, {
         ...init,
         method,
         body,
@@ -350,23 +382,25 @@ export async function guardedFetch(
 
       // `fetch` reports opaqueredirect / 3xx: follow manually so each hop is guarded.
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
-      if (!isRedirect) return res;
+      if (!isRedirect || opts?.followRedirects === false) {
+        return { response: res, finalUrl: current.href, hops: hop };
+      }
 
       if (hop === maxRedirects) {
-        throw new SsrfBlockedError(current.hostname, "too-many-redirects");
+        throw new SsrfBlockedError(current.hostname, "too-many-redirects", hop);
       }
 
       const location = res.headers.get("location")!;
       const next = stripUserInfoAndFragment(new URL(location, current));
-      assertHttp(next);
+      assertHttp(next, hop + 1);
       // Caller's reachability contract FIRST (cheap, sync, fail-closed): an
       // off-contract hop aborts the exchange before we even resolve it. A
       // same-origin redirect can walk off an allowlisted PATH while keeping
       // every header and the body — only the caller's predicate can see that.
       opts?.validateHop?.(next, hop + 1);
-      const nextPin = await checkHost(next, opts);
+      const nextPin = await checkHost(next, hop + 1, opts);
 
-      if (next.origin !== current.origin) {
+      if (next.origin !== current.origin && opts?.forwardCredentials?.(next) !== true) {
         for (const h of sensitiveHeaderNames) headers.delete(h);
         cookieBase = null;
         // A 307/308 preserves method+body by spec, but re-sending a
@@ -421,15 +455,8 @@ export async function guardedFetch(
       // A `ReadableStream` body is single-use: hop 0 consumed it, so any hop
       // that PRESERVES the body is about to re-send a locked stream. The
       // runtime answers that with an opaque `TypeError: body already used`
-      // from inside `fetch`, naming neither the redirect nor the stream.
-      //
-      // Callers CAN reach this: `apps/api/src/services/credential-proxy/core.ts`
-      // forwards its caller's request body straight through, sets
-      // `duplex: "half"` for the stream case, and takes the default redirect
-      // budget. It has always been reachable via 307/308 (which preserve
-      // method + body unconditionally); making 301/302 conformant for
-      // PUT/PATCH/DELETE widened WHICH statuses land on it, so it is named
-      // here rather than left to surface as a transport-level type error.
+      // from inside `fetch`, naming neither the redirect nor the stream (a
+      // caller that streams passes `followRedirects: false`).
       //
       // Fail loudly instead of dropping the body: a bodyless PUT the caller
       // never made, sent silently, is the worse outcome — that is the exact
@@ -454,5 +481,5 @@ export async function guardedFetch(
   }
 
   // Unreachable — loop either returns or throws.
-  throw new SsrfBlockedError(current.hostname, "redirect-loop");
+  throw new SsrfBlockedError(current.hostname, "redirect-loop", maxRedirects);
 }

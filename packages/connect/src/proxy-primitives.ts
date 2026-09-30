@@ -268,7 +268,7 @@ export function stripUpstreamResponseHeaders(src: Headers, extraSkip?: Set<strin
 /**
  * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
  * provides a hook for entrypoint-specific control headers (e.g.
- * `x-integration`, `x-target`) that must also be kept out of the upstream
+ * `x-integration-id`, `x-target`) that must also be kept out of the upstream
  * request.
  *
  * Preserves the original header casing from the caller.

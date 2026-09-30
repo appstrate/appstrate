@@ -336,7 +336,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
     // A matching guess reads exactly like a non-matching one.
     for (const guess of ["alice", "jdoe"]) {
       const message = await expectRefused(call(up.fetchImpl, `https://${guess}.example.invalid/`));
-      expect(message).toContain(`host ${guess}.example.invalid `);
+      expect(message).toContain(`(host ${guess}.example.invalid)`);
     }
     expect(up.hits).toEqual([]);
   });

@@ -72,7 +72,7 @@ describe("executeApiCall — structured failures", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(400);
-      expect(result.error).toMatch(/X-Integration/);
+      expect(result.error).toMatch(/Invalid integration id/);
     }
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
@@ -108,7 +108,7 @@ describe("executeApiCall — structured failures", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(403);
-      expect(result.error).toMatch(/not authorized/);
+      expect(result.error).toMatch(/not in authorized_uris allowlist/);
     }
   });
 });
@@ -222,9 +222,9 @@ describe("executeApiCall — happy path", () => {
     expect(jarCookies(deps, "gmail", "https://api.example.com/")).toBe("sess=abc");
     // Verify Authorization was server-side injected.
     const callArgs = fetchFn.mock.calls[0]!;
-    const init = callArgs[1] as RequestInit & { headers: Record<string, string> };
-    expect(init.headers["Authorization"]).toBe("Bearer tok-123");
-    expect(init.headers["X-Custom"]).toBe("x");
+    const sent = new Headers((callArgs[1] as RequestInit).headers);
+    expect(sent.get("Authorization")).toBe("Bearer tok-123");
+    expect(sent.get("X-Custom")).toBe("x");
   });
 });
 
@@ -244,8 +244,10 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
   }
 
   function sentAuthHeader(fetchFn: ReturnType<typeof mock>): string | undefined {
-    const init = fetchFn.mock.calls[0]![1] as RequestInit & { headers: Record<string, string> };
-    return init.headers["Authorization"];
+    return (
+      new Headers((fetchFn.mock.calls[0]![1] as RequestInit).headers).get("Authorization") ??
+      undefined
+    );
   }
 
   // These three values are exactly what the old resolved-value regex
@@ -341,10 +343,8 @@ describe("executeApiCall — 401 retry path", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.response.status).toBe(401);
-    const sent = fetchFn.mock.calls[0]![1]! as RequestInit & {
-      headers: Record<string, string>;
-    };
-    expect(sent.headers.authorization).toBe("Bearer caller");
+    const sent = new Headers((fetchFn.mock.calls[0]![1] as RequestInit).headers);
+    expect(sent.get("authorization")).toBe("Bearer caller");
     expect(refreshCredentials).not.toHaveBeenCalled();
     expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(false);
   });
@@ -1383,17 +1383,12 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/b");
   });
 
-  it("returns response.url on the streaming path", async () => {
-    // The streaming path uses `redirect: "manual"`; when the upstream
-    // responds without a redirect, `Response.url` carries the resolved
-    // URL. The sidecar must surface it as finalUrl.
-    const fetchFn = mock(async (_url: string | URL, _init?: RequestInit) => {
-      const res = new Response("uploaded", { status: 200 });
-      Object.defineProperty(res, "url", {
-        value: "https://api.example.com/uploaded?key=final",
-      });
-      return res;
-    });
+  it("returns the target itself on the streaming path (its redirect is never followed)", async () => {
+    // `Response.url` is not read: with the address pin it names the IP, not the host.
+    const fetchFn = mock(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "https://api.example.com/b" } }),
+    );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     const stream = new ReadableStream({
       start(c) {
@@ -1414,8 +1409,10 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.finalUrl).toBe("https://api.example.com/uploaded?key=final");
+      expect(result.response.status).toBe(302);
+      expect(result.finalUrl).toBe("https://api.example.com/upload");
     }
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("returns the post-refresh URL after a 401 retry that followed redirects", async () => {
@@ -1651,10 +1648,10 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
 
   /** Allowlisted host answers `status → location`; every other host 200s. */
   function redirectingFetch(status: number, location: string) {
-    const calls: { url: string; init: RequestInit & { headers: Record<string, string> } }[] = [];
+    const calls: { url: string; headers: Headers; body: unknown }[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
       const u = typeof url === "string" ? url : url.toString();
-      calls.push({ url: u, init: init as RequestInit & { headers: Record<string, string> } });
+      calls.push({ url: u, headers: new Headers(init?.headers), body: init?.body });
       if (u.startsWith("https://api.example.com")) {
         return new Response(null, { status, headers: { location } });
       }
@@ -1683,7 +1680,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
       expect(result.error).toContain("evil.example.net");
     }
     expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
-    expect(calls[0]!.init.headers["X-Key"]).toBe("SECRET");
+    expect(calls[0]!.headers.get("X-Key")).toBe("SECRET");
   });
 
   it("refuses a 307 off the allowlist when the substituted body carries a credential", async () => {
@@ -1711,7 +1708,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
       expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
     }
     expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
-    expect(calls[0]!.init.body).toBe('{"key":"SECRET"}');
+    expect(calls[0]!.body).toBe('{"key":"SECRET"}');
   });
 
   it("still follows allow_all redirects to a public host when no credential is templated", async () => {
@@ -1810,7 +1807,7 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.status).toBe(403);
-      expect(result.error).toMatch(/URL not authorized/);
+      expect(result.error).toMatch(/URL not in authorized_uris allowlist/);
       expect(result.error).not.toContain("hooks.example.com");
     }
     expect(calls).toHaveLength(0);

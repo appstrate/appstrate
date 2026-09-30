@@ -25,8 +25,12 @@
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
  *     or `user:<id>`) — cookie jars can never be shared between a bearer
  *     JWT and an API key, nor between two API keys of the same org.
- *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
- *     endUserId, integrationId, target, status)
+ *   - Log line on every call (requestId, authMethod, apiKeyId, userId,
+ *     endUserId, integrationId, connectionId, target, status); an audit row
+ *     on the first use per session of a connection the caller does not own
+ *     (`services/credential-proxy/connection-audit.ts`)
+ *   - RFC 9209 `Proxy-Status` on every response: `received-status` on a
+ *     relayed upstream response, `error` on the proxy's own
  *   - URL allowlist enforced via the integration manifest
  *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
  *   - Upstream `Set-Cookie` never relayed to the caller
@@ -57,16 +61,22 @@ import {
   ApiError,
   invalidRequest,
   forbidden,
-  notFound,
   internalError,
   payloadTooLarge,
 } from "../lib/errors.ts";
 import {
+  proxyErrorStatus,
+  proxyStatusMarker,
+  relayedProxyStatus,
+  type ProxyErrorType,
+} from "../lib/proxy-status.ts";
+import {
   proxyCall,
-  ProxyAuthorizationError,
-  ProxyCredentialError,
-  ProxySubstitutionError,
+  ProxyCallError,
+  type ProxyErrorCode,
 } from "../services/credential-proxy/core.ts";
+import { auditForeignConnectionUse } from "../services/credential-proxy/connection-audit.ts";
+import { trackAudit } from "../services/audit.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import { runBoundSelection } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -79,6 +89,7 @@ export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getCredentialProxyLimits();
 
+  router.use("/*", proxyStatusMarker());
   router.use("/*", requireSpaceContext());
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
@@ -278,6 +289,7 @@ export function createCredentialProxyRouter() {
           endUserId: endUser?.id,
           spaceId,
           integrationId,
+          connectionId: result.connectionId,
           method,
           target,
           status: result.status,
@@ -285,12 +297,25 @@ export function createCredentialProxyRouter() {
           durationMs,
         });
 
+        // Off the response path; `drainAudits` flushes it at shutdown.
+        void trackAudit(
+          auditForeignConnectionUse(c, {
+            actor,
+            connectionId: result.connectionId,
+            integrationId,
+            sessionId,
+            runId,
+            sessionTtlSeconds: limits.session_ttl_seconds,
+          }),
+        );
+
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
         // plus the route-specific set (transport hints, Set-Cookie).
         const responseHeaders = stripUpstreamResponseHeaders(
           result.headers,
           CALLER_RESPONSE_SKIP_HEADERS,
         );
+        responseHeaders.append("Proxy-Status", relayedProxyStatus(result.status));
         // One URL serves every target and connection (they ride in headers), so an upstream
         // cache policy must not let a client replay one connection's response for another.
         responseHeaders.set("Cache-Control", "no-store");
@@ -344,22 +369,26 @@ export function createCredentialProxyRouter() {
         // active). Surface it with its intended status instead of masking
         // every non-Proxy* error as a 500 below.
         if (err instanceof ApiError) throw err;
-        if (err instanceof ProxyAuthorizationError) {
-          logger.warn("credential-proxy: target not in allowlist", {
-            authMethod,
-            apiKeyId,
-            userId,
-            spaceId,
-            integrationId,
-            target,
+        if (err instanceof ProxyCallError) {
+          const refusal = PROXY_ERRORS[err.code];
+          if (refusal.status === 403) {
+            logger.warn("credential-proxy: call refused", {
+              code: err.code,
+              authMethod,
+              apiKeyId,
+              userId,
+              spaceId,
+              integrationId,
+              target,
+            });
+          }
+          throw new ApiError({
+            status: refusal.status,
+            code: err.code,
+            title: refusal.title,
+            detail: err.message,
+            headers: { "Proxy-Status": proxyErrorStatus(refusal.proxyError) },
           });
-          throw forbidden(err.message);
-        }
-        if (err instanceof ProxyCredentialError) {
-          throw notFound(err.message);
-        }
-        if (err instanceof ProxySubstitutionError) {
-          throw invalidRequest(err.message);
         }
         logger.error("credential-proxy: unexpected failure", {
           authMethod,
@@ -377,6 +406,41 @@ export function createCredentialProxyRouter() {
   return router;
 }
 
+/** Each refusal of `proxyCall`: HTTP status, problem title, RFC 9209 §2.3 error type. */
+const PROXY_ERRORS: Record<
+  ProxyErrorCode,
+  { status: number; title: string; proxyError: ProxyErrorType }
+> = {
+  unauthorized_target: {
+    status: 403,
+    title: "Unauthorized Target",
+    proxyError: "http_request_denied",
+  },
+  blocked_target: { status: 403, title: "Blocked Target", proxyError: "destination_ip_prohibited" },
+  credential_exfiltration_refused: {
+    status: 403,
+    title: "Credential Exfiltration Refused",
+    proxyError: "http_request_denied",
+  },
+  credential_not_found: {
+    status: 404,
+    title: "Credential Not Found",
+    proxyError: "proxy_internal_response",
+  },
+  unresolved_placeholder: {
+    status: 400,
+    title: "Unresolved Placeholder",
+    proxyError: "proxy_internal_response",
+  },
+  upstream_unresolvable: { status: 502, title: "Upstream Unresolvable", proxyError: "dns_error" },
+  upstream_unreachable: {
+    status: 502,
+    title: "Upstream Unreachable",
+    proxyError: "destination_unavailable",
+  },
+  upstream_timeout: { status: 504, title: "Upstream Timeout", proxyError: "http_response_timeout" },
+};
+
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
 function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
   const value = c.req.header(name);
@@ -386,7 +450,6 @@ function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
 }
 
 const PROXY_CONTROL_HEADERS = new Set([
-  "x-integration",
   "x-integration-id",
   "x-target",
   "x-session-id",

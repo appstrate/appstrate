@@ -328,21 +328,18 @@ describe("readApiCallIntegrationMetas", () => {
     expect(apiCallToolName(meta).length).toBeLessThanOrEqual(56);
   });
 
-  // ── toHttpDeliveryConfig branches ──
-  // The `delivery.http.value` template is lowered onto the resolver's
-  // `HttpDeliveryConfig.valueFrom`. A single `{$credential.field}` with no
-  // encoding lowers to a bare field name; encoding or multi-ref values keep
-  // the `{{field}}` template form.
+  // ── delivery.http projection ──
+  // The `delivery.http.value` template reaches `HttpDeliveryConfig.valueFrom`
+  // verbatim, in the one `{$credential.<field>}` grammar the resolver renders.
 
-  it("lowers a single {$credential.field} (no encoding) to a bare valueFrom field name", () => {
+  it("carries a single {$credential.field} as a template", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
     });
     const bundle = makeBundle(root, [integ]);
     const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/api", version: "^1" })[0]!;
-    // Single-ref fast path: lowered to a bare field name (not a template object).
-    expect(meta.http?.valueFrom).toBe("api_key");
+    expect(meta.http?.valueFrom).toEqual({ template: "{$credential.api_key}" });
   });
 
   it("keeps encoding=base64 as a { template, encoding } valueFrom", () => {
@@ -361,9 +358,6 @@ describe("readApiCallIntegrationMetas", () => {
               http: {
                 in: "header",
                 name: "Authorization",
-                // Single credential ref BUT with base64 encoding — the single-ref
-                // fast path is skipped, so the value stays a template object that
-                // carries the encoding hint downstream.
                 value: "{$credential.api_key}",
                 encoding: "base64",
               },
@@ -374,10 +368,10 @@ describe("readApiCallIntegrationMetas", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/b64", version: "^1" })[0]!;
-    expect(meta.http?.valueFrom).toEqual({ template: "{{api_key}}", encoding: "base64" });
+    expect(meta.http?.valueFrom).toEqual({ template: "{$credential.api_key}", encoding: "base64" });
   });
 
-  it("rewrites a value with two {$credential.*} refs into {{field}} template syntax", () => {
+  it("carries a value with two {$credential.*} refs verbatim", () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const integ = makePackage("@acme/basic", "1.0.0", "integration", {
       "integration.json": JSON.stringify({
@@ -394,7 +388,6 @@ describe("readApiCallIntegrationMetas", () => {
                 in: "header",
                 name: "Authorization",
                 prefix: "Basic ",
-                // Two refs → multi-ref path → template rewrite to `{{field}}`.
                 value: "{$credential.username}:{$credential.password}",
               },
             },
@@ -404,7 +397,9 @@ describe("readApiCallIntegrationMetas", () => {
     });
     const bundle = makeBundle(root, [integ]);
     const meta = readApiCallIntegrationMetas(bundle, { name: "@acme/basic", version: "^1" })[0]!;
-    expect(meta.http?.valueFrom).toEqual({ template: "{{username}}:{{password}}" });
+    expect(meta.http?.valueFrom).toEqual({
+      template: "{$credential.username}:{$credential.password}",
+    });
   });
 });
 
@@ -462,8 +457,36 @@ describe("LocalIntegrationResolver", () => {
     expect(tools[0]!.name).toBe("acme_api__api_call");
     const { ctx } = makeCtx();
     await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
-    const h = calls[0]!.init.headers as Record<string, string>;
-    expect(h["X-Api-Key"]).toBe("secret");
+    const h = Object.fromEntries(new Headers(calls[0]!.init.headers));
+    expect(h["x-api-key"]).toBe("secret");
+  });
+
+  it("bounds the upstream call by the shared deadline combined with the tool signal", async () => {
+    let sent: AbortSignal | undefined;
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((_url: string, init: RequestInit) => {
+        sent = init.signal ?? undefined;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const toolAbort = new AbortController();
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      { method: "GET", target: "https://api.acme.com/v1/me" },
+      { ...ctx, signal: toolAbort.signal },
+    );
+    expect(sent).not.toBe(toolAbort.signal);
+    toolAbort.abort();
+    expect(sent!.aborted).toBe(true);
   });
 
   it("injects oauth2 Bearer by default and substitutes {{var}} in the URL", async () => {
@@ -511,8 +534,8 @@ describe("LocalIntegrationResolver", () => {
     const { ctx } = makeCtx();
     await tools[0]!.execute({ method: "GET", target: "https://{{subdomain}}.acme.com/me" }, ctx);
     expect(calls[0]!.url).toBe("https://eu.acme.com/me");
-    const h = calls[0]!.init.headers as Record<string, string>;
-    expect(h["Authorization"]).toBe("Bearer tok");
+    const h = Object.fromEntries(new Headers(calls[0]!.init.headers));
+    expect(h["authorization"]).toBe("Bearer tok");
   });
 
   it("enforces authorizedUris from the manifest (no allowAllUris)", async () => {
@@ -666,7 +689,7 @@ describe("LocalIntegrationResolver", () => {
       },
       ctx,
     );
-    const h = calls[0]!.init.headers as Record<string, string>;
+    const h = Object.fromEntries(new Headers(calls[0]!.init.headers));
     // Only the injected value survives.
     const apiKeyHeaders = Object.entries(h).filter(([k]) => k.toLowerCase() === "x-api-key");
     expect(apiKeyHeaders).toHaveLength(1);
@@ -707,7 +730,9 @@ describe("LocalIntegrationResolver", () => {
       },
       ctx,
     );
-    expect(calls[0]!.init.headers).toEqual({ authorization: "Bearer caller" });
+    expect(Object.fromEntries(new Headers(calls[0]!.init.headers))).toEqual({
+      authorization: "Bearer caller",
+    });
   });
 
   it("honours an explicit injection override from the creds file", async () => {
@@ -736,8 +761,8 @@ describe("LocalIntegrationResolver", () => {
     const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
     const { ctx } = makeCtx();
     await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
-    const h = calls[0]!.init.headers as Record<string, string>;
-    expect(h["Authorization"]).toBe("Token secret");
+    const h = Object.fromEntries(new Headers(calls[0]!.init.headers));
+    expect(h["authorization"]).toBe("Token secret");
   });
 
   // The creds file is hand-authored and never passes through a manifest
@@ -834,10 +859,8 @@ describe("LocalIntegrationResolver", () => {
       const { ctx } = makeCtx();
       await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
     }
-    expect((calls[0]!.init.headers as Record<string, string>)["Authorization"]).toBe(
-      "Bearer secret",
-    );
-    expect((calls[1]!.init.headers as Record<string, string>)["Cookie"]).toBe("sessionsecret");
+    expect(new Headers(calls[0]!.init.headers).get("Authorization")).toBe("Bearer secret");
+    expect(new Headers(calls[1]!.init.headers).get("Cookie")).toBe("sessionsecret");
   });
 
   it("skips integrations without apiCall and fails on missing creds", async () => {

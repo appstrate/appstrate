@@ -94,6 +94,7 @@ import {
   matchesAuthorizedUriSpec,
 } from "@appstrate/connect/proxy-primitives";
 import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
@@ -852,7 +853,11 @@ export async function handleInnerRequest(
   // request outside those URIs is never substituted (any `{{...}}` literal it
   // carries stays a literal — a placeholder name, never the secret value).
   const active = credentials.activeInputs?.() ?? null;
-  if (active && targetWithinAuthorizedUris(targetUrl, active.authorizedUris)) {
+  if (
+    active &&
+    !active.authorizedUris.some(isHostUnboundedUriPattern) &&
+    targetWithinAuthorizedUris(targetUrl, active.authorizedUris)
+  ) {
     const inboundHeaders: Record<string, string> = {};
     req.headers.forEach((v, k) => {
       inboundHeaders[k] = v;
@@ -893,6 +898,14 @@ export async function handleInnerRequest(
   };
 
   const action = buildAction();
+  // The api_call rule (`credentialUrlPolicy`) at run time: an injected credential needs an
+  // allowlist naming its hosts, whatever manifest version predates the write-path check.
+  if (action.injectedHeader && action.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)) {
+    emit({ kind: "request-refused", url: targetUrl, reason: "credential not host-bounded" });
+    return new Response("MITM listener: credential allowlist leaves the host open", {
+      status: 403,
+    });
+  }
 
   const outboundHeaders = buildOutboundHeaders(
     headersForOutbound,

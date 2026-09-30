@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { DEFAULT_MAX_REDIRECTS, guardedFetch, SsrfBlockedError } from "../src/guarded-fetch.ts";
+import {
+  DEFAULT_MAX_REDIRECTS,
+  guardedFetch,
+  guardedFetchChain,
+  SsrfBlockedError,
+} from "../src/guarded-fetch.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -768,5 +773,81 @@ describe("guardedFetch — per-hop cookies", () => {
       { resolve, fetchImpl },
     );
     expect(seen.map((s) => s.cookie)).toEqual(["sid=old", "sid=old"]);
+  });
+});
+
+describe("guardedFetchChain — terminus, credential forwarding, single-hop", () => {
+  const resolve = resolverFor({});
+  /** Transport answering `responses` in order, recording each hop's URL and headers. */
+  function serve(responses: Response[]) {
+    const seen: Array<{ url: string; headers: Headers; body: unknown }> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      seen.push({ url, headers: new Headers(init?.headers), body: init?.body });
+      return responses.shift() ?? new Response("ok");
+    }) as unknown as typeof fetch;
+    return { seen, fetchImpl };
+  }
+  const to = (location: string, status = 302) =>
+    new Response(null, { status, headers: { location } });
+
+  it("reports the logical terminal URL and the redirects followed", async () => {
+    const { fetchImpl } = serve([to("https://second.example/b#x"), new Response("ok")]);
+    const { response, finalUrl, hops } = await guardedFetchChain(
+      "https://first.example/a",
+      undefined,
+      { resolve, fetchImpl },
+    );
+    expect(response.status).toBe(200);
+    expect(finalUrl).toBe("https://second.example/b");
+    expect(hops).toBe(1);
+  });
+
+  it("keeps credentials, Cookie and body on a cross-origin hop forwardCredentials authorizes", async () => {
+    const { seen, fetchImpl } = serve([to("https://content.vendor.example/up", 307)]);
+    await guardedFetchChain(
+      "https://api.vendor.example/up",
+      { method: "POST", body: "payload", headers: { authorization: "Bearer t", cookie: "s=1" } },
+      {
+        resolve,
+        fetchImpl,
+        validateHop: () => {},
+        forwardCredentials: (url) => url.hostname.endsWith(".vendor.example"),
+      },
+    );
+    expect(seen[1]!.headers.get("authorization")).toBe("Bearer t");
+    expect(seen[1]!.headers.get("cookie")).toBe("s=1");
+    expect(seen[1]!.body).toBe("payload");
+  });
+
+  it("strips them when forwardCredentials declines the hop", async () => {
+    const { seen, fetchImpl } = serve([to("https://evil.example/")]);
+    await guardedFetchChain(
+      "https://api.vendor.example/",
+      { headers: { authorization: "Bearer t" } },
+      { resolve, fetchImpl, forwardCredentials: () => false },
+    );
+    expect(seen[1]!.headers.get("authorization")).toBeNull();
+  });
+
+  it("returns a redirect unfollowed when followRedirects is false", async () => {
+    const { seen, fetchImpl } = serve([to("https://second.example/")]);
+    const { response, hops } = await guardedFetchChain("https://first.example/", undefined, {
+      resolve,
+      fetchImpl,
+      followRedirects: false,
+    });
+    expect(response.status).toBe(302);
+    expect(hops).toBe(0);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("names the refused hop on SsrfBlockedError", async () => {
+    const { fetchImpl } = serve([to("https://inside.example/")]);
+    const err = await guardedFetchChain("https://first.example/", undefined, {
+      resolve: resolverFor({ "inside.example": ["10.0.0.1"] }),
+      fetchImpl,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SsrfBlockedError);
+    expect((err as SsrfBlockedError).hop).toBe(1);
   });
 });

@@ -15,17 +15,14 @@
  *
  * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
  * (body streaming, `authorized_uris` matching, response serialisation), and
- * the shared outbound pipeline (SSRF blocklist + the redirect-follower with
- * per-hop SSRF / per-hop allowlist / hybrid credential-strip / cookie
- * capture) lives in `./api-call-engine.ts` — identical to the platform
- * sidecar's `executeApiCall`. This module is credential-source-specific:
+ * the outbound half is `fetchApiCall` (`./api-call-engine.ts`), shared with
+ * the platform credential proxy and the sidecar. This module is
+ * credential-source-specific:
  *
  *   - {@link LocalIntegrationResolver} reads a JSON creds file keyed by
- *     integration id and injects the credential header itself, then
- *     dispatches the upstream call through the shared engine's
- *     `guardedFetch` (offline / air-gapped dev — no refresh, no rotation).
- *     The engine adds the SSRF blocklist + redirect-follower the raw
- *     `fetch` path used to lack.
+ *     integration id, injects the credential header itself, then sends the
+ *     call through `fetchApiCall` (offline / air-gapped dev — no refresh, no
+ *     rotation).
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials never
@@ -60,9 +57,10 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
 import {
-  guardedFetch,
+  assertAllowlistRendered,
+  fetchApiCall,
   PreflightError,
-  scrubTransportError,
+  RedirectBlockedError,
   type HostResolver,
 } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
@@ -359,7 +357,7 @@ function assertUsableCredsFile(
 interface LocalIntegrationResolverOptions {
   /** Path to a creds JSON file or an already-parsed object. */
   creds: string | LocalIntegrationCredentialsFile;
-  /** Override the low-level HTTP client. Defaults to the global `fetch`. */
+  /** Transport override (tests) — disables the address pin. Omitted = pinned global `fetch`. */
   fetch?: typeof fetch;
   /**
    * DNS resolver for the SSRF rebind preflight — injectable for tests.
@@ -375,13 +373,13 @@ interface LocalIntegrationResolverOptions {
  * no refresh, no rotation. Tokens expire; dev re-authenticates manually.
  */
 export class LocalIntegrationResolver implements IntegrationApiCallResolver {
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: typeof fetch | undefined;
   private readonly resolveHost: HostResolver | undefined;
   private creds: LocalIntegrationCredentialsFile | null;
   private readonly credsPath: string | null;
 
   constructor(opts: LocalIntegrationResolverOptions) {
-    this.fetchImpl = opts.fetch ?? fetch;
+    this.fetchImpl = opts.fetch;
     this.resolveHost = opts.resolveHost;
     if (typeof opts.creds === "string") {
       this.creds = null;
@@ -462,6 +460,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // header and explicitly authorises a caller override. The remote resolver
       // always strips it because it authenticates to Appstrate with that header.
       const headers: Record<string, string> = {};
+      const credentialHeaders: string[] = [];
       for (const [key, value] of Object.entries(req.headers ?? {})) {
         const lowerKey = key.toLowerCase();
         if (
@@ -472,6 +471,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         }
         templates.push(value);
         headers[key] = substituteVars(value, fields);
+        if (headers[key] !== value) credentialHeaders.push(key);
       }
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
@@ -487,6 +487,19 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         authorizedUris,
         injectsCredential: injectedCredentialHeader !== null,
       });
+      try {
+        assertAllowlistRendered({
+          declaredUris: meta.authorizedUris,
+          authorizedUris,
+          allowAllUris: policy.allowAllUris,
+        });
+      } catch (err) {
+        throw new AuthorizedUrisError(
+          "AUTHORIZED_URIS_MISMATCH",
+          `Integration ${meta.name}: ${(err as Error).message}`,
+          { integration: meta.name, target: req.target },
+        );
+      }
       if (policy.refuse) {
         throw new ResolverError(
           "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
@@ -506,11 +519,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         headers["Content-Type"] = resolvedBody.contentType;
       }
 
-      // Route through the shared engine — same SSRF blocklist + manual
-      // redirect-follower (per-hop SSRF, per-hop authorized_uris,
-      // hybrid credential-strip, userinfo/fragment stripping) the sidecar
-      // uses. Previously this was a raw `fetch(target, …)` with default
-      // `redirect: "follow"` and NO SSRF check — the gap this engine closes.
       const init: RequestInit & Record<string, unknown> = {
         method: req.method,
         headers,
@@ -521,25 +529,24 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
 
       let res: Response;
       try {
-        const result = await guardedFetch({
+        const result = await fetchApiCall({
           url: target,
           init,
-          fetchFn: this.fetchImpl,
           authorizedUris,
           declaredUris: meta.authorizedUris,
           allowAllUris: policy.allowAllUris,
-          injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
+          credentialHeaders: injectedCredentialHeader
+            ? [...credentialHeaders, injectedCredentialHeader]
+            : credentialHeaders,
+          trustDeclaredHosts: true,
           integrationId: meta.name,
-          resolveHost: this.resolveHost,
+          ...(this.fetchImpl ? { fetchFn: this.fetchImpl } : {}),
+          ...(this.resolveHost ? { resolveHost: this.resolveHost } : {}),
           credentialFields: redactFields,
         });
         res = result.response;
       } catch (err) {
-        // The shared engine throws on a refused initial target (SSRF /
-        // off-allowlist) or a refused redirect hop. Surface these as a
-        // typed resolver error rather than a bare fetch exception so the
-        // CLI agent gets a clear, structured failure — the host is
-        // redacted (a redirect target may carry `?token=…`).
+        // Typed resolver errors; hosts are redacted (a redirect target may carry `?token=…`).
         if (err instanceof PreflightError) {
           if (err.reason === "not_authorized") {
             throw new AuthorizedUrisError(
@@ -554,14 +561,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             { integration: meta.name, target: req.target },
           );
         }
-        if (err instanceof Error && err.name === "RedirectBlockedError") {
+        if (err instanceof RedirectBlockedError) {
           throw new ResolverError(
             "RESOLVER_REDIRECT_BLOCKED",
-            `Integration ${meta.name}: redirect blocked (${(err as { reason?: string }).reason})`,
+            `Integration ${meta.name}: redirect blocked (${err.reason})`,
             { integration: meta.name },
           );
         }
-        throw scrubTransportError(err, redactFields);
+        throw err;
       }
 
       return serializeFetchResponse(res, {

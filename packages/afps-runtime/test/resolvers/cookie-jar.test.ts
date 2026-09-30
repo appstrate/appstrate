@@ -7,10 +7,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
-import {
-  fetchFollowingRedirectsCapturingCookies,
-  guardedFetch,
-} from "../../src/resolvers/api-call-engine.ts";
+import { fetchApiCall } from "../../src/resolvers/api-call-engine.ts";
 
 const API = "https://api.example.com/x";
 const CONTENT = "https://content.example.com/x";
@@ -155,7 +152,7 @@ describe("cookieScope.header", () => {
   });
 });
 
-describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
+describe("fetchApiCall — a caller's cookie scope", () => {
   /** Records the `Cookie` header of every hop; `routes` maps a URL to its response. */
   function routedFetch(routes: Record<string, () => Response>) {
     const seen: (string | null)[] = [];
@@ -177,14 +174,17 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
     jar: CookieJar,
     policy: { authorizedUris?: string[]; allowAllUris?: boolean },
   ) {
-    return fetchFollowingRedirectsCapturingCookies({
+    return fetchApiCall({
       url,
       init: { method: "GET", headers: { cookie } },
       fetchFn,
       cookies: cookieScope(jar, "i", null),
       integrationId: "i",
-      injectedCredentialHeader: "cookie",
-      ...policy,
+      credentialHeaders: ["cookie"],
+      authorizedUris: policy.authorizedUris ?? [],
+      declaredUris: policy.authorizedUris ?? [],
+      allowAllUris: policy.allowAllUris ?? false,
+      trustDeclaredHosts: true,
       resolveHost: async () => ["203.0.113.7"],
     });
   }
@@ -262,7 +262,7 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
   });
 });
 
-describe("guardedFetch — cookie scope", () => {
+describe("fetchApiCall — the per-call cookie scope", () => {
   const SSO = "https://sso.vendor.example/login";
   const HOME = "https://api.vendor.example/home";
 
@@ -277,12 +277,16 @@ describe("guardedFetch — cookie scope", () => {
         ? new Response(null, { status: 302, headers: { location: HOME, "set-cookie": "sess=S" } })
         : new Response("ok");
     }) as unknown as typeof fetch;
-    await guardedFetch({
+    await fetchApiCall({
       url: SSO,
       init: { method: "GET" },
       fetchFn,
       authorizedUris,
       declaredUris,
+      allowAllUris: false,
+      credentialHeaders: [],
+      trustDeclaredHosts: true,
+      integrationId: "i",
       resolveHost: async () => ["203.0.113.7"],
     });
     return seen[1] ?? null;

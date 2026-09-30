@@ -18,13 +18,10 @@
  * ({@link makeApiCallTool} calls `enforceAuthorizedUris` before dispatch),
  * and response serialisation ({@link serializeFetchResponse}).
  *
- * The credential-source-agnostic OUTBOUND request pipeline — SSRF
- * blocklist preflight + the manual redirect-follower (per-hop SSRF,
- * per-hop `authorized_uris` re-check, hybrid credential-strip,
- * cookie-jar capture, userinfo/fragment stripping) — lives in the
- * sibling `./api-call-engine.ts`, shared verbatim with the platform
- * sidecar's `executeApiCall`. `integration-api-call.ts`'s local resolver
- * dispatches through that engine's `guardedFetch`.
+ * The OUTBOUND half of an api_call (allowlist + SSRF gate per hop, pinned
+ * transport, credential rule across redirects, cookie capture, deadline) is
+ * `fetchApiCall` in the sibling `./api-call-engine.ts`, shared by the platform
+ * credential proxy, the sidecar and `integration-api-call.ts`'s local resolver.
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */

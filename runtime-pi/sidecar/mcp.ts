@@ -199,13 +199,12 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
  * the MCP layer deliberately does not expose),
  * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
  * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Integration` and `X-Target`
+ * the response truncation budget. The `X-Integration-Id` and `X-Target`
  * routing headers are also stripped so the LLM can't redirect the
  * request post-validation. Header names are matched case-insensitively
  * (HTTP header semantics).
  */
 const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-integration",
   "x-integration-id",
   "x-target",
   "x-substitute-body",
@@ -649,7 +648,8 @@ function buildSidecarTools(options: MountMcpOptions): {
   makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
-  const { config, fetchFn } = proxyDeps;
+  const { config } = proxyDeps;
+  const fetchFn = proxyDeps.fetchFn ?? fetch;
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
   // integration identifier (just target + method + headers + body).
@@ -674,7 +674,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         type: "object",
         description:
           "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-          "headers (X-Integration, X-Target, X-Substitute-Body, …) are filtered " +
+          "headers (X-Integration-Id, X-Target, X-Substitute-Body, …) are filtered " +
           "server-side.",
         additionalProperties: { type: "string" },
       },

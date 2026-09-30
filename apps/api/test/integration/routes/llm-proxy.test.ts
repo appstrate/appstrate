@@ -403,6 +403,36 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("relays an upstream 401 as the provider's: Proxy-Status, no platform challenge", async () => {
+    const h = await buildHarness();
+    mockUpstream(
+      async () =>
+        new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=401");
+    expect(res.headers.get("www-authenticate")).toBeNull();
+  });
+
+  it("marks its own refusal with a Proxy-Status error", async () => {
+    const h = await buildHarness();
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: "no-such-preset", messages: [] }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_internal_response");
+  });
+
   it("rejects cookie sessions with 403 (bearer-only)", async () => {
     const h = await buildHarness();
     mockUpstream(async () => new Response("should not be called", { status: 599 }));
@@ -792,6 +822,8 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     });
     expect(second.status).toBe(200);
     expect(second.headers.get("cache-status")).toBe(HIT);
+    // Served from the cache: handled by the proxy, no status received from the upstream.
+    expect(second.headers.get("proxy-status")).toBe("appstrate");
     const secondJson = (await second.json()) as { id: string };
     // Replayed verbatim — same id as the first call, no upstream re-hit.
     expect(secondJson.id).toBe("chatcmpl_1");

@@ -6,6 +6,7 @@ import {
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "@appstrate/runner-pi";
+import { PROXY_STATUS_HEADER } from "./credential-proxy.ts";
 
 /**
  * LLM proxy endpoints — server-side model injection and per-call metering for
@@ -49,6 +50,23 @@ const baseParameters = [
   // separate, content-addressed response cache these routes *do* have.
 ] as const;
 
+const problem = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
+/** A 401 is the caller's credential refused, or the provider's refusal relayed. */
+const unauthorized = {
+  description:
+    "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, " +
+    "`Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the " +
+    "model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge).",
+  headers: {
+    ...PROXY_STATUS_HEADER,
+    "WWW-Authenticate": { $ref: "#/components/headers/WWWAuthenticate" },
+  },
+  content: { ...problem, "application/json": { schema: { type: "object" } } },
+} as const;
+
 const baseResponses = {
   "200": {
     description:
@@ -56,6 +74,7 @@ const baseResponses = {
       "(`stream: true`), the response is `text/event-stream`; otherwise " +
       "`application/json`.",
     headers: {
+      ...PROXY_STATUS_HEADER,
       "Cache-Status": {
         description:
           "RFC 9211. This proxy's member is present only when the response " +
@@ -84,36 +103,44 @@ const baseResponses = {
       "endpoint for its protocol instead), the preset's provider is an " +
       "OAuth subscription with no proxyable gateway (connect an API-key " +
       "provider instead), or request body exceeds " +
-      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
+      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). A model " +
+      "whose upstream resolves into a blocked range carries `Proxy-Status` error " +
+      "`destination_ip_prohibited`.",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
   },
-  "401": { $ref: "#/components/responses/Unauthorized" },
+  "401": unauthorized,
   "403": {
     description:
       "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth " +
       "method was used (cookie sessions and any unknown/unrecognized auth " +
       "strategy are rejected; bearer only).",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
   },
   "409": {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
       "metered usage is admitted. RFC 9457 problem+json.",
-    content: {
-      "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
-      },
-    },
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
   },
   "413": {
     description:
       "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +
       "by the body-limit middleware).",
+    headers: PROXY_STATUS_HEADER,
+    content: problem,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
   "502": {
     description:
       "Upstream provider error — the upstream's status and body are " +
       "forwarded verbatim (the documented status may be any non-2xx the " +
-      "upstream returns, e.g. 400/401/404/429/500/503). No usage recorded.",
+      "upstream returns, e.g. 400/401/404/429/500/503), marked " +
+      "`Proxy-Status: appstrate; received-status=<n>`. No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: { "application/json": { schema: { type: "object" } } },
   },
 } as const;
 
@@ -374,16 +401,24 @@ export const runLlmProxyPaths = Object.fromEntries(
             description:
               "Validation error — malformed or empty body, a field the proxy cannot " +
               "meter, or the run's model is not served by this endpoint.",
+            headers: PROXY_STATUS_HEADER,
+            content: problem,
           },
-          "401": { $ref: "#/components/responses/Unauthorized" },
+          "401": unauthorized,
           "403": {
             description:
               "The run is not running, is remote-origin, or its model is not a " +
               "platform-provided model pinned at launch.",
+            headers: PROXY_STATUS_HEADER,
+            content: problem,
           },
           "404": { $ref: "#/components/responses/NotFound" },
           "409": baseResponses["409"],
-          "413": { description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`." },
+          "413": {
+            description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`.",
+            headers: PROXY_STATUS_HEADER,
+            content: problem,
+          },
           "429": { $ref: "#/components/responses/RateLimited" },
           "502": baseResponses["502"],
         },

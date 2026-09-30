@@ -9,10 +9,11 @@
  *
  *   1. Fetch credentials from the platform (per-run Bearer token).
  *   2. Substitute `{{vars}}` into URL / headers / body.
- *   3. Validate the resolved URL against the integration's
- *      `authorizedUris` allowlist + the SSRF blocklist.
+ *   3. Refuse a credential the allowlist does not bound (`credentialUrlPolicy`).
  *   4. Inject the credential header server-side.
- *   5. Forward the request to the upstream API.
+ *   5. Send it through `fetchApiCall` (`@appstrate/afps-runtime`), the outbound
+ *      half shared with the platform proxy and the CLI: allowlist + SSRF gate
+ *      per hop, pinned transport, credential rule across redirects, deadline.
  *   6. Retry once on 401 with a refreshed token.
  *   7. Log persistent auth failures locally (once per connection per run).
  *
@@ -30,29 +31,24 @@
 
 import {
   applyInjectedCredentialHeader,
-  isBlockedUrl,
-  matchesAuthorizedUri,
   normalizeAuthSchemeTemplates,
   substituteVars,
   findUnresolvedPlaceholders,
-  resolveAndCheckHost,
-  OUTBOUND_TIMEOUT_MS,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
   type HostResolver,
   type SidecarConfig,
 } from "./helpers.ts";
 import {
-  allowlistUnrendered,
+  assertAllowlistRendered,
   cookieScope,
   credentialUrlPolicy,
   exfiltrationRefusal,
+  fetchApiCall,
+  PreflightError,
   redactionFields,
-  fetchFollowingRedirectsCapturingCookies,
-  hostLiterallyAllowlisted,
   redactCredentialHost,
   RedirectBlockedError,
-  UNRENDERED_ALLOWLIST_REFUSAL,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
@@ -175,7 +171,11 @@ export interface ApiCallBaseDeps {
   config: SidecarConfig;
   /** Run-wide sticky-cookie store, read and written through `cookieScope`. */
   cookieJar: CookieJar;
-  fetchFn: typeof fetch;
+  /**
+   * Transport override (tests). Omitted = the global `fetch` — for `api_call` upstreams, pinned
+   * to the DNS-validated address; an override disables the pin.
+   */
+  fetchFn?: typeof fetch;
   /**
    * Set tracking which credential scopes already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
@@ -307,7 +307,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
   if (!INTEGRATION_ID_RE.test(integrationId)) {
-    return { ok: false, status: 400, error: "Invalid X-Integration format" };
+    return { ok: false, status: 400, error: "Invalid integration id" };
   }
 
   // 2. Fetch credentials.
@@ -333,18 +333,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 4. Validate URL against authorizedUris (or block internal
-  //    targets when allowAllUris is set). The SSRF branches add the
-  //    DNS-resolving rebind layer over the literal blocklist (see
-  //    `refuseSsrfTarget`). On the allowlist branch, the SSRF gate
-  //    applies UNLESS some DECLARED entry pins this exact host literally —
-  //    a named host resolving internally is the operator's declared
-  //    topology (on-prem APIs are legitimate allowlist targets), but
-  //    the AFPS glob grammar lets `**` span the host (`https://**`),
-  //    and a glob-matched host is agent-chosen, not operator-chosen —
-  //    without the gate that branch would be strictly weaker than
-  //    allow_all. A declared allowlist rendering to nothing refuses every target.
-  // 4a. Credential-exfiltration guard (docs/architecture/SIDECAR.md).
+  // 4. Credential-exfiltration guard (docs/architecture/SIDECAR.md). The allowlist + SSRF gate
+  //    itself runs inside `fetchApiCall`, on the target and on every redirect hop.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
@@ -359,41 +349,17 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
-
-  if (
-    allowlistUnrendered({
+  try {
+    assertAllowlistRendered({
       declaredUris: deps.declaredUris,
       authorizedUris,
       allowAllUris: policy.allowAllUris,
-    })
-  ) {
-    return {
-      ok: false,
-      status: 403,
-      error: `Integration "${integrationId}": ${UNRENDERED_ALLOWLIST_REFUSAL}`,
-    };
-  } else if (policy.refuse) {
+    });
+  } catch (err) {
+    return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
+  }
+  if (policy.refuse) {
     return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
-  } else if (policy.allowAllUris) {
-    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
-    if (refusal) return refusal;
-  } else if (authorizedUris.length) {
-    if (!matchesAuthorizedUri(resolvedUrl, authorizedUris)) {
-      return {
-        ok: false,
-        status: 403,
-        // The declared entries: a rendered one may be a secret (an exact webhook URL).
-        error: `URL not authorized for integration "${integrationId}". Allowed: ${deps.declaredUris.join(", ")}`,
-      };
-    }
-    if (!hostLiterallyAllowlisted(resolvedUrl, deps.declaredUris)) {
-      const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
-      if (refusal) return refusal;
-    }
-  } else {
-    // No authorizedUris and no allowAllUris — apply the SSRF safety net.
-    const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
-    if (refusal) return refusal;
   }
 
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
@@ -488,10 +454,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   /**
    * One outbound attempt. Re-runs header + body substitution against
    * the supplied creds so 401-retry sees the refreshed token. Returns
-   * both the upstream `Response` and the URL it was served from — the
-   * streaming path reads it off `Response.url` (Bun populates this
-   * after native redirect:"follow"), the manual-follow path threads
-   * the terminal-hop URL through the loop.
+   * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
@@ -510,11 +473,18 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
     const resolvedHeaders: Record<string, string> = {};
+    const credentialHeaders: string[] = [];
     for (const [key, value] of Object.entries(callerHeaders)) {
       resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
+      if (resolvedHeaders[key] !== value) credentialHeaders.push(key);
     }
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
+    if (credentialInjection.kind === "inject") {
+      credentialHeaders.push(credentialInjection.header.name);
+    } else if (credentialInjection.kind === "caller_override") {
+      credentialHeaders.push(credentialInjection.headerName);
+    }
     // ONE Cookie header (injected credential + caller cookies): the jar's base.
     const cookieKeys = Object.keys(resolvedHeaders).filter((k) => k.toLowerCase() === "cookie");
     const baseCookie = cookieKeys.map((k) => resolvedHeaders[k]).join("; ");
@@ -546,81 +516,41 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       method,
       headers: resolvedHeaders,
       body: buildBody(activeCreds.credentials),
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
       proxy: args.proxyUrl || undefined,
     };
-    if (init.body instanceof ReadableStream) {
-      // Streaming bodies can't be replayed across hops, so the manual
-      // redirect follower (which re-issues each hop) can't run here.
-      // `redirect: "manual"` is mandatory, NOT a default: native
-      // `redirect: "follow"` would carry the injected credential header
-      // (and any cookie jar) into an upstream-controlled cross-origin
-      // redirect — WHATWG fetch strips `Authorization` cross-origin but
-      // NOT custom headers like `X-Api-Key`, the usual injection target.
-      // Returning the 30x unfollowed keeps the credential on the initial
-      // (allowlist-checked) origin only.
-      //
-      // KNOWN LIMITATION, stated rather than papered over: the agent CANNOT
-      // follow that 30x. `location` is on `UPSTREAM_HEADER_ALLOWLIST`
-      // (`packages/mcp-transport/src/upstream-meta.ts`) so it reaches the
-      // runtime on `_meta` — and stops there. `callToolResultToPi` forwards
-      // only `content` blocks to the model, and the response shaper
-      // (`runtime-pi/mcp/api-call-response-resolver.ts`) renders `_meta` down
-      // to `[api_call status=<n>]`, dropping every header. The model sees a
-      // bare 30x and no next hop. A caller that must follow one re-issues with
-      // a BUFFERED body, which takes the manual-follow branch below and walks
-      // the chain server-side under the per-hop URL policy.
-      //
-      // Rendering `location` into that status line would close the gap and is
-      // deliberately NOT done here: a redirect URL is routinely
-      // credential-bearing (an authorize hop's `?code=`, a signed
-      // `?X-Amz-Signature=`), and step 10 below redacts this very URL to a
-      // bare host before it reaches an operator log. Showing the model what we
-      // withhold from a log is a decision to take explicitly, not a side
-      // effect of a comment fix. `finalUrl` below is not a channel to the
-      // agent either — it never leaves this module.
-      init.duplex = "half";
-      init.redirect = "manual";
-      // No follower on this path, so the jar cookies are composed here.
-      const cookie = cookies.header(resolvedUrl, baseCookie);
-      if (cookie) resolvedHeaders[cookieKeys[0] ?? "cookie"] = cookie;
-      const response = await fetchFn(resolvedUrl, init);
-      // Streaming path issues a single unfollowed request — no manual hops.
-      return {
-        response,
-        finalUrl: response.url || resolvedUrl,
-        hops: 0,
-        requestHeaderNames: Object.keys(resolvedHeaders),
-        credentialInjection: credentialInjection.kind,
-      };
-    }
-    const followed = await fetchFollowingRedirectsCapturingCookies({
+    // A streaming body cannot be replayed, so `fetchApiCall` returns its 30x unfollowed:
+    // the credential stays on the initial, allowlist-checked origin.
+    //
+    // KNOWN LIMITATION, stated rather than papered over: the agent CANNOT
+    // follow that 30x. `location` is on `UPSTREAM_HEADER_ALLOWLIST`
+    // (`packages/mcp-transport/src/upstream-meta.ts`) so it reaches the
+    // runtime on `_meta` — and stops there. `callToolResultToPi` forwards
+    // only `content` blocks to the model, and the response shaper
+    // (`runtime-pi/mcp/api-call-response-resolver.ts`) renders `_meta` down
+    // to `[api_call status=<n>]`, dropping every header. A caller that must
+    // follow one re-issues with a BUFFERED body, which walks the chain
+    // server-side under the per-hop URL policy. Rendering `location` is
+    // deliberately NOT done: a redirect URL is routinely credential-bearing
+    // (`?code=`, `?X-Amz-Signature=`).
+    if (init.body instanceof ReadableStream) init.duplex = "half";
+    const sent = await fetchApiCall({
       url: resolvedUrl,
       init,
-      fetchFn,
+      authorizedUris,
+      declaredUris: deps.declaredUris,
+      // The 4 policy, not the raw flag: a templated credential must not leave the allowlist.
+      allowAllUris: policy.allowAllUris,
+      credentialHeaders,
+      trustDeclaredHosts: true,
       cookies,
       integrationId,
-      injectedCredentialHeader:
-        credentialInjection.kind === "inject"
-          ? credentialInjection.header.name.toLowerCase()
-          : credentialInjection.kind === "caller_override"
-            ? credentialInjection.headerName.toLowerCase()
-            : null,
-      // The 4a policy, not the raw flag: a templated credential must not be redirected off-list.
-      authorizedUris,
-      allowAllUris: policy.allowAllUris,
-      // Thread the injected DNS resolver into the per-hop SSRF rebind
-      // check — same resolver the initial-target gate uses. Without it
-      // the follower falls back to the system resolver, which diverges
-      // from the sidecar's configured resolution (and fails closed on
-      // every hop in tests).
+      ...(fetchFn ? { fetchFn } : {}),
       ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
-      // Preserve the sidecar's structured per-hop refusal logging.
       logger,
       credentialFields: redactionFields(policy, activeCreds.credentials),
     });
     return {
-      ...followed,
+      ...sent,
       requestHeaderNames: Object.keys(resolvedHeaders),
       credentialInjection: credentialInjection.kind,
     };
@@ -644,7 +574,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
   } catch (err) {
-    return wrapRequestError(err, resolvedUrl, redactFields);
+    return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
   }
 
   let authRefreshed = false;
@@ -675,7 +605,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
         } catch (err) {
-          return wrapRequestError(err, resolvedUrl, redactFields);
+          return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401 signal to
@@ -717,7 +647,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     status: upstream.status,
     durationMs: Math.round(performance.now() - requestStartedAt),
     hops: upstreamHops,
-    redirected: upstreamFinalUrl !== resolvedUrl,
+    redirected: upstreamHops > 0,
     // How the credential was applied: a server-injected header (named, never
     // valued) or no injection at all (URL/query-embedded or anonymous).
     authMode: credentialInjection === "inject" ? "header" : credentialInjection,
@@ -740,94 +670,28 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 }
 
 /**
- * SSRF gate for every branch without a literal operator host pin
- * (allow_all, no allowlist, glob-matched allowlist): the literal
- * blocklist first (IP literals, known-internal names), then resolve every A/AAAA
- * record and refuse if ANY lands in a blocked range. A DNS name whose
- * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
- * alone — this closes the rebind-to-internal vector.
- *
- * The outbound connection is delegated to `fetch`, which re-resolves —
- * so this is fail-closed defence-in-depth with a documented residual
- * TOCTOU, not a full resolve-and-pin (same posture as the MITM upstream
- * fetch and the platform CIMD guard; only the raw-socket egress
- * listeners can pin). Resolution failure maps to 502 — the same outcome
- * the subsequent fetch would have produced for an unresolvable host —
- * while a blocked answer is the policy 403.
- *
- * Returns the structured failure, or `null` when the target is clear.
- */
-async function refuseSsrfTarget(
-  url: string,
-  fields: Readonly<Record<string, string>>,
-  resolveHost?: HostResolver,
-): Promise<ApiCallFailure | null> {
-  const blockedFailure: ApiCallFailure = {
-    ok: false,
-    status: 403,
-    error: "URL targets a blocked network range",
-  };
-  if (isBlockedUrl(url)) return blockedFailure;
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return blockedFailure;
-  }
-  const check = await resolveAndCheckHost(hostname, { resolve: resolveHost });
-  if (!check.blocked) return null;
-  if (check.reason === "resolution-failed") {
-    return {
-      ok: false,
-      status: 502,
-      error: `Target host could not be resolved (${redactCredentialHost(url, fields)})`,
-    };
-  }
-  logger.warn("api_call refused: target resolves into a blocked network range", {
-    host: redactCredentialHost(url, fields),
-  });
-  return blockedFailure;
-}
-
-function wrapFetchError(
-  err: unknown,
-  label: string,
-  url: string,
-  fields: Readonly<Record<string, string>>,
-): ApiCallFailure {
-  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-  const suffix = code ? `: ${code}` : "";
-  return {
-    ok: false,
-    status: 502,
-    error: `${label}${suffix} (${redactCredentialHost(url, fields)})`,
-  };
-}
-
-/**
- * Demultiplex outbound-request errors into structured failures:
- *
- *   - {@link RedirectBlockedError} → 403 (upstream tried to pivot to
- *     a non-allowlisted or SSRF-blocked host — this is a policy
- *     decision, not a network fault).
- *   - everything else (timeout, ECONNREFUSED, ENOTFOUND) → 502 via
- *     {@link wrapFetchError}.
- *
- * Redacts the target host into the error message; the full URL stays
- * out because a redirect target may itself encode capabilities
- * (`?token=…`) we don't want surfaced to the agent.
+ * Outbound refusals and faults as structured failures: a refused target or hop is a policy
+ * 403, an unresolvable target or a network fault a 502. Hosts only, redacted — a redirect
+ * target may itself encode capabilities (`?token=…`).
  */
 function wrapRequestError(
   err: unknown,
+  integrationId: string,
   resolvedUrl: string,
   fields: Readonly<Record<string, string>>,
 ): ApiCallFailure {
-  if (err instanceof RedirectBlockedError) {
+  if (err instanceof PreflightError) {
     return {
       ok: false,
-      status: 403,
-      error: `Redirect blocked (${err.reason}): host=${redactCredentialHost(err.hopUrl, fields)}`,
+      status: err.reason === "unresolvable" ? 502 : 403,
+      error: `Integration "${integrationId}": ${err.message}`,
     };
   }
-  return wrapFetchError(err, "Upstream request failed", resolvedUrl, fields);
+  if (err instanceof RedirectBlockedError) return { ok: false, status: 403, error: err.message };
+  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+  return {
+    ok: false,
+    status: 502,
+    error: `Upstream request failed${code ? `: ${code}` : ""} (${redactCredentialHost(resolvedUrl, fields)})`,
+  };
 }

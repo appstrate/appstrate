@@ -126,27 +126,27 @@ The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-m
 
 ## Initial-URL SSRF gate
 
-Before any outbound byte, `executeApiCall` validates the resolved target:
+`executeApiCall` sends the call through `fetchApiCall` (`@appstrate/afps-runtime`), which validates the resolved target before any outbound byte — and every redirect hop the same way:
 
 - **Literal floor** — `isBlockedUrl` refuses IP-literal / known-internal targets (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`) on every branch without a literal operator host pin.
-- **DNS rebind layer** — on `allowAllUris`, no-allowlist, and glob-matched-allowlist branches, the hostname is DNS-resolved pre-flight (`resolveAndCheckHost`) and EVERY A/AAAA record is checked against the blocklist. Fail-closed: any blocked record → `403`, unresolvable → `502`. The connection is then delegated to `fetch` (which re-resolves), so this is defence-in-depth with a documented residual TOCTOU — only the raw-socket egress paths (forward proxy, egress listener) connect to the pinned IP and close the window fully.
+- **DNS rebind layer** — on `allowAllUris`, no-allowlist, and glob-matched-allowlist branches, the hostname is DNS-resolved (`resolveAndCheckHost`) and EVERY A/AAAA record is checked against the blocklist. Fail-closed: any blocked record → `403`, unresolvable → `502`. The connection is then pinned to the validated address (`guardedFetchChain`, `@appstrate/afps-shared/guarded-fetch`; the logical hostname stays on `Host` + TLS SNI), so a record flipping after the check is never dialled. The pin is off only when the call sets a Bun `proxy`, which resolves the name itself.
 - **Literal-allowlist exemption** — a DECLARED `authorized_uris` entry whose host segment is wildcard-free pins that exact host as operator-declared topology: an on-prem API resolving into a private range stays reachable. A glob-host entry (`https://**`, `https://*.example.com/**`) never exempts — the concrete host is agent-chosen, so the SSRF gate still applies. Neither does a templated entry (`https://{$credential.host}/**`, `{$credential.site_url}/**`): the target is matched against the list rendered for the connection, but a host rendered from a connection value is connection-chosen, so it gets the SSRF gate and never shares cookies with a sibling host.
 
-The CLI's `guardedFetch`/`preflightUrl` (`@appstrate/afps-runtime`) applies the identical branches, so an AFPS package behaves the same under the sidecar and the standalone `afps` CLI.
+The CLI's local resolver and the platform credential proxy call the same `fetchApiCall`, so an AFPS package behaves the same under the sidecar and the standalone `afps` CLI (the platform proxy alone grants no literal-allowlist exemption).
 
 ## Redirect handling
 
-`{ns}__api_call` follows 30x redirects manually (`redirect: "manual"`) on the buffered path so `Set-Cookie` from intermediate hops is captured, each into the connection's jar bucket for the hop's own origin (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Each hop's `Cookie` header is composed by name as sibling-origin < injected credential < own-origin cookies (`docs/architecture/SIDECAR.md`, "Sticky-cookie jar scoping"). Three defence-in-depth rules apply to every hop:
+`{ns}__api_call` follows 30x redirects manually (`redirect: "manual"`) so `Set-Cookie` from intermediate hops is captured, each into the connection's jar bucket for the hop's own origin (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Each hop's `Cookie` header is composed by name as sibling-origin < injected credential < own-origin cookies (`docs/architecture/SIDECAR.md`, "Sticky-cookie jar scoping"). Three defence-in-depth rules apply to every hop:
 
-1. **Per-hop SSRF blocklist** — every candidate hop is checked against the same blocklist as the initial URL (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`). Applies regardless of `allowAllUris` — a compromised upstream cannot pivot the proxy into `http://169.254.169.254/…`.
+1. **Per-hop SSRF gate** — every candidate hop gets the same literal + DNS check and address pin as the initial URL (loopback, RFC1918, link-local, cloud metadata, `host.docker.internal`). Applies regardless of `allowAllUris` — a compromised upstream cannot pivot the proxy into `http://169.254.169.254/…`.
 2. **Per-hop `authorizedUris`** — when the provider declared `authorizedUris`, every hop must match. Off-allowlist redirects fail closed with a structured `403 Redirect blocked (unauthorized)` and the raw hop URL never appears in the error message (defence against capability-bearing redirect URLs).
-3. **Hybrid credential strip** — with an `authorizedUris` allowlist, every surviving hop is inside the trust boundary by construction so the injected credential header (and `Authorization`) is forwarded — multi-host APIs like Dropbox (`api.dropboxapi.com` ⇄ `content.dropboxapi.com`) or Twilio (`api` ⇄ `lookups` ⇄ `verify`) work without special-casing. With `allowAllUris: true` (no declared trust boundary), credentials are stripped on cross-origin hops per WHATWG fetch, and the initial `Cookie` header stays stripped for the rest of the chain.
+3. **One credential rule** — a hop to an origin the `authorizedUris` allowlist names keeps the credential headers, the caller's `Cookie` and the body, so multi-host APIs like Dropbox (`api.dropboxapi.com` ⇄ `content.dropboxapi.com`) or Twilio (`api` ⇄ `lookups` ⇄ `verify`) work without special-casing. Any other origin change (no allowlist, or `allowAllUris` on a call carrying no credential) strips them, and the initial `Cookie` header stays stripped for the rest of the chain. The platform credential proxy and the CLI resolver apply the same rule.
 
 Additional hardening: userinfo and fragment are stripped from every redirect `Location` before policy checks and before re-issuing the fetch. A compromised upstream cannot inject attacker-controlled basic-auth (`https://attacker:pwn@target/`) on the next hop.
 
-Streaming bodies (`ReadableStream`) skip the manual follower (bodies cannot be replayed across hops) and fall back to Bun's native `redirect: "follow"`. The initial-URL allowlist check still bounds the surface; per-hop validation is unavailable on this path by construction.
+A streaming body (`ReadableStream`) cannot be replayed across hops, so its 30x is returned to the caller unfollowed: the credential never leaves the initial, allowlist-checked origin.
 
-Cap: `MAX_REDIRECTS = 10` (mirrors Bun's native default).
+Cap: 10 redirects (`DEFAULT_MAX_REDIRECTS`, `@appstrate/afps-shared/guarded-fetch`). Deadline: 30 s per exchange (`API_CALL_TIMEOUT_MS`).
 
 **Provider-author guidance**: if your API redirects between hosts (DigitalOcean Spaces signed URLs, Dropbox API ⇄ content, multi-region failover), declare every host in `authorizedUris`. The Bearer survives intra-allowlist hops; cross-allowlist redirects are refused.
 
