@@ -636,6 +636,112 @@ describe("code sync — --source draft", () => {
   });
 });
 
+describe("code sync — --package", () => {
+  const claudeRoot = (): string => join(harness.home(), ".claude", "skills");
+  const TWO: SkillFixture[] = [
+    {
+      id: "@acme/pdf-tools",
+      skillMd: skillMd("PDF Tools", "Published copy."),
+      draft: { skillMd: skillMd("PDF Tools", "Draft copy."), lockVersion: 2, etag: "idx-a" },
+    },
+    {
+      id: "@acme/notes",
+      skillMd: skillMd("notes", "Published notes."),
+      draft: { skillMd: skillMd("notes", "Draft notes."), lockVersion: 2, etag: "idx-b" },
+    },
+  ];
+
+  it("tries one draft and leaves every other installed skill as it was", async () => {
+    const server = createSkillServer(TWO);
+    server.install();
+    await codeSyncCommand({ target: ["claude-user"] }, createMemoryIO().io);
+    const notes = await readText(join(claudeRoot(), "notes", "SKILL.md"));
+
+    await codeSyncCommand(
+      { target: ["claude-user"], source: "draft", package: ["@acme/pdf-tools"] },
+      createMemoryIO().io,
+    );
+
+    expect(await readText(join(claudeRoot(), "pdf-tools", "SKILL.md"))).toContain("Draft copy.");
+    expect(await readText(join(claudeRoot(), "notes", "SKILL.md"))).toBe(notes);
+    expect(server.draftDownloads()).toBe(1);
+  });
+
+  it("gives the skill back its published copy on the next full sync", async () => {
+    createSkillServer(TWO).install();
+    const { io } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-user"] }, io);
+    await codeSyncCommand(
+      { target: ["claude-user"], source: "draft", package: ["@acme/pdf-tools"] },
+      io,
+    );
+
+    await codeSyncCommand({ target: ["claude-user"] }, io);
+
+    expect(await readText(join(claudeRoot(), "pdf-tools", "SKILL.md"))).toContain(
+      "Published copy.",
+    );
+    expect(await readdir(claudeRoot())).toEqual(["notes", "pdf-tools"]);
+  });
+
+  it("keeps the plugin's other skills when it rebuilds the plugin", async () => {
+    createSkillServer(TWO).install();
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    await codeSyncCommand(
+      { target: ["claude-plugin"], source: "draft", package: ["@acme/notes"] },
+      createMemoryIO().io,
+    );
+
+    const skills = join(pluginRoot(), "skills");
+    expect(await readdir(skills)).toEqual(["notes", "pdf-tools"]);
+    expect(await readText(join(skills, "notes", "SKILL.md"))).toContain("Draft notes.");
+    expect(await readText(join(skills, "pdf-tools", "SKILL.md"))).toContain("Published copy.");
+  });
+
+  it("refuses a package no synced space lists, and writes nothing", async () => {
+    createSkillServer(TWO).install();
+    const { io, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-user"], package: ["@acme/missing"] }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("Not a skill of the synced spaces: @acme/missing");
+    expect(await exists(claudeRoot())).toBe(false);
+  });
+
+  it("refuses to sync into another connection's installation", async () => {
+    createSkillServer(TWO).install();
+    await codeSyncCommand({ target: ["claude-user"] }, createMemoryIO().io);
+    await seedLoggedInProfile("default", { orgId: "org_2", spaceId: "spc_1" });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand(
+        { target: ["claude-user"], source: "draft", package: ["@acme/pdf-tools"] },
+        io,
+      ),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("holds another connection's installation");
+    expect(await readText(join(claudeRoot(), "pdf-tools", "SKILL.md"))).toContain(
+      "Published copy.",
+    );
+    expect(await readdir(claudeRoot())).toEqual(["notes", "pdf-tools"]);
+  });
+
+  it("cannot be combined with --print-path", async () => {
+    const { io, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand(
+        { target: ["claude-plugin"], printPath: true, package: ["@acme/pdf-tools"] },
+        io,
+      ),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("--package cannot be combined with --print-path.");
+  });
+});
+
 describe("code sync — a failed resolution is not a deletion", () => {
   const TWO: SkillFixture[] = [...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }];
 

@@ -470,6 +470,7 @@ export async function diffTarget(
   state: SyncState,
   source: SkillSource,
   context: SyncContext,
+  only?: ReadonlySet<string>,
 ): Promise<TargetPlan> {
   const ledger = ownedLedger(target, state, source, context);
   // A ledger from a build whose materializer differs is stale, but still owned.
@@ -521,7 +522,9 @@ export async function diffTarget(
   for (const slug of Object.keys(ledger.managed).sort()) {
     if (wanted.has(slug)) continue;
     // The plugin is rebuilt by COPYING carried-over directories.
-    const keepable = catalogue.unresolved.has(ledger.managed[slug]!.packageId) && present.has(slug);
+    const { packageId } = ledger.managed[slug]!;
+    const outOfScope = only !== undefined && !only.has(packageId);
+    const keepable = (outOfScope || catalogue.unresolved.has(packageId)) && present.has(slug);
     (keepable ? plan.keep : plan.removed).push(slug);
   }
   plan.write.sort();

@@ -73,6 +73,8 @@ export interface CodeSyncOptions {
   target?: SyncTarget[];
   space?: string[];
   source?: SkillSource;
+  /** Sync only these skills; everything else installed is carried as it is. */
+  package?: string[];
   printPath?: boolean;
   dryRun?: boolean;
 }
@@ -97,6 +99,7 @@ export async function codeSyncCommand(
   const targets = uniqueTargets(opts.target);
   const source: SkillSource = opts.source ?? "published";
   const printPath = opts.printPath === true;
+  const only = opts.package ? new Set(opts.package) : undefined;
 
   // No default: a plugin tree is useless unless the plugin is installed, and
   // the one unattended caller (the marketplace command) names its targets.
@@ -116,6 +119,12 @@ export async function codeSyncCommand(
     io.stderr.write(
       "--print-path cannot be combined with --dry-run: a dry run writes no plugin.\n",
     );
+    io.exit(1);
+  }
+  if (only && printPath) {
+    // The marketplace command rebuilds the whole plugin every session; a
+    // partial run there would pin it to whatever this one package selected.
+    io.stderr.write("--package cannot be combined with --print-path.\n");
     io.exit(1);
   }
 
@@ -174,7 +183,7 @@ export async function codeSyncCommand(
           profileName,
           profile!,
           opts.space,
-          targets.includes("claude-plugin"),
+          targets.includes("claude-plugin") && !only,
           report,
         );
         const catalogue = await resolveAll(
@@ -185,10 +194,19 @@ export async function codeSyncCommand(
           report,
           sources,
           context,
+          only,
         );
         const plans = await Promise.all(
-          targets.map((target) => diffTarget(target, catalogue, state, source, context)),
+          targets.map((target) => diffTarget(target, catalogue, state, source, context, only)),
         );
+        const switching = only && plans.find((plan) => plan.contextChanged);
+        if (switching) {
+          // One ledger per target, one connection per ledger: carrying another
+          // connection's skills beside this one would record them as ours.
+          throw new Error(
+            `--package cannot sync into ${targetRoot(switching.target)}: it holds another connection's installation. Run a full sync of that target first.`,
+          );
+        }
         const unresolvedKinds = [...catalogue.unresolved.values()];
         if (
           plans.some(
@@ -302,6 +320,7 @@ async function resolveAll(
   report: Report,
   { skillSpaces: spaceIds, agentSpace }: SyncSources,
   context: SyncContext,
+  only?: ReadonlySet<string>,
 ): Promise<Catalogue> {
   // A package is an ORG row that `space_packages` attributes to zero or more
   // spaces, so the same skill is normally listed by several of them. It is
@@ -313,9 +332,14 @@ async function resolveAll(
   const origins = new Map<string, string>();
   spaceIds.forEach((spaceId, index) => {
     for (const packageId of listings[index]!) {
+      if (only && !only.has(packageId)) continue;
       if (!origins.has(packageId)) origins.set(packageId, spaceId);
     }
   });
+  const missing = [...(only ?? [])].filter((packageId) => !origins.has(packageId));
+  if (missing.length > 0) {
+    throw new Error(`Not a skill of the synced spaces: ${missing.join(", ")}`);
+  }
   const agents = agentSpace ? await listSyncableAgents(profileName, agentSpace) : [];
   // One queue for both kinds, so the cap holds across them. `null` = nothing to sync.
   type Resolved =
@@ -381,7 +405,9 @@ async function resolveAll(
   for (const target of SYNC_TARGETS.filter((target) => targets.includes(target))) {
     const { managed } = ownedLedger(target, state, source, context);
     for (const [slug, { packageId }] of Object.entries(managed)) {
-      if (wanted.has(packageId) && !incumbents.has(slug)) incumbents.set(slug, packageId);
+      // Out of `--package`'s scope, an installed skill keeps its directory too.
+      const held = wanted.has(packageId) || (only !== undefined && !only.has(packageId));
+      if (held && !incumbents.has(slug)) incumbents.set(slug, packageId);
     }
   }
 

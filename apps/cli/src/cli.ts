@@ -559,6 +559,11 @@ codeGroup
   )
   .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
   .option(
+    "--package <id>",
+    "Sync only this skill, as @scope/name (repeatable). Every other installed skill and agent command is left exactly as it is — how one draft is tried without touching the rest.",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option(
     "--print-path",
     "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",
   )
@@ -568,6 +573,7 @@ codeGroup
       target?: SyncTarget[];
       space?: string[];
       source?: SkillSource;
+      package?: string[];
       printPath?: boolean;
       dryRun?: boolean;
     }) => {
@@ -577,6 +583,7 @@ codeGroup
         target: opts.target,
         space: opts.space,
         source: opts.source,
+        package: opts.package,
         printPath: opts.printPath,
         dryRun: opts.dryRun,
       });
