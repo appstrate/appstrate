@@ -173,83 +173,18 @@ const REASONS = {
  * `bun install` re-resolving it moved unrelated packages too). `nanoid` 1139427
  * no longer matches anything installed.
  *
+ * Re-measured 2026-09-30: the nine `brace-expansion` entries went when all
+ * three vulnerable copies (1.1.15, 2.1.1, 5.0.5) and the two nested `undici`
+ * copies (6.28.0, 7.29.0) were moved to their patched releases by editing
+ * those five `bun.lock` entries in place — deleting them instead made
+ * `bun install` re-resolve ~350 unrelated packages.
+ *
  * The rest are pinned by transitive semver ranges — an exact pin in one case
  * (`js-yaml` below) — and forcing them with root `overrides` is a separate
  * change with its own blast radius: bun applies an override to every copy, so
  * it cannot lift one major without dragging a consumer of another.
  */
 const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
-  // ── brace-expansion — three installed copies, two of them dev-only ──
-  // 1.1.15 via eslint-plugin-react → minimatch.
-  {
-    id: 1123897,
-    packageName: "brace-expansion",
-    reason: "Dev tree only — brace-expansion@1.1.15 via minimatch ← eslint-plugin-react.",
-    expires: "2026-12-31",
-  },
-  {
-    id: 1130588,
-    packageName: "brace-expansion",
-    reason: "Dev tree only — brace-expansion@1.1.15 via minimatch ← eslint-plugin-react.",
-    expires: "2026-12-31",
-  },
-  {
-    id: 1130737,
-    packageName: "brace-expansion",
-    reason: "Dev tree only — brace-expansion@1.1.15 via minimatch ← eslint-plugin-react.",
-    expires: "2026-12-31",
-  },
-  // 2.1.1 via openapi-typescript → @redocly/openapi-core → minimatch.
-  {
-    id: 1123896,
-    packageName: "brace-expansion",
-    reason:
-      "Dev tree only — brace-expansion@2.1.1 via minimatch ← @redocly/openapi-core ← " +
-      "openapi-typescript.",
-    expires: "2026-12-31",
-  },
-  {
-    id: 1130589,
-    packageName: "brace-expansion",
-    reason:
-      "Dev tree only — brace-expansion@2.1.1 via minimatch ← @redocly/openapi-core ← " +
-      "openapi-typescript.",
-    expires: "2026-12-31",
-  },
-  {
-    id: 1130736,
-    packageName: "brace-expansion",
-    reason:
-      "Dev tree only — brace-expansion@2.1.1 via minimatch ← @redocly/openapi-core ← " +
-      "openapi-typescript.",
-    expires: "2026-12-31",
-  },
-  // 5.0.5 via @earendil-works/pi-coding-agent → minimatch. Product.
-  {
-    id: 1123898,
-    packageName: "brace-expansion",
-    reason:
-      "Product tree — brace-expansion@5.0.5 via minimatch ← @earendil-works/pi-coding-agent. " +
-      "Glob patterns come from agent/skill config, not from request input; DoS only.",
-    expires: "2026-10-31",
-  },
-  {
-    id: 1130591,
-    packageName: "brace-expansion",
-    reason:
-      "Product tree — brace-expansion@5.0.5 via minimatch ← @earendil-works/pi-coding-agent. " +
-      "Glob patterns come from agent/skill config, not from request input; DoS only.",
-    expires: "2026-10-31",
-  },
-  {
-    id: 1130734,
-    packageName: "brace-expansion",
-    reason:
-      "Product tree — brace-expansion@5.0.5 via minimatch ← @earendil-works/pi-coding-agent. " +
-      "Glob patterns come from agent/skill config, not from request input; DoS only.",
-    expires: "2026-10-31",
-  },
-
   // ── browserslist ──
   {
     id: 1153171,
