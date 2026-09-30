@@ -3,7 +3,7 @@
 -- `resolvedConnectionMapSchema` requires a string `label` and `accountId` on every
 -- element of `runs.resolved_connections`; a pre-`0077` run may carry `label: null`, and
 -- its reads 500. A missing label takes the connection's current one, else the element's
--- `accountId`, else its `connectionId`; a missing `accountId` takes the connection's,
+-- non-empty `accountId`, else its `connectionId`; a missing `accountId` takes the connection's,
 -- else `''` (unknown: the connection is deleted). Order: `scripts/migration/README.md`.
 -- Rows: UNMEASURED — record the rehearsal counts here. Idempotent; one transaction.
 
@@ -59,7 +59,7 @@ SET resolved_connections = (
           'label', coalesce(
             CASE WHEN jsonb_typeof(a.el->'label') = 'string' THEN a.el->>'label' END,
             c.label,
-            CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END,
+            NULLIF(CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END, ''),
             a.el->>'connectionId'),
           'accountId', coalesce(
             CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END,

@@ -87,7 +87,7 @@ export async function countByKid(query: Query): Promise<KidCount[]> {
 
 interface RekeyResult {
   rekeyed: number;
-  /** Rewritten by the platform between the read and the write. */
+  /** Changed or deleted between the read and the write. */
   skipped: number;
   /** `table.column key: reason` — never a value. */
   failed: string[];
@@ -196,7 +196,7 @@ if (import.meta.main) {
 
     if (values.apply) {
       const result = await rekeyRetiredKids(query, { ...keyring, batchSize });
-      out(`rekeyed ${result.rekeyed}, skipped ${result.skipped} (rewritten meanwhile)`);
+      out(`rekeyed ${result.rekeyed}, skipped ${result.skipped} (changed or deleted meanwhile)`);
       for (const line of result.failed) out(`  FAILED ${line}`);
     }
     out("ciphertexts per kid:");

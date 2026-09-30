@@ -57,6 +57,52 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
     });
   });
 
+  it("refuses the connect re-login replay once it would inject", async () => {
+    let session = ""; // not acquired yet: the first attempt injects nothing
+    const src: MitmCredentialSource = {
+      current: () => ({
+        auths: [{ authKey: "s", authType: "custom", fields: {}, authorizedUris: ["https://**"] }],
+      }),
+      deliveryPlans: () => ({
+        s: {
+          headerName: "Cookie",
+          headerPrefix: "sid=",
+          value: session,
+          allowServerOverride: false,
+        },
+      }),
+      shouldReauth: (_key, status) => status === 401,
+      hasReloginHandler: () => true,
+      refreshOnUnauthorized: async () => {
+        session = "fresh";
+        return true;
+      },
+    };
+    const sent: Headers[] = [];
+    const events: MitmListenerEvent[] = [];
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers));
+      return new Response("no", { status: 401 });
+    }) as unknown as typeof fetch;
+    const res = await handleInnerRequest(
+      new Request("https://127.0.0.1/v1/things"),
+      "attacker.example",
+      src,
+      fetchFn,
+      1024,
+      (e) => events.push(e),
+      allowAll,
+    );
+    expect(res.status).toBe(401);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.get("cookie")).toBeNull();
+    expect(events).toContainEqual({
+      kind: "request-refused",
+      url: "https://attacker.example/v1/things",
+      reason: "credential not host-bounded",
+    });
+  });
+
   it("injects under an allowlist naming the host", async () => {
     const { res, sent } = await send(["https://attacker.example/**"]);
     expect(res.status).toBe(200);

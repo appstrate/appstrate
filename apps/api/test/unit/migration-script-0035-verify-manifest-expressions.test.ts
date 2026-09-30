@@ -2,9 +2,10 @@
 
 /**
  * `scripts/migration/0035-verify-manifest-expressions.ts` on a private PGlite replayed to the
- * current schema: its query reads every integration draft and published version, and the report
- * lists both the expressions the platform no longer evaluates and the injected credentials a run
- * now refuses as `exfiltration`, and nothing for a clean manifest.
+ * current schema: its query reads every org integration draft and published version, and the
+ * report lists both the expressions the platform no longer evaluates and the injected credentials
+ * a run now refuses as `exfiltration`, and nothing for a clean manifest. Only drafts and `latest`
+ * versions are gated; an older version is listed apart and a system package not at all.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -19,6 +20,8 @@ import {
 const CLEAN = "@acme0035/clean";
 const DOWNGRADED = "@acme0035/downgraded";
 const BROKEN = "@acme0035/broken";
+const UPGRADED = "@acme0035/upgraded";
+const SYSTEM = "@acme0035/system";
 
 const apiKeyAuth = (extra: Record<string, unknown>) => ({
   type: "api_key",
@@ -59,8 +62,18 @@ beforeAll(async () => {
     ],
   );
   await pg.query(
-    `INSERT INTO package_versions (package_id, version, integrity, artifact_size, manifest) VALUES ($1, '1.0.0', 'sha256-x', 1, $2)`,
-    [BROKEN, JSON.stringify(published)],
+    `INSERT INTO packages (id, type, source, draft_manifest) VALUES ($1, 'integration', 'local', $2), ($3, 'integration', 'system', $4)`,
+    [UPGRADED, JSON.stringify(clean), SYSTEM, JSON.stringify(published)],
+  );
+  await pg.query(
+    `INSERT INTO package_versions (package_id, version, integrity, artifact_size, manifest) VALUES ($1, '1.0.0', 'sha256-x', 1, $2), ($3, '1.0.0', 'sha256-x', 1, $2), ($3, '1.0.1', 'sha256-x', 1, $4), ($5, '1.0.0', 'sha256-x', 1, $2)`,
+    [BROKEN, JSON.stringify(published), UPGRADED, JSON.stringify(clean), SYSTEM],
+  );
+  await pg.query(
+    `INSERT INTO package_dist_tags (package_id, tag, version_id)
+     SELECT package_id, 'latest', id FROM package_versions
+      WHERE (package_id, version) IN (($1, '1.0.0'), ($2, '1.0.1'), ($3, '1.0.0'))`,
+    [BROKEN, UPGRADED, SYSTEM],
   );
 }, 300_000);
 
@@ -69,13 +82,16 @@ afterAll(async () => {
 });
 
 describe("0035 — stored manifests the release refuses", () => {
-  it("lists unevaluable expressions and credentials runs will refuse, integrations only", async () => {
+  it("lists unevaluable expressions and credentials runs will refuse, org integrations only", async () => {
     const { rows } = await pg.query<StoredManifest>(STORED_MANIFESTS_QUERY);
-    expect(rows.map((r) => `${r.id}@${r.version}`)).toEqual([
-      `${BROKEN}@1.0.0`,
-      `${BROKEN}@draft`,
-      `${CLEAN}@draft`,
-      `${DOWNGRADED}@draft`,
+    expect(rows.map((r) => `${r.id}@${r.version} ${r.gated}`)).toEqual([
+      `${BROKEN}@1.0.0 true`,
+      `${BROKEN}@draft true`,
+      `${CLEAN}@draft true`,
+      `${DOWNGRADED}@draft true`,
+      `${UPGRADED}@1.0.0 false`,
+      `${UPGRADED}@1.0.1 true`,
+      `${UPGRADED}@draft true`,
     ]);
 
     const report = manifestIssues(rows);
@@ -84,6 +100,10 @@ describe("0035 — stored manifests the release refuses", () => {
     expect(report.lines.map((l) => l.split(":")[0])).toEqual([
       `${BROKEN}@1.0.0 [exfiltration] auths.k.allow_all_uris`,
       `${BROKEN}@draft [expression] auths.k.delivery.http.value`,
+    ]);
+    // Fixed by a later `latest`: reported, but not what fails the pre-flight.
+    expect(report.olderVersions.map((l) => l.split(":")[0])).toEqual([
+      `${UPGRADED}@1.0.0 [exfiltration] auths.k.allow_all_uris`,
     ]);
   });
 });

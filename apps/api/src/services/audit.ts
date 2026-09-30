@@ -48,7 +48,8 @@ type ContextAuditInput = Omit<
   "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
 >;
 
-export async function recordAudit(input: RecordAuditInput): Promise<void> {
+/** Resolves `false` when the insert failed (logged, never thrown). */
+export async function recordAudit(input: RecordAuditInput): Promise<boolean> {
   try {
     await db.insert(auditEvents).values({
       orgId: input.orgId,
@@ -64,6 +65,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
       userAgent: input.userAgent ?? null,
       requestId: input.requestId ?? null,
     });
+    return true;
   } catch (err) {
     logger.error("recordAudit failed (state change is unaffected)", {
       action: input.action,
@@ -71,6 +73,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
       resourceId: input.resourceId,
       error: getErrorMessage(err),
     });
+    return false;
   }
 }
 
@@ -146,9 +149,17 @@ export async function recordAuditFromContext(
   c: Context<AppEnv>,
   input: ContextAuditInput & { orgIdOverride?: string },
 ): Promise<void> {
+  await tryRecordAuditFromContext(c, input);
+}
+
+/** {@link recordAuditFromContext}, resolving `false` when no row was written. */
+export async function tryRecordAuditFromContext(
+  c: Context<AppEnv>,
+  input: ContextAuditInput & { orgIdOverride?: string },
+): Promise<boolean> {
   const { orgIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
-  if (!orgId) return;
+  if (!orgId) return false;
 
   const user = c.get("user");
   const apiKeyId = c.get("apiKeyId");
@@ -168,7 +179,7 @@ export async function recordAuditFromContext(
   }
 
   const persona = c.get("viewAs");
-  await recordAudit({
+  return recordAudit({
     ...auditInput,
     ...(persona ? { after: { ...(auditInput.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
     orgId,

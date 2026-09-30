@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `loginBlockIssues` refuses. Needs `@appstrate/afps-shared`
   `./runtime-expression` and `./credential-template`. (#1641)
 
+### Security
+
+- **`isBlockedHost` (`./ssrf`) judges IPv4 embedded in NAT64 and 6to4 IPv6
+  addresses** like IPv4-mapped ones, through `@appstrate/afps-shared` 0.10.0.
+  (#1641)
+
 ## [13.0.0] — 2026-09-30
 
 ### Added

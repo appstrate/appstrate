@@ -40,7 +40,15 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
-/** The two ways the `connection_id` selector is refused. Shared by both operations. */
+/** `connection_id` where only an agent run's token is accepted: no connect-run exemption. */
+const boundConnectionIdParam = {
+  ...connectionIdParam,
+  required: true,
+  description:
+    "The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`.",
+} as const;
+
+/** The two ways the `connection_id` selector is refused. Shared by every operation taking it. */
 const connectionSelector400 = {
   description:
     "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
@@ -371,12 +379,12 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "End a connection's upstream-rejection streak",
       description:
-        "Sidecar-only. Same Bearer run token, agent-dependency check and required `connection_id` selector as the refresh endpoint. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.",
+        "Sidecar-only. Same Bearer run token, agent-dependency check and bound-connection check as the refresh endpoint; `connection_id` is always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        connectionIdParam,
+        boundConnectionIdParam,
       ],
       responses: {
         "204": { description: "Streak ended (or none to end)." },

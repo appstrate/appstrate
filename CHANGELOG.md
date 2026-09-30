@@ -18,9 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1641).
 - **Run `scripts/migration/0037-schedule-disabled-reason-backfill.sql` after
   the release boots** (#1641): it relabels `actor_left_org` the disabled
-  schedules whose member actor is no longer in the organization. A schedule a
-  fire disabled because its actor could no longer run agents
-  (`actor_invalid`) is not derivable and stays `user`.
+  schedules whose member actor is no longer in the organization. The other two
+  system disables are not derivable and stay `user`: a fire that found its
+  actor could no longer run agents (`actor_invalid`), and a connection
+  deletion that emptied an override set (`connection_deleted`).
 - **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
   deploy, this query must return no row:
   `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
@@ -39,13 +40,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
   or an entry that does not bound the host; `allow_all_uris` beside a bounded
   list is dropped at run time, not refused, so it is not listed); it exits 1
-  while any remains (#1641).
+  while a draft or `latest` version of an org integration has one. A hit on an
+  older version is listed apart without failing the check, and system
+  packages are skipped: the image ships them (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
   missing label or account takes its connection's; when that connection is
-  deleted, the label falls back to the element's `accountId`, else its
-  `connectionId`, and the account to `''`. It writes nothing while an element
+  deleted, the label falls back to the element's non-empty `accountId`, else
+  its `connectionId`, and the account to `''`. It writes nothing while an element
   lacks a string `connectionId` or names no cascade layer in `source`.
 
 ### Changed
@@ -173,22 +176,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   longer do** (#1641). A credential that cannot refresh (api_key, basic,
   custom, OAuth2 with no refresh client) is flagged `needs_reconnection` at
   the `INTEGRATION_REFRESH_MAX_FAILURES`-th CONSECUTIVE upstream 401, however
-  far apart: any successful (2xx) call through it ends the streak, as a
-  reconnect does. Every path counts and resets: the platform credential proxy
-  (CLI, GitHub Action), which counted none before and flagged an OAuth2
-  connection without a refresh client on its first 401, and the sidecar's
-  `api_call`, MITM egress and remote-HTTP sinks, which report the first
-  success after a counted rejection to
+  far apart. Any successful (2xx) call through a non-OAuth2 connection ends
+  the streak; an OAuth2 connection's count is cleared only by a credential
+  write (a reconnect, or a successful refresh), never by a 2xx. Every path
+  counts and resets: the platform credential proxy (CLI, GitHub Action),
+  which counted none before and flagged an OAuth2 connection without a
+  refresh client on its first 401, and the sidecar's `api_call`, MITM egress
+  and remote-HTTP sinks, which report the first success after a counted
+  rejection to
   `POST /internal/integration-credentials/{scope}/{name}/upstream-success`
   (the credentials payload announces a pending streak as `rejection_streak`).
   For an API-key integration connection that replaces a count since the last
   reconnect; a revoked BYOK model key, never flagged before, is counted the
   same way through the LLM proxy, which a 2xx resets, and stops inference
   until it is re-entered. A BYOK rejection or success counts only against the
-  key the request sent; an OAuth2 connection or subscription keeps its own
-  counter, the refresh streak, which only a successful refresh resets. The
-  refresh `502` now reads
-  `N/M consecutive upstream rejections before it is flagged`.
+  key the request sent; an OAuth2 subscription keeps its own counter, the
+  refresh streak, which a successful refresh resets. The refresh `502` now
+  reads `N/M consecutive upstream rejections before it is flagged`.
 - **An OAuth client update that sends a new `client_secret` without
   `token_endpoint_auth_method` keeps the stored method** (#1641); it reset
   the client to the manifest's method. A public client (`none`) given a
@@ -227,6 +231,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The MITM listener applies the host-bound credential rule to its replay
+  too** (#1641). A request replayed after a credential refresh or a
+  `connect.tool` re-login is checked like the first attempt: a credential
+  whose auth leaves the host to the caller is never injected.
+- **`api_call` never forwards a caller-supplied `Host` header** (#1641). The
+  shared outbound engine drops it on every path (platform proxy, sidecar,
+  CLI), so the upstream's virtual host always follows the target URL.
+- **The SSRF blocklist judges IPv4 addresses embedded in NAT64 and 6to4 IPv6
+  addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
+  IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
+  is blocked.
+- **The credential-proxy audit of another member's connection is no longer
+  lost** (#1641). A failed insert no longer suppresses the session's row: the
+  next call retries it. The row names the acting principal (`principalType`,
+  `principalId` in `after`), and two principals sharing one session each get
+  their own.
 - **BREAKING: an auth whose credential the proxy injects must name its
   hosts** (#1641). Manifest writes and imports refuse, on such an auth,
   `allow_all_uris`, no `authorized_uris`, or an entry that leaves the host to

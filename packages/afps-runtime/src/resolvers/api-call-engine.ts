@@ -186,11 +186,14 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
     AbortSignal.timeout(API_CALL_TIMEOUT_MS),
     ...(callerSignal ? [callerSignal] : []),
   ]);
+  // The URL owns Host: a caller's would name another virtual host beside the credential.
+  const headers = new Headers(opts.init.headers);
+  headers.delete("host");
 
   try {
     return await guardedFetchChain(
       opts.url,
-      { ...opts.init, signal },
+      { ...opts.init, headers, signal },
       {
         ...(gated
           ? {

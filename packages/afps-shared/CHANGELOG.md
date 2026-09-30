@@ -77,6 +77,15 @@ exports (core raises its range to `^0.10.0`).
   only**. (#1641)
 - The guarded-fetch transport receives the URL as a string. (#1641)
 
+### Security
+
+- **`isBlockedHost` judges an IPv4 address embedded in IPv6 as that IPv4 for
+  every translation prefix**: IPv4-compatible `::/96`, IPv4-mapped
+  `::ffff:0:0/96`, NAT64 `64:ff9b::/96` (RFC 6052) and 6to4 `2002::/16`
+  (RFC 3056). The local-use NAT64 prefix `64:ff9b:1::/48` (RFC 8215) is
+  blocked whole, and an IPv6 literal that does not expand to eight groups is
+  blocked. (#1641)
+
 ## [0.9.2] — 2026-09-30
 
 Additive only. Publish before any `@appstrate/core` that imports

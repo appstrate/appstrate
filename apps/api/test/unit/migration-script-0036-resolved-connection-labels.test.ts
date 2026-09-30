@@ -119,14 +119,16 @@ describe("0036 — resolved connection labels", () => {
     expect(await snapshot("run_0036_legacy")).toEqual(before);
   });
 
-  it("names an element with a deleted connection and no account by its connectionId", async () => {
+  it("names an element with a deleted connection and no or an empty account by its connectionId", async () => {
     await insertRun("run_0036_orphan", {
-      [GMAIL]: [{ connectionId: GONE, source: "fallback_auto", label: null }],
+      [GMAIL]: [
+        { connectionId: GONE, source: "fallback_auto", label: null },
+        { connectionId: GONE, source: "fallback_auto", label: null, accountId: "" },
+      ],
     });
     await pg.exec(script);
-    expect(await snapshot("run_0036_orphan")).toEqual({
-      [GMAIL]: [{ connectionId: GONE, source: "fallback_auto", label: GONE, accountId: "" }],
-    });
+    const named = { connectionId: GONE, source: "fallback_auto", label: GONE, accountId: "" };
+    expect(await snapshot("run_0036_orphan")).toEqual({ [GMAIL]: [named, named] });
     resolvedConnectionMapSchema.parse(await snapshot("run_0036_orphan"));
   });
 

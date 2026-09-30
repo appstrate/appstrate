@@ -499,6 +499,29 @@ describe("fetchApiCall — transport", () => {
     expect(finalUrl).toBe("https://api.example.com/v1");
   });
 
+  it("never forwards a caller-supplied Host, even on an unpinned hop", async () => {
+    let seen: Headers | null = null;
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      seen = new Headers(init?.headers);
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    await fetchApiCall({
+      url: "https://api.example.com/v1",
+      init: { method: "GET", headers: { Host: "other.example", "X-Api-Key": "k" } },
+      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaders: ["X-Api-Key"],
+      trustedHost: () => false,
+      integrationId: "i",
+      credentialFields: {},
+      fetchFn,
+      resolveHost: publicResolver,
+    });
+    expect(seen!.get("host")).toBeNull();
+    expect(seen!.get("x-api-key")).toBe("k");
+  });
+
   it(`bounds the exchange at API_CALL_TIMEOUT_MS (${API_CALL_TIMEOUT_MS} ms) AND the caller's signal`, async () => {
     const caller = new AbortController();
     let signal: AbortSignal | undefined;

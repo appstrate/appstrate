@@ -5001,7 +5001,7 @@ export interface paths {
         put?: never;
         /**
          * End a connection's upstream-rejection streak
-         * @description Sidecar-only. Same Bearer run token, agent-dependency check and required `connection_id` selector as the refresh endpoint. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.
+         * @description Sidecar-only. Same Bearer run token, agent-dependency check and bound-connection check as the refresh endpoint; `connection_id` is always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.
          */
         post: operations["reportIntegrationUpstreamSuccess"];
         delete?: never;
@@ -24999,9 +24999,9 @@ export interface operations {
     };
     reportIntegrationUpstreamSuccess: {
         parameters: {
-            query?: {
-                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
-                connection_id?: string;
+            query: {
+                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id: string;
             };
             header?: never;
             path: {

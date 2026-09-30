@@ -27,6 +27,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
+import { Hono } from "hono";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
@@ -45,6 +46,8 @@ import {
   integrationOrgDefaults,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
+import { auditForeignConnectionUse } from "../../../src/services/credential-proxy/connection-audit.ts";
+import type { AppEnv } from "../../../src/types/index.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -843,11 +846,61 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
           packageId: INTEGRATION_ID,
           sessionId: session,
           runId,
+          principalType: "user",
+          principalId: ctx.user.id,
           ownerType: "user",
           ownerId: colleagueId,
         },
       },
     ]);
+  });
+
+  describe("auditForeignConnectionUse", () => {
+    /** One audit call through a bare Hono context, as the route hands it an API-key request. */
+    async function audit(actorId: string, session: string, orgId = ctx.orgId): Promise<void> {
+      const probe = new Hono<AppEnv>();
+      probe.get("/", async (c) => {
+        c.set("orgId", orgId);
+        c.set("apiKeyId", "key-1");
+        await auditForeignConnectionUse(c, {
+          actor: { type: "end_user", id: actorId },
+          connectionId: shared,
+          integrationId: INTEGRATION_ID,
+          sessionId: session,
+          runId: null,
+          sessionTtlSeconds: 60,
+        });
+        return c.body(null, 204);
+      });
+      expect((await probe.request("/")).status).toBe(204);
+    }
+
+    async function proxiedRows() {
+      return db
+        .select({ resourceId: auditEvents.resourceId, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.connection.proxied"));
+    }
+
+    it("retries on the session's next call when the audit insert failed", async () => {
+      const session = uuidV4();
+      await audit("eu_a", session, "not-a-uuid");
+      expect(await proxiedRows()).toEqual([]);
+      await audit("eu_a", session);
+      await audit("eu_a", session);
+      expect((await proxiedRows()).map((r) => r.resourceId)).toEqual([shared]);
+    });
+
+    it("writes one row per acting principal in a shared session", async () => {
+      const session = uuidV4();
+      await audit("eu_a", session);
+      await audit("eu_b", session);
+      await audit("eu_a", session);
+      const principals = (await proxiedRows()).map(
+        (r) => (r.after as { principalId?: string } | null)?.principalId,
+      );
+      expect(principals.sort()).toEqual(["eu_a", "eu_b"]);
+    });
   });
 
   it("uses the run's single bound connection — even a colleague's shared one — without naming it", async () => {

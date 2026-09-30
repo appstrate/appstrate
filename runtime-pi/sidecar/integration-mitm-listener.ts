@@ -84,6 +84,7 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import {
   planMitmAction,
+  type MitmAction,
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
@@ -893,20 +894,28 @@ export async function handleInnerRequest(
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
-  const buildAction = () => {
+  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
+  // auth's allowlist names, never to one an entry leaves to the caller. Applied to every build,
+  // the first attempt and the post-refresh replay alike; `null` = refused.
+  const buildAction = (): MitmAction | null => {
     const ctx: MitmRequestContext = {
       url: targetUrl,
       headerNames: callerHeaderNames,
       deliveryPlans: credentials.deliveryPlans(),
     };
-    return planMitmAction(ctx, credentials.current());
+    const planned = planMitmAction(ctx, credentials.current());
+    if (
+      planned.injectedHeader &&
+      planned.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)
+    ) {
+      emit({ kind: "request-refused", url: targetUrl, reason: "credential not host-bounded" });
+      return null;
+    }
+    return planned;
   };
 
   const action = buildAction();
-  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
-  // auth's allowlist names, never to one an entry leaves to the caller.
-  if (action.injectedHeader && action.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "credential not host-bounded" });
+  if (!action) {
     return new Response("MITM listener: credential allowlist leaves the host open", {
       status: 403,
     });
@@ -976,9 +985,10 @@ export async function handleInnerRequest(
 
   // Rebuild the action from the source's CURRENT state (fresh after a refresh /
   // re-login, identical for a same-credential replay) and re-issue the request
-  // once. Returns the new response, or null if the retry threw.
+  // once. Returns the new response, or null if the rebuild was refused or the retry threw.
   const refetch = async (): Promise<Response | null> => {
     const a = buildAction();
+    if (!a) return null;
     lastAction = a;
     const outbound = buildOutboundHeaders(
       headersForOutbound,
