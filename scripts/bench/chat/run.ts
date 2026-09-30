@@ -159,10 +159,14 @@ let interrupted = false;
 
 function track(release: () => unknown): () => Promise<void> {
   let done: Promise<void> | null = null;
+  // Stays in `live` until released, so an interrupt waits for a release already under way.
   const dispose = () =>
     (done ??= (async () => {
-      live.delete(dispose);
-      await release();
+      try {
+        await release();
+      } finally {
+        live.delete(dispose);
+      }
     })());
   live.add(dispose);
   return dispose;
@@ -185,7 +189,10 @@ for (const [signal, code] of [
 ] as const) {
   process.once(signal, () => {
     interrupted = true;
-    void releaseAll().finally(() => process.exit(code));
+    void releaseAll().finally(() => {
+      writeResult();
+      process.exit(code);
+    });
   });
 }
 
@@ -300,9 +307,16 @@ const SERVER_LOG_FIELDS: Record<string, string[]> = {
  * The phase fields the platform logged for the turn sent at `sentAt`. Turns
  * never overlap, so the first line of each kind after `sentAt` is this turn's;
  * `chat turn construction` is logged when the turn settles, and carries the
- * session id, so it is waited for and matched on both.
+ * session id, so it is waited for and matched on both. A completed turn must
+ * carry every line and field: a renamed one fails the run instead of reading
+ * as a column of nulls.
  */
-async function serverPhases(server: BenchServer, sentAt: number, sessionId: string) {
+async function serverPhases(
+  server: BenchServer,
+  sentAt: number,
+  sessionId: string,
+  completedTurn: boolean,
+) {
   const ours = (msg: string) => server.logs.filter((l) => l.at >= sentAt && l.msg === msg);
   const construction = () =>
     ours("chat turn construction").find((l) => l.fields.chatSessionId === sessionId);
@@ -312,7 +326,14 @@ async function serverPhases(server: BenchServer, sentAt: number, sessionId: stri
   const out: Record<string, number | null> = {};
   for (const [msg, fields] of Object.entries(SERVER_LOG_FIELDS)) {
     const line = msg === "chat turn construction" ? construction() : ours(msg)[0];
-    for (const field of fields) out[field] = metricValue(line?.fields ?? {}, [field]);
+    for (const field of fields) {
+      if (completedTurn && !(line && Object.hasOwn(line.fields, field))) {
+        throw new Error(
+          `no "${msg}" log with ${field} for a completed turn: SERVER_LOG_FIELDS is stale`,
+        );
+      }
+      out[field] = metricValue(line?.fields ?? {}, [field]);
+    }
   }
   const proxied = ours("llm-proxy call");
   out.llmProxyCalls = proxied.length;
@@ -357,7 +378,7 @@ async function turn(
     scenario,
     index,
     historyLength: history.length,
-    server: await serverPhases(ctx.server, timings.sentAt, sessionId),
+    server: await serverPhases(ctx.server, timings.sentAt, sessionId, !timings.error),
     upstream: upstreamSide(ctx.mock, timings),
   };
   const s = record.server;
@@ -373,6 +394,10 @@ async function newConversationTurn(ctx: Context, scenario: TurnRecord["scenario"
 
 // ─── scenarios ──────────────────────────────────────────────────────────────
 
+/** Measured turns, recorded as each one lands so an interrupted run keeps them. */
+const records: (TurnRecord | UiRecord)[] = [];
+const boots: number[] = [];
+
 async function withServer<T>(
   bootLabel: string,
   keys: unknown[],
@@ -380,25 +405,25 @@ async function withServer<T>(
   body: (server: BenchServer) => Promise<T>,
 ): Promise<{ result: T; bootMs: number }> {
   throwIfInterrupted();
-  const server = await startServer({
-    checkout,
-    port,
-    infra,
-    workDir: join(workRoot, bootLabel),
-    dataDir,
-    systemProviderKeys: keys,
-    env,
-  });
-  const stop = track(() => server.stop());
+  let release = async () => {};
   try {
+    const server = await startServer({
+      checkout,
+      port,
+      infra,
+      workDir: join(workRoot, bootLabel),
+      dataDir,
+      systemProviderKeys: keys,
+      env,
+      onSpawn: (stop) => (release = track(stop)),
+    });
     return { result: await body(server), bootMs: server.bootMs };
   } finally {
-    await stop();
+    await release();
   }
 }
 
-async function warmScenario(ctx: Context, scenario: TurnRecord["scenario"]): Promise<TurnRecord[]> {
-  const records: TurnRecord[] = [];
+async function warmScenario(ctx: Context, scenario: TurnRecord["scenario"]): Promise<void> {
   for (let i = 0; i < warmup; i++) await newConversationTurn(ctx, scenario, -1 - i);
   if (scenario === "follow-up") {
     const sessionId = newSessionId();
@@ -409,19 +434,17 @@ async function warmScenario(ctx: Context, scenario: TurnRecord["scenario"]): Pro
       records.push(record);
       if (assistant) history.push(assistant);
     }
-    return records;
+    return;
   }
   for (let i = 0; i < runs; i++) {
     if (scenario === "idle") await Bun.sleep(idleGap);
     records.push(await newConversationTurn(ctx, scenario, i));
   }
-  return records;
 }
 
-async function uiScenario(ctx: Context, expectedWords: number): Promise<UiRecord[]> {
+async function uiScenario(ctx: Context, expectedWords: number): Promise<void> {
   const browser = await openBrowser(repoRoot);
   const close = track(() => browser.close());
-  const records: UiRecord[] = [];
   try {
     for (let i = -warmup; i < runs; i++) {
       await pace();
@@ -434,13 +457,52 @@ async function uiScenario(ctx: Context, expectedWords: number): Promise<UiRecord
   } finally {
     await close();
   }
-  return records;
+}
+
+let complete = false;
+let written: { result: BenchResult; file: string } | null = null;
+
+/** Writes what was measured, once: also when a boot fails or the run is interrupted. */
+function writeResult(): { result: BenchResult; file: string } {
+  if (written) return written;
+  const summary: Record<string, Record<string, Summary | null>> = {};
+  for (const scenario of scenarios) {
+    const rows = completed(records, scenario);
+    summary[scenario] = Object.fromEntries(
+      Object.entries(metricsOf(scenario)).map(([name, path]) => [
+        name,
+        summarize(rows.map((r) => metricValue(r, path))),
+      ]),
+    );
+  }
+  const gitHead = Bun.spawnSync(["git", "-C", checkout, "rev-parse", "--short", "HEAD"])
+    .stdout.toString()
+    .trim();
+  const result: BenchResult = {
+    label,
+    at: new Date().toISOString(),
+    checkout,
+    gitHead,
+    complete,
+    infra,
+    netLatencyMs: netLatency,
+    upstream,
+    mockProfile: profile,
+    extraEnvKeys: Object.keys(extraEnv),
+    extraBody,
+    runs,
+    warmup,
+    boots: summarize(boots),
+    summary,
+    records,
+  };
+  const file = join(outDir, `${label}.json`);
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(file, JSON.stringify(result, null, 2));
+  return (written = { result, file });
 }
 
 async function main() {
-  mkdirSync(outDir, { recursive: true });
-  const records: (TurnRecord | UiRecord)[] = [];
-  const boots: number[] = [];
   try {
     const relayEnv = await infraUp();
     const mock = profile ? startMockLlm(profile) : null;
@@ -463,68 +525,33 @@ async function main() {
       console.log(`\n▶ ${scenario} — ${SCENARIO_DOC[scenario]}`);
       if (scenario === "cold") {
         for (let i = 0; i < runs; i++) {
-          const { result, bootMs } = await withServer(`cold-${i}`, keys, env, (server) =>
-            newConversationTurn({ server, user, mock }, scenario, i),
-          );
-          records.push(result);
+          const { bootMs } = await withServer(`cold-${i}`, keys, env, async (server) => {
+            records.push(await newConversationTurn({ server, user, mock }, scenario, i));
+          });
           boots.push(bootMs);
         }
         continue;
       }
-      const { result, bootMs } = await withServer<(TurnRecord | UiRecord)[]>(
-        scenario,
-        keys,
-        env,
-        (server) =>
-          scenario === "ui"
-            ? uiScenario({ server, user, mock }, profile!.textTokens)
-            : warmScenario({ server, user, mock }, scenario),
+      const { bootMs } = await withServer(scenario, keys, env, (server) =>
+        scenario === "ui"
+          ? uiScenario({ server, user, mock }, profile!.textTokens)
+          : warmScenario({ server, user, mock }, scenario),
       );
-      records.push(...result);
       boots.push(bootMs);
     }
+    complete = true;
   } finally {
     await releaseAll();
     rmSync(dataDir, { recursive: true, force: true });
+    const { file } = writeResult();
+    if (!complete) console.error(`\nstopped early; what was measured is in ${file}`);
   }
 
-  const summary: Record<string, Record<string, Summary | null>> = {};
-  for (const scenario of scenarios) {
-    const rows = completed(records, scenario);
-    summary[scenario] = Object.fromEntries(
-      Object.entries(metricsOf(scenario)).map(([name, path]) => [
-        name,
-        summarize(rows.map((r) => metricValue(r, path))),
-      ]),
-    );
-  }
-  const gitHead = Bun.spawnSync(["git", "-C", checkout, "rev-parse", "--short", "HEAD"])
-    .stdout.toString()
-    .trim();
-  const result: BenchResult = {
-    label,
-    at: new Date().toISOString(),
-    checkout,
-    gitHead,
-    infra,
-    netLatencyMs: netLatency,
-    upstream,
-    mockProfile: profile,
-    extraEnvKeys: Object.keys(extraEnv),
-    extraBody,
-    runs,
-    warmup,
-    boots: summarize(boots),
-    summary,
-    records,
-  };
-  const file = join(outDir, `${label}.json`);
-  writeFileSync(file, JSON.stringify(result, null, 2));
-
+  const { result, file } = writeResult();
   console.log(
-    `\n${label} @ ${gitHead} (${infra}, net+${netLatency}ms, upstream=${upstream}) — medians ms (p90)`,
+    `\n${label} @ ${result.gitHead} (${infra}, net+${netLatency}ms, upstream=${upstream}) — medians ms (p90)`,
   );
-  for (const [scenario, row] of Object.entries(summary)) {
+  for (const [scenario, row] of Object.entries(result.summary)) {
     const cells = Object.entries(row).map(
       ([name, s]) => `${name}=${fmt(s?.median)}(${fmt(s?.p90)})`,
     );

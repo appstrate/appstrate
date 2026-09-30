@@ -46,9 +46,7 @@
       b.longTaskMs += entry.duration;
     }
   }).observe({ type: "longtask" });
-  // The aria-label fallback: baseline builds predate the testid (and hardcode a French label).
-  const dotsSelector =
-    '[data-testid="chat-thinking-status"], [role="status"][aria-label^="L\'assistant"]';
+  const dotsSelector = '[data-testid="chat-thinking-status"]';
   const scan = () => {
     if (b.sendAt === null) return;
     const now = performance.now();

@@ -57,11 +57,10 @@ const median = (xs: number[]) =>
     0.5,
   );
 const signed = (v: number) => `${v >= 0 ? "+" : ""}${Math.round(v)}`;
+const named = (r: BenchResult) => `${r.label} (${r.gitHead}${r.complete ? "" : ", STOPPED EARLY"})`;
 
 for (const variant of variants) {
-  console.log(
-    `\n${variant.label} (${variant.gitHead}) vs ${base.label} (${base.gitHead}) — medians ms`,
-  );
+  console.log(`\n${named(variant)} vs ${named(base)} — medians ms`);
   for (const scenario of scenarios) {
     const table = metricsOf(scenario);
     const cells = metrics
@@ -76,6 +75,7 @@ for (const variant of variants) {
         const pct = ma === 0 ? "" : `, ${signed(((mb - ma) / ma) * 100)}%`;
         return `${metric}: ${Math.round(ma)}→${Math.round(mb)} (${signed(mb - ma)}${pct}, p=${p.toFixed(3)}${p < 0.05 ? " *" : ""})`;
       });
-    console.log(`  ${scenario.padEnd(10)} ${cells.join("  ")}`);
+    const n = `n=${completed(base.records, scenario).length}→${completed(variant.records, scenario).length}`;
+    console.log(`  ${scenario.padEnd(10)} ${n}  ${cells.join("  ")}`);
   }
 }

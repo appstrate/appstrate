@@ -28,6 +28,8 @@ export interface ServerOptions {
   systemProviderKeys: unknown[];
   /** Overrides applied last (relay endpoints, upstream allowances, `--env`). */
   env: Record<string, string>;
+  /** Receives the process's `stop` as soon as it is spawned, so an interrupted boot is still torn down. */
+  onSpawn(stop: () => Promise<void>): void;
 }
 
 export interface LogLine {
@@ -119,6 +121,7 @@ export async function startServer(opts: ServerOptions): Promise<BenchServer> {
 
   const startedAt = now();
   try {
+    assertPortFree(opts.port);
     writeFileSync(
       envFile,
       Object.entries(env)
@@ -139,6 +142,7 @@ export async function startServer(opts: ServerOptions): Promise<BenchServer> {
       stderr: "pipe",
     });
     proc = child;
+    opts.onSpawn(stop);
     const pump = async (stream: ReadableStream<Uint8Array>) => {
       for await (const line of lines(stream, (text) => void logFile.write(text))) {
         if (!line.startsWith("{")) continue;
@@ -169,6 +173,15 @@ export async function startServer(opts: ServerOptions): Promise<BenchServer> {
   } finally {
     dropEnvFile();
     process.off("exit", dropEnvFile);
+  }
+}
+
+/** Anything already listening would answer `/health` in place of this boot's process. */
+function assertPortFree(port: number) {
+  try {
+    Bun.listen({ hostname: "0.0.0.0", port, socket: { data() {} } }).stop(true);
+  } catch {
+    throw new Error(`port ${port} is taken (a bench API left running?): free it or pass --port`);
   }
 }
 

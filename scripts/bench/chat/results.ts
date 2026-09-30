@@ -47,6 +47,8 @@ export interface BenchResult {
   at: string;
   checkout: string;
   gitHead: string;
+  /** False when the run stopped early (a failed boot, Ctrl-C): `records` holds what was measured. */
+  complete: boolean;
   infra: string;
   netLatencyMs: number;
   upstream: string;

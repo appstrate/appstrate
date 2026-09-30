@@ -7,10 +7,10 @@ end of the answer — and splits the time into platform overhead and model time.
 It boots its **own** platform process from any checkout (a worktree per
 variant), on its own port, against its own PostgreSQL 16 / Redis 7 / MinIO stack
 (`docker-compose.bench.yml`, compose project `appstrate-bench`, host ports
-55432 / 56379 / 59000), with an env built from scratch. A developer's `.env`,
-dev server and data are never read or touched; the env file handed to the
-process holds provider keys and is deleted as soon as the process has booted
-(or failed to).
+55432 / 56379 / 59000), with an env built from scratch: the booted process never sees a developer's
+`.env`, dev server or data (only `--upstream real` reads the provider keys from
+`.env`, see below). The env file handed to the process holds provider keys and
+is deleted as soon as the process has booted (or failed to).
 
 ## Quick start
 
@@ -86,14 +86,15 @@ is even asked) and `relay` (upstream token → client).
 `ui` scenario, ms after the SPA sent the turn: `dots` (thinking indicator),
 `firstText`, `blank` (time before the first answer word with nothing moving on
 screen), `lastText`, and render smoothness during the stream
-(`longTaskMs`, `slowFrames` > 50 ms, `maxFrame`). It serves the checkout's
+(`longTaskMs`, `slowFrames` > 50 ms, `maxFrame`). `dots` is the element marked
+`data-testid="chat-thinking-status"` (1.0.0-beta.64 and later). It serves the checkout's
 `apps/web/dist` — build it first (`cd apps/web && bunx vite build`) — and drives
 the Playwright of `e2e/` (`cd e2e && npx playwright install chromium`).
 
 `bench:chat:compare` prints, per scenario, each metric's median in the baseline
 (the first file) and in each variant, the delta, and a two-sided Mann-Whitney
-p-value (exact for small tie-free samples); `*` marks p < 0.05. `--metrics`
-picks the metrics.
+p-value (exact for small tie-free samples); `*` marks p < 0.05, and `n` is the
+number of completed turns on each side. `--metrics` picks the metrics.
 
 ## Rules for trustworthy numbers
 
@@ -104,4 +105,7 @@ picks the metrics.
   other before anything else: their gap is the drift of the session (±40 ms
   observed), and a variant's delta smaller than it is not a result.
 - Compare only variants measured in the same session, and treat a delta
-  without `p < 0.05` as noise.
+  without `p < 0.05` as noise. A comparison tests dozens of metrics at once, so
+  an isolated `*` is expected by chance: repeat the series before believing it.
+- A run that stopped early (a failed boot, Ctrl-C) still writes its file, with
+  `"complete": false`; `compare` flags it.
