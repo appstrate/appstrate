@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SubscriptionChatModel } from "@appstrate/core/chat-contract";
-import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { loadPiCodingAgentSdk, type ExtensionAPI } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { getPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
@@ -10,7 +13,7 @@ import {
   createPiOAuthModelBinding,
   createPiProxyAuthExtension,
   createPiProxyModelBinding,
-  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
+  piChatModelRuntimeOptions,
   resolvePiChatModelBinding,
 } from "../src/pi-chat/model-binding.ts";
 
@@ -59,15 +62,37 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
 }
 
 describe("Pi chat model binding", () => {
-  it("never reads the host's Pi CLI credential store", () => {
-    // A stored credential outranks the key the turn registers: Pi's default
-    // `~/.pi/agent/auth.json` would let a CLI login answer for the org's own.
-    expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS.authPath).not.toContain(".pi/agent");
+  it("never reads the host's Pi CLI credential store", async () => {
+    // A stored credential outranks the key the turn registers: a Pi CLI login
+    // in Pi's default store would answer for the org's own credential.
+    const hostAgentDir = await mkdtemp(join(tmpdir(), "pi-host-agent-"));
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await Bun.write(
+        join(hostAgentDir, "auth.json"),
+        JSON.stringify({ anthropic: { type: "api_key", key: "host-cli-key" } }),
+      );
+      process.env.PI_CODING_AGENT_DIR = hostAgentDir;
+      const { ModelRuntime } = await loadPiCodingAgentSdk();
+      const runtime = await ModelRuntime.create(piChatModelRuntimeOptions());
+      runtime.registerProvider("anthropic", { apiKey: "org-key" });
+
+      expect((await runtime.getAuth("anthropic"))?.auth).toEqual({ apiKey: "org-key" });
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+      await rm(hostAgentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives every turn its own credential store", () => {
+    expect(piChatModelRuntimeOptions().credentials).not.toBe(
+      piChatModelRuntimeOptions().credentials,
+    );
   });
 
   it("skips the redundant full-catalog refresh for an already resolved chat model", () => {
-    expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS).toEqual({
-      authPath: "/tmp/pi-chat/auth.json",
+    expect(piChatModelRuntimeOptions()).toMatchObject({
       modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,

@@ -7,7 +7,8 @@
  * Appstrate preset id, a proxy URL and the inert runtime key `proxy`; the
  * transport mints a fresh process-local bearer immediately before every model
  * request. OAuth subscriptions use Pi's native provider request shape with the
- * freshly resolved access token held only in the in-memory AuthStorage.
+ * freshly resolved access token held only in the turn's in-memory credential
+ * store.
  */
 
 import type {
@@ -15,10 +16,15 @@ import type {
   SubscriptionChatModel,
   ChatModelResolution,
 } from "@appstrate/core/chat-contract";
-import { llmProxyBaseUrl, type Api, type ExtensionFactory, type Model } from "@appstrate/runner-pi";
+import {
+  InMemoryCredentialStore,
+  llmProxyBaseUrl,
+  type Api,
+  type ExtensionFactory,
+  type Model,
+} from "@appstrate/runner-pi";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
-import { PI_CHAT_AGENT_DIR } from "./resource-loader.ts";
 
 interface PiChatModelBindingBase {
   /** Fully resolved Pi model. No provider secret is ever stored on this object. */
@@ -56,17 +62,19 @@ export type ResolvedPiChatModelBinding = PiProxyModelBinding | PiOAuthModelBindi
  * credential setup refreshes that provider afterwards, so a full catalog and
  * availability refresh during every runtime construction is redundant.
  *
- * `authPath` keeps Pi off its default store, `~/.pi/agent/auth.json`: a stored
- * credential outranks the key the turn registers, so a Pi CLI login on the
- * host (an old Anthropic OAuth entry, say) would answer for the org's own
- * credential. Runs pin theirs the same way (`pi-runner.ts`).
+ * The credential store is in memory and fresh per turn. Pi's default is the
+ * host's `~/.pi/agent/auth.json`, and a stored credential outranks the key the
+ * turn registers: a Pi CLI login on the host would answer for the org's own
+ * credential. Nothing is persisted and no store is shared between orgs.
  */
-export const PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS = {
-  authPath: `${PI_CHAT_AGENT_DIR}/auth.json`,
-  modelsPath: null,
-  allowModelNetwork: false,
-  refreshOnCreate: false,
-} as const;
+export function piChatModelRuntimeOptions() {
+  return {
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    allowModelNetwork: false,
+    refreshOnCreate: false,
+  } as const;
+}
 
 type PiChatModelBindingResolution =
   | { status: "ready"; binding: ResolvedPiChatModelBinding }
