@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [13.0.0] — 2026-09-30
+
 ### Added
 
 - **New export `selectedApiCallConfigs(manifest, selection)`

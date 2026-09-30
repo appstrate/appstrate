@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.64] - 2026-09-30
+
 ### Operators
 
 - **Two one-off scripts run before the drizzle batch, with the app container
@@ -280,7 +282,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   disabled schedule or replay replaced values; it carries only
   `{ scheduleId }`, and a fire skips a deleted or disabled schedule.
 - **Runs on an `openai-compatible` model that is not aliased reach
-  `/chat/completions` again**. The agent installed its credential with
+  `/chat/completions` again** (#1600). The agent installed its credential with
   `setRuntimeApiKey`, which leaves Pi's builtin `openai` provider untouched,
   and that provider streams Responses only. So a gateway model's
   `openai-completions` call went out as `POST /responses`, and the sidecar
@@ -303,6 +305,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as nothing yet reach the model, and the hidden-character filter compared
   UTF-16 units, so it could not match these surrogate pairs; it now walks code
   points. Connection labels, which share that filter, refuse and drop them too.
+- **An integration's injected session cookie survives the credential proxy**
+  (#1613). Delivered in `Cookie`, it was lost from the second call of an
+  `X-Session-Id` through `/api/credential-proxy/proxy` on, once the upstream
+  had set any cookie. The platform proxy and the sidecar now share one cookie
+  jar: a cookie the upstream sets or rotates wins, a deleted one falls back to
+  the injected value, and each redirect hop keeps its cookies to its own origin
+  unless both hosts are literal `authorized_uris` entries. In-flight proxy
+  sessions lose their stored cookies once at deploy.
+- **Recreating a package, or republishing a deleted version's number, keeps
+  its files** (#1612). When the successor was written before the deferred
+  storage purge ran, the purge deleted its bytes: the draft fell back to
+  `SKILL.md` + `manifest.json` and the version answered
+  `422 version_artifact_unavailable`. The purge now skips a key a live package
+  or version claims.
+- **`appstrate packages push` on a skill says how to try it** (#1632). It
+  printed `appstrate code sync --target claude-user --source draft`, which
+  swaps every synced skill for its draft; it now prints
+  `claude --plugin-dir '<work folder>'`, which loads the folder as it is for
+  one Claude Code session.
+
+### Security
+
+- **The platform credential proxy no longer sends a templated credential to
+  any host** (#1624). `/api/credential-proxy/proxy` honoured `allow_all_uris`
+  for a call templating a credential (`{{api_key}}`) into its URL, a header or
+  its body, so an API-key caller could ship the secret anywhere. Like the
+  sidecar and the CLI's local resolver, such a call now needs a matching
+  `authorized_uris` entry on the target and every redirect hop, else `403`; the
+  sidecar's redirect follower, which skipped that check, now applies it. The
+  proxy no longer relays upstream `Set-Cookie`, and no path echoes a templated
+  secret in its error messages.
+- **Patched transitive `brace-expansion` and `undici` copies** (#1630).
 
 ## [1.0.0-beta.63] - 2026-09-26
 
