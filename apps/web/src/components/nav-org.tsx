@@ -134,14 +134,11 @@ export function NavOrg() {
               </Link>
             </SidebarMenuButton>
             {unread > 0 && (
-              <>
-                <SidebarMenuBadge>
-                  <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                </SidebarMenuBadge>
-                <span className="ring-sidebar bg-destructive pointer-events-none absolute top-1 right-1 hidden size-2 rounded-full ring-2 group-data-[collapsible=icon]:block" />
-              </>
+              <SidebarMenuBadge>
+                <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              </SidebarMenuBadge>
             )}
           </SidebarMenuItem>
           {renderItems(activityTailItems)}

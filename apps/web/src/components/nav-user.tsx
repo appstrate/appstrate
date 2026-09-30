@@ -73,14 +73,14 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
           <button
             type="button"
             aria-label={t("userMenu.ariaLabel")}
-            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex w-full items-center gap-2 rounded-md p-2 text-left transition-colors"
           >
             <Avatar className="size-7 shrink-0 rounded-full">
               <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-xs font-medium">
                 {initials}
               </AvatarFallback>
             </Avatar>
-            <span className="grid min-w-0 flex-1 leading-tight group-data-[collapsible=icon]:hidden">
+            <span className="grid min-w-0 flex-1 leading-tight">
               <span className="truncate text-sm font-medium">{displayName}</span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </span>

@@ -21,6 +21,7 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
+const PEEK_CLOSE_DELAY_MS = 300;
 
 const SidebarProvider = React.forwardRef<
   HTMLDivElement,
@@ -46,6 +47,7 @@ const SidebarProvider = React.forwardRef<
   ) => {
     const isMobile = useIsMobile();
     const [openMobile, setOpenMobile] = React.useState(false);
+    const [peeking, setPeeking] = React.useState(false);
 
     // This is the internal state of the sidebar.
     // We use openProp and setOpenProp for control from outside the component.
@@ -85,6 +87,8 @@ const SidebarProvider = React.forwardRef<
     // We add a state so that we can do data-state="expanded" or "collapsed".
     // This makes it easier to style the sidebar with Tailwind classes.
     const state = open ? "expanded" : "collapsed";
+    // Pinning the panel open ends the peek, so collapsing again starts hidden.
+    if (open && peeking) setPeeking(false);
 
     const contextValue = React.useMemo<SidebarContextProps>(
       () => ({
@@ -95,8 +99,10 @@ const SidebarProvider = React.forwardRef<
         openMobile,
         setOpenMobile,
         toggleSidebar,
+        peeking,
+        setPeeking,
       }),
-      [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
+      [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, peeking],
     );
 
     return (
@@ -145,7 +151,34 @@ const Sidebar = React.forwardRef<
     },
     ref,
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+    const { isMobile, state, openMobile, setOpenMobile, peeking, setPeeking } = useSidebar();
+    const panelRef = React.useRef<HTMLDivElement>(null);
+    const canPeek = collapsible === "offcanvas" && state === "collapsed" && !isMobile;
+    const peek = canPeek && peeking;
+
+    // While peeking, the panel stays out as long as the pointer is on it, on the
+    // edge zone or the trigger that opened it, or while one of its menus is open
+    // (a menu is portalled outside the panel, and a modal menu makes the page
+    // under it inert, so the pointer is never "on" the panel then). Leaving
+    // closes it after a short grace, so a diagonal slip does not snap it shut.
+    React.useEffect(() => {
+      if (!peek) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onMove = (event: PointerEvent) => {
+        clearTimeout(timer);
+        const target = event.target as Element | null;
+        const stays =
+          panelRef.current?.contains(target) ||
+          target?.closest?.("[data-sidebar=peek-zone],[data-sidebar=peek-trigger]") ||
+          document.querySelector("[data-radix-popper-content-wrapper] [role=menu]");
+        if (!stays) timer = setTimeout(() => setPeeking(false), PEEK_CLOSE_DELAY_MS);
+      };
+      document.addEventListener("pointermove", onMove);
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener("pointermove", onMove);
+      };
+    }, [peek, setPeeking]);
 
     if (collapsible === "none") {
       return (
@@ -194,7 +227,18 @@ const Sidebar = React.forwardRef<
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-variant={variant}
         data-side={side}
+        data-peek={peek}
       >
+        {/* Collapsed off-canvas, nothing of the panel is left on screen: a thin
+            strip along the edge slides it back over the page on hover. */}
+        {canPeek && (
+          <div
+            data-sidebar="peek-zone"
+            aria-hidden
+            className={cn("fixed inset-y-0 z-30 w-2", side === "left" ? "left-0" : "right-0")}
+            onPointerEnter={() => setPeeking(true)}
+          />
+        )}
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
@@ -208,16 +252,29 @@ const Sidebar = React.forwardRef<
         />
         <div
           className={cn(
-            "duration-base ease-surface fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] md:flex",
+            "duration-base ease-surface fixed inset-y-0 z-10 hidden w-(--sidebar-width) transition-[left,right,width,top,bottom] md:flex",
+            // Collapsed off-canvas, the panel is a card below the header, so a
+            // peek reads as floating over the page rather than as the page's
+            // column coming back.
+            "group-data-[collapsible=offcanvas]:top-header group-data-[collapsible=offcanvas]:bottom-2 group-data-[collapsible=offcanvas]:z-40 group-data-[collapsible=offcanvas]:overflow-hidden group-data-[collapsible=offcanvas]:border-y group-data-[collapsible=offcanvas]:shadow-xl",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? cn(
+                  "left-0 group-data-[collapsible=offcanvas]:rounded-r-xl",
+                  !peek &&
+                    "group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]",
+                )
+              : cn(
+                  "right-0 group-data-[collapsible=offcanvas]:rounded-l-xl",
+                  !peek &&
+                    "group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+                ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
               : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
             className,
           )}
+          ref={panelRef}
           {...props}
         >
           <div
@@ -520,7 +577,7 @@ const SidebarMenuButton = React.forwardRef<
     ref,
   ) => {
     const Comp = asChild ? Slot : "button";
-    const { isMobile, state, setOpenMobile } = useSidebar();
+    const { isMobile, state, setOpenMobile, peeking } = useSidebar();
 
     // On a phone the sidebar is a drawer over the page, so picking a row has to
     // close it — otherwise it covers the very screen it just navigated to. It
@@ -560,7 +617,7 @@ const SidebarMenuButton = React.forwardRef<
         <TooltipContent
           side="right"
           align="center"
-          hidden={state !== "collapsed" || isMobile}
+          hidden={state !== "collapsed" || isMobile || peeking}
           {...tooltip}
         />
       </Tooltip>

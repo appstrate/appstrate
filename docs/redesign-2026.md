@@ -383,6 +383,18 @@ and dropped are at the end of this section, so they are not tried again.
   once and used by both products; each passes only its own navigation. They
   were extracted after the chat's copy had already drifted from Studio's by a
   font weight.
+- **Collapsed is 100% collapsed, Notion's way** (29 September, Olivier). The
+  sidebar is shadcn's `offcanvas`, not `icon`: collapsed, nothing of it is
+  left and the page takes the full width. Its way back is a burger at the
+  left of the header (carrying the unread dot the hidden Runs entry cannot
+  show) and an 8px strip along the screen's left edge. Hovering either slides
+  the panel over the page as a floating card below the header; a click on
+  the burger (or Cmd+B, or the panel's own collapse control) pins it open
+  again. The peek stays while the pointer is on the panel, the strip or the
+  burger, or while one of its menus is open (portalled, and a modal menu
+  makes the page inert), and closes 300ms after the pointer leaves. It lives
+  in `@appstrate/ui`'s `Sidebar` (`peeking` in the context), so the rail
+  styles of the icon mode were removed from the shell's five components.
 - Header height is `--spacing-header` (56px), a constant. It used to shrink on
   sidebar collapse while two surfaces subtracted a hard-coded 3.5rem.
 

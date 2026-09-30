@@ -195,14 +195,14 @@ export function OrgSwitcher({
             type="button"
             data-testid="org-switcher-button"
             aria-label={t("switcher.orgAriaLabel")}
-            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0!"
+            className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors"
           >
             <OrganizationAvatar
               name={currentOrg.name}
               logo={currentOrg.logo}
               className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
-            <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
+            <span className="min-w-0 flex-1 truncate text-left">
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
                   level nobody ever sees is a level nobody learns. */}
@@ -215,7 +215,7 @@ export function OrgSwitcher({
                 </>
               )}
             </span>
-            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
           </button>
         ) : variant === "row" ? (
           /* A white card on the sidebar's grey, not a nav row: it is the
@@ -226,14 +226,14 @@ export function OrgSwitcher({
             type="button"
             data-testid="org-switcher-button"
             aria-label={t("switcher.orgAriaLabel")}
-            className="bg-card hover:bg-accent data-[state=open]:bg-accent flex h-10 w-full items-center gap-2 rounded-lg border px-2 text-sm shadow-sm transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:px-0! group-data-[collapsible=icon]:shadow-none"
+            className="bg-card hover:bg-accent data-[state=open]:bg-accent flex h-10 w-full items-center gap-2 rounded-lg border px-2 text-sm shadow-sm transition-colors"
           >
             <OrganizationAvatar
               name={currentOrg.name}
               logo={currentOrg.logo}
-              className="size-6 shrink-0 rounded-md text-[0.7rem] group-data-[collapsible=icon]:size-6 group-data-[collapsible=icon]:rounded-[5px] group-data-[collapsible=icon]:text-[0.65rem]"
+              className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
-            <span className="min-w-0 flex-1 truncate text-left group-data-[collapsible=icon]:hidden">
+            <span className="min-w-0 flex-1 truncate text-left">
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
                   level nobody ever sees is a level nobody learns. */}
@@ -246,7 +246,7 @@ export function OrgSwitcher({
                 </>
               )}
             </span>
-            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0 group-data-[collapsible=icon]:hidden" />
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
           </button>
         ) : (
           <button

@@ -77,7 +77,7 @@ export function ProductTabs() {
     <div
       role="tablist"
       aria-label={t("products.ariaLabel")}
-      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1.5 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0"
+      className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
     >
       {products.map((p) => (
         <Link
@@ -87,17 +87,17 @@ export function ProductTabs() {
           aria-selected={p.active}
           className={cn(
             "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-            "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:px-0!",
+            "",
             p.active
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
           <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
-          <span className="truncate group-data-[collapsible=icon]:hidden">{p.label}</span>
+          <span className="truncate">{p.label}</span>
           {!p.active && (p.unread ?? 0) > 0 && (
             <span
-              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums group-data-[collapsible=icon]:hidden"
+              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums"
               aria-label={t("products.unread", { count: p.unread })}
             >
               {p.unread}

@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
+import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
@@ -66,7 +67,7 @@ export function ShellSidebar({
   const catalogueActive = window.location.pathname.startsWith("/catalogue");
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar>
       {/* Head: the brand cell alone, at the header's height and closed by the
           header's own rule — the two lines meet across the shell instead of
           nearly meeting. Beside the product name, the two controls that act on
@@ -79,7 +80,7 @@ export function ShellSidebar({
           more pieces than it has ideas. More air above than below, so the tabs
           read as the head of the navigation rather than as a tail of the rule
           they sit under. */}
-      <div className="px-2 pt-4 pb-1 group-data-[collapsible=icon]:px-0">
+      <div className="px-2 pt-4 pb-1">
         <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
@@ -146,8 +147,8 @@ export function ShellSidebar({
         {/* Who you are, and the collapse beside it — the control that changes
             the column's width sits at the end of the column, not in the head
             where it competed with the product name. */}
-        <div className="border-sidebar-border flex items-center gap-1 border-t p-2 group-data-[collapsible=icon]:flex-col">
-          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+        <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
+          <div className="min-w-0 flex-1">
             <NavUser variant="row" />
           </div>
           <SidebarTrigger className="text-muted-foreground size-7 shrink-0">
@@ -172,7 +173,8 @@ export function ShellHeader({
    */
   fullBleed?: boolean;
 }) {
-  const { isMobile, openMobile } = useSidebar();
+  const { isMobile, openMobile, state, setPeeking } = useSidebar();
+  const { data: unreadCount } = useUnreadCount();
 
   return (
     <header
@@ -187,10 +189,26 @@ export function ShellHeader({
           !fullBleed && "max-w-page mx-auto",
         )}
       >
-        {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
+        {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
         <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
           <Menu className="size-4" />
         </SidebarTrigger>
+        {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
+            way back is here. Hovering slides it over the page (as the screen's
+            left edge does), a click pins it open again. It carries the unread
+            dot the hidden Runs entry cannot show. */}
+        {!isMobile && state === "collapsed" && (
+          <SidebarTrigger
+            data-sidebar="peek-trigger"
+            className="relative -ml-2 hidden size-8 shrink-0 md:inline-flex"
+            onPointerEnter={() => setPeeking(true)}
+          >
+            <Menu className="size-4" />
+            {(unreadCount ?? 0) > 0 && (
+              <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
+            )}
+          </SidebarTrigger>
+        )}
         <div className="flex min-w-0 flex-1 md:hidden">
           <OrgSwitcher variant="mobile" />
         </div>

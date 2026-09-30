@@ -10,6 +10,9 @@ export type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void;
   isMobile: boolean;
   toggleSidebar: () => void;
+  /** Collapsed off-canvas, the panel slid over the page while the pointer is on it. */
+  peeking: boolean;
+  setPeeking: (peeking: boolean) => void;
 };
 
 export const SidebarContext = React.createContext<SidebarContextProps | null>(null);
