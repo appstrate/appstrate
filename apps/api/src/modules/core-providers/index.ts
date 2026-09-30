@@ -48,7 +48,7 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"],
+  featuredModels: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5"],
 };
 
 const cerebras: ModelProviderDefinition = {

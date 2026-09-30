@@ -264,26 +264,6 @@ const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
   { id: 1118932, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
   { id: 1123488, packageName: "protobufjs", reason: REASONS.googleGenai, expires: "2026-10-31" },
 
-  // ── shell-quote ──
-  {
-    id: 1120422,
-    packageName: "shell-quote",
-    reason:
-      "Installed but unreachable — sole consumer is `gel` (the Gel/EdgeDB driver), an optional " +
-      "peer of drizzle-orm. Nothing in this repo imports `gel` or `drizzle-orm/gel`; the " +
-      "platform is on postgres.js.",
-    expires: "2026-12-31",
-  },
-  {
-    id: 1123944,
-    packageName: "shell-quote",
-    reason:
-      "Installed but unreachable — sole consumer is `gel` (the Gel/EdgeDB driver), an optional " +
-      "peer of drizzle-orm. Nothing in this repo imports `gel` or `drizzle-orm/gel`; the " +
-      "platform is on postgres.js.",
-    expires: "2026-12-31",
-  },
-
   // ── ws ──
   { id: 1123259, packageName: "ws", reason: REASONS.googleGenai, expires: "2026-10-31" },
 ];

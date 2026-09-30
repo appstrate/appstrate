@@ -280,7 +280,7 @@ describe("ALL /llm/* — shared forwarding policy", () => {
     authorization: "Bearer someone-elses-key",
     cookie: "session=abc",
     "x-forwarded-for": "10.0.0.1",
-    "x-appstrate-pi-sdk": "0.86.1",
+    "x-appstrate-pi-sdk": "0.87.1",
     "x-run-id": "run_1",
   };
   const KEPT = ["content-type", "x-opencode-session", "http-referer", "x-vendor-foo", "user-agent"];
