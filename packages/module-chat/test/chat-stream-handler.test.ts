@@ -344,6 +344,18 @@ describe("handleChatStream", () => {
     return res;
   }
 
+  it("hands the composer's approval mode to the engine: on unless the turn says off", async () => {
+    const modes: boolean[] = [];
+    for (const body of [{}, { tool_approval: true }, { tool_approval: false }]) {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, { body });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      modes.push(calls[0]!.toolApproval);
+    }
+    expect(modes).toEqual([true, true, false]);
+  });
+
   it("refuses to mint a loopback for a principal that is not the user", async () => {
     // `chat:read`/`chat:write` are neither `apiKeyGrantable` nor
     // `endUserGrantable` (`index.ts`), so nothing but a `user` principal reaches

@@ -12,6 +12,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
 import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
+import { bindToolApprovalUser } from "@appstrate/module-chat/tool-approval";
 import { useAuth } from "../../hooks/use-auth";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
@@ -33,9 +34,12 @@ const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
   useCollapsedGlobalSidebar();
-  // The agent-authoring preference is per user: bind it before the composer paints.
+  // The composer's preferences are per user: bind them before the composer paints.
   const userId = useAuth().user?.id ?? null;
-  useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);
+  useLayoutEffect(() => {
+    bindAgentAuthoringUser(userId);
+    bindToolApprovalUser(userId);
+  }, [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.

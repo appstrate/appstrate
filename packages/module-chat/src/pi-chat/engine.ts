@@ -56,6 +56,8 @@ import {
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
+import type { RequestApproval } from "./tool-approval.ts";
+import { awaitApproval } from "../approval-registry.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -79,6 +81,11 @@ export interface PiChatInput {
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
+  /**
+   * The composer's approval mode. On, every writing tool call waits for the
+   * person's answer (`tool-approval.ts`); off, it runs straight away.
+   */
+  toolApproval: boolean;
   /**
    * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
    *
@@ -473,6 +480,25 @@ export function runPiChat(input: PiChatInput): Response {
               ];
         const authExtensions =
           modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
+        // Writing tools wait for the person: the request and the answer ride the
+        // turn's own stream as the AI SDK's native approval parts, attached to
+        // the intercepted call. A stop or the deadline answers "no". An
+        // ephemeral turn has no session to answer through, so it refuses.
+        const requestApproval: RequestApproval = async ({ toolCallId, reason }) => {
+          const approvalId = crypto.randomUUID();
+          write({ type: "tool-approval-request", approvalId, toolCallId, reason });
+          const decision = input.chatSessionId
+            ? await awaitApproval(approvalId, input.chatSessionId, turnAbort.signal)
+            : { approved: false };
+          write({
+            type: "tool-approval-response",
+            approvalId,
+            approved: decision.approved,
+            ...(decision.reason ? { reason: decision.reason } : {}),
+          });
+          if (!decision.approved) mapper.markDenied(toolCallId);
+          return decision;
+        };
         const resourceLoader = await untilAborted(
           timed(
             createPiChatResourceLoader({
@@ -480,6 +506,7 @@ export function runPiChat(input: PiChatInput): Response {
               SettingsManager,
               extensionFactories: [
                 ...tools.extensionFactories,
+                ...(input.toolApproval ? [tools.approvalExtension(requestApproval)] : []),
                 ...authExtensions,
                 ...generationExtensions,
               ],

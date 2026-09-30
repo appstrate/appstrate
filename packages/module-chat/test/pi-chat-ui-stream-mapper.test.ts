@@ -172,6 +172,30 @@ describe("PiChatUiStreamMapper", () => {
     ]);
   });
 
+  it("closes a refused call as output-denied, and any other failed call as an error", () => {
+    const mapper = new PiChatUiStreamMapper();
+    mapper.markDenied("refused");
+    const blocked = { content: [{ type: "text", text: "The user denied this tool call." }] };
+    const chunks = [
+      mapper.map({
+        type: "tool_execution_end",
+        toolCallId: "refused",
+        toolName: "invoke_operation",
+        result: blocked,
+        isError: true,
+      }),
+      mapper.map({
+        type: "tool_execution_end",
+        toolCallId: "failed",
+        toolName: "invoke_operation",
+        result: blocked,
+        isError: true,
+      }),
+    ].flat();
+    expect(chunks[0]).toEqual({ type: "tool-output-denied", toolCallId: "refused" });
+    expect(chunks[1]?.type).toBe("tool-output-error");
+  });
+
   it("fires onFirstModelEvent once, on the first ASSISTANT message_start only", () => {
     // The user echo's `message_start` fires at `prompt()`; the assistant's is
     // pi-ai's `start`, pushed once the provider answered. Only the latter is a

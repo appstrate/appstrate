@@ -31,11 +31,12 @@ import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
-import { invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
+import { forbidden, invalidRequest, notFound, parseBody } from "@appstrate/core/api-errors";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
+import { resolveApproval } from "./approval-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -58,6 +59,11 @@ export const createSessionSchema = z.object({
 
 export const renameSessionSchema = z.object({
   title: z.string().min(1).max(200),
+});
+
+export const approvalResponseSchema = z.object({
+  approved: z.boolean(),
+  reason: z.string().max(2000).optional(),
 });
 
 type SessionRow = typeof chatSessions.$inferSelect;
@@ -356,6 +362,28 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     async (c) => {
       const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
       if (session.activeStreamId) stopStream(session.activeStreamId);
+      return c.body(null, 204);
+    },
+  );
+
+  // POST /api/chat/sessions/:id/approvals/:approvalId — the person's answer to
+  // a writing tool call the session's live turn is holding. Only a signed-in
+  // person answers: an API key, the chat's own loopback token (which is how
+  // the model reaches this API) or any other bearer is refused, so the model
+  // can never approve its own call.
+  router.post(
+    "/api/chat/sessions/:id/approvals/:approvalId",
+    rateLimited(60),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      if (c.get("authMethod") !== "session") {
+        throw forbidden("Tool approvals are answered from a signed-in session only");
+      }
+      const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
+      const decision = parseBody(approvalResponseSchema, await c.req.json().catch(() => null));
+      if (!resolveApproval(c.req.param("approvalId"), session.id, decision)) {
+        throw notFound("No pending approval with this id in this session");
+      }
       return c.body(null, 204);
     },
   );

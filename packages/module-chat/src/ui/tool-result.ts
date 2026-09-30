@@ -44,6 +44,8 @@ interface ToolPhaseInput {
   status?: { type?: string; reason?: string } | undefined;
   isError?: boolean | undefined;
   result?: unknown;
+  /** Server-side approval gate (`tool-approval-card.tsx`). */
+  approval?: { approved?: boolean } | undefined;
 }
 
 function isTextPart(value: unknown): value is { type: "text"; text: string } {
@@ -145,6 +147,9 @@ function isErrorPayload(unwrapped: unknown): boolean {
  * `error`) so a failed call can never read as a success.
  */
 export function deriveToolPhase(part: ToolPhaseInput): ToolPhase {
+  // Held for an answer, or refused: nothing runs and nothing failed. The
+  // approval banner under the row says which.
+  if (part.approval && part.approval.approved !== true) return "pending";
   const type = part.status?.type;
   if (type === "running") return "running";
   if (type === "requires-action") return "pending";
