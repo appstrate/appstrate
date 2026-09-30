@@ -551,6 +551,66 @@ describe("MITM listener — 401 refresh + retry", () => {
   });
 
   runIfOpenssl(
+    "reports an upstream success on a 2xx with the injected credential only",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      let successReports = 0;
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          return false;
+        },
+        reportUpstreamSuccess() {
+          successReports += 1;
+        },
+      };
+      const statuses = [200, 401];
+      const recorded = makeRecordingFetch(
+        async () => new Response("{}", { status: statuses.shift()! }),
+      );
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: stubResolveHost,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        for (let i = 0; i < 2; i++) {
+          await drivenFetch({
+            listenerPort: addr.port,
+            sni: "api.test.local",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/",
+            headers: {},
+          });
+        }
+        expect(successReports).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
     "403 does NOT trigger a refresh (authorization decision, not a dead credential)",
     async () => {
       // A 403 is an authorization decision on a specific resource, not a dead

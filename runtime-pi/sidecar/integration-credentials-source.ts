@@ -86,6 +86,7 @@ export type { IntegrationCredentialsWire };
  *   expires_at            → expiresAt
  *   delivery_plans        → deliveryPlans
  *   expires_at_epoch_ms   → expiresAtEpochMs
+ *   rejection_streak      → rejectionStreak
  *   header_name           → headerName           (per delivery plan)
  *   header_prefix         → headerPrefix         (per delivery plan)
  *   allow_server_override → allowServerOverride  (per delivery plan)
@@ -124,7 +125,12 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
 
   const expiresAtEpochMs = (r.expires_at_epoch_ms ?? {}) as Record<string, number | null>;
 
-  return { auths, deliveryPlans, expiresAtEpochMs };
+  return {
+    auths,
+    deliveryPlans,
+    expiresAtEpochMs,
+    ...(typeof r.rejection_streak === "number" ? { rejectionStreak: r.rejection_streak } : {}),
+  };
 }
 
 function connectionQuery(connectionId: string | undefined): string {
@@ -244,6 +250,8 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * invoke it without a presence check.
    */
   refreshOnUnauthorized(authKey: string): Promise<boolean>;
+  /** Required here: this factory always reports ({@link MitmCredentialSource.reportUpstreamSuccess}). */
+  reportUpstreamSuccess(): void;
 }
 
 /**
@@ -325,6 +333,31 @@ export function createIntegrationCredentialsSource(
     string,
     { handler: () => Promise<boolean>; reauthStatuses: ReadonlySet<number> }
   >();
+  // The platform holds a rejection streak on this connection that no success has ended yet: the
+  // boot payload announced one, or a rejection was counted during this run (the 502 below).
+  let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
+
+  const reportUpstreamSuccess = (): void => {
+    if (!rejectionPending || options.connectionId === undefined) return;
+    rejectionPending = false;
+    postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, {
+      ...options,
+      fetchFn,
+    }).then(
+      (res) => {
+        if (!res.ok)
+          logger.warn("integration upstream success report refused", {
+            ...logCtx,
+            status: res.status,
+          });
+      },
+      (err: unknown) =>
+        logger.warn("integration upstream success report failed", {
+          ...logCtx,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+  };
 
   const current = (): IntegrationCredentialsPayload => ({
     auths: [...payload.auths],
@@ -442,6 +475,7 @@ export function createIntegrationCredentialsSource(
       // any other auth it is expected — nothing to refresh, the platform counts
       // the upstream rejection toward the reconnect threshold (then 410, above).
       const authType = payload.auths.find((a) => a.authKey === authKey)?.authType;
+      if (res.status === 502 && authType !== "oauth2") rejectionPending = true;
       if (res.status !== 502 || authType === "oauth2") {
         logger.warn("integration credential refresh non-OK status", {
           ...logCtx,
@@ -502,6 +536,7 @@ export function createIntegrationCredentialsSource(
     current,
     deliveryPlans,
     refreshOnUnauthorized,
+    reportUpstreamSuccess,
     snapshot: () => payload,
     setSessionOutputs,
     setActiveInputs: (
@@ -559,6 +594,22 @@ export function postIntegrationCredentialsRefresh(
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
     `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${connectionQuery(connectionId)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.runToken}` },
+    },
+  );
+}
+
+/** Tell the platform a call through the connection succeeded upstream, ending its rejection streak. */
+function postIntegrationUpstreamSuccess(
+  integrationId: string,
+  connectionId: string,
+  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  return fetchFn(
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/upstream-success${connectionQuery(connectionId)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },

@@ -536,6 +536,7 @@ export async function connectRemoteHttpIntegration(
         const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
         if (refreshed) attempt = await send();
       }
+      if (attempt.response.ok && attempt.credentialInjected) source.reportUpstreamSuccess();
       return attempt.response;
     },
     { preconnect: fetch.preconnect },
@@ -1443,6 +1444,7 @@ export async function bootIntegrations(
             declaredUris: apiCall.authorizedUris,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
+            reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
             // Resumable-upload protocols the manifest declared (plumbed via
             // the spawn resolver). When non-empty the factory also emits an
             // `api_upload` tool; the agent-side resolver drives it.

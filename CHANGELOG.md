@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Migration `0080` rewrites `runs` under an exclusive lock** (the
+- **Migration `0079` rewrites `runs` under an exclusive lock** (the
   `model_source` column becomes the `credential_source` enum), adds
   `package_schedules.disabled_reason` (every schedule already disabled is
   labelled `user`) and two CHECKs. Before the deploy these must return 0:
@@ -21,11 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   schedules whose member actor is no longer in the organization. A schedule a
   fire disabled because its actor could no longer run agents
   (`actor_invalid`) is not derivable and stays `user`.
-- **Three additive migrations apply at boot**: `0078` adds
-  `integration_connections.refresh_failures_since`; `0079` adds the
-  `notifications_type_valid` CHECK; `0081` adds
-  `model_provider_credentials.refresh_failures_since`. Before the deploy, this
-  query must return no row:
+- **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
+  deploy, this query must return no row:
   `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
   (#1641).
 - **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
@@ -39,8 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lists every draft or version holding a template or runtime expression the
   platform no longer evaluates (`[expression]`: it would stop loading) and
   every auth whose injected credential runs will now refuse as exfiltration
-  (`[exfiltration]`: `allow_all_uris`, no `authorized_uris`, or an entry that
-  does not bound the host); it exits 1 while any remains (#1641).
+  (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
+  or an entry that does not bound the host; `allow_all_uris` beside a bounded
+  list is dropped at run time, not refused, so it is not listed); it exits 1
+  while any remains (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
@@ -173,17 +172,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **An upstream that keeps rejecting an API key flags it; isolated 401s no
   longer do** (#1641). A credential that cannot refresh (api_key, basic,
   custom, OAuth2 with no refresh client) is flagged `needs_reconnection` at
-  the `INTEGRATION_REFRESH_MAX_FAILURES`-th counted upstream 401; a 401 more
-  than 7 days after the previous counted one restarts the count at 1, so a
-  daily schedule is flagged on its 5th rejected run while rejections months
-  apart never add up. Every path counts: the platform credential proxy (CLI,
-  GitHub Action), which counted none before and flagged an OAuth2 connection
-  without a refresh client on its first 401, the sidecar and its MITM egress.
-  For an API-key integration connection that replaces a count with no
-  window; a revoked BYOK model key, never flagged before, is counted under
-  the same 7-day rule and stops inference until it is re-entered. A BYOK
-  rejection counts only against the key the request sent; an OAuth
-  subscription is never counted (its counter is its refresh streak).
+  the `INTEGRATION_REFRESH_MAX_FAILURES`-th CONSECUTIVE upstream 401, however
+  far apart: any successful (2xx) call through it ends the streak, as a
+  reconnect does. Every path counts and resets: the platform credential proxy
+  (CLI, GitHub Action), which counted none before and flagged an OAuth2
+  connection without a refresh client on its first 401, and the sidecar's
+  `api_call`, MITM egress and remote-HTTP sinks, which report the first
+  success after a counted rejection to
+  `POST /internal/integration-credentials/{scope}/{name}/upstream-success`
+  (the credentials payload announces a pending streak as `rejection_streak`).
+  For an API-key integration connection that replaces a count since the last
+  reconnect; a revoked BYOK model key, never flagged before, is counted the
+  same way through the LLM proxy, which a 2xx resets, and stops inference
+  until it is re-entered. A BYOK rejection or success counts only against the
+  key the request sent; an OAuth2 connection or subscription keeps its own
+  counter, the refresh streak, which only a successful refresh resets. The
+  refresh `502` now reads
+  `N/M consecutive upstream rejections before it is flagged`.
 - **An OAuth client update that sends a new `client_secret` without
   `token_endpoint_auth_method` keeps the stored method** (#1641); it reset
   the client to the manifest's method. A public client (`none`) given a

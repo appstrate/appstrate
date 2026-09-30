@@ -63,7 +63,10 @@ import {
 } from "../services/integration-credentials-resolver.ts";
 import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
-import { isIntegrationActive } from "../services/integration-connections.ts";
+import {
+  clearUpstreamRejections,
+  isIntegrationActive,
+} from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import {
@@ -565,6 +568,18 @@ export function createInternalRouter() {
       authCount: result.auths.length,
     });
     return c.json(serializeIntegrationCredentialsWire(result));
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/upstream-success
+  // Sidecar-only: a call through the bound connection succeeded upstream, ending the rejection
+  // streak the credentials payload announced (`rejection_streak`). Same guards as `/refresh`.
+  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/upstream-success`, async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const { runId, run } = await verifyRunToken(c);
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
+    await clearUpstreamRejections(bound.connectionId);
+    return c.body(null, 204);
   });
 
   // GET /internal/mcp-server-bundle/:scope/:name

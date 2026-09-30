@@ -47,6 +47,8 @@ import {
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
+import { logger } from "../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { upstreamFailureDetail, type ProxyProblemCode } from "../../lib/proxy-status.ts";
 import {
   resolveIntegrationProxyCredentials,
@@ -54,6 +56,7 @@ import {
   IntegrationCredentialNotFoundError,
   type ProxyRunSelection,
 } from "./integration-resolver.ts";
+import { clearUpstreamRejections } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -196,11 +199,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
   let refreshSelection;
   let connectionId: string;
+  let rejectionStreak: number;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
+    rejectionStreak = result.rejectionStreak;
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
@@ -406,6 +411,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
   } finally {
     await persistJar();
+  }
+
+  if (res.ok && credentialInjection.kind === "inject" && rejectionStreak > 0) {
+    clearUpstreamRejections(connectionId).catch((err: unknown) =>
+      logger.warn("credential-proxy: could not clear the connection's rejection streak", {
+        connectionId,
+        error: getErrorMessage(err),
+      }),
+    );
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them

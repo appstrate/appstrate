@@ -8,9 +8,9 @@
  *
  * Lists, for every stored integration draft and published version, each expression
  * `integrationManifestSchema` now refuses (`findUnevaluableExpressions`, the manifest stops
- * loading) and each injected credential a run now refuses as `exfiltration`
- * (`findUnboundedInjectedCredentials`); exits 1 while any remains. What it means and how to fix
- * one: `scripts/migration/README.md`.
+ * loading) and each injected credential a run now refuses as `exfiltration` (the
+ * `findUnboundedInjectedCredentials` hits `credentialUrlPolicy` refuses); exits 1 while any
+ * remains. What it means and how to fix one: `scripts/migration/README.md`.
  */
 
 import { SQL } from "bun";
@@ -34,6 +34,17 @@ export const STORED_MANIFESTS_QUERY = `
    WHERE p.type = 'integration'
    ORDER BY 1, 2`;
 
+/**
+ * A run refuses an injected credential whose list is empty or names a host-unbounded entry
+ * (`credentialUrlPolicy`); `allow_all_uris` beside a list is dropped, the list served.
+ */
+function refusedAtRun(manifest: unknown, issue: { authKey: string; path: readonly PropertyKey[] }) {
+  if (issue.path.at(-1) !== "allow_all_uris") return true;
+  const auths = (manifest as { auths: Record<string, { authorized_uris?: unknown }> }).auths;
+  const uris = auths[issue.authKey]?.authorized_uris;
+  return !Array.isArray(uris) || uris.length === 0;
+}
+
 /** One line per issue: `<id>@<version> [expression|exfiltration] <path>: <message>`. */
 export function manifestIssues(rows: readonly StoredManifest[]): {
   lines: string[];
@@ -54,6 +65,7 @@ export function manifestIssues(rows: readonly StoredManifest[]): {
       report("expression", v);
     }
     for (const v of findUnboundedInjectedCredentials(manifest)) {
+      if (!refusedAtRun(manifest, v)) continue;
       exfiltration += 1;
       report("exfiltration", v);
     }

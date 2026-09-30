@@ -45,9 +45,9 @@ import {
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
   recordUnrefreshableRejection,
+  upstreamRejectionStreak,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
-import { UPSTREAM_REJECTION_GAP_DAYS } from "./upstream-rejection-window.ts";
 import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
@@ -58,6 +58,7 @@ interface MutableCredentialsWire {
   auths: ResolvedAuthCredentials[];
   deliveryPlans: Record<string, HttpDeliveryPlan>;
   expiresAtEpochMs: Record<string, number | null>;
+  rejectionStreak?: number;
 }
 
 interface ResolveLiveCredentialsOptions {
@@ -84,7 +85,7 @@ interface ResolveLiveCredentialsOptions {
  *     surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
  *     an unrefreshable auth rejected fewer times than the failure threshold
- *     (see `countUpstreamRejection`).
+ *     (consecutive, see `clearUpstreamRejections`).
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
@@ -208,7 +209,7 @@ export async function resolveLiveIntegrationCredentials(
   // A forced refresh nothing can recover (no refresh client, or not oauth2).
   // One 401 can be a transient upstream fault, or a permission error the agent
   // provoked, so it is counted: 502 until INTEGRATION_REFRESH_MAX_FAILURES
-  // rejections (see `countUpstreamRejection`), then terminal.
+  // consecutive rejections (a successful call ends the streak), then terminal.
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
       connection.id,
@@ -225,8 +226,7 @@ export async function resolveLiveIntegrationCredentials(
     });
     throw badGateway(
       `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} upstream rejections before it is flagged ` +
-        `(a ${UPSTREAM_REJECTION_GAP_DAYS}-day gap restarts the count)`,
+        `${failures}/${maxFailures} consecutive upstream rejections before it is flagged`,
     );
   };
 
@@ -429,6 +429,8 @@ export async function resolveLiveIntegrationCredentials(
       : {}),
   });
   out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
+  const streak = upstreamRejectionStreak(connection);
+  if (streak > 0) out.rejectionStreak = streak;
 
   return out;
 }
@@ -503,6 +505,7 @@ function isWithinLeadWindow(expiresAt: Date | null): boolean {
  *   expiresAt             → expires_at
  *   deliveryPlans         → delivery_plans
  *   expiresAtEpochMs      → expires_at_epoch_ms
+ *   rejectionStreak       → rejection_streak
  *   headerName            → header_name           (per delivery plan)
  *   headerPrefix          → header_prefix         (per delivery plan)
  *   allowServerOverride   → allow_server_override (per delivery plan)
@@ -540,5 +543,6 @@ export function serializeIntegrationCredentialsWire(
     auths,
     delivery_plans,
     expires_at_epoch_ms: wire.expiresAtEpochMs,
+    ...(wire.rejectionStreak !== undefined ? { rejection_streak: wire.rejectionStreak } : {}),
   };
 }

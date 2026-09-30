@@ -40,7 +40,10 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
-import { recordModelCredentialRejection } from "../model-providers/credentials.ts";
+import {
+  clearModelCredentialRejections,
+  recordModelCredentialRejection,
+} from "../model-providers/credentials.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
 interface ProxyCallInputs {
@@ -343,6 +346,17 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       inputs.principal.orgId,
       resolved.credentialId,
       resolved.apiKey,
+    );
+  } else if (upstream.ok && resolved.credentialId) {
+    clearModelCredentialRejections(
+      inputs.principal.orgId,
+      resolved.credentialId,
+      resolved.apiKey,
+    ).catch((err: unknown) =>
+      logger.warn("llm-proxy: could not clear the credential's rejection streak", {
+        credentialId: resolved.credentialId,
+        error: getErrorMessage(err),
+      }),
     );
   }
 

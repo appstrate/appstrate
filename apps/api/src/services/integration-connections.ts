@@ -26,13 +26,13 @@ import {
   arrayOverlaps,
   asc,
   eq,
+  gt,
   inArray,
   isNull,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
-import { countUpstreamRejection } from "./upstream-rejection-window.ts";
 import { db } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -196,6 +196,7 @@ interface ActorConnectionRow {
    * resolution so refresh uses the SAME credentials that minted the tokens.
    */
   clientRef: string | null;
+  refreshFailureCount: number;
 }
 
 /**
@@ -245,6 +246,7 @@ export async function loadAccessibleConnectionById(
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
+      refreshFailureCount: integrationConnections.refreshFailureCount,
     })
     .from(integrationConnections)
     .where(
@@ -398,8 +400,24 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
 type SelectableRow = typeof integrationConnections.$inferSelect;
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
-  const { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef } = row;
-  return { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef };
+  const {
+    id,
+    authKey,
+    credentialsEncrypted,
+    expiresAt,
+    scopesGranted,
+    clientRef,
+    refreshFailureCount,
+  } = row;
+  return {
+    id,
+    authKey,
+    credentialsEncrypted,
+    expiresAt,
+    scopesGranted,
+    clientRef,
+    refreshFailureCount,
+  };
 }
 
 function mustChoose(
@@ -2379,7 +2397,6 @@ export async function persistCredentialBundle(
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
-    refreshFailuresSince: null,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -2509,7 +2526,7 @@ export async function markIntegrationConnectionNeedsReconnection(
 type RefreshFailureGate =
   /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
   | { graceSeconds: number }
-  /** An upstream rejection of an unrefreshable credential: see `countUpstreamRejection`. */
+  /** An upstream 401 on an unrefreshable credential; {@link clearUpstreamRejections} ends the streak. */
   | "upstream_rejection";
 
 /**
@@ -2525,23 +2542,14 @@ export async function recordIntegrationRefreshFailure(
   maxFailures: number,
   gate: RefreshFailureGate,
 ): Promise<{ failures: number; needsReconnection: boolean }> {
-  const { refreshFailureCount: count, refreshFailuresSince: since } = integrationConnections;
-  let failures: SQL;
-  let escalates: SQL;
-  const set: Partial<Record<keyof typeof integrationConnections.$inferInsert, SQL>> = {};
-  if (gate === "upstream_rejection") {
-    const counted = countUpstreamRejection(count, since);
-    failures = counted.failures;
-    escalates = sql`${failures} >= ${maxFailures}`;
-    set.refreshFailuresSince = counted.since;
-  } else {
-    failures = sql`${count} + 1`;
-    escalates = sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
-  }
+  const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
+  const escalates =
+    gate === "upstream_rejection"
+      ? sql`${failures} >= ${maxFailures}`
+      : sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
   const [row] = await db
     .update(integrationConnections)
     .set({
-      ...set,
       refreshFailureCount: failures,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
@@ -2565,6 +2573,32 @@ export async function recordUnrefreshableRejection(
     "upstream_rejection",
   );
   return { ...counted, maxFailures };
+}
+
+/**
+ * A successful upstream call through a connection ends its rejection streak. Only a non-OAuth2
+ * connection (`client_ref IS NULL`): an OAuth2 count tracks refreshes, which a call does not prove.
+ * Writes nothing when the count is already 0.
+ */
+export async function clearUpstreamRejections(connectionId: string): Promise<void> {
+  await db
+    .update(integrationConnections)
+    .set({ refreshFailureCount: 0 })
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        gt(integrationConnections.refreshFailureCount, 0),
+        isNull(integrationConnections.clientRef),
+      ),
+    );
+}
+
+/** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */
+export function upstreamRejectionStreak(connection: {
+  clientRef: string | null;
+  refreshFailureCount: number;
+}): number {
+  return connection.clientRef === null ? connection.refreshFailureCount : 0;
 }
 
 /**

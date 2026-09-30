@@ -18,8 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { and, eq, sql } from "drizzle-orm";
-import { countUpstreamRejection } from "../upstream-rejection-window.ts";
+import { and, eq, gt, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -436,7 +435,6 @@ export async function updateModelProviderCredential(
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
     updates.refreshFailureCount = 0;
-    updates.refreshFailuresSince = null;
   }
 
   if (Object.keys(updates).length === 0) return;
@@ -685,35 +683,49 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * Count an upstream 401 against the api key the request sent (none once the row holds another
- * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th with no gap over 7 days flags it. OAuth rows are skipped.
+ * The row's WHERE while it still holds `apiKey` as a live api-key blob (`null` otherwise), so a
+ * verdict on one key never lands on the key that replaced it. `onlyCounted` skips a zero count.
  */
-export async function recordModelCredentialRejection(
+async function whileHoldingApiKey(
   orgId: string,
   id: string,
-  rejectedApiKey: string,
-): Promise<void> {
+  apiKey: string,
+  onlyCounted = false,
+): Promise<SQL | null> {
   const byId = scopedWhere(modelProviderCredentials, {
     orgId,
-    extra: [eq(modelProviderCredentials.id, id)],
+    extra: [
+      eq(modelProviderCredentials.id, id),
+      onlyCounted ? gt(modelProviderCredentials.refreshFailureCount, 0) : undefined,
+    ],
   });
   const [row] = await db
     .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
     .from(modelProviderCredentials)
     .where(byId)
     .limit(1);
-  if (!row) return;
+  if (!row) return null;
   const blob = decryptBlob(row.credentialsEncrypted);
-  if (blob?.kind !== "api_key" || blob.apiKey !== rejectedApiKey || blob.needsReconnection) return;
+  if (blob?.kind !== "api_key" || blob.apiKey !== apiKey || blob.needsReconnection) return null;
+  return and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted))!;
+}
 
-  const counted = countUpstreamRejection(
-    modelProviderCredentials.refreshFailureCount,
-    modelProviderCredentials.refreshFailuresSince,
-  );
+/**
+ * Count an upstream 401 against the api key the request sent (none once the row holds another
+ * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th consecutive one flags it, and any successful
+ * call ({@link clearModelCredentialRejections}) ends the streak. OAuth rows are skipped.
+ */
+export async function recordModelCredentialRejection(
+  orgId: string,
+  id: string,
+  rejectedApiKey: string,
+): Promise<void> {
+  const holding = await whileHoldingApiKey(orgId, id, rejectedApiKey);
+  if (!holding) return;
   const [updated] = await db
     .update(modelProviderCredentials)
-    .set({ refreshFailureCount: counted.failures, refreshFailuresSince: counted.since })
-    .where(and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted)))
+    .set({ refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1` })
+    .where(holding)
     .returning({ failures: modelProviderCredentials.refreshFailureCount });
   if (!updated || updated.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
 
@@ -724,6 +736,18 @@ export async function recordModelCredentialRejection(
   await updateBlob(orgId, id, (b) =>
     b.kind === "api_key" && b.apiKey === rejectedApiKey ? { ...b, needsReconnection: true } : null,
   );
+}
+
+/** A successful upstream call with `apiKey` ends its rejection streak; one read when there is none. */
+export async function clearModelCredentialRejections(
+  orgId: string,
+  id: string,
+  apiKey: string,
+): Promise<void> {
+  const holding = await whileHoldingApiKey(orgId, id, apiKey, true);
+  if (holding) {
+    await db.update(modelProviderCredentials).set({ refreshFailureCount: 0 }).where(holding);
+  }
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ import {
   assertIntegrationActive,
   selectAccessibleConnection,
   recordUnrefreshableRejection,
+  upstreamRejectionStreak,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
@@ -108,6 +109,8 @@ interface ResolvedIntegrationProxyCredentials {
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;
   authKey: string;
+  /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
+  rejectionStreak: number;
 }
 
 /**
@@ -139,6 +142,7 @@ export async function resolveIntegrationProxyCredentials(
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
     authKey: connection.authKey,
+    rejectionStreak: upstreamRejectionStreak(connection),
   };
 }
 
@@ -257,6 +261,7 @@ export async function forceRefreshIntegrationProxyCredentials(
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
     authKey: connection.authKey,
+    rejectionStreak: upstreamRejectionStreak(connection),
   };
 }
 

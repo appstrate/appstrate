@@ -17,6 +17,7 @@ import {
 } from "../../../../scripts/migration/0035-verify-manifest-expressions.ts";
 
 const CLEAN = "@acme0035/clean";
+const DOWNGRADED = "@acme0035/downgraded";
 const BROKEN = "@acme0035/broken";
 
 const apiKeyAuth = (extra: Record<string, unknown>) => ({
@@ -39,9 +40,23 @@ beforeAll(async () => {
     },
   };
   const published = { auths: { k: apiKeyAuth({ allow_all_uris: true }) } };
+  // A run drops `allow_all_uris` beside a bounded list and serves the list: nothing to refuse.
+  const downgraded = {
+    auths: {
+      k: apiKeyAuth({ allow_all_uris: true, authorized_uris: ["https://api.acme.test/**"] }),
+    },
+  };
   await pg.query(
-    `INSERT INTO packages (id, type, draft_manifest) VALUES ($1, 'integration', $2), ($3, 'integration', $4), ('@acme0035/agent', 'agent', $5)`,
-    [CLEAN, JSON.stringify(clean), BROKEN, JSON.stringify(draft), JSON.stringify(published)],
+    `INSERT INTO packages (id, type, draft_manifest) VALUES ($1, 'integration', $2), ($3, 'integration', $4), ('@acme0035/agent', 'agent', $5), ($6, 'integration', $7)`,
+    [
+      CLEAN,
+      JSON.stringify(clean),
+      BROKEN,
+      JSON.stringify(draft),
+      JSON.stringify(published),
+      DOWNGRADED,
+      JSON.stringify(downgraded),
+    ],
   );
   await pg.query(
     `INSERT INTO package_versions (package_id, version, integrity, artifact_size, manifest) VALUES ($1, '1.0.0', 'sha256-x', 1, $2)`,
@@ -60,6 +75,7 @@ describe("0035 — stored manifests the release refuses", () => {
       `${BROKEN}@1.0.0`,
       `${BROKEN}@draft`,
       `${CLEAN}@draft`,
+      `${DOWNGRADED}@draft`,
     ]);
 
     const report = manifestIssues(rows);

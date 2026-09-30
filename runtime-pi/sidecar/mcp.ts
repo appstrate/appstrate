@@ -858,6 +858,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         declaredUris: integ.declaredUris,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
+        reportUpstreamSuccess: integ.reportUpstreamSuccess,
       },
       integrationId: integ.integrationId,
       connectionId: integ.connectionId,
@@ -1707,6 +1708,8 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /** See {@link ApiCallDeps.reportUpstreamSuccess}. */
+  reportUpstreamSuccess?: ApiCallDeps["reportUpstreamSuccess"];
   /**
    * Resumable-upload protocols this integration auth declared under
    * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. When non-empty the sidecar

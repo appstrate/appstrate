@@ -1,6 +1,6 @@
 {
-  "id": "57be9c6a-9bd2-4f20-b5a8-8e51e84304fa",
-  "prevId": "5bdc18a3-129f-4e03-b771-46cba09bbada",
+  "id": "3e63edd1-b268-4946-9b13-f6a2654cd2d0",
+  "prevId": "57be9c6a-9bd2-4f20-b5a8-8e51e84304fa",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3873,7 +3873,8 @@
         },
         "model_source": {
           "name": "model_source",
-          "type": "text",
+          "type": "credential_source",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -4448,6 +4449,10 @@
         "runs_proxy_route_has_model": {
           "name": "runs_proxy_route_has_model",
           "value": "inference_route <> 'proxy' OR model_id IS NOT NULL"
+        },
+        "runs_remote_has_no_platform_model": {
+          "name": "runs_remote_has_no_platform_model",
+          "value": "run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -4504,6 +4509,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
+        },
+        "disabled_reason": {
+          "name": "disabled_reason",
+          "type": "schedule_disabled_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
         },
         "cron_expression": {
           "name": "cron_expression",
@@ -4718,6 +4730,10 @@
         "package_schedules_exactly_one_actor": {
           "name": "package_schedules_exactly_one_actor",
           "value": "(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)"
+        },
+        "package_schedules_disabled_reason_matches": {
+          "name": "package_schedules_disabled_reason_matches",
+          "value": "enabled = (disabled_reason IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -5069,12 +5085,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "refresh_failures_since": {
-          "name": "refresh_failures_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "label": {
           "name": "label",
@@ -9225,6 +9235,11 @@
       "name": "run_status",
       "schema": "public",
       "values": ["pending", "running", "success", "failed", "timeout", "cancelled"]
+    },
+    "public.schedule_disabled_reason": {
+      "name": "schedule_disabled_reason",
+      "schema": "public",
+      "values": ["user", "actor_invalid", "actor_left_org", "connection_deleted"]
     }
   },
   "schemas": {},

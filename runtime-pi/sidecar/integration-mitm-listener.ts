@@ -132,6 +132,11 @@ export interface MitmCredentialSource {
    */
   refreshOnUnauthorized?(authKey: string): Promise<boolean>;
   /**
+   * A call carrying the injected credential got a 2xx: tells the platform, when a rejection streak
+   * is pending on the connection, that the credential works (fire-and-forget).
+   */
+  reportUpstreamSuccess?(): void;
+  /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
    * it calls {@link refreshOnUnauthorized} (which routes to the registered
@@ -1015,6 +1020,7 @@ export async function handleInnerRequest(
     }
   }
 
+  if (response.ok && lastAction.injectedHeader !== null) credentials.reportUpstreamSuccess?.();
   emit({
     kind: "request-forwarded",
     url: targetUrl,

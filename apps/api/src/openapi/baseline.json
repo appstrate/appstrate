@@ -14538,7 +14538,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections are counted. A rejection more than 7 days after the previous one restarts the count; a reconnect resets it.",
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14546,6 +14546,74 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+      "post": {
+        "operationId": "reportIntegrationUpstreamSuccess",
+        "tags": ["Internal"],
+        "summary": "End a connection's upstream-rejection streak",
+        "description": "Sidecar-only. Same Bearer run token, agent-dependency check and required `connection_id` selector as the refresh endpoint. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "description": "Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no \"the connection of this integration\" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Streak ended (or none to end)."
+          },
+          "400": {
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -29799,6 +29867,11 @@
             "additionalProperties": {
               "type": ["integer", "null"]
             }
+          },
+          "rejection_streak": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak."
           }
         }
       },

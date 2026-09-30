@@ -1850,6 +1850,12 @@ export const schemas = {
         type: "object",
         additionalProperties: { type: ["integer", "null"] },
       },
+      rejection_streak: {
+        type: "integer",
+        minimum: 1,
+        description:
+          "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak.",
+      },
     },
   },
   IntegrationAgentResolution: {

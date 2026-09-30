@@ -74,6 +74,11 @@ export interface IntegrationCredentialsWire {
   auths: ReadonlyArray<ResolvedAuthCredentials>;
   deliveryPlans: Readonly<Record<string, HttpDeliveryPlan>>;
   expiresAtEpochMs: Readonly<Record<string, number | null>>;
+  /**
+   * Consecutive upstream rejections counted against this non-OAuth2 connection; absent when none.
+   * The sidecar reports the next successful call, which ends the streak.
+   */
+  rejectionStreak?: number;
 }
 
 /**

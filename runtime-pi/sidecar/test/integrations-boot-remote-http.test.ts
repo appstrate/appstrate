@@ -90,11 +90,15 @@ function makeDeps(
 ) {
   let captured: typeof fetch | undefined;
   let refreshCalls = 0;
+  let successReports = 0;
   const source = {
     snapshot: () => initial,
     refreshOnUnauthorized: async (_authKey: string) => {
       refreshCalls += 1;
       return refresh();
+    },
+    reportUpstreamSuccess: () => {
+      successReports += 1;
     },
   } as unknown as IntegrationCredentialsSource;
   const deps: ConnectRemoteHttpDeps = {
@@ -104,7 +108,13 @@ function makeDeps(
     }) as unknown as ConnectRemoteHttpDeps["createClient"],
     resolveHost,
   };
-  return { deps, source, getFetch: () => captured!, getRefreshCalls: () => refreshCalls };
+  return {
+    deps,
+    source,
+    getFetch: () => captured!,
+    getRefreshCalls: () => refreshCalls,
+    getSuccessReports: () => successReports,
+  };
 }
 
 async function withGlobalFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
@@ -147,6 +157,28 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     // Cast: TS narrows a `let` assigned only inside a closure back to its
     // initializer type (`null`); the global fetch stub mutates it at runtime.
     expect(seen as string | null).toBe("Bearer TOKEN");
+  });
+
+  it("reports a 2xx on the injected credential, never one on a caller override", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: {
+        headerName: "X-Api-Key",
+        headerPrefix: "",
+        value: "K",
+        allowServerOverride: true,
+      },
+    });
+    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      async () => {
+        await getFetch()(SERVER_URL, { method: "POST" });
+        await getFetch()(SERVER_URL, { method: "POST", headers: { "x-api-key": "CALLER" } });
+      },
+    );
+    expect(getSuccessReports()).toBe(1);
   });
 
   it("preserves an allowed caller override and does not refresh it on 401", async () => {

@@ -1,12 +1,12 @@
 -- 0037 — name why a schedule disabled before `disabled_reason` existed was disabled (#1641).
 --
--- Drizzle `0080` labels every already-disabled schedule `user`. Two system paths disabled rows
+-- Drizzle `0079` labels every already-disabled schedule `user`. Two system paths disabled rows
 -- before it without recording why; one is derivable: a MEMBER actor (`user_id`) that is no
 -- longer a member of the schedule's organization left or was removed (CRIT-13), so its row
 -- becomes `actor_left_org` — a row its actor paused before leaving too, which is as true.
 -- `actor_invalid` (a fire found the actor could not run agents in the space) is NOT derived: the
 -- space-role rule lives in TypeScript, and today's roles need not be those of the fire.
--- Run any time after `0080` is applied. Rows: UNMEASURED. Idempotent; one transaction.
+-- Run any time after `0079` is applied. Rows: UNMEASURED. Idempotent; one transaction.
 
 BEGIN;
 SET LOCAL lock_timeout = '3s';
@@ -16,7 +16,7 @@ DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                  WHERE table_name = 'package_schedules' AND column_name = 'disabled_reason') THEN
-    RAISE EXCEPTION '0037: package_schedules.disabled_reason does not exist — apply drizzle 0080 (boot the release) first. Nothing was written.';
+    RAISE EXCEPTION '0037: package_schedules.disabled_reason does not exist — apply drizzle 0079 (boot the release) first. Nothing was written.';
   END IF;
 END $$;
 

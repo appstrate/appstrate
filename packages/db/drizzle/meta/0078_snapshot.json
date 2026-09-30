@@ -1,5 +1,5 @@
 {
-  "id": "5bdc18a3-129f-4e03-b771-46cba09bbada",
+  "id": "57be9c6a-9bd2-4f20-b5a8-8e51e84304fa",
   "prevId": "2a133790-95d1-4ed1-8aab-bd10043181c6",
   "version": "7",
   "dialect": "postgresql",
@@ -4970,6 +4970,10 @@
         "notifications_recipient_type_valid": {
           "name": "notifications_recipient_type_valid",
           "value": "recipient_type IN ('user', 'end_user')"
+        },
+        "notifications_type_valid": {
+          "name": "notifications_type_valid",
+          "value": "type IN ('run_completed', 'package_shared')"
         }
       },
       "isRLSEnabled": false
@@ -5065,12 +5069,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "refresh_failures_since": {
-          "name": "refresh_failures_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "label": {
           "name": "label",

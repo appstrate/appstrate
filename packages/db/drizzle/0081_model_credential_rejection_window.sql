@@ -1,1 +1,0 @@
-ALTER TABLE "model_provider_credentials" ADD COLUMN "refresh_failures_since" timestamp with time zone;

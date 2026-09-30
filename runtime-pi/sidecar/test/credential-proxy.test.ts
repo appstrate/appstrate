@@ -427,6 +427,32 @@ describe("executeApiCall — 401 retry path", () => {
     expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(true);
   });
 
+  it("reports an upstream success only for a 2xx on the injected credential", async () => {
+    const statuses = [200, 401];
+    const fetchFn = mock(async () => new Response("{}", { status: statuses.shift()! }));
+    const reportUpstreamSuccess = mock(() => {});
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      refreshCredentials: mock(async () => null),
+      reportUpstreamSuccess,
+    });
+    const call = () =>
+      executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl: "https://api.example.com/x",
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+    await call();
+    await call();
+    expect(reportUpstreamSuccess).toHaveBeenCalledTimes(1);
+  });
+
   it("does NOT replay a streaming-request body on 401", async () => {
     let upstreamCalls = 0;
     const fetchFn = mock(async (url: string | URL) => {

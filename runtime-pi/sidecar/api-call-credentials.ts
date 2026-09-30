@@ -38,6 +38,7 @@ interface ApiCallCredentialAdapter {
    * stale token.
    */
   refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
+  reportUpstreamSuccess: () => void;
 }
 
 /**
@@ -88,5 +89,6 @@ export function createApiCallCredentialAdapter(opts: {
       const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
       return rotated ? toPayload() : null;
     },
+    reportUpstreamSuccess: () => source.reportUpstreamSuccess(),
   };
 }

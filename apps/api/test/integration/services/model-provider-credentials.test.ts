@@ -36,6 +36,7 @@ import {
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
+  clearModelCredentialRejections,
   recordModelCredentialRejection,
   updateModelProviderCredential,
   updateOAuthCredentialTokens,
@@ -427,13 +428,10 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(await flagged(orgId, id)).toBe(false);
     expect((await loadInferenceCredentials(orgId, id))!.apiKey).toBe("sk-rotated");
     const [row] = await db
-      .select({
-        count: modelProviderCredentials.refreshFailureCount,
-        since: modelProviderCredentials.refreshFailuresSince,
-      })
+      .select({ count: modelProviderCredentials.refreshFailureCount })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
-    expect(row).toEqual({ count: 0, since: null });
+    expect(row!.count).toBe(0);
   });
 
   it("counts nothing for a key the row no longer holds: a rotation in flight flags nothing", async () => {
@@ -465,36 +463,40 @@ describe("model-provider-credentials service — upstream rejections of an api k
     }
   });
 
-  it("flags a key rejected once a day on the INTEGRATION_REFRESH_MAX_FAILURES-th day", async () => {
-    const { orgId, id } = await apiKeyCredential("mpc-reject-daily");
+  it("flags a key rejected on every call, however far apart, at the threshold", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-dead");
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    for (let i = 1; i < max; i++) {
-      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-      await db
-        .update(modelProviderCredentials)
-        .set({ refreshFailuresSince: new Date(Date.now() - 86_400_000) })
-        .where(eq(modelProviderCredentials.id, id));
-    }
+    for (let i = 1; i < max; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
     await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(true);
   });
 
-  it("starts a new count after a gap of more than 7 days", async () => {
-    const { orgId, id } = await apiKeyCredential("mpc-reject-window");
-    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-    await db
-      .update(modelProviderCredentials)
-      .set({ refreshFailuresSince: new Date(Date.now() - 8 * 86_400_000) })
-      .where(eq(modelProviderCredentials.id, id));
-
-    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+  it("a successful call ends the streak, so interleaved rejections never flag the key", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-healthy");
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 0; i < 2 * max; i++) {
+      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+      await clearModelCredentialRejections(orgId, id, PLAINTEXT);
+    }
     expect(await flagged(orgId, id)).toBe(false);
     const [row] = await db
       .select({ count: modelProviderCredentials.refreshFailureCount })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
-    expect(row!.count).toBe(1);
+    expect(row!.count).toBe(0);
+  });
+
+  it("a success with a key the row no longer holds clears nothing", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-clear-rotated");
+    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    for (let i = 0; i < 3; i++) await recordModelCredentialRejection(orgId, id, "sk-rotated");
+    await clearModelCredentialRejections(orgId, id, PLAINTEXT);
+    const [row] = await db
+      .select({ count: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    expect(row!.count).toBe(3);
   });
 
   it("leaves an OAuth credential's transient-refresh streak and flag untouched", async () => {
@@ -514,15 +516,13 @@ describe("model-provider-credentials service — upstream rejections of an api k
       .where(eq(modelProviderCredentials.id, id));
 
     for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id, "access-1");
+    await clearModelCredentialRejections(ctx.orgId, id, "access-1");
 
     const [row] = await db
-      .select({
-        count: modelProviderCredentials.refreshFailureCount,
-        since: modelProviderCredentials.refreshFailuresSince,
-      })
+      .select({ count: modelProviderCredentials.refreshFailureCount })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
-    expect(row).toEqual({ count: 2, since: null });
+    expect(row!.count).toBe(2);
     expect(await flagged(ctx.orgId, id)).toBe(false);
   });
 });

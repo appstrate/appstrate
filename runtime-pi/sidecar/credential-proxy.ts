@@ -200,6 +200,8 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
    * retry with a stale token.
    */
   refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
+  /** A 2xx on the injected credential — ends a pending rejection streak on the connection. */
+  reportUpstreamSuccess?: () => void;
 }
 
 /**
@@ -599,6 +601,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       connectionId: args.connectionId,
     });
   }
+
+  if (upstream.ok && credentialInjection === "inject") deps.reportUpstreamSuccess?.();
 
   // 10. Success-path diagnostic envelope (#404). One structured line per
   //     completed call — resolved auth mode, hop count, status, duration,

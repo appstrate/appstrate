@@ -3,7 +3,7 @@
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 /**
- * The `409` shared by BOTH `/internal/integration-credentials/{scope}/{name}`
+ * The `409` shared by the `/internal/integration-credentials/{scope}/{name}`
  * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
  * object is serialized at both sites. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
@@ -354,12 +354,40 @@ export const internalPaths = {
         },
         "502": {
           description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections are counted. A rejection more than 7 days after the previous one restarts the count; a reconnect resets it.",
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
+        },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+    post: {
+      operationId: "reportIntegrationUpstreamSuccess",
+      tags: ["Internal"],
+      summary: "End a connection's upstream-rejection streak",
+      description:
+        "Sidecar-only. Same Bearer run token, agent-dependency check and required `connection_id` selector as the refresh endpoint. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent; writes nothing when the count is already 0.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        connectionIdParam,
+      ],
+      responses: {
+        "204": { description: "Streak ended (or none to end)." },
+        "400": connectionSelector400,
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          ...integrationCredentialsConflict409,
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided.",
         },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },

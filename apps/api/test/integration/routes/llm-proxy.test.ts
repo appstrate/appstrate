@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -450,6 +450,43 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
     expect((await call()).status).not.toBe(401);
     expect(upstreamCalls).toBe(5);
+  });
+
+  it("a successful call ends the org key's rejection streak", async () => {
+    const h = await buildHarness();
+    const statuses = [401, 401, 200];
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl_x",
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          { status: statuses.shift()!, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const call = () =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+      });
+    const failures = (n: number) =>
+      db
+        .select({ id: modelProviderCredentials.id })
+        .from(modelProviderCredentials)
+        .where(
+          and(
+            eq(modelProviderCredentials.id, h.credentialId),
+            eq(modelProviderCredentials.refreshFailureCount, n),
+          ),
+        );
+    await call();
+    await call();
+    expect(await failures(2)).toHaveLength(1);
+    expect((await call()).status).toBe(200);
+    await waitForRow(() => failures(0));
   });
 
   it("marks its own refusal with a Proxy-Status error", async () => {

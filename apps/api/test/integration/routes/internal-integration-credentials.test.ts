@@ -687,6 +687,56 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     // A refused request must not have touched the credential it never read.
     expect(row!.needsReconnection).toBe(false);
   });
+
+  it("upstream-success ends the streak the refreshes counted, which the GET announced", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const auth = { Authorization: `Bearer ${token}` };
+    const streak = async () =>
+      (
+        (await (
+          await app.request(credentialsUrl(INTEGRATION, connectionId), { headers: auth })
+        ).json()) as {
+          rejection_streak?: number;
+        }
+      ).rejection_streak;
+
+    for (let i = 0; i < 2; i++) {
+      await app.request(credentialsUrl(INTEGRATION, connectionId, true), {
+        method: "POST",
+        headers: auth,
+      });
+    }
+    expect(await streak()).toBe(2);
+
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
+      { method: "POST", headers: auth },
+    );
+    expect(res.status).toBe(204);
+    expect(await streak()).toBeUndefined();
+  });
+
+  it("DENY: upstream-success for a connection the run did not bind is a 400", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await db
+      .update(integrationConnections)
+      .set({ refreshFailureCount: 2 })
+      .where(eq(integrationConnections.id, connectionId));
+
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(400);
+    const [row] = await db
+      .select({ count: integrationConnections.refreshFailureCount })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.count).toBe(2);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────

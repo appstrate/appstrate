@@ -1,1 +1,0 @@
-ALTER TABLE "integration_connections" ADD COLUMN "refresh_failures_since" timestamp with time zone;

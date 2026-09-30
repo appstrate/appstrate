@@ -496,6 +496,77 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
   });
 });
 
+describe("createIntegrationCredentialsSource — upstream success report", () => {
+  const SUCCESS_URL =
+    "http://api/internal/integration-credentials/@test/integ/upstream-success?connection_id=conn-a";
+
+  function sourceWith(initialPayload: IntegrationCredentialsWire) {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      calls.push({ url, method: init.method ?? "GET" });
+      return new Response(null, {
+        status: url.includes("/refresh") ? 502 : 204,
+      });
+    }) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload,
+      fetchFn,
+      minRefreshIntervalMs: 0,
+    });
+    const successCalls = () => calls.filter((c) => c.url === SUCCESS_URL && c.method === "POST");
+    return { source, successCalls };
+  }
+
+  it("reports the first success once when the payload announced a streak", () => {
+    const { source, successCalls } = sourceWith({ ...makePayload("tok"), rejectionStreak: 2 });
+    source.reportUpstreamSuccess();
+    source.reportUpstreamSuccess();
+    expect(successCalls().length).toBe(1);
+  });
+
+  it("reports nothing when no streak is pending", () => {
+    const { source, successCalls } = sourceWith(makePayload("tok"));
+    source.reportUpstreamSuccess();
+    expect(successCalls().length).toBe(0);
+  });
+
+  it("reports a success that follows a rejection counted in this run", async () => {
+    const { source, successCalls } = sourceWith(makePayload("tok"));
+    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    source.reportUpstreamSuccess();
+    source.reportUpstreamSuccess();
+    expect(successCalls().length).toBe(1);
+  });
+
+  it("an OAuth2 refresh failure is not a rejection streak", async () => {
+    const payload = makePayload("tok");
+    const { source, successCalls } = sourceWith({
+      ...payload,
+      auths: [{ ...payload.auths[0]!, authType: "oauth2" }],
+    });
+    await source.refreshOnUnauthorized("primary");
+    source.reportUpstreamSuccess();
+    expect(successCalls().length).toBe(0);
+  });
+
+  it("reads `rejection_streak` off the wire", async () => {
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ ...makeWireJson("tok"), rejection_streak: 3 }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    const wire = await fetchInitialIntegrationCredentials("@test/integ", "conn-a", {
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      fetchFn,
+    });
+    expect(wire.rejectionStreak).toBe(3);
+  });
+});
+
 describe("fetchInitialIntegrationCredentials", () => {
   it("GETs the right URL with the bearer and returns the body", async () => {
     const payload = makeWireJson("tok-x");

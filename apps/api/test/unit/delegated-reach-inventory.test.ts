@@ -194,6 +194,7 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect-run grant or verifyRunToken",
   },
   refreshOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
+  reportIntegrationUpstreamSuccess: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyAnthropicMessages: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },

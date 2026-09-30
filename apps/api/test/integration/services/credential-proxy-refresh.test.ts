@@ -598,3 +598,82 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
     expect(await callThroughRun(finish)).toEqual({ status: 401, upstreamCalls: 1, refreshes: 0 });
   });
 });
+
+describe("proxyCall — an api_key connection's rejection streak", () => {
+  const packageId = "@cprefreshorg/apikey";
+  let ctx: TestContext;
+  let connId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: packageId,
+        auths: {
+          key: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+          },
+        },
+      }),
+    });
+    await seedPublishedVersion(packageId, "1.0.0");
+    await seedPackageShare(ctx.defaultSpaceId, packageId);
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId });
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: packageId,
+        authKey: "key",
+        accountId: "acct-1",
+        label: "acct-1",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        refreshFailureCount: 3,
+      })
+      .returning({ id: integrationConnections.id });
+    connId = conn!.id;
+  });
+
+  async function callReturning(status: number): Promise<number> {
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/v1/items",
+      headers: {},
+      fetch: (async () => new Response("{}", { status })) as unknown as typeof fetch,
+    });
+    return res.status;
+  }
+
+  async function failures(): Promise<number> {
+    const [row] = await db
+      .select({ count: integrationConnections.refreshFailureCount })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    return row!.count;
+  }
+
+  it("a 2xx ends the streak", async () => {
+    expect(await callReturning(200)).toBe(200);
+    const deadline = Date.now() + 1000;
+    while ((await failures()) !== 0 && Date.now() < deadline) await Bun.sleep(10);
+    expect(await failures()).toBe(0);
+  });
+
+  it("a non-2xx leaves it", async () => {
+    expect(await callReturning(403)).toBe(403);
+    await Bun.sleep(50);
+    expect(await failures()).toBe(3);
+  });
+});

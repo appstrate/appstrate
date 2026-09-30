@@ -2,7 +2,7 @@
 
 /**
  * `scripts/migration/0037-schedule-disabled-reason-backfill.sql` on a private PGlite replayed to
- * the current schema: a schedule `0080` labelled `user` whose member actor is no longer in the
+ * the current schema: a schedule `0079` labelled `user` whose member actor is no longer in the
  * organization becomes `actor_left_org`; every other row keeps its reason, and a rerun is a no-op.
  */
 
