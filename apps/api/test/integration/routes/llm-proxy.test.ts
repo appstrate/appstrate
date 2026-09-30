@@ -45,6 +45,7 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { listOrgModelProviderCredentials } from "../../../src/services/model-providers/credentials.ts";
 import {
   CACHE_STATUS_HIT as HIT,
   CACHE_STATUS_MISS as MISS,
@@ -420,6 +421,35 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=401");
     expect(res.headers.get("www-authenticate")).toBeNull();
+  });
+
+  it("stops serving the org's key once upstream rejected it INTEGRATION_REFRESH_MAX_FAILURES times", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(JSON.stringify({ error: { message: "invalid api key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const call = () =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+      });
+    for (let i = 0; i < 5; i++) expect((await call()).status).toBe(401);
+
+    const [row] = await db
+      .select({ failures: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, h.credentialId));
+    expect(row!.failures).toBe(5);
+    const listed = await listOrgModelProviderCredentials(h.ctx.orgId);
+    expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
+    expect((await call()).status).not.toBe(401);
+    expect(upstreamCalls).toBe(5);
   });
 
   it("marks its own refusal with a Proxy-Status error", async () => {

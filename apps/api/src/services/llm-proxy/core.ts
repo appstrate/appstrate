@@ -35,6 +35,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
+import { recordModelCredentialRejection } from "../model-providers/credentials.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
 interface ProxyCallInputs {
@@ -319,6 +320,12 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       error: getErrorMessage(err),
     });
     throw err;
+  }
+
+  // Only an org's own credential can be revoked from under it; the headers
+  // that could forge a 401 are never forwarded (`forwardedLlmRequestHeaders`).
+  if (upstream.status === 401 && resolved.credentialId) {
+    await recordModelCredentialRejection(inputs.principal.orgId, resolved.credentialId);
   }
 
   // Forward + meter, weaving in the alias-swap (every branch) and the

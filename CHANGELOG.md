@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Migration `0080` rewrites `runs` under an exclusive lock** (the
+  `model_source` column becomes the `credential_source` enum) and adds two
+  CHECKs; existing disabled schedules are labelled `user`. Before the deploy
+  these must return 0:
+  `SELECT count(*) FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org');`
+  and
+  `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
+  (#1641).
+- **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
+  `scripts/migration/0037-rekey-encrypted-columns.ts` re-encrypts, under the
+  active key, every ciphertext a retired kid wrote in the seven encrypted
+  columns; its dry run is the per-kid inventory and exits 0 only when nothing
+  is left outside the active kid. Procedure: `docs/ENV.md` § "Rotating
+  `CONNECTION_ENCRYPTION_KEY`" (#1641).
+
 - **Two additive migrations apply at boot**: `0078` adds
   `integration_connections.refresh_failures_since`; `0079` adds the
   `notifications_type_valid` CHECK. Before the deploy, this query must return
@@ -25,6 +40,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`runs.model_source` is the `credential_source` enum** (#1641): the
+  column, the run DTO and OpenAPI accept only `system`, `org` or `null`, and
+  the CHECK `runs_remote_has_no_platform_model` forbids a model source, model
+  id or inference route on a remote-origin run. The runner ledger no longer
+  coerces an unknown source to `null`, which silently switched a run to
+  pass-through pricing.
+- **The sidecar refuses a malformed `RUNTIME_TOOLS_JSON` or `OUTPUT_SCHEMA`
+  at boot** (#1641) instead of silently dropping the runtime tools or the
+  output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
+  its env validation. The chat module validates `PORT`.
 - **BREAKING (manifests): one template grammar per concept, and nothing
   unrendered reaches an upstream** (#1641). `delivery.http.value` renders
   through the same `{$credential.<field>}` renderer as `env` and `files`: a
@@ -103,6 +128,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A disabled schedule says why** (#1641). `disabled_reason` (`user`,
+  `actor_invalid`, `actor_left_org`, `connection_deleted`) is set by every
+  writer, cleared on re-enable and `NULL` exactly while enabled (CHECK); it is
+  on the schedule DTO and shown on the schedule badge and detail page.
 - **Credential-proxy use of another member's connection is audited** (#1641).
   The first call of an `X-Session-Id` through a connection the caller does not
   own writes one `integration.connection.proxied` row; the call log names the
@@ -110,6 +139,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A revoked BYOK API key is flagged** (#1641). Upstream 401s through the
+  LLM proxy count against the organization's credential; the
+  `INTEGRATION_REFRESH_MAX_FAILURES`-th within an hour sets
+  `needs_reconnection` and stops inference on it until the key is re-entered.
 - **A `connection_overrides` key the agent does not declare is a 400**
   (#1641). It was dropped without a trace, and a schedule froze it onto its
   row, so the run bound a lower cascade layer instead of the account asked
