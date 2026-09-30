@@ -35,10 +35,10 @@ import {
 import {
   cookieScope,
   credentialUrlPolicy,
+  exfiltrationRefusal,
   redactCredentialHost,
-  redactCredentialMessage,
-  redactCredentialValues,
   redactionFields,
+  scrubTransportError,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
@@ -167,7 +167,7 @@ interface ProxyCallResult {
  * Authorization failure for a proxy call. The route reflects `message` to the
  * caller (403 body) and logs it, so it MUST NEVER contain a substituted
  * credential value — build messages from the REDACTED target representation
- * only (see {@link redactCredentialValues}), never from the substituted one.
+ * only (see {@link redactCredentialHost}), never from the substituted one.
  */
 export class ProxyAuthorizationError extends Error {
   readonly code = "UNAUTHORIZED_TARGET";
@@ -245,18 +245,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
     );
   }
-  // Header and body templates exactly as substituted below. `Bearer{{token}}`
-  // → `Bearer {{token}}` is repaired on the TEMPLATE, never on the resolved
-  // value: a raw secret starting with a scheme name must reach the upstream
-  // byte-identical (#988).
+  // `Bearer{{token}}` is repaired on the TEMPLATE: a raw secret reaches the upstream as-is (#988).
   const headerTemplates = Object.entries(input.headers ?? {}).map(
     ([k, v]) => [k, normalizeAuthSchemeTemplate(k, v)] as const,
   );
   const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
 
-  // Credential-exfiltration guard, shared with the sidecar and the local
-  // resolver: a call templating a decrypted field loses `allow_all_uris`, its
-  // whole chain is gated by `policy.authorizedUris`, refused when that is empty.
+  const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
       input.target,
@@ -265,18 +260,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     ],
     fields,
     allowAllUris: resolved.allowAllUris,
-    authorizedUris: resolved.authorizedUris ?? [],
+    authorizedUris,
   });
-  // Redacted twin of `target`, computed ONCE. `target` carries decrypted
-  // credential values (the substitution above) — it goes on the wire and
-  // NOWHERE else. Every error message / log-bound string below must use
-  // `redactedTarget` / `redactFields` instead.
+  // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
   const redactFields = redactionFields(policy, fields);
-  const redactedTarget = redactCredentialValues(target, redactFields);
+  const redactedHost = redactCredentialHost(target, redactFields);
   if (policy.refuse) {
-    throw new ProxyAuthorizationError(
-      `Call for integration "${input.integrationId}" substitutes a credential into an agent-controlled URL, header, or body but no authorized_uris allowlist applies to it; refusing to prevent credential exfiltration.`,
-    );
+    throw new ProxyAuthorizationError(exfiltrationRefusal(input.integrationId));
   }
 
   // authorized_uris gate (AFPS spec: `*` = one segment, `**` = any substring).
@@ -291,21 +281,18 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // ONE matcher for the whole chain: the same assertion runs on the initial
   // target here AND — via `guardedFetch`'s `validateHop` — on EVERY redirect
   // hop, so a 302 cannot walk the request off the allowlist (cross-host OR a
-  // same-host path escape like `/v1/me` → `/internal/dump`). The message names
-  // the hop's HOST only (see {@link redactCredentialHost}): a hop URL can embed
-  // an interpolated credential (vendor puts the token in a path, or echoes it
-  // in a Location header) in a normalised form value-based redaction misses.
+  // same-host path escape like `/v1/me` → `/internal/dump`). The message is
+  // built from the REDACTED form only: a hop URL can itself embed an
+  // interpolated credential (vendor puts the token in a path, or echoes it
+  // in a Location header).
   const assertHopAuthorized = (hopTarget: string): void => {
     if (policy.allowAllUris) return;
-    const ok = policy.authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
+    const ok = authorizedUris.some((p) => matchesAuthorizedUriSpec(p, hopTarget));
     if (!ok) {
       throw new ProxyAuthorizationError(
         `Target host ${redactCredentialHost(hopTarget, redactFields)} is not in the authorized_uris allowlist for ${input.integrationId}`,
       );
     }
-    // Note: an empty allowlist can never reach here — `allowlist.some(...)` is
-    // `false` for `[]`, so the `!ok` guard above already threw. (The former
-    // `allowlist.length === 0 && isBlockedUrl(target)` branch was dead.)
   };
   assertHopAuthorized(target);
 
@@ -318,7 +305,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const egress = await checkEgressUrl(target);
   if (!egress.ok) {
     throw new ProxyAuthorizationError(
-      `Target ${redactedTarget} resolves to a blocked network range`,
+      `Target host ${redactedHost} resolves to a blocked network range`,
     );
   }
 
@@ -377,7 +364,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  const literalAllowlist = policy.allowAllUris ? null : policy.authorizedUris;
+  const literalAllowlist = policy.allowAllUris ? null : authorizedUris;
   // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
   // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
   const captured: Array<[string, string[]]> = [];
@@ -440,23 +427,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       }
       if (err instanceof SsrfBlockedError) {
         throw new ProxyAuthorizationError(
-          `Target ${redactedTarget} was blocked by the egress guard (${err.reason})`,
+          `Target host ${redactedHost} was blocked by the egress guard (${err.reason})`,
         );
       }
-      if (err instanceof Error) {
-        // Bun fetch errors carry the request URL — on a redirect hop a
-        // normalised one — so every URL is cut down to its redacted host.
-        const redacted = redactCredentialMessage(err.message, redactFields);
-        if (redacted !== err.message) {
-          // Re-wrap with the scrubbed message; keep the name so callers can
-          // still discriminate (e.g. TimeoutError). The original error is
-          // deliberately NOT chained as `cause`.
-          const clean = new Error(redacted);
-          clean.name = err.name;
-          throw clean;
-        }
-      }
-      throw err;
+      throw scrubTransportError(err, redactFields);
     }
   };
 

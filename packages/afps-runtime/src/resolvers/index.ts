@@ -54,10 +54,10 @@ export {
 // renderer, and the portable integration resolver.
 export { substituteVars } from "./template-vars.ts";
 
-// Credential-exfiltration guard shared by the sidecar, the local resolver and
-// the platform credential proxy.
+// Credential-exfiltration guard shared by the three `api_call` paths.
 export {
   credentialUrlPolicy,
+  exfiltrationRefusal,
   redactionFields,
   type CredentialUrlPolicy,
 } from "./credential-guard.ts";
@@ -99,9 +99,8 @@ export {
   matchesAuthorizedUri,
   stripUserInfoAndFragment,
   redactHost,
-  redactCredentialValues,
   redactCredentialHost,
-  redactCredentialMessage,
+  scrubTransportError,
   fetchFollowingRedirectsCapturingCookies,
   guardedFetch,
   RedirectBlockedError,

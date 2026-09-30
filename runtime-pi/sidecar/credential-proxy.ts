@@ -45,6 +45,7 @@ import {
 import {
   cookieScope,
   credentialUrlPolicy,
+  exfiltrationRefusal,
   redactionFields,
   fetchFollowingRedirectsCapturingCookies,
   hostLiterallyAllowlisted,
@@ -218,7 +219,7 @@ function deepSubstituteJson(value: unknown, creds: Record<string, string> | unde
   return value;
 }
 
-/** The string leaves of a JSON value — exactly what {@link deepSubstituteJson} substitutes. */
+/** The string leaves of a JSON value: what {@link deepSubstituteJson} substitutes. */
 function* jsonStringLeaves(value: unknown): Generator<string> {
   if (typeof value === "string") yield value;
   else if (Array.isArray(value)) for (const v of value) yield* jsonStringLeaves(v);
@@ -254,11 +255,7 @@ export function credentialScope(integrationId: string, connectionId: string): st
   return `${integrationId}\u0000${connectionId}`;
 }
 
-/**
- * The strings a `substituteBody: true` request body runs substitution on —
- * the exfil guard scans exactly these, never a re-serialisation (JSON escaping
- * would hide `{{\tkey}}`). Exhaustive via `assertNever`.
- */
+/** Strings substituted in a `substituteBody: true` body (JSON escaping would hide `{{\tkey}}`). */
 function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
@@ -338,10 +335,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    and a glob-matched host is agent-chosen, not operator-chosen —
   //    without the gate that branch would be strictly weaker than
   //    allow_all.
-  // 4a. Credential-exfiltration guard (`credentialUrlPolicy`): a credential
-  //     templated into the URL, a header, or a substituted body drops
-  //     `allow_all_uris` — the SSRF net alone would let the secret reach any
-  //     public host — and is refused when no allowlist remains.
+  // 4a. Credential-exfiltration guard (docs/architecture/SIDECAR.md).
+  const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
       targetUrl,
@@ -350,28 +345,25 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     ],
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
-    authorizedUris: creds.authorizedUris ?? [],
+    authorizedUris,
   });
-  const redactFields = redactionFields(policy, creds.credentials);
+  // Reassigned when a 401 retry runs with refreshed credentials.
+  let redactFields = redactionFields(policy, creds.credentials);
 
   if (policy.refuse) {
-    return {
-      ok: false,
-      status: 403,
-      error: `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
-    };
+    return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
   } else if (policy.allowAllUris) {
     const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
     if (refusal) return refusal;
-  } else if (policy.authorizedUris.length) {
-    if (!matchesAuthorizedUri(resolvedUrl, policy.authorizedUris)) {
+  } else if (authorizedUris.length) {
+    if (!matchesAuthorizedUri(resolvedUrl, authorizedUris)) {
       return {
         ok: false,
         status: 403,
-        error: `URL not authorized for integration "${integrationId}". Allowed: ${policy.authorizedUris.join(", ")}`,
+        error: `URL not authorized for integration "${integrationId}". Allowed: ${authorizedUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(resolvedUrl, policy.authorizedUris)) {
+    if (!hostLiterallyAllowlisted(resolvedUrl, authorizedUris)) {
       const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
       if (refusal) return refusal;
     }
@@ -386,7 +378,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const cookies = cookieScope(
     cookieJar,
     scope,
-    policy.allowAllUris || !policy.authorizedUris.length ? null : policy.authorizedUris,
+    policy.allowAllUris || !authorizedUris.length ? null : authorizedUris,
   );
 
   // 5b. Pre-substitute headers with the *initial* creds so we can
@@ -591,9 +583,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           : credentialInjection.kind === "caller_override"
             ? credentialInjection.headerName.toLowerCase()
             : null,
-      // The 4a policy: the raw flag would skip the per-hop allowlist and let a
-      // substituted credential follow a redirect off it.
-      authorizedUris: policy.authorizedUris,
+      // The 4a policy, not the raw flag: a templated credential must not be redirected off-list.
+      authorizedUris,
       allowAllUris: policy.allowAllUris,
       // Thread the injected DNS resolver into the per-hop SSRF rebind
       // check — same resolver the initial-target gate uses. Without it
@@ -652,6 +643,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     const fresh = await refreshCredentials(integrationId).catch(() => null);
     if (fresh) {
       if (body.kind !== "streaming") {
+        redactFields = redactionFields(policy, fresh.credentials);
         try {
           const r = await doUpstreamRequest(fresh);
           upstream = r.response;
@@ -708,10 +700,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     authMode: credentialInjection === "inject" ? "header" : credentialInjection,
     injectedHeader:
       credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
-    // Which URL-trust policy gated the call (after the 4a downgrade).
+    // Which URL-trust policy gated the call.
     urlPolicy: policy.allowAllUris
       ? "allow_all"
-      : policy.authorizedUris.length
+      : authorizedUris.length
         ? "allowlist"
         : "ssrf_guard",
     authRefreshed,
@@ -744,7 +736,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
  */
 async function refuseSsrfTarget(
   url: string,
-  fields: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, string>>,
   resolveHost?: HostResolver,
 ): Promise<ApiCallFailure | null> {
   const blockedFailure: ApiCallFailure = {
@@ -778,7 +770,7 @@ function wrapFetchError(
   err: unknown,
   label: string,
   url: string,
-  fields: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, string>>,
 ): ApiCallFailure {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   const suffix = code ? `: ${code}` : "";
@@ -798,14 +790,14 @@ function wrapFetchError(
  *   - everything else (timeout, ECONNREFUSED, ENOTFOUND) → 502 via
  *     {@link wrapFetchError}.
  *
- * Only the host reaches the message, credential values scrubbed from it
- * (`https://{{api_key}}.vendor.example/`); the full URL stays out because a
- * redirect target may itself encode capabilities (`?token=…`).
+ * Redacts the target host into the error message; the full URL stays
+ * out because a redirect target may itself encode capabilities
+ * (`?token=…`) we don't want surfaced to the agent.
  */
 function wrapRequestError(
   err: unknown,
   resolvedUrl: string,
-  fields: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, string>>,
 ): ApiCallFailure {
   if (err instanceof RedirectBlockedError) {
     return {

@@ -283,12 +283,16 @@ describe("proxyCall — credential-exfiltration guard", () => {
   });
 
   it("does not scrub a guessed credential value on an untemplated call (no oracle)", async () => {
-    await seedEndpointIntegration(ctx, { username: "jdoe", api_key: SECRET });
+    await seedEndpointIntegration(
+      ctx,
+      { username: "jdoe", api_key: SECRET },
+      { authorizedUris: [`${ALLOWED}/**`], allowAllUris: false },
+    );
     const up = upstream();
     // A matching guess reads exactly like a non-matching one.
     for (const guess of ["alice", "jdoe"]) {
-      const message = await expectRefused(call(up.fetchImpl, `https://10.0.0.1/?u=${guess}`));
-      expect(message).toContain(`?u=${guess} `);
+      const message = await expectRefused(call(up.fetchImpl, `https://${guess}.example.invalid/`));
+      expect(message).toContain(`host ${guess}.example.invalid `);
     }
     expect(up.hits).toEqual([]);
   });

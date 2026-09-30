@@ -28,8 +28,7 @@
  *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
  *     endUserId, integrationId, target, status)
  *   - URL allowlist enforced via the integration manifest
- *     (`authorized_uris` / `allow_all_uris`; the latter is ignored when the
- *     caller templates a credential field into the call)
+ *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
  *   - Upstream `Set-Cookie` never relayed to the caller
  *   - Request / response size caps
  */
@@ -409,11 +408,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "accept-encoding",
 ]);
 
-/**
- * Upstream response headers never relayed to the caller: the X-Stream-*
- * transport hints, and Set-Cookie — a rotated session cookie can BE the
- * credential; continuity lives in the server-side jar (X-Session-Id).
- */
+/** Not relayed to the caller: transport hints, and Set-Cookie (a cookie can be the credential). */
 const CALLER_RESPONSE_SKIP_HEADERS = new Set([
   "x-stream-request",
   "x-stream-response",

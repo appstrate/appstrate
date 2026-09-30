@@ -1828,6 +1828,50 @@ describe("executeApiCall — no credential in an error host", () => {
     expect(await probe("alice")).toContain("(alice.nx.invalid)");
     expect(await probe("jdoe")).toContain("(jdoe.nx.invalid)");
   });
+
+  it("scrubs the refreshed credential from a redirect refusal after a 401 retry", async () => {
+    const FRESH = "FreshTok42";
+    const creds = (token: string) =>
+      mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: token },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      }));
+    let calls = 0;
+    const fetchFn = mock(async () =>
+      ++calls === 1
+        ? new Response("expired", { status: 401 })
+        : new Response(null, {
+            status: 302,
+            headers: { location: `https://${FRESH}.evil.example/` },
+          }),
+    );
+    const result = await executeApiCall(
+      {
+        integrationId: "demo",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/v1?t={{access_token}}",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchCredentials: creds("tok-old"),
+        refreshCredentials: creds(FRESH),
+        fetchFn: fetchFn as unknown as typeof fetch,
+      }),
+    );
+    expect(calls).toBe(2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("host={{access_token}}.evil.example");
+      expect(result.error.toLowerCase()).not.toContain(FRESH.toLowerCase());
+    }
+  });
 });
 
 describe("executeApiCall — SSRF DNS-rebind layer", () => {

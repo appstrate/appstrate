@@ -60,7 +60,7 @@ import {
 import {
   guardedFetch,
   PreflightError,
-  redactCredentialMessage,
+  scrubTransportError,
   type HostResolver,
 } from "./api-call-engine.ts";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
@@ -76,7 +76,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { substituteVars } from "./template-vars.ts";
-import { credentialUrlPolicy, redactionFields } from "./credential-guard.ts";
+import { credentialUrlPolicy, exfiltrationRefusal, redactionFields } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -449,11 +449,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Every string `{{field}}` substitution runs on: the target, the kept
-      // header values, and a string body (`transformString` below runs on
-      // strings only; multipart / fromFile / fromBytes are never substituted).
-      // The resolver's own injected header is not a template — the engine's
-      // credential-strip protects it on redirects.
+      // Every substituted string: target, kept header values, a string body (never multipart).
       const templates = [req.target];
       if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
@@ -486,8 +482,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ? applyDeliveryPlan(headers, deliveryPlan)
         : null;
 
-      // Credential-exfiltration guard (`credentialUrlPolicy`): a templated
-      // credential drops allow_all_uris and is refused without an allowlist.
       const policy = credentialUrlPolicy({
         templates,
         fields,
@@ -497,7 +491,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       if (policy.refuse) {
         throw new ResolverError(
           "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-          `Integration ${meta.name}: the call substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`,
+          exfiltrationRefusal(meta.name),
           { integration: meta.name },
         );
       }
@@ -532,7 +526,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           url: target,
           init,
           fetchFn: this.fetchImpl,
-          authorizedUris: policy.authorizedUris,
+          authorizedUris: meta.authorizedUris,
           allowAllUris: policy.allowAllUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,
@@ -547,19 +541,17 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         // CLI agent gets a clear, structured failure — the host is
         // redacted (a redirect target may carry `?token=…`).
         if (err instanceof PreflightError) {
-          // `details` carries the template, never the substituted URL (it may hold a secret).
-          const target = req.target;
           if (err.reason === "not_authorized") {
             throw new AuthorizedUrisError(
               "AUTHORIZED_URIS_MISMATCH",
               `Integration ${meta.name}: ${err.message}`,
-              { integration: meta.name, target },
+              { integration: meta.name, target: req.target },
             );
           }
           throw new ResolverError(
             "RESOLVER_URL_BLOCKED",
             `Integration ${meta.name}: ${err.message}`,
-            { integration: meta.name, target },
+            { integration: meta.name, target: req.target },
           );
         }
         if (err instanceof Error && err.name === "RedirectBlockedError") {
@@ -569,13 +561,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             { integration: meta.name },
           );
         }
-        if (err instanceof Error) {
-          // Bun fetch errors carry the substituted URL (message, `.path`): rethrow a scrubbed copy.
-          const clean = new Error(redactCredentialMessage(err.message, redactFields));
-          clean.name = err.name;
-          throw clean;
-        }
-        throw err;
+        throw scrubTransportError(err, redactFields);
       }
 
       return serializeFetchResponse(res, {

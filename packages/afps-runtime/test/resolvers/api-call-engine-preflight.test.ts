@@ -15,6 +15,7 @@ import {
   MAX_REDIRECTS,
   preflightUrl,
   redactCredentialValues,
+  scrubTransportError,
 } from "../../src/resolvers/api-call-engine.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 
@@ -39,6 +40,26 @@ describe("redactCredentialValues", () => {
     const out = redactCredentialValues("x=abcdefgh", { a: "abc", b: "abcdefgh" });
     expect(out).toBe("x={{b}}");
     expect(out).not.toContain("defgh");
+  });
+});
+
+describe("scrubTransportError", () => {
+  const bunError = () =>
+    Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+      name: "ConnectionRefused",
+      path: "https://api.example.com/v1?key=SeCrEt-path-7",
+    });
+
+  it("rebuilds a templated call's error without the URL Bun keeps on `.path`", () => {
+    const out = scrubTransportError(bunError(), { api_key: "SeCrEt-path-7" }) as Error;
+    expect(out.name).toBe("ConnectionRefused");
+    expect(out.message).toContain("Unable to connect");
+    expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
+  });
+
+  it("returns an untemplated call's error untouched", () => {
+    const err = bunError();
+    expect(scrubTransportError(err, {})).toBe(err);
   });
 });
 

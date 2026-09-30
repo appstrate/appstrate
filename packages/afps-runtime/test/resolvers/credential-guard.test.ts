@@ -25,12 +25,7 @@ describe("credentialUrlPolicy — detection", () => {
       ...allowAll,
       templates: ["{{constructor}}", "{{toString}}", "{{__proto__}}", "{{other}}", "plain"],
     });
-    expect(policy).toEqual({
-      substitutesCredential: false,
-      allowAllUris: true,
-      authorizedUris: [],
-      refuse: false,
-    });
+    expect(policy).toEqual({ substitutesCredential: false, allowAllUris: true, refuse: false });
   });
 
   it("substitution leaves a prototype-name placeholder unresolved", () => {
@@ -48,54 +43,23 @@ describe("credentialUrlPolicy — downgrade and refusal", () => {
       allowAllUris: false,
       authorizedUris: ["https://api.example.com/**"],
     });
-    expect(policy.authorizedUris).toEqual(["https://api.example.com/**"]);
     expect(policy.allowAllUris).toBe(false);
     expect(policy.refuse).toBe(false);
   });
 
-  it("drops allow_all_uris and enforces the declared allowlist", () => {
+  it("drops allow_all_uris and does not refuse when an allowlist is declared", () => {
     const policy = credentialUrlPolicy({
       templates: ["{{api_key}}"],
       fields,
       allowAllUris: true,
       authorizedUris: ["https://api.example.com/**"],
     });
-    expect(policy).toEqual({
-      substitutesCredential: true,
-      allowAllUris: false,
-      authorizedUris: ["https://api.example.com/**"],
-      refuse: false,
-    });
+    expect(policy).toEqual({ substitutesCredential: true, allowAllUris: false, refuse: false });
   });
 
   it("refuses when a credential is templated and no allowlist remains", () => {
     const policy = credentialUrlPolicy({ ...allowAll, templates: ["x={{api_key}}"] });
     expect(policy.allowAllUris).toBe(false);
-    expect(policy.refuse).toBe(true);
-  });
-});
-
-describe("credentialUrlPolicy — URL-valued credential fields", () => {
-  const fields = { webhook_url: "https://hooks.example.com/services/TVICTIM/x", secret: "S" };
-
-  it("never widens the allowlist from a field's value (shared origins)", () => {
-    const policy = credentialUrlPolicy({
-      fields,
-      allowAllUris: false,
-      authorizedUris: ["https://api.example.com/**"],
-      templates: ["{{webhook_url}}"],
-    });
-    expect(policy.authorizedUris).toEqual(["https://api.example.com/**"]);
-  });
-
-  it("refuses under allow_all_uris with no allowlist, the field's origin included", () => {
-    const policy = credentialUrlPolicy({
-      fields,
-      allowAllUris: true,
-      authorizedUris: [],
-      templates: ["{{secret}}"],
-    });
-    expect(policy.authorizedUris).toEqual([]);
     expect(policy.refuse).toBe(true);
   });
 });
