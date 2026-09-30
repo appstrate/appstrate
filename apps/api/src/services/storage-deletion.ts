@@ -39,6 +39,7 @@ import {
   parseRunFilesManifest,
   runWorkspaceFileKey,
 } from "./run-workspace-manifest.ts";
+import { deleteUnlessReclaimed } from "./package-storage-deletion.ts";
 
 /** One object to purge. `storageKey` is the IN-BUCKET path (no `bucket/` prefix). */
 export interface StorageDeletionJobInput {
@@ -147,7 +148,10 @@ interface ProcessStorageDeletionDeps {
 /** Outcome of one worker pass. */
 interface ProcessStorageDeletionResult {
   claimed: number;
+  /** Jobs settled as done, `reclaimed` ones included. */
   completed: number;
+  /** Completed without deleting: a live row owns the key again (#1612). */
+  reclaimed: number;
   failed: number;
 }
 
@@ -190,8 +194,8 @@ async function deleteStorageTarget(
 
 /**
  * One worker pass, using a claim → execute → settle lease (NO transaction held
- * across physical deletes — a slow/hanging storage backend must never pin a
- * connection idle-in-transaction, where `idle_in_transaction_session_timeout`
+ * across the pass's physical deletes — a slow/hanging storage backend must never
+ * pin a connection idle-in-transaction, where `idle_in_transaction_session_timeout`
  * or a deploy would roll back completions that already physically succeeded):
  *
  *  1. **Claim** (single statement, autocommit): `UPDATE … SET next_attempt_at =
@@ -201,7 +205,10 @@ async function deleteStorageTarget(
  *     inner select means concurrent passes never claim the same rows within the
  *     lease window; pushing `next_attempt_at` forward IS the lease (see
  *     {@link CLAIM_LEASE_MS}).
- *  2. **Execute** (no transaction): attempt each `deleteFile`.
+ *  2. **Execute** (no transaction): attempt each `deleteFile`. A package key
+ *     alone is checked and deleted inside its own short transaction, under its
+ *     writers' lock, and kept if a live row claims it again
+ *     (`deleteUnlessReclaimed`, #1612); no completion is ever written there.
  *  3. **Settle** (one autocommit UPDATE per job): success → `completed_at`;
  *     failure → `last_error` + backoff.
  *
@@ -231,6 +238,7 @@ export async function processStorageDeletionJobs(
   const rand = deps.rand ?? Math.random;
 
   let completed = 0;
+  let reclaimed = 0;
   let failed = 0;
 
   // 1. Claim: lease a batch of due jobs in one statement. The inner
@@ -265,8 +273,9 @@ export async function processStorageDeletionJobs(
       attempts: storageDeletionJobs.attempts,
     });
 
-  // 2 + 3. Execute each delete OUTSIDE any transaction, then settle it with a
-  //        single autocommit UPDATE, guarded on the claim this pass owns.
+  // 2 + 3. Execute each delete outside the pass (a package key takes a
+  //        transaction of its own, see above), then settle it with a single
+  //        autocommit UPDATE, guarded on the claim this pass owns.
   for (const job of claimedJobs) {
     const owned = and(
       eq(storageDeletionJobs.id, job.id),
@@ -274,7 +283,18 @@ export async function processStorageDeletionJobs(
       isNull(storageDeletionJobs.completedAt),
     );
     try {
-      await deleteStorageTarget(job.bucket, job.storageKey, del, download);
+      // A package key a live row has taken back is closed without deleting.
+      const outcome = await deleteUnlessReclaimed(job.bucket, job.storageKey, () =>
+        deleteStorageTarget(job.bucket, job.storageKey, del, download),
+      );
+      if (outcome === "reclaimed") {
+        reclaimed += 1;
+        logger.info("storage deletion job skipped: key reclaimed by a live row", {
+          jobId: job.id,
+          bucket: job.bucket,
+          storageKey: job.storageKey,
+        });
+      }
       await db
         .update(storageDeletionJobs)
         .set({ completedAt: sql`now()`, lastError: null })
@@ -302,7 +322,7 @@ export async function processStorageDeletionJobs(
   }
 
   await emitBacklogMetrics();
-  return { claimed: claimedJobs.length, completed, failed };
+  return { claimed: claimedJobs.length, completed, reclaimed, failed };
 }
 
 /** Cheap COUNT/MIN over the pending set → the outbox backlog gauges. */

@@ -163,6 +163,15 @@ export async function seedPackageShare(
 }
 
 /**
+ * Simulate a published version whose artifact left storage (bucket loss, a
+ * manual purge): a raw delete, bypassing `deleteVersionZip`, which refuses to
+ * delete the artifact of a version row that still exists.
+ */
+export async function loseVersionArchive(packageId: string, version: string): Promise<void> {
+  await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(packageId, version));
+}
+
+/**
  * Publish a version of a package: upload a real AFPS archive, record the
  * `package_versions` row that matches its integrity, and move the `latest`
  * dist-tag onto it.

@@ -55,7 +55,7 @@ import {
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
 import { readSkillSnapshot } from "../../../src/services/skill-read.ts";
-import { withPackageDraftLock } from "../../../src/services/package-draft-lock.ts";
+import { withPackageDraftLock } from "../../../src/services/package-locks.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 
 const app = getTestApp();

@@ -30,3 +30,15 @@ export const AGENT_PACKAGES_BUCKET = "agent-packages";
  */
 export const versionZipKey = (packageId: string, version: string): string =>
   `${packageId}/${version}.afps`;
+
+/**
+ * Inverse of {@link versionZipKey}, or `null` for a key it cannot have built.
+ * The package id keeps its own `/`, so the version is what follows the last one.
+ */
+export function parseVersionZipKey(key: string): { packageId: string; version: string } | null {
+  const slash = key.lastIndexOf("/");
+  if (slash <= 0 || !key.endsWith(".afps")) return null;
+  const packageId = key.slice(0, slash);
+  const version = key.slice(slash + 1, -".afps".length);
+  return version ? { packageId, version } : null;
+}
