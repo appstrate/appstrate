@@ -38,9 +38,9 @@ import type { KnipConfig } from "knip";
  * on the strength of it. **Only two scoped packages in this monorepo have ever
  * been published**: `@appstrate/core` and `@appstrate/afps-shared`, the only two
  * with a publish workflow (`publish-core.yml`, `publish-afps-shared.yml`) and a
- * release tag. `@appstrate/afps-runtime` carries `publishConfig` but has no
- * workflow, no `afps-runtime@*` tag, and npm holds one `0.0.0` placeholder from
- * 2026-04-20 against a local 0.2.0; `@appstrate/runner-pi` and all five
+ * release tag. `@appstrate/afps-runtime` is `"private": true` (no workflow, no
+ * `afps-runtime@*` tag; npm holds one `0.0.0` placeholder from 2026-04-20);
+ * `@appstrate/runner-pi` is `"private": true` too, and it and all five
  * `@appstrate/module-*` packages are absent from npm entirely and are reached
  * in-tree by `workspace:*` or by a `MODULES` specifier the loader resolves by
  * name. `@appstrate/ui` is a third case: `"private": true` here, yet 1.0.1 sits
@@ -492,7 +492,7 @@ const config: KnipConfig = {
     },
 
     /**
-     * NOT published, despite the `publishConfig` in its manifest — see the
+     * NOT published — `"private": true` in its manifest; see the
      * `includeEntryExports` note above for the evidence and for what that
      * costs. `includeEntryExports` is therefore UNSET here on purpose and NOT
      * because the published-package exemption applies: turning it on reports
