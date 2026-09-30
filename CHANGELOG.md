@@ -137,7 +137,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The sidecar refuses a malformed `RUNTIME_TOOLS_JSON` or `OUTPUT_SCHEMA`
   at boot** (#1641) instead of silently dropping the runtime tools or the
   output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
-  its env validation. The chat module validates `PORT`.
+  its env validation.
 - **The retired `X-Integration` header is no longer stripped** by the
   credential proxy or the sidecar (#1641); it reaches the upstream like any
   other header.

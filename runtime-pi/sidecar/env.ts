@@ -19,7 +19,7 @@ export interface SidecarEnv {
   /** Upstream egress proxy — set only when the run resolved one. */
   proxyUrl?: string;
   /** `RUNTIME_TOOLS_JSON`: the runtime tools the agent selected. */
-  runtimeTools: string[];
+  runtimeToolNames: string[];
   /** `OUTPUT_SCHEMA`: the agent's output schema, for the `output` tool. */
   outputSchema?: Record<string, unknown>;
   /** `CONNECT_RESULT_KEY`, required with `CONNECT_LOGIN_JSON` (connect mode). */
@@ -69,7 +69,7 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     forwardProxyPort: forwardProxyPort!,
     ...(source.SIDECAR_AUTH_TOKEN ? { sidecarAuthToken: source.SIDECAR_AUTH_TOKEN } : {}),
     ...(source.PROXY_URL ? { proxyUrl: source.PROXY_URL } : {}),
-    runtimeTools: runtimeTools ?? [],
+    runtimeToolNames: runtimeTools ?? [],
     ...(outputSchema ? { outputSchema } : {}),
     ...(connectResultKey ? { connectResultKey } : {}),
   };

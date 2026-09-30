@@ -27,7 +27,7 @@ describe("parseSidecarEnv", () => {
       runToken: "run-token",
       port: 8080,
       forwardProxyPort: 8081,
-      runtimeTools: [],
+      runtimeToolNames: [],
     });
   });
 
@@ -37,7 +37,7 @@ describe("parseSidecarEnv", () => {
       RUNTIME_TOOLS_JSON: '["output","note"]',
       OUTPUT_SCHEMA: '{"type":"object"}',
     });
-    expect(env.runtimeTools).toEqual(["output", "note"]);
+    expect(env.runtimeToolNames).toEqual(["output", "note"]);
     expect(env.outputSchema).toEqual({ type: "object" });
   });
 

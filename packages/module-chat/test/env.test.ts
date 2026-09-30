@@ -36,11 +36,6 @@ describe("chat module env", () => {
     expect(getChatEnv().selfOrigin).toBe("http://127.0.0.1:4321");
   });
 
-  it("refuses a PORT that is not a port", () => {
-    expect(chatEnvSchema.safeParse({ PORT: "abc" }).success).toBe(false);
-    expect(chatEnvSchema.parse({ PORT: "" }).PORT).toBe(3000);
-  });
-
   it("throws on first read when CHAT_SELF_ORIGIN is off-host", () => {
     process.env.CHAT_SELF_ORIGIN = "http://10.0.0.5:3000";
     expect(() => getChatEnv()).toThrow(/loopback/);

@@ -229,7 +229,7 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 const runtimeEventJournal = new RuntimeEventJournal();
 const runtimeToolDefs = journalRuntimeToolDefs(
   buildRuntimeToolDefs({
-    runtimeTools: env.runtimeTools,
+    runtimeTools: env.runtimeToolNames,
     outputSchema: env.outputSchema ?? null,
   }),
   runtimeEventJournal,

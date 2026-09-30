@@ -24,8 +24,6 @@ export const chatEnvSchema = z.object({
       })
       .optional(),
   ),
-  /** The platform's own listener — read here only to derive the loopback origin. */
-  PORT: z.preprocess(emptyAsUnset, z.coerce.number().int().positive().default(3000)),
 });
 
 interface ChatEnv {
@@ -40,7 +38,7 @@ export function getChatEnv(): ChatEnv {
   if (!cached) {
     const env = chatEnvSchema.parse(process.env);
     cached = {
-      selfOrigin: env.CHAT_SELF_ORIGIN ?? `http://127.0.0.1:${env.PORT}`,
+      selfOrigin: env.CHAT_SELF_ORIGIN ?? `http://127.0.0.1:${process.env.PORT || "3000"}`,
       ...(env.CHAT_PI_MAX_CONCURRENCY !== undefined
         ? { piMaxConcurrency: env.CHAT_PI_MAX_CONCURRENCY }
         : {}),
