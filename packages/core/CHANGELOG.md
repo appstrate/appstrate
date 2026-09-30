@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`@appstrate/afps-shared` range moves from `^0.9.2` to `^0.10.0`**, which
+  carries the exports below (published first). (#1641)
 - **`integrationManifestSchema` refuses expressions the platform does not
   evaluate** (`findUnevaluableExpressions`): in a delivery template (`http`,
   `env`, `files`) anything but `{$credential.<field>}`, the api_call `{{…}}`

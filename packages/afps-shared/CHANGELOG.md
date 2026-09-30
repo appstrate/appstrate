@@ -14,6 +14,11 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-30
+
+Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new
+exports (core raises its range to `^0.10.0`).
+
 ### Added
 
 - **`parseAuthorizedUriPattern`**, **`AuthorizedUriPattern`** and
