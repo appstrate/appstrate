@@ -8,6 +8,7 @@ import {
   createTestUser,
   addOrgMember,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -15,6 +16,7 @@ import {
   seedSchedule,
   seedRun,
   seedEndUser,
+  seedApiKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
@@ -366,17 +368,14 @@ describe("Schedules API", () => {
     });
   });
 
-  describe("connection_overrides shape (flat per-integration map)", () => {
-    // Regression guard for the schedule half of the connection-renewal flow.
-    // The wire shape is a FLAT `Record<integrationId, connectionId>` matching
-    // the run route — `routes/schedules.ts` validates it with
-    // `z.record(z.string(), z.string())`. The frontend previously sent the
-    // nested `Record<int, Record<authKey, conn>>` shape, which 400'd. These
-    // tests pin both directions so a revert to the nested schema fails CI.
-    // Connection ids need not resolve to real rows: the route validates the
-    // shape only and freezes the map; resolution happens at fire time.
+  describe("connection_overrides shape (per-integration connection SETS)", () => {
+    // The wire shape is `Record<integrationId, connectionId[]>`, the run route's
+    // (`connectionOverridesSchema`, `lib/launch-schemas.ts`); a nested object or a
+    // string where a set belongs is a 400. Connection ids need not resolve to real
+    // rows: the route validates the shape and stores the map; resolution happens
+    // at fire time.
 
-    it("accepts a flat connection_overrides map on create and round-trips it", async () => {
+    it("accepts a connection_overrides map of sets on create and round-trips it", async () => {
       const fid = agentId("co-create");
       await seedAgent({
         id: fid,
@@ -386,7 +385,7 @@ describe("Schedules API", () => {
       });
       await publish(fid);
 
-      const overrides = { "@runorg/svc": "conn_abc123" };
+      const overrides = { "@runorg/svc": [crypto.randomUUID(), crypto.randomUUID()] };
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -401,7 +400,7 @@ describe("Schedules API", () => {
       expect(body.connection_overrides).toEqual(overrides);
     });
 
-    it("rejects the legacy nested connection_overrides shape with 400", async () => {
+    it("rejects a nested object where a set belongs with 400", async () => {
       const fid = agentId("co-nested");
       await seedAgent({
         id: fid,
@@ -416,7 +415,6 @@ describe("Schedules API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           cron_expression: "0 9 * * 1-5",
-          // Old nested shape: integrationId → { authKey → connectionId }.
           connection_overrides: { "@runorg/svc": { primary: "conn_abc123" } },
         }),
       });
@@ -424,7 +422,7 @@ describe("Schedules API", () => {
       expect(res.status).toBe(400);
     });
 
-    it("updates connection_overrides via PUT and round-trips the flat map", async () => {
+    it("updates connection_overrides via PUT and round-trips the map of sets", async () => {
       const fid = agentId("co-update");
       const agent = await seedAgent({
         id: fid,
@@ -442,7 +440,7 @@ describe("Schedules API", () => {
         name: "co-sched",
       });
 
-      const overrides = { "@runorg/svc": "conn_xyz789" };
+      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -502,7 +500,7 @@ describe("Schedules API", () => {
           body: JSON.stringify(body),
         });
 
-      const overrides = { "@runorg/svc": "conn_merge" };
+      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
       expect((await patch({ connection_overrides: overrides })).status).toBe(200);
       const cleared = await patch({ connection_overrides: null });
       expect(cleared.status).toBe(200);
@@ -745,7 +743,7 @@ describe("Schedules API", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
-        connectionOverrides: { "@acme/slack": "conn_keep" },
+        connectionOverrides: { "@acme/slack": ["conn_keep"] },
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
@@ -758,7 +756,7 @@ describe("Schedules API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.userId).toBe(ctx.user.id);
-      expect(body.connection_overrides).toEqual({ "@acme/slack": "conn_keep" });
+      expect(body.connection_overrides).toEqual({ "@acme/slack": ["conn_keep"] });
     });
 
     it("rejects both userId and endUserId together", async () => {
@@ -814,7 +812,7 @@ describe("Schedules API", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
-        connectionOverrides: { "@acme/slack": "conn_old" },
+        connectionOverrides: { "@acme/slack": ["conn_old"] },
       });
 
       const res = await app.request(`/api/schedules/${schedule.id}`, {
@@ -850,6 +848,165 @@ describe("Schedules API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.userId).toBe(ctx.user.id);
+    });
+
+    // A schedule running as another member lends that member's connections to every run: naming
+    // such an actor, and any later write to such a schedule, is an org owner/admin act.
+    // `schedules:write` covers schedules running as yourself or as an end user.
+    describe("who may name another member", () => {
+      let fid: string;
+      let other: string;
+
+      beforeEach(async () => {
+        fid = agentId("actor-authority");
+        await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+        await publish(fid);
+        const user = await createTestUser();
+        await addOrgMember(ctx.orgId, user.id, "member");
+        other = user.id;
+      });
+
+      function create(caller: TestContext, actor?: Record<string, string>) {
+        return app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: { ...authHeaders(caller), "Content-Type": "application/json" },
+          body: JSON.stringify({ cron_expression: "0 9 * * *", ...(actor ? { actor } : {}) }),
+        });
+      }
+
+      function patch(caller: TestContext, id: string, body: Record<string, unknown>) {
+        return app.request(`/api/schedules/${id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(caller), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+
+      it("refuses a builder naming another member, and writes nothing", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const res = await create(builder, { userId: other });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: "forbidden", param: "actor" });
+        const list = await app.request(`/api/schedules`, { headers: authHeaders(ctx) });
+        expect(((await list.json()) as { data: unknown[] }).data).toHaveLength(0);
+      });
+
+      it("lets a builder name themselves or an end user", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const eu = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          externalId: `ext-${Date.now()}`,
+        });
+        expect((await create(builder, { userId: builder.user.id })).status).toBe(201);
+        expect((await create(builder, { endUserId: eu.id })).status).toBe(201);
+      });
+
+      it("lets an org admin name another member", async () => {
+        const admin = await memberContext(ctx, "admin");
+        const res = await create(admin, { userId: other });
+        expect(res.status).toBe(201);
+        expect(((await res.json()) as { userId: string }).userId).toBe(other);
+      });
+
+      function remove(caller: TestContext, id: string) {
+        return app.request(`/api/schedules/${id}`, {
+          method: "DELETE",
+          headers: authHeaders(caller),
+        });
+      }
+
+      async function scheduleRunningAsOther(): Promise<string> {
+        const created = await create(ctx, { userId: other });
+        expect(created.status).toBe(201);
+        return ((await created.json()) as { id: string }).id;
+      }
+
+      it("refuses a builder every write to a schedule running as another member", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const id = await scheduleRunningAsOther();
+
+        for (const body of [
+          { name: "Renamed" },
+          { enabled: false },
+          // Re-sending the stored actor, or taking the schedule over, is a write like any other.
+          { actor: { userId: other } },
+          { actor: { userId: builder.user.id } },
+        ]) {
+          const res = await patch(builder, id, body);
+          expect(`${JSON.stringify(body)}: ${res.status}`).toBe(`${JSON.stringify(body)}: 403`);
+          expect(await res.json()).toMatchObject({ code: "forbidden" });
+        }
+        expect((await remove(builder, id)).status).toBe(403);
+
+        const read = await app.request(`/api/schedules/${id}`, { headers: authHeaders(ctx) });
+        expect(await read.json()).toMatchObject({ name: null, enabled: true, userId: other });
+      });
+
+      it("lets an org admin edit, disable and delete it", async () => {
+        const admin = await memberContext(ctx, "admin");
+        const id = await scheduleRunningAsOther();
+
+        expect((await patch(admin, id, { name: "Renamed" })).status).toBe(200);
+        expect((await patch(admin, id, { enabled: false })).status).toBe(200);
+        expect((await remove(admin, id)).status).toBe(204);
+      });
+
+      // An owner's API key is a delegate, not the owner: it must not lend itself another member's reach.
+      it("refuses an owner's API key naming or writing another member's schedule", async () => {
+        const key = await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["schedules:read", "schedules:write", "schedules:delete"],
+        });
+        const keyHeaders = {
+          Authorization: `Bearer ${key.rawKey}`,
+          "Content-Type": "application/json",
+        };
+        const id = await scheduleRunningAsOther();
+
+        const named = await app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: keyHeaders,
+          body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { userId: other } }),
+        });
+        expect(named.status).toBe(403);
+        expect(await named.json()).toMatchObject({ code: "forbidden", param: "actor" });
+
+        const patched = await app.request(`/api/schedules/${id}`, {
+          method: "PATCH",
+          headers: keyHeaders,
+          body: JSON.stringify({ name: "Renamed" }),
+        });
+        expect(patched.status).toBe(403);
+        const deleted = await app.request(`/api/schedules/${id}`, {
+          method: "DELETE",
+          headers: keyHeaders,
+        });
+        expect(deleted.status).toBe(403);
+
+        // Its creator's own schedules stay writable through it.
+        const own = await app.request(`/api/agents/${fid}/schedules`, {
+          method: "POST",
+          headers: keyHeaders,
+          body: JSON.stringify({ cron_expression: "0 9 * * *" }),
+        });
+        expect(own.status).toBe(201);
+      });
+
+      it("lets a builder write their own schedule, and refuses moving it to another member", async () => {
+        const builder = await memberContext(ctx, "member", "builder");
+        const created = await create(builder);
+        expect(created.status).toBe(201);
+        const { id } = (await created.json()) as { id: string };
+
+        expect((await patch(builder, id, { name: "Renamed" })).status).toBe(200);
+        const moved = await patch(builder, id, { actor: { userId: other } });
+        expect(moved.status).toBe(403);
+        expect(await moved.json()).toMatchObject({ code: "forbidden", param: "actor" });
+        expect((await remove(builder, id)).status).toBe(204);
+      });
     });
   });
 

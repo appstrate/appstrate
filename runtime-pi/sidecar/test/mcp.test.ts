@@ -503,6 +503,7 @@ describe("POST /mcp — api_call", () => {
         {
           namespace: "gmail",
           integrationId: "@official/gmail",
+          connectionId: "conn-1",
           fetchCredentials: async () => integrationCreds(),
           refreshCredentials: async () => integrationCreds("integ-tok-2"),
         },

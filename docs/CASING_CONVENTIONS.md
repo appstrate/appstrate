@@ -300,7 +300,7 @@ The runner→platform ingestion routes (`/api/runs/{runId}/events*`) carry this 
 
 | Type                                                      | File                                                              |
 | --------------------------------------------------------- | ----------------------------------------------------------------- |
-| `ScheduleJobData`                                         | `apps/api/src/services/scheduler.ts`                              |
+| `ScheduleJobData` (`scheduleId`)                          | `apps/api/src/services/scheduler.ts`                              |
 | `DeliveryJobData`                                         | `apps/api/src/modules/webhooks/service.ts`                        |
 | `CompactionJobData` (`retentionDays`)                     | `apps/api/src/services/inline-compaction.ts`                      |
 | `LlmUsageRetryJob` (`entry: LlmUsageEntry`, `onConflict`) | `apps/api/src/services/llm-usage-retry.ts`, `llm-usage-ledger.ts` |
@@ -558,7 +558,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Import-bundle response domain fields** (snake_case — `POST /api/packages/import-bundle` 201): `root_active`, `root_package_id`, `root_version`, and per-item `imported[].version_id`.
 
-**Integration DTO domain fields** (snake_case): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `resolved_owned_by_actor`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `integration_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_id`, `member_pinned_connection_id`, `org_default_connection_id`, `resolved_connection_id`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`, `connections_used[].{integration_id, label, account_id, source}`
+**Integration DTO domain fields** (snake_case): `scopes_granted`, `needs_reconnection`, `owner_type`, `owner_name`, `auth_key`, `account_id`, `shared_with_org`, `identity_claims`, `block_user_connections`, `has_oauth_client`, `has_client_secret`, `redirect_uri`, `missing_scopes`, `resolved_missing_scopes`, `org_default_enforced`, `can_add_connection`, `tool_catalog`, `required_scopes`, `source_id`, `source_type`, `client_id`, `client_secret`, `client_secret_hash`, `client_type`, `allowed_scopes`, `connected_at`, `force_account_select`, `connection_id`, `connection_ids`, `integration_id`, `integration_package_id`, `agent_package_id`, `admin_pinned_connection_ids`, `member_pinned_connection_ids`, `org_default_connection_ids`, `resolved_connection_ids`, `candidate_connections`, `owned_by_actor`, `owner_id`, `owner_user_id`, `owner_end_user_id`, `is_own`, `connections_used[].{integration_id, label, account_id, source}`
 
 **Model-provider family** (4e): the per-object table under Carve-out 4e — `api_key`, `base_url`, `base_url_override`, `provider_name`, `available_model_ids`, `model_ids`, `promoted_default`, `oauth_email`, `consumed_at`, `access_token`, `refresh_token`, `account_id`.
 

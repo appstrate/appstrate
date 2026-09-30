@@ -540,6 +540,13 @@
       "when": 1790448109287,
       "tag": "0076_space_packages_chat_enforced",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790448169287,
+      "tag": "0077_connection_sets",
+      "breakpoints": true
     }
   ]
 }

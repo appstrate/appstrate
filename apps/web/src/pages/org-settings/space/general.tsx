@@ -153,6 +153,10 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
               ))}
             </RadioGroup>
             {!space.personal && <FieldDescription>{t("spaces.adminAccessHint")}</FieldDescription>}
+            {/* Closing ends implicit members' access; the server unshares their connections. */}
+            {space.visibility === "open" && visibility !== "open" && (
+              <FieldDescription>{t("spaces.closeUnsharesConnections")}</FieldDescription>
+            )}
             {space.personal && (
               <FieldDescription>{t("spaces.personal.settingsLocked")}</FieldDescription>
             )}

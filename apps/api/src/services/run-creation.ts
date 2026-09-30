@@ -117,10 +117,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // (agent, input, spaceId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
   // branch runs it inside `runInlinePreflight`. Neither passes
-  // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
+  // `launchOverrides`, and neither can: `CreateRemoteRunBodySchema` is
   // `.strict()` and declares no `connection_overrides` field, so a remote run
-  // carries no per-run connection picks at all (mechanism #2 is a
-  // platform-run feature).
+  // carries no per-run connection picks at all (a platform-run feature).
   //
   // Both call sites let the original `ApiError` escape to the route, which
   // preserves the 409 `missing_integration_connection` envelope (with its
@@ -185,7 +184,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   }
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
-  //     run-pipeline). `runOverrides` is null here and in the readiness pass
+  //     run-pipeline). `launchOverrides` is null here and in the readiness pass
   //     the route already ran — the remote body accepts no per-run connection
   //     picks — so the two resolve the same cascade. A failure at this point is
   //     therefore a between-readiness-and-now race (connection deleted, new
@@ -198,10 +197,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       packageId: agent.id,
       actor,
       scope: { orgId, spaceId },
-      runOverrides: null,
-      // Remote runs are never scheduled, so there is no frozen schedule
-      // override on this path (mechanism #3 applies to platform runs only).
-      scheduleOverrides: null,
+      launchOverrides: null,
       // Reads the pinned manifests frozen just above (auth keys / scopes match
       // what the spawn will use).
       manifestCache,
@@ -214,12 +210,30 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
         ok: false,
         error: {
           code: "agent_not_ready",
-          message: outcome.error.detail,
+          message: outcome.error.message,
           status: outcome.error.status,
         },
       };
     }
     resolvedConnections = outcome.resolved;
+    // The remote api_call tool takes no argument addressing a set member.
+    const multi = Object.entries(resolvedConnections ?? {})
+      .filter(([, set]) => set.length > 1)
+      .map(([integrationId]) => integrationId);
+    if (multi.length > 0) {
+      return {
+        ok: false,
+        error: {
+          code: "agent_not_ready",
+          message:
+            `Remote runs bind one connection per integration, but this run's connection choice binds ` +
+            `several to ${multi.map((id) => `'${id}'`).join(", ")} — the remote runner's api_call tool ` +
+            `cannot say which one to use. Pick one with a member pin (a set an admin pin or an enforced ` +
+            `org default imposes is narrowed by an admin), or run the agent on the platform.`,
+          status: 409,
+        },
+      };
+    }
   }
 
   // --- Mint sink credentials ---

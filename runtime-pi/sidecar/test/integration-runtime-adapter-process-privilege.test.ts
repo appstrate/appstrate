@@ -36,10 +36,13 @@ import {
   installPassthroughRunnerExec,
 } from "./helpers/runner-exec.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 function localSpec(): IntegrationSpawnSpec {
   return {
     integrationId: "@orga/third-party",
     namespace: "thirdparty",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: "@orga/third-party",

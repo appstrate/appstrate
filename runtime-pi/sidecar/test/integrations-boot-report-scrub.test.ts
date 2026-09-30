@@ -25,6 +25,8 @@ import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.
 import { _setLogSinkForTesting } from "../logger.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 /** A shape `scrubSecretMaterial` masks, distinctive enough to grep for. */
 const SECRET = "sk-ant-api03-LEAKED0000000000";
 const SERVER_ID = "@tractr/leaky-server";
@@ -33,6 +35,7 @@ function localSpec(integrationId: string): IntegrationSpawnSpec {
   return {
     integrationId,
     namespace: "leaky",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: integrationId,
@@ -102,6 +105,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
     const spec = {
       integrationId: "@tractr/mitm",
       namespace: "mitm",
+      connection: CONN_A,
       sourceKind: "none",
       manifest: { name: "@tractr/mitm", version: "1.0.0" },
       spawnEnv: {},

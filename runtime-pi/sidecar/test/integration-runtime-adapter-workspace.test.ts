@@ -33,6 +33,8 @@ import {
   type PassthroughRunnerExec,
 } from "./helpers/runner-exec.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 /**
  * Poll until the spawned env-dump-and-exit script has flushed its output
  * (every 10ms, 2s budget) — deterministic replacement for a fixed sleep.
@@ -54,6 +56,7 @@ function baseSpec(extra: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
   return {
     integrationId: "@orga/test",
     namespace: "orga__test",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: {
       name: "@orga/test",

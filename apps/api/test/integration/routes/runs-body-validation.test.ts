@@ -28,6 +28,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -114,9 +115,60 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     await expectRejectedField(res, "rerun_from");
   });
 
-  it("rejects an empty connection_overrides value with 400", async () => {
-    const res = await post({ input: {}, connection_overrides: { "@acme/gmail": "" } });
+  it("rejects an empty or non-uuid connection id inside a connection_overrides set with 400", async () => {
+    for (const id of ["", "conn_1"]) {
+      const res = await post({ input: {}, connection_overrides: { "@acme/gmail": [id] } });
+      await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
+    }
+  });
+
+  it("rejects a string where a set belongs", async () => {
+    const res = await post({ input: {}, connection_overrides: { "@acme/gmail": "conn_1" } });
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
+  });
+
+  it("rejects an EMPTY connection_overrides set with 400", async () => {
+    const res = await post({ input: {}, connection_overrides: { "@acme/gmail": [] } });
+    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+  });
+
+  it("rejects a repeated connection id in a set, in either case", async () => {
+    // The same connection twice would bind one credential under two
+    // addresses. `z.uuid()` accepts either case and Postgres folds, so the
+    // guard has to fold too.
+    const a = crypto.randomUUID();
+    await expectRejectedField(
+      await post({ input: {}, connection_overrides: { "@acme/gmail": [a, a] } }),
+      "connection_overrides.@acme/gmail",
+    );
+    await expectRejectedField(
+      await post({ input: {}, connection_overrides: { "@acme/gmail": [a, a.toUpperCase()] } }),
+      "connection_overrides.@acme/gmail",
+    );
+    // Control: two genuinely different ids pass the schema and die later, at
+    // version resolution (404).
+    const distinct = await post({
+      input: {},
+      connection_overrides: { "@acme/gmail": [crypto.randomUUID(), crypto.randomUUID()] },
+    });
+    expect(distinct.status).toBe(404);
+  });
+
+  it("rejects a connection_overrides set over the cap, and accepts exactly the cap", async () => {
+    const ids = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
+      crypto.randomUUID(),
+    );
+    await expectRejectedField(
+      await post({ input: {}, connection_overrides: { "@acme/gmail": ids } }),
+      "connection_overrides.@acme/gmail",
+    );
+    // Control: the cap itself passes the schema and dies later, at version
+    // resolution (404) — the same place a legal body dies in this suite.
+    const capped = await post({
+      input: {},
+      connection_overrides: { "@acme/gmail": ids.slice(0, MAX_CONNECTIONS_PER_INTEGRATION) },
+    });
+    expect(capped.status).toBe(404);
   });
 
   it("reads the body behind an Idempotency-Key — the CLI's path", async () => {
@@ -147,7 +199,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
       modelId: "claude-sonnet-4",
       generation: { temperature: 0.2, reasoning_level: "high" },
       proxyId: "none",
-      connection_overrides: { "@acme/gmail": "conn_1" },
+      connection_overrides: { "@acme/gmail": [crypto.randomUUID(), crypto.randomUUID()] },
       dependency_overrides: { "@acme/skill": "draft" },
     });
     expect(res.status).toBe(404);

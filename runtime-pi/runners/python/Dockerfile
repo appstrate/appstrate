@@ -2,7 +2,7 @@
 #
 # Appstrate MCP Runner — Python
 #
-# Spawned per-integration by the sidecar when an AFPS integration
+# Spawned per bound connection by the sidecar when an AFPS integration
 # manifest declares `server.type: "python"`. Symmetric to the node
 # runner — see that Dockerfile for the rationale and contract.
 #

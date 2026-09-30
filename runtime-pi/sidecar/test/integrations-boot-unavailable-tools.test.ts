@@ -15,10 +15,13 @@ import type { IntegrationBootBreadcrumb } from "@appstrate/core/sidecar-types";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { pushUnavailableToolBreadcrumb } from "../integrations-boot.ts";
 
+const CONN_A = { id: "conn-a", label: "work", accountId: null };
+
 function specWith(toolAllowlist: string[] | undefined): IntegrationSpawnSpec {
   return {
     integrationId: "@scope/gh",
     namespace: "gh",
+    connection: CONN_A,
     sourceKind: "local",
     manifest: { name: "@scope/gh", version: "1.0.0" },
     spawnEnv: {},
@@ -36,7 +39,7 @@ describe("pushUnavailableToolBreadcrumb", () => {
     );
     expect(breadcrumbs).toHaveLength(1);
     expect(breadcrumbs[0]!.level).toBe("warn");
-    expect(breadcrumbs[0]!.message).toBe("@scope/gh: 1/3 selected tool(s) unavailable");
+    expect(breadcrumbs[0]!.message).toBe("@scope/gh [work]: 1/3 selected tool(s) unavailable");
     expect(breadcrumbs[0]!.data).toMatchObject({
       integrationId: "@scope/gh",
       requested: 3,
@@ -101,7 +104,7 @@ describe("pushUnavailableToolBreadcrumb", () => {
       breadcrumbs,
     );
     expect(breadcrumbs).toHaveLength(1);
-    expect(breadcrumbs[0]!.message).toBe("@scope/gh: 1/2 selected tool(s) unavailable");
+    expect(breadcrumbs[0]!.message).toBe("@scope/gh [work]: 1/2 selected tool(s) unavailable");
     expect(breadcrumbs[0]!.data).toMatchObject({ requested: 2, surviving: 1, missing: 1 });
   });
 

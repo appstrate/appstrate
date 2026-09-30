@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
@@ -26,10 +27,12 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../lib/format-date";
-import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Play, Pause, Clock, Lock } from "lucide-react";
 
 type ScheduleTab = "runs" | "details";
 
@@ -42,6 +45,7 @@ export function ScheduleDetailPage() {
   const { data: schedule, isLoading, error } = useScheduleById(id);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  const mayWrite = useCanWriteSchedule(schedule);
 
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   const readsRuns = canReadRuns(can);
@@ -53,7 +57,10 @@ export function ScheduleDetailPage() {
   if (error || !schedule) return <ErrorState message={error?.message} />;
 
   const handleToggle = () => {
-    updateSchedule.mutate({ id: schedule.id, enabled: !schedule.enabled });
+    updateSchedule.mutate(
+      { id: schedule.id, enabled: !schedule.enabled },
+      { onError: toastScheduleConnectionChoice },
+    );
   };
 
   return (
@@ -70,7 +77,19 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {can("schedules:write") && (
+              {can("schedules:write") && !mayWrite && (
+                <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled
+                    aria-label={t("schedule.memberGoverned")}
+                  >
+                    <Lock size={16} />
+                  </Button>
+                </DisabledReasonTooltip>
+              )}
+              {can("schedules:write") && mayWrite && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="icon">
@@ -203,7 +222,7 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramTimezone")}</p>
-          <p className="text-sm font-medium">{schedule.timezone ?? "UTC"}</p>
+          <p className="text-sm font-medium">{schedule.timezone}</p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">

@@ -26,7 +26,7 @@ import {
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type ManifestDeliveryHttp,
 } from "@appstrate/core/sidecar-types";
-import type { McpHost } from "./mcp-host.ts";
+import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 import { logger } from "./logger.ts";
 import { truncateForScrub } from "./redact.ts";
@@ -42,9 +42,9 @@ import { truncateForScrub } from "./redact.ts";
 type DeliveryHttp = ManifestDeliveryHttp;
 
 interface RunConnectLoginOptions {
-  /** Multiplexing host holding the integration's connected MCP client. */
-  host: McpHost;
-  /** Normalised namespace the integration registered under. */
+  /** This connection's own runner — never resolved from the namespace its siblings share. */
+  client: Pick<AppstrateMcpClient, "callTool">;
+  /** Namespace the integration registered under — diagnostics only. */
   namespace: string;
   /** Login tool name as advertised by the upstream (un-namespaced). */
   toolName: string;
@@ -93,16 +93,9 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
   // URL matches one of them, never leaked to an off-allowlist host (P2-1).
   opts.source.setActiveInputs(opts.inputs, opts.authKey, opts.authorizedUris);
   try {
-    const client = opts.host.getUpstreamClient(opts.namespace);
-    if (!client) {
-      throw new Error(
-        `connect-login: no upstream client registered for namespace '${opts.namespace}'`,
-      );
-    }
-
     // The secret is delivered ONLY via proxy-side substitution — the tool
     // is called with empty arguments (security contract).
-    const result = await client.callTool({ name: opts.toolName, arguments: {} }, {});
+    const result = await opts.client.callTool({ name: opts.toolName, arguments: {} }, {});
 
     const parsed = parseLoginToolResult(result);
 

@@ -30,7 +30,6 @@ export type {
   IntegrationManifestView,
   IntegrationOAuthClient,
   IntegrationOrgDefault,
-  IntegrationPickStatus,
   IntegrationPin,
   IntegrationSummary,
   IntegrationToolCatalogEntry,
@@ -141,8 +140,9 @@ export interface RunWireDto {
 
 /**
  * One integration connection resolved for a run, projected from the internal
- * `runs.resolved_connections` snapshot for display. The raw `connectionId` is
- * deliberately omitted — only display-safe fields cross the wire.
+ * `runs.resolved_connections` snapshot for display — one entry per bound
+ * connection, so several may share an `integration_id`. The raw `connectionId`
+ * is deliberately omitted — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */
@@ -322,13 +322,13 @@ export interface ScheduleWireDto {
   name: string | null;
   enabled: boolean;
   cron_expression: string;
-  timezone: string | null;
+  timezone: string;
   input: Record<string, unknown> | null;
   generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;
   proxy_id_override: string | null;
   version_override: string | null;
-  connection_overrides: Record<string, string> | null;
+  connection_overrides: Record<string, string[]> | null;
   dependency_overrides: Record<string, string> | null;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -445,7 +445,7 @@ export interface MeConnectionEntry {
   connection_id: string;
   kind: MeConnectionKind;
   /** Display label set by the user. */
-  label: string | null;
+  label: string;
   scopes_granted: string[];
   connected_at: string;
   needs_reconnection: boolean;
@@ -456,6 +456,8 @@ export interface MeConnectionEntry {
   auth_key: string;
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
+  /** What binds it for the whole space; while set, unshare and delete answer 409. */
+  locked_by: "admin_pin" | "org_default" | null;
   /**
    * Number of agents this connection's space RUNS — placed here and switched
    * on, or on by the deployment's default — that declare this integration in

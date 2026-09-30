@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+
 /**
  * The `409` shared by BOTH `/internal/integration-credentials/{scope}/{name}`
  * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
@@ -14,6 +16,34 @@
 const integrationCredentialsConflict409 = {
   description:
     "The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not active in the space. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit.",
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetail" },
+    },
+  },
+} as const;
+
+/**
+ * `connection_id` — the selector every agent run sends to both integration-credentials
+ * operations. A run binds a SET of connections to an integration
+ * (`runs.resolved_connections`) and the sidecar runs one credentials source per
+ * spawn spec, i.e. per connection, so an agent run always names one.
+ */
+const connectionIdParam = {
+  name: "connection_id",
+  in: "query",
+  required: false,
+  description:
+    "Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to " +
+    MAX_CONNECTIONS_PER_INTEGRATION +
+    ' connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run\'s cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.',
+  schema: { type: "string", format: "uuid" },
+} as const;
+
+/** The two ways the `connection_id` selector is refused. Shared by both operations. */
+const connectionSelector400 = {
+  description:
+    "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
   content: {
     "application/problem+json": {
       schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -240,11 +270,12 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch live credentials + HTTP delivery plans for an active integration",
       description:
-        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is ACTIVE in the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
+        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls for ONE of the connections this run bound to the integration (named by the required `connection_id`) — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations`, that the integration is ACTIVE in the run's space, AND that the run's kickoff snapshot bound this connection. On the RUN path a `200` always carries a usable credential surface — the only EMPTY payload this endpoint serves is the connect-run one described below. Every state where a credential was expected but could not be produced fails instead — `400` when the selector is missing or names a connection outside the run's bound set, `404` when the named connection is no longer reachable by the actor (deleted/unshared since kickoff), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        connectionIdParam,
       ],
       responses: {
         "200": {
@@ -255,6 +286,7 @@ export const internalPaths = {
             },
           },
         },
+        "400": connectionSelector400,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -287,11 +319,12 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an active integration",
       description:
-        "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
+        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        connectionIdParam,
       ],
       responses: {
         "200": {
@@ -302,6 +335,7 @@ export const internalPaths = {
             },
           },
         },
+        "400": connectionSelector400,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
+
+const runConnectionOverrides = {
+  type: "object",
+  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
+  additionalProperties: connectionIdSetJsonSchema,
+} as const;
 
 const inlineRunPermission =
   " **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.";
@@ -118,12 +126,7 @@ const canonicalRunsPaths = {
                   description:
                     'Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults.',
                 },
-                connection_overrides: {
-                  type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
-                },
+                connection_overrides: runConnectionOverrides,
                 dependency_overrides: {
                   type: "object",
                   description:
@@ -463,12 +466,7 @@ const canonicalRunsPaths = {
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
                     "`_context_files` is rejected with a `400` — the name is reserved.",
                 },
-                connection_overrides: {
-                  type: "object",
-                  description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 409 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string", minLength: 1 },
-                },
+                connection_overrides: runConnectionOverrides,
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
                 generation: {
@@ -689,12 +687,12 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  additionalProperties: { type: "string", minLength: 1 },
+                  additionalProperties: connectionIdSetJsonSchema,
                   description:
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
-                    "real launch too. Never persisted; no run is created. Values must be " +
-                    "non-empty, same rule and same reason as on the launch surfaces.",
+                    "real launch too. Never persisted; no run is created. Same array shape and " +
+                    "same bounds as on the launch surfaces.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -1127,7 +1125,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 agent_not_ready` naming it: pick one with a member pin, or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1299,7 +1297,16 @@ const canonicalRunsPaths = {
             'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/RunAdmissionConflict" },
+        "409": {
+          description:
+            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared with a member pin, since this body takes no `connection_overrides`. Or `agent_not_ready` — the connection cascade binds several connections to one integration (see above), or changed between the readiness check and the run's creation.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "422": {
           description:
             'Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is `required`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable`',

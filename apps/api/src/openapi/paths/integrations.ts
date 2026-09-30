@@ -2,6 +2,8 @@
 
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 
 /**
  * OpenAPI paths for the AFPS integration marketplace.
@@ -51,33 +53,33 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-// The org default is keyed by (space, integration) ONLY — a single row
-// per integration, NOT one per (integration, auth_key). The unique index in
-// `integrationOrgDefaults` and the `onConflictDoUpdate` in
-// `integration-org-defaults-service.ts:upsertOrgDefault` both target
-// [spaceId, integrationId], so PUT overwrites the one existing default
-// wholesale. `auth_key` below is a DERIVED read-only projection of the chosen
-// connection's own auth (joined from `integration_connections` at read time) —
-// it does NOT partition the default. Picking a connection of a different auth
-// type replaces the single default; it does not create a second, per-auth one.
+/** A connection set as every write takes it and every pin or default returns it. */
+export const connectionIdSetJsonSchema = {
+  type: "array",
+  items: { type: "string", format: "uuid" },
+  minItems: 1,
+  maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+} as const;
+
+/** The refusals every connection-set write shares, beyond the per-connection checks. */
+export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+export const lockedBySchema = {
+  type: ["string", "null"],
+  enum: ["admin_pin", "org_default", null],
+  description:
+    "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.",
+} as const;
+
+// The org default is keyed by (space, integration) ONLY — one set per
+// integration, NOT one per (integration, auth_key): a set may mix auths, and
+// PUT replaces it wholesale.
 const integrationOrgDefaultSchema = {
   type: "object",
-  required: [
-    "integration_package_id",
-    "connection_id",
-    "auth_key",
-    "enforce",
-    "createdAt",
-    "updatedAt",
-  ],
+  required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_id: { type: "string", format: "uuid" },
-    auth_key: {
-      type: "string",
-      description:
-        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
-    },
+    connection_ids: connectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -119,6 +121,7 @@ const integrationConnectionSchema = {
     "expiresAt",
     "owner_type",
     "owner_id",
+    "label",
     "client_ref",
     "createdAt",
     "updatedAt",
@@ -139,7 +142,15 @@ const integrationConnectionSchema = {
       description:
         "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
     },
-    label: { type: ["string", "null"] },
+    locked_by: {
+      ...lockedBySchema,
+      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`.`,
+    },
+    label: {
+      type: "string",
+      description:
+        "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
+    },
     shared_with_org: { type: "boolean" },
     client_ref: {
       type: ["string", "null"],
@@ -695,7 +706,13 @@ export const integrationsPaths = {
         "Deletes one of this space's custom clients by id (an org-level client " +
         "id is a 404 here), with the connections it minted. If it was the " +
         "default, the cascade re-resolves (org default, else system client) " +
-        "with no auto-promotion. Requires `integrations:configure`, which is never granted to an API key.",
+        "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default " +
+        "(enforced or soft) names one of the connections it minted; a member pin does not block it. " +
+        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) " +
+        "and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration " +
+        "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
+        "with `pinned_connection_unavailable`. " +
+        "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -709,6 +726,15 @@ export const integrationsPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "A connection the client minted is named by an admin pin or an org default",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1153,6 +1179,16 @@ export const integrationsPaths = {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],
       summary: "Update an integration connection's label and/or shared_with_org flag",
+      description:
+        "The connection owner or a holder of `integrations:configure` may edit it. Sharing " +
+        "(`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; " +
+        "unsharing is open to both, so a governor can withdraw a colleague's shared credentials. " +
+        "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
+        "or an org default (enforced or soft) names the connection. A member pin does not block it: " +
+        "that member's next run fails with `pinned_connection_unavailable` until they pick again. " +
+        "A label is unique per " +
+        "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
+        "with 409 `connection_label_taken`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1166,7 +1202,13 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                label: { type: ["string", "null"], maxLength: 80 },
+                label: {
+                  type: "string",
+                  minLength: 1,
+                  maxLength: CONNECTION_LABEL_MAX,
+                  description:
+                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`.",
+                },
                 shared_with_org: { type: "boolean" },
               },
               additionalProperties: false,
@@ -1191,7 +1233,8 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Connection is pinned and cannot be unshared",
+          description:
+            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), or sharing it once its owner no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`)",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
@@ -1328,7 +1371,7 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
-      summary: "Pin an admin-shared connection to an agent for all members (admin)",
+      summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1341,8 +1384,14 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connection_id"],
-              properties: { connection_id: { type: "string", format: "uuid" } },
+              required: ["connection_ids"],
+              properties: {
+                connection_ids: {
+                  ...connectionIdSetJsonSchema,
+                  description:
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`.",
+                },
+              },
               additionalProperties: false,
             },
           },
@@ -1356,9 +1405,16 @@ export const integrationsPaths = {
             "application/json": { schema: { $ref: "#/components/schemas/IntegrationPin" } },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Refused: ${connectionSetRefusals}.`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
+        },
       },
     },
     delete: {
@@ -1386,9 +1442,11 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get the org-wide default connection for this integration",
       description:
-        "The cross-agent governance baseline: one default connection per (space, " +
+        "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
-        "`enforce: false` is overridable by a member pin. Returns 204 when unset.",
+        "`enforce: false` is overridable by a member pin. Either way the set binds whole: a " +
+        "member that is no longer reachable fails the run with `pinned_connection_unavailable` " +
+        "rather than falling through. Returns 204 when unset.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1416,11 +1474,10 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Set the org-wide default connection for this integration (admin)",
       description:
-        "Upsert the single (space, integration) default. Keyed per-integration, " +
-        "NOT per-auth: this overwrites the one existing default wholesale (atomic " +
-        "onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection " +
-        "of a different auth type replaces the current default rather than adding a " +
-        "second one. The response `auth_key` reflects the chosen connection's auth (derived).",
+        "Replace the (space, integration) default connection SET. Keyed per-integration, " +
+        "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
+        "`enforce` included. Selecting connections of a different auth type replaces " +
+        "the current default rather than adding a second one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1434,9 +1491,12 @@ export const integrationsPaths = {
               type: "object",
               // `enforce` carries a server-side default (`false`), so it is
               // optional on the wire — the `default` beside it said as much.
-              required: ["connection_id"],
+              required: ["connection_ids"],
               properties: {
-                connection_id: { type: "string", format: "uuid" },
+                connection_ids: {
+                  ...connectionIdSetJsonSchema,
+                  description: "The WHOLE default set — this write replaces it.",
+                },
                 enforce: { type: "boolean", default: false },
               },
               additionalProperties: false,
@@ -1450,9 +1510,16 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationOrgDefaultSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Refused: ${connectionSetRefusals}.`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed.",
+        },
       },
     },
     delete: {

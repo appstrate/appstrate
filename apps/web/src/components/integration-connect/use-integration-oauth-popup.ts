@@ -144,10 +144,7 @@ export function useHostedConnectPopup() {
         // Invalidate the integration + user-connection caches so every consumer
         // (status cards, pickers, the connections page) reflects the new
         // connection without waiting for a window-focus refetch.
-        await Promise.all([
-          invalidateIntegrationQueries(qc),
-          qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] }),
-        ]);
+        await invalidateIntegrationQueries(qc);
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
           toast.error(t("integration.popup.blocked"));

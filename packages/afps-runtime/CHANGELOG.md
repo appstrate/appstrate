@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `X-Run-Id` is a reserved transport header
+
+- An `api_call`'s own `x-run-id` header (any casing) is now dropped, like the
+  other Appstrate transport headers: the remote resolver sets `X-Run-Id` itself
+  (`extraHeaders`), and a second casing would reach the platform merged as
+  `"a, b"`. `X-Connection-Id` stays open, only so that a caller already holding
+  a connection id can name it: the `api_call` tool has no argument addressing
+  one member of a bound set, which is why the platform refuses a remote run
+  that binds several connections to one integration.
+
+### Added — `readIntegrationManifest`
+
+- `readIntegrationManifest(bundle, ref)`, exported from
+  `@appstrate/afps-runtime/resolvers`: the integration manifest a ref resolves
+  to in the bundle, unvalidated — its `integration.json` (else `manifest.json`)
+  file, else the package's parsed manifest; `undefined` when the bundle does
+  not carry the package. `readApiCallIntegrationMetas` now reads through it.
+  `@appstrate/runner-pi` uses it to expose `api_call` only for the tools the
+  agent selected.
+
 ### Changed — redirect follower takes a `CookieScope` (BREAKING)
 
 - `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in

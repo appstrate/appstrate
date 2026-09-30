@@ -7,8 +7,10 @@
 
 import type { LoadedPackage } from "../types/index.ts";
 import {
+  missingIntegrationConnection,
   resolveConnectionsForRun,
   translateResolutionError,
+  type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
 import {
@@ -18,8 +20,8 @@ import {
 } from "./integration-service.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
+import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -37,20 +39,8 @@ interface AgentReadinessParams {
    * that resolve the actor from request context may not have one.
    */
   actor: Actor | null;
-  /**
-   * Caller's run-time connection picks (mechanism #2 of the resolver
-   * cascade). Threaded into the readiness check so the must_choose-retry
-   * UX loop in `MissingConnectionsModal` actually completes: without it,
-   * readiness re-fires must_choose on >1 candidates even when the caller
-   * already disambiguated via `connection_overrides` on the request body.
-   */
-  runOverrides?: ConnectionOverrides | null;
-  /**
-   * Schedule's frozen connection picks (mechanism #3). Plumbed for parity
-   * with `run-pipeline.ts:resolveRunConnectionsOrError` — schedules apply
-   * their overrides once at fire time, and readiness should honour them.
-   */
-  scheduleOverrides?: ConnectionOverrides | null;
+  /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
+  launchOverrides?: LaunchOverrides | null;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
    * path threads one Map so this readiness pass, the resolver snapshot pass,
@@ -121,9 +111,18 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, spaceId, actor, runOverrides, scheduleOverrides } = params;
+  return (await collectAgentReadiness(params)).errors;
+}
+
+/** {@link collectAgentReadinessErrors} plus the resolver errors, whose `source` the wire drops. */
+export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
+  errors: ValidationFieldError[];
+  resolutionErrors: ConnectionResolutionError[];
+}> {
+  const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
+  const resolutionErrors: ConnectionResolutionError[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -245,16 +244,11 @@ export async function collectAgentReadinessErrors(
     }
   }
 
-  // Resolver enumerates own + shared connections, applies
-  // pin > run override > schedule override > fallback, and surfaces
+  // Resolver enumerates own + shared connections, applies the cascade, and surfaces
   // structured errors per (integration, authKey). Skipped when the caller
   // has no actor context (integration gating only applies to run kickoff).
   //
-  // `runOverrides` / `scheduleOverrides` are threaded so the must_choose
-  // recovery loop in `MissingConnectionsModal` can complete: the user
-  // picks a candidate, the modal POSTs `connection_overrides`, readiness
-  // honours the pick instead of re-firing must_choose on the same N>1
-  // candidate set. run-pipeline.ts re-runs the resolver after readiness
+  // run-pipeline.ts re-runs the resolver after readiness
   // (with the same overrides) to produce the persisted snapshot. The two
   // passes cannot disagree even though only this one passes
   // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
@@ -267,17 +261,17 @@ export async function collectAgentReadinessErrors(
       packageId: agent.id,
       actor,
       scope: { orgId, spaceId },
-      ...(runOverrides ? { runOverrides } : {}),
-      ...(scheduleOverrides ? { scheduleOverrides } : {}),
+      ...(launchOverrides ? { launchOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
       ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));
     }
+    resolutionErrors.push(...resolution.errors);
   }
 
-  return errors;
+  return { errors, resolutionErrors };
 }
 
 /**
@@ -295,7 +289,6 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   // modal can render the full list in one round trip.
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   if (integrationErrors.length > 0) {
-    const first = integrationErrors[0]!;
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
     // notification before we throw. Integration errors only accumulate when
     // an actor was present, so the guard narrows the type for the payload.
@@ -326,13 +319,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
             ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
           })
         : integrationErrors;
-    throw new ApiError({
-      status: 409,
-      code: "missing_integration_connection",
-      title: "Missing Integration Connection",
-      detail: first.message,
-      errors: responseErrors,
-    });
+    throw missingIntegrationConnection(responseErrors);
   }
 
   const first = errors[0]!;

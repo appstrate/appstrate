@@ -24,6 +24,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
+import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -225,7 +226,7 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4).
+ * (RBAC spec §4.4). Returns the connections a close unshared, for the audit.
  */
 export async function updateSpace(
   orgId: string,
@@ -258,28 +259,37 @@ export async function updateSpace(
       );
     }
   }
-  const [space] = await db
-    .update(spaces)
-    .set({
-      ...(params.name !== undefined && { name: params.name }),
-      ...(params.settings !== undefined && { settings: params.settings }),
-      ...(params.visibility !== undefined && { visibility: params.visibility }),
-      ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
-      updatedAt: new Date(),
-    })
-    .where(
-      scopedWhere(spaces, {
-        orgId,
-        extra: [
-          eq(spaces.id, spaceId),
-          changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
-          changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
-        ],
-      }),
-    )
-    .returning();
+  const { space, unsharedConnectionIds } = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(spaces)
+      .set({
+        ...(params.name !== undefined && { name: params.name }),
+        ...(params.settings !== undefined && { settings: params.settings }),
+        ...(params.visibility !== undefined && { visibility: params.visibility }),
+        ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
+        updatedAt: new Date(),
+      })
+      .where(
+        scopedWhere(spaces, {
+          orgId,
+          extra: [
+            eq(spaces.id, spaceId),
+            changesAccess ? eq(spaces.visibility, judged.visibility) : undefined,
+            changesAccess ? eq(spaces.defaultRole, judged.defaultRole) : undefined,
+          ],
+        }),
+      )
+      .returning();
+    // Closing an open space ends every implicit member's access. The UPDATE above holds the
+    // space row lock a removal or a share waits on (`lockSpaceRow`, space-members.ts).
+    const unshared =
+      updated && changesAccess
+        ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
+        : [];
+    return { space: updated, unsharedConnectionIds: unshared };
+  });
 
-  if (space) return space;
+  if (space) return { space, unsharedConnectionIds };
   if (changesAccess) {
     await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
     throw conflict(

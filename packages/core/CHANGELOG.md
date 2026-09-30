@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New export `selectedApiCallConfigs(manifest, selection)`
+  (`@appstrate/core/integration`)** — the `ApiCallConfig`s a tool selection
+  grants: all under `"*"`, else each whose `api_call` or `api_upload` companion
+  the selection names (the pair is granted together); `undefined` grants none.
+  Pass the effective selection (`resolveEffectiveToolSelection`).
+- **New export `MAX_CONNECTIONS_PER_INTEGRATION` (`@appstrate/core/integration`)** —
+  the cap on how many connections one declared integration may bind in a single
+  run (10). Enforced at every WRITE (pins, org defaults, run and schedule
+  overrides), never in the resolver: the cascade only echoes a set a write
+  already validated, and the fallback produces at most one.
+- **`ConnectionResolutionError` gains optional `boundConnectionIds: string[]`**
+  (`@appstrate/core/integration`) — every connection the winning cascade layer
+  tried to bind, in its order. Set when every member was reachable but the set
+  still could not bind: a member failing its health check (e.g.
+  `insufficient_scopes`). Additive.
 - **`PlatformServices.loadEnforcedChatSkills`** and
   **`PlatformServices.listEnforcedChatSkills`** (`@appstrate/core/module`, #1586) —
   the skills a space enforces on its chat conversations: its active skills whose
@@ -42,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space, while the caller holds `chat:write` there, and serves a draft only at
   the `lockVersion` injected (409 `injected_draft_changed` once it moved).
 
+- **`dedupeLabel` takes an optional `{ maxLength }`** (`@appstrate/core/dedupe-label`)
+  — with `maxLength` every candidate fits it, the base cut to leave room for its
+  ` (n)` suffix (UTF-16 units, on a code-point boundary, trailing whitespace
+  trimmed when cut; a label within the limit is returned as is). Without
+  the option `dedupeLabel` behaves as before.
+
 - **`org-integrations:configure`** (`@appstrate/core/permissions`, #1264) — a new
   org-level core resource: managing the org-wide integration OAuth clients (and the
   org-tier default among them) that every space inherits. The org half of
@@ -51,11 +72,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `ConnectionResolutionErrorCode` gains `override_outranked`**
+  (`@appstrate/core/integration`) — a launch override (run or schedule) naming
+  a connection outside the set an admin pin or an enforced org default binds
+  for that integration. Previously the governing layer silently won; now the
+  launch is refused. An override naming a subset of the governing set binds
+  that subset. `source` is the override's layer. Exhaustive switches over the
+  union must handle it.
+
+- **`ConnectionResolutionError.source` names the failing layer on every
+  layer-bound code** (`@appstrate/core/integration`) — previously set only on
+  `insufficient_scopes`; now on `needs_reconnection`, `insufficient_scopes`,
+  `auth_serves_no_selected_tool`, `pinned_connection_unavailable`,
+  `override_connection_unavailable` and `override_outranked`. Still absent when no layer bound anything
+  (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
+  `auth_key_serves_no_selected_tool`). The field's type is unchanged.
+
 - **`RunOrchestrator.initialize()` may be called again after it rejects**
   (`@appstrate/core/platform-types`, #1129) — the platform retries it in the
   background with backoff until it resolves once, instead of once per process.
   Implementations must tolerate a retry after a partial failure. Documentation
   only: the signature is unchanged.
+
+- **BREAKING: an integration binds a SET of connections, not one**
+  (`@appstrate/core/integration`, `@appstrate/core/sidecar-types`,
+  `@appstrate/core/platform-types`). One agent declaration, one or more
+  connections — two Gmail accounts, three SSH hosts — with the same tools, so
+  the shape had to move from a pick to a set:
+  - `ConnectionOverrides` is `Record<string, string[]>` (was
+    `Record<string, string>`), 1..`MAX_CONNECTIONS_PER_INTEGRATION` ids per key;
+  - `ResolvedConnectionMap` is `Record<string, ResolvedConnection[]>` (was
+    `Record<string, ResolvedConnection>`);
+  - `InlineRunBody.connection_overrides` is `Record<string, string[]>` (was
+    `Record<string, string>`);
+  - `IntegrationSpawnSpec` gains an optional
+    `connection: { id: string; label: string; accountId: string | null }`. N
+    connections of one integration emit N specs sharing `integrationId` and
+    `namespace`; `connection` is what tells them apart. Absent in exactly one
+    case, a connect run, whose connection row does not exist yet;
+  - `IntegrationBootReport.declared` is renamed `declaredConnections` and
+    counts spawn specs — one per bound connection — rather than integrations;
+    `spawned[]` and `failed[]` entries each gain an optional `connectionLabel`,
+    since entries no longer differ by `integrationId` + `namespace` alone (a
+    `failed[]` entry omits it on the whole-boot `integrationId: "*"` entry and
+    on a spec that binds no connection).
+
+  There is deliberately no `string | string[]` union and no "fall back to the
+  first connection": the array is the only accepted shape, and a value left in
+  the old one fails loudly. Wrap each existing value in an array.
+
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_serves_no_selected_tool`
+  and `auth_key_serves_no_selected_tool`** (`@appstrate/core/integration`).
+  `auth_serves_no_selected_tool` is raised when a connection an explicit layer
+  binds (pin, org default, run or schedule override) is on an auth that exposes
+  none of the agent's selected tools; it carries that `connectionId`. The
+  fallback raises `not_connected` instead, its `authKey` restricted to auths
+  that serve the selection. A bound set needs no label check: labels are unique
+  per (space, integration) in the platform's schema.
+  `auth_key_serves_no_selected_tool` is the agent's configuration, not a
+  connection: its own `auth_key` (AFPS §4.1) names a declared auth that exposes
+  none of its selected tools. It is raised before any connection is considered,
+  carries `requiredAuthKey` and no `connectionId`, and no connect flow clears it.
+  `ConnectionResolutionError.requiredAuthKey` and
+  `ResolutionFieldError.required_auth_key` (`@appstrate/core/api-errors`) are set
+  on it as well as on `auth_key_mismatch`. Exhaustive `switch`es over the code
+  must handle both.
+
+- **BREAKING: a connection label is never null.** `ConnectionCandidate.label`
+  (`@appstrate/core/integration`) and `ResolutionFieldError.candidate_connections[].label`
+  (`@appstrate/core/api-errors`) are `string` (were `string | null`):
+  `integration_connections.label` is `NOT NULL` and never empty.
+  `ResolvedConnection.label` and `ResolvedConnection.accountId` are required
+  `string` (were optional `string | null`) for the same reason: the resolver
+  always sets both from `NOT NULL` columns.
+
+- **BREAKING: `ConnectionCandidate` gains a required `needsReconnection: boolean`**
+  (`@appstrate/core/integration`), mirrored as `needs_reconnection` on
+  `ResolutionFieldError.candidate_connections[]` (`@appstrate/core/api-errors`).
+  `must_choose_connection` now lists every accessible connection on a serving
+  auth, dead ones included — the list the picker shows — so a caller choosing
+  from the error can tell which candidates must be reconnected before they can
+  run. It is also raised when the actor's only candidates are connections
+  shared by other members: the fallback binds only the actor's own connection,
+  never a shared one implicitly. Code that builds a `ConnectionCandidate` must
+  set the field.
+
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: the refusal
+  of a `connection_overrides` argument that is a string or not an object now
+  names the array shape (`{"@scope/integration": ["<connection_id>", ...]}`).
+  The map's values are still not checked client-side: a scalar value reaches
+  the launch route, which refuses it with a `400`.
 
 ## [12.0.0] — 2026-09-25
 

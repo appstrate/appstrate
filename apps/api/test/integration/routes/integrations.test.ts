@@ -935,6 +935,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "a@x.test",
         clientRef: target.id,
       },
       {
@@ -944,6 +945,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "b@x.test",
         clientRef: target.id,
       },
       {
@@ -953,6 +955,7 @@ describe("OAuth client CRUD", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
+        label: "c@x.test",
         clientRef: other.id,
       },
     ]);
@@ -1445,6 +1448,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: shared,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -1463,51 +1467,51 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const put = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(put.status).toBe(200);
-    const created = (await put.json()) as { connection_id: string; enforce: boolean };
-    expect(created.connection_id).toBe(connId);
+    const created = (await put.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(false);
 
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
     expect(get.status).toBe(200);
-    const body = (await get.json()) as { connection_id: string; enforce: boolean };
-    expect(body.connection_id).toBe(connId);
+    const body = (await get.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(body.connection_ids).toEqual([connId]);
   });
 
-  it("upsert replaces the existing default (one row per integration) and honors enforce", async () => {
+  it("upsert replaces the existing default set and honors enforce", async () => {
     const a = await seedConn(true);
     const b = await seedConn(true);
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: a }),
+      body: JSON.stringify({ connection_ids: [a] }),
     });
     const put2 = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: b, enforce: true }),
+      body: JSON.stringify({ connection_ids: [b], enforce: true }),
     });
     expect(put2.status).toBe(200);
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
-    const body = (await get.json()) as { connection_id: string; enforce: boolean };
-    expect(body.connection_id).toBe(b);
+    const body = (await get.json()) as { connection_ids: string[]; enforce: boolean };
+    expect(body.connection_ids).toEqual([b]);
     expect(body.enforce).toBe(true);
   });
 
-  it("refuses a connection that is not sharedWithOrg (400)", async () => {
+  it("refuses a connection that is not sharedWithOrg (404)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it("deletes the default", async () => {
@@ -1515,7 +1519,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     const del = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "DELETE",
@@ -1541,7 +1545,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: memberHeaders,
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });

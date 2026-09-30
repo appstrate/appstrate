@@ -36,6 +36,7 @@ import { cookieScope, type CookieJar } from "@appstrate/afps-runtime/resolvers";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import type { Actor } from "../../lib/actor.ts";
+import type { RunBoundSelection } from "../integration-connections.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -75,6 +76,8 @@ interface ProxyCallInput {
    * against the actor's accessible set).
    */
   connectionId?: string;
+  /** The run named by `X-Run-Id` — confines the call to the connections it bound. */
+  run?: RunBoundSelection;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -111,7 +114,8 @@ interface ProxyCallInput {
    */
   cookieJar?: CookieJarAdapter;
   /**
-   * Jar lookup key (usually `sessionId`), combined with the connection id.
+   * Jar lookup key (usually `sessionId`). Combined with the resolved connection id, so two
+   * connections driven by one session never share cookies.
    */
   jarSessionId?: string;
   /** TTL applied on each write. Required when `cookieJar` is provided. */
@@ -230,17 +234,22 @@ function redactCredentialValues(value: string, fields: Record<string, string>): 
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
+  const selection = {
+    integrationId: input.integrationId,
+    spaceId: input.spaceId,
+    actor: input.actor,
+    ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    ...(input.run ? { run: input.run } : {}),
+  };
   let resolved;
+  // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
+  let refreshSelection;
   let connectionId: string;
   try {
-    const result = await resolveIntegrationProxyCredentials({
-      integrationId: input.integrationId,
-      spaceId: input.spaceId,
-      actor: input.actor,
-      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-    });
+    const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
     connectionId = result.connectionId;
+    refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCredentialError(err.message);
@@ -475,12 +484,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // fresh body stream).
     if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
       try {
-        const refreshedResult = await forceRefreshIntegrationProxyCredentials({
-          integrationId: input.integrationId,
-          spaceId: input.spaceId,
-          actor: input.actor,
-          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-        });
+        const refreshedResult = await forceRefreshIntegrationProxyCredentials(refreshSelection);
         const refreshed = refreshedResult?.payload ?? null;
         if (refreshed) {
           // Rebuild the credential header from the rotated token. Drop the
@@ -521,12 +525,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // can signal the client to retry itself with a fresh body stream.
   if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
     try {
-      await forceRefreshIntegrationProxyCredentials({
-        integrationId: input.integrationId,
-        spaceId: input.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      });
+      await forceRefreshIntegrationProxyCredentials(refreshSelection);
     } catch {
       // Refresh itself failed (invalid_grant, revoked token, etc.) —
       // surface the 401 as-is; the caller will handle re-authentication.

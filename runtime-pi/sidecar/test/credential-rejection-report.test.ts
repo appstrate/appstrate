@@ -56,14 +56,14 @@ describe("credential rejection signal", () => {
       calls.push({ url, init });
       return new Response(null, { status: 502 });
     }) as unknown as typeof fetch;
-    await postIntegrationCredentialsRefresh("@appstrate/ssh", {
+    await postIntegrationCredentialsRefresh("@appstrate/ssh", "conn-web", {
       platformApiUrl: "http://platform",
       runToken: "rt",
       fetchFn,
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe(
-      "http://platform/internal/integration-credentials/@appstrate/ssh/refresh",
+      "http://platform/internal/integration-credentials/@appstrate/ssh/refresh?connection_id=conn-web",
     );
     expect(calls[0]!.init?.method).toBe("POST");
     expect(calls[0]!.init?.headers).toEqual({ Authorization: "Bearer rt" });

@@ -4,8 +4,9 @@
  * The launches the SPA builds before `useRunAgent` puts them on the wire.
  *
  * The retry of a launch refused with `409 missing_integration_connection` only
- * adds connection picks; dropping anything else changes the run — or gets it
- * refused, as the input did (#1539). "Lancer avec options…" sends an option
+ * touches connection picks (adds the modal's, drops one the 409 refuses); dropping
+ * anything else changes the run — or gets it refused, as the input did (#1539).
+ * A second 409 retries the first retry, not the original launch. "Lancer avec options…" sends an option
  * only when set, so an untouched modal launches what plain "Lancer" does.
  */
 
@@ -15,16 +16,20 @@ import { launchFromOptions, retryLaunch } from "../run-launch.ts";
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {
     expect(
-      retryLaunch({ input: { prompt: "bonjour" }, version: "draft" }, { "@acme/crm": "conn_1" }),
+      retryLaunch(
+        { input: { prompt: "bonjour" }, version: "draft" },
+        { "@acme/crm": ["conn_1"] },
+        [],
+      ),
     ).toEqual({
       input: { prompt: "bonjour" },
       version: "draft",
-      connectionOverrides: { "@acme/crm": "conn_1" },
+      connectionOverrides: { "@acme/crm": ["conn_1"] },
     });
   });
 
   it("replays a rerun_from launch without inventing an input", () => {
-    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, {})).toEqual({
+    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, {}, [])).toEqual({
       rerun_from: "run_1",
       version: "1.0.0",
       connectionOverrides: {},
@@ -39,16 +44,86 @@ describe("retryLaunch", () => {
       generation: { temperature: 0.2 },
       dependencyOverrides: { "@acme/skill": "draft" },
     };
-    expect(retryLaunch(launch, {})).toEqual({ ...launch, connectionOverrides: {} });
+    expect(retryLaunch(launch, {}, [])).toEqual({ ...launch, connectionOverrides: {} });
   });
 
   it("merges the picks over the launch's own connection picks", () => {
     expect(
       retryLaunch(
-        { connectionOverrides: { "@acme/crm": "conn_old", "@acme/mail": "conn_mail" } },
-        { "@acme/crm": "conn_new" },
+        { connectionOverrides: { "@acme/crm": ["conn_old"], "@acme/mail": ["conn_mail"] } },
+        { "@acme/crm": ["conn_new"] },
+        [],
       ).connectionOverrides,
-    ).toEqual({ "@acme/crm": "conn_new", "@acme/mail": "conn_mail" });
+    ).toEqual({ "@acme/crm": ["conn_new"], "@acme/mail": ["conn_mail"] });
+  });
+
+  it("drops the launch's own pick the 409 refuses: replayed, it would be refused again", () => {
+    expect(
+      retryLaunch(
+        {
+          connectionOverrides: {
+            "@acme/crm": ["conn_outside"],
+            "@acme/notion": ["conn_gone"],
+            "@acme/drive": ["conn_no_tool"],
+            "@acme/mail": ["conn_mail"],
+          },
+        },
+        {},
+        [
+          { field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" },
+          {
+            field: "integrations.@acme/notion",
+            code: "override_connection_unavailable",
+            message: "unavailable",
+          },
+          {
+            field: "integrations.@acme/drive",
+            code: "auth_serves_no_selected_tool",
+            message: "no tool",
+            connection_id: "conn_no_tool",
+          },
+        ],
+      ).connectionOverrides,
+    ).toEqual({ "@acme/mail": ["conn_mail"] });
+  });
+
+  it("keeps the launch's own pick under any other code: the retry never switches account", () => {
+    const connectionOverrides = {
+      "@acme/crm": ["conn_expired"],
+      "@acme/drive": ["conn_drive"],
+    };
+    expect(
+      retryLaunch({ connectionOverrides }, {}, [
+        {
+          field: "integrations.@acme/crm",
+          code: "needs_reconnection",
+          message: "reconnect",
+          connection_id: "conn_expired",
+        },
+        {
+          // Names the pin's connection, not the launch's pick.
+          field: "integrations.@acme/drive",
+          code: "auth_serves_no_selected_tool",
+          message: "no tool",
+          connection_id: "conn_pinned",
+        },
+      ]).connectionOverrides,
+    ).toEqual(connectionOverrides);
+  });
+
+  it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
+    // The launcher keeps each retried launch, so the next retry starts from it.
+    const first = retryLaunch(
+      { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
+      {},
+      [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
+    );
+    // The second 409 names another integration, with nothing to pick: crm must not come back.
+    expect(
+      retryLaunch(first, {}, [
+        { field: "integrations.@acme/drive", code: "not_connected", message: "connect" },
+      ]).connectionOverrides,
+    ).toEqual({ "@acme/mail": ["conn_mail"] });
   });
 });
 
@@ -68,7 +143,7 @@ describe("launchFromOptions", () => {
           model_id_override: "model_1",
           generation_config_override: { temperature: 0.2 },
           proxy_id_override: "proxy_1",
-          connection_overrides: { "@acme/crm": "conn_1" },
+          connection_overrides: { "@acme/crm": ["conn_1"] },
         },
         dependencyOverrides: { "@acme/skill": "draft" },
       }),
@@ -78,7 +153,7 @@ describe("launchFromOptions", () => {
       modelId: "model_1",
       generation: { temperature: 0.2 },
       proxyId: "proxy_1",
-      connectionOverrides: { "@acme/crm": "conn_1" },
+      connectionOverrides: { "@acme/crm": ["conn_1"] },
       dependencyOverrides: { "@acme/skill": "draft" },
     });
   });
