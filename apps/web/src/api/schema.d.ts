@@ -10463,7 +10463,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10562,7 +10562,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10666,7 +10666,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10770,7 +10770,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
@@ -10869,7 +10869,7 @@ export interface operations {
                 "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
-                /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
+                /** @description Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. */
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;

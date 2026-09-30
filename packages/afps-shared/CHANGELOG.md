@@ -26,7 +26,7 @@ consumer's publish rather than the first user's `npm install`.
   issue #1627) — a pattern that is exactly one `{$credential.<field>}` at index 0,
   followed by nothing or a placeholder-free `/` suffix (`{$credential.site_url}/**`),
   renders the field as a whole URL: it must parse as an absolute `http:`/`https:`
-  URL with a host, no userinfo or fragment and no `*`; it renders as
+  URL with a host, no userinfo, no `#`, no empty `?` and no `*`; it renders as
   origin + path (a bare entry keeps the exact path; before a suffix one
   trailing `/` is dropped), then the suffix. A query string is kept for a bare
   entry only (`{$credential.webhook_url}` — Google Chat, Power Automate), which

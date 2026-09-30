@@ -155,6 +155,8 @@ describe("renderAuthorizedUris — URL form", () => {
     "https://user@shop.example.com",
     "https://shop.example.com/?a=1",
     "https://shop.example.com/#x",
+    "https://shop.example.com/?",
+    "https://shop.example.com/#",
     "https://*.example.com",
     "https://shop.example.com/*",
     "",
@@ -181,6 +183,10 @@ describe("renderAuthorizedUris — URL form", () => {
     "https://flow.example.com/hook?sig=s#x",
     "https://u@flow.example.com/hook?sig=s",
     "https://flow.example.com/hook?sig=*",
+    // Rendered without the `?` / `#`, while a call to the stored URL keeps it: never a match.
+    "https://flow.example.com/hook?",
+    "https://flow.example.com/hook#",
+    "https://flow.example.com/hook?#",
   ]) {
     it(`drops a bare entry whose value is ${JSON.stringify(bad)}`, () => {
       expect(renderAuthorizedUris(["{$credential.url}"], { url: bad })).toEqual([]);
@@ -223,6 +229,13 @@ describe("unrenderableAuthorizedUriFields", () => {
     expect(site!.expected).toContain("query string");
     expect(hook!.expected).not.toContain("query string");
     expect(host!.expected).toContain("host name");
+  });
+
+  it("names a bare entry whose value ends in an empty '?' or '#'", () => {
+    for (const hook of ["https://h.example.com/hook?", "https://h.example.com/hook#"]) {
+      const [entry] = unrenderableAuthorizedUriFields(["{$credential.hook}"], { hook });
+      expect(entry).toEqual({ field: "hook", expected: expect.stringContaining("empty '?'") });
+    }
   });
 
   it("never echoes the value", () => {

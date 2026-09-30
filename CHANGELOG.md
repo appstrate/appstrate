@@ -45,6 +45,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - a space that blocks personal connections (`block_user_connections`) so
     that members fall through to an admin's shared connection must make it the
     org default (`PUT /api/integrations/{packageId}/default`).
+- **Run `bun scripts/migration/0034-integration-url-allowlists.ts --apply`
+  just before the deploy** (env loaded, it decrypts): it adds `api_url`
+  (`https://<account_name>.api-us1.com`) to ActiveCampaign connections without
+  one, which the running release ignores, and lists every ActiveCampaign,
+  WordPress, WooCommerce and Webhooks connection whose URL field will have its
+  calls refused (exit 1 while any remains: its owner fixes the URL, an
+  ActiveCampaign account outside `api-us1.com` its `api_url`). Re-run the dry
+  run after the deploy.
 
 ### Added
 
@@ -224,6 +232,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   visible token: 180 to 201 ms sooner
   (`mcpHandshakeMs` from ~200 ms to ~1 ms). The `chat turn construction` log
   line gains `mcpSurfaceCached`.
+- **ActiveCampaign, WordPress, WooCommerce and Webhooks send their credential
+  only to the connection's own URL** (#1627, #1628), no longer to any host
+  (`allow_all_uris`). ActiveCampaign 1.0.3 adds a required `api_url`; prefer
+  `{{api_url}}/…` in new prompts, while `https://{{account_name}}.api-us1.com/…`
+  keeps working for accounts on `api-us1.com`. Webhooks admits its exact URL
+  only, redirect hops included. A connection whose URL field does not qualify
+  is refused when it is created or updated.
 
 ### Fixed
 

@@ -77,11 +77,11 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
 }
 
 /**
- * Absolute http(s) URL, no userinfo/fragment/`*`, as origin + path (a root path drops). A query
- * is kept only for a bare entry (`allowQuery`), which is an exact match it cannot widen.
+ * Absolute http(s) URL, no userinfo/`#`/`*`/empty `?`, as origin + path (a root path drops). A
+ * query is kept only for a bare entry (`allowQuery`), which is an exact match it cannot widen.
  */
 function renderUrlValue(value: unknown, allowQuery: boolean): string | null {
-  if (typeof value !== "string" || value.includes("*")) return null;
+  if (typeof value !== "string" || value.includes("*") || value.includes("#")) return null;
   let url: URL;
   try {
     url = new URL(value);
@@ -89,14 +89,17 @@ function renderUrlValue(value: unknown, allowQuery: boolean): string | null {
     return null;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-  if (!url.hostname || url.username || url.password || url.hash) return null;
+  if (!url.hostname || url.username || url.password) return null;
+  // An empty `?` vanishes from `url.search`, but a call to the stored URL keeps it: never a match.
+  if (value.includes("?") && !url.search) return null;
   if (url.search && !allowQuery) return null;
   const path = url.pathname === "/" && !url.search ? "" : url.pathname;
   return url.origin + path + url.search;
 }
 
 const EXPECTED_AUTHORITY = "a host name or port (letters, digits, '.' and '-' only)";
-const EXPECTED_URL = "an absolute http:// or https:// URL without userinfo, fragment or '*'";
+const EXPECTED_URL =
+  "an absolute http:// or https:// URL without userinfo, fragment ('#'), empty '?' or '*'";
 const EXPECTED_URL_NO_QUERY =
   "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
 

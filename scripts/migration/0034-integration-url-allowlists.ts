@@ -14,18 +14,19 @@
  * updated connection is refused at connect time instead (`unrenderableAuthorizedUriFields`).
  *
  * 1. Rewrite: an ActiveCampaign connection without `api_url` gets
- *    `https://<account_name>.api-us1.com`, and `account_name` (gone from 1.0.3) is removed. An
- *    account on another API domain must then edit its connection. Skipped when `account_name` is
- *    not a hostname label. Idempotent: it only touches connections still holding `account_name`.
+ *    `https://<account_name>.api-us1.com`. `account_name` is kept: 1.0.3 still declares it
+ *    (optional), so prompts calling `https://{{account_name}}.api-us1.com/…` keep resolving. An
+ *    account on another API domain must then edit its `api_url`. Skipped when `account_name` is
+ *    missing or not a hostname label. Idempotent: a connection holding `api_url` is never touched.
  * 2. Audit: every connection of the four integrations whose URL field would not render, with its
  *    id and the form the field must take — never a value. Same rules as the runtime and the
  *    connect-time check (`unrenderableAuthorizedUriFields`): a query string is refused before a
  *    `/**` suffix, allowed in the bare `webhook_url` entry.
  *
- * Run `--apply` just BEFORE the deploy: the running 1.0.2 manifest reads neither `account_name` nor
- * `api_url` at runtime (`allow_all_uris`), so no call is refused in between; re-run the dry run
- * after the deploy. Dry run by default (rolled back). Exit 1 when any connection is refused, in
- * both modes: its owner must fix the URL in the connection.
+ * Run `--apply` just BEFORE the deploy: it only adds a field, which the running 1.0.2 manifest
+ * ignores (its `allow_all_uris` and `{{account_name}}` substitution are unchanged), so no call is
+ * refused in between; re-run the dry run after the deploy. Dry run by default (rolled back). Exit
+ * 1 when any connection is refused, in both modes: its owner must fix the URL in the connection.
  */
 
 import { SQL } from "bun";
@@ -76,21 +77,19 @@ try {
       }
       let outputs = envelope.outputs;
 
-      if (row.pkg === ACTIVECAMPAIGN && "account_name" in outputs) {
-        const { account_name: account, ...rest } = outputs;
-        const derivable = typeof account === "string" && HOST_LABEL.test(account);
-        if (rest.api_url || derivable) {
-          outputs = rest.api_url ? rest : { ...rest, api_url: `https://${account}.api-us1.com` };
+      if (row.pkg === ACTIVECAMPAIGN && !outputs.api_url) {
+        const account = outputs.account_name;
+        if (typeof account === "string" && HOST_LABEL.test(account)) {
+          outputs = { ...outputs, api_url: `https://${account}.api-us1.com` };
           const ciphertext = encryptCredentialEnvelope({ outputs, inputs: envelope.inputs });
           await tx`
             UPDATE integration_connections
                SET credentials_encrypted = ${ciphertext}, updated_at = now()
              WHERE id = ${row.id}`;
           rewritten += 1;
-          const what = rest.api_url ? "account_name dropped" : "api_url from account_name";
-          out(`  rewrite ${row.pkg} ${row.id}: ${what}`);
+          out(`  rewrite ${row.pkg} ${row.id}: api_url from account_name`);
         } else {
-          out(`  skip    ${row.pkg} ${row.id}: account_name is not a hostname label`);
+          out(`  skip    ${row.pkg} ${row.id}: account_name missing or not a hostname label`);
         }
       }
 

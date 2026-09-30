@@ -20,6 +20,10 @@
         "schema": {
           "type": "object",
           "properties": {
+            "account_name": {
+              "type": "string",
+              "description": "Optional — account subdomain (yourname in yourname.api-us1.com), kept for https://{{account_name}}.api-us1.com URLs; calls are allowed under api_url only"
+            },
             "api_url": {
               "type": "string",
               "description": "API URL from Settings → Developer, with https:// (e.g. https://youraccount.api-us1.com)"
