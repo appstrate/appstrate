@@ -21,8 +21,8 @@
  * Reading stays lenient on purpose — any 0.x loads — so this build is the
  * only place that notices a spec bump leaving them behind.
  *
- * No source may inject a credential through `delivery.http` under
- * `allow_all_uris: true` (`findAllowAllInjectedCredential`, #1628).
+ * No source may inject a credential over HTTP (`delivery.http` or the auth-type
+ * default) under `allow_all_uris: true` (`findAllowAllInjectedCredential`, #1628).
  *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
@@ -33,6 +33,7 @@ import { join, posix, relative, sep } from "node:path";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
+import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 
 /**
  * Recursively collect every regular file under `root` into the zip
@@ -88,10 +89,17 @@ export function findSchemaVersionDrift(
   return drift;
 }
 
+type GatedAuth = {
+  type?: unknown;
+  allow_all_uris?: unknown;
+  delivery?: { http?: AfpsHttpDelivery };
+};
+
 /**
- * Every auth that injects a credential through `delivery.http` while declaring
- * `allow_all_uris: true` — the proxy would send that secret to any host a caller
- * names (#1628). Pure, like `findSchemaVersionDrift`.
+ * Every auth that injects a credential over HTTP while declaring `allow_all_uris: true` — the
+ * proxy would send that secret to any host a caller names (#1628). "Injects" is what the delivery
+ * engine plans: an explicit `delivery.http`, or its auth-type default (oauth2 Bearer, api_key
+ * X-Api-Key, basic). Pure, like `findSchemaVersionDrift`.
  */
 export function findAllowAllInjectedCredential(
   manifests: Iterable<readonly [dirName: string, manifest: unknown]>,
@@ -101,8 +109,10 @@ export function findAllowAllInjectedCredential(
     const auths = (manifest as { auths?: unknown } | null)?.auths;
     if (typeof auths !== "object" || auths === null) continue;
     for (const [authKey, auth] of Object.entries(auths)) {
-      const a = auth as { allow_all_uris?: unknown; delivery?: { http?: unknown } } | null;
-      if (a?.allow_all_uris === true && a.delivery?.http) offenders.push({ dirName, authKey });
+      const a = auth as GatedAuth | null;
+      if (a?.allow_all_uris !== true) continue;
+      const type = typeof a.type === "string" ? a.type : "";
+      if (resolveAfpsHttpDelivery(type, {}, a.delivery?.http)) offenders.push({ dirName, authKey });
     }
   }
   return offenders;
@@ -157,7 +167,7 @@ async function main() {
   const openInjection = findAllowAllInjectedCredential(manifests);
   if (openInjection.length > 0) {
     console.error(
-      `\nALLOW ALL URIS: ${openInjection.length} auth(s) inject a credential via delivery.http under allow_all_uris: true:`,
+      `\nALLOW ALL URIS: ${openInjection.length} auth(s) inject a credential over HTTP under allow_all_uris: true:`,
     );
     for (const { dirName, authKey } of openInjection) {
       console.error(`  - ${dirName} auths.${authKey}`);

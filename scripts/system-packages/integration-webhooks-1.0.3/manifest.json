@@ -22,7 +22,7 @@
           "properties": {
             "webhook_url": {
               "type": "string",
-              "description": "Full target webhook URL with https:// and no query string — calls may reach this exact URL only"
+              "description": "Full target webhook URL with https://, query string included (e.g. ?key=…&token=…) — calls may reach this exact URL only"
             },
             "secret_header_name": {
               "type": "string",

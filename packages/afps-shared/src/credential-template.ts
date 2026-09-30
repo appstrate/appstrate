@@ -76,8 +76,11 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
   return { field: head[1]!, suffix };
 }
 
-/** Absolute http(s) URL, no userinfo/query/fragment/`*`, as origin + path (a root path drops). */
-function renderUrlValue(value: unknown): string | null {
+/**
+ * Absolute http(s) URL, no userinfo/fragment/`*`, as origin + path (a root path drops). A query
+ * is kept only for a bare entry (`allowQuery`), which is an exact match it cannot widen.
+ */
+function renderUrlValue(value: unknown, allowQuery: boolean): string | null {
   if (typeof value !== "string" || value.includes("*")) return null;
   let url: URL;
   try {
@@ -86,8 +89,44 @@ function renderUrlValue(value: unknown): string | null {
     return null;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-  if (!url.hostname || url.username || url.password || url.search || url.hash) return null;
-  return url.pathname === "/" ? url.origin : url.origin + url.pathname;
+  if (!url.hostname || url.username || url.password || url.hash) return null;
+  if (url.search && !allowQuery) return null;
+  const path = url.pathname === "/" && !url.search ? "" : url.pathname;
+  return url.origin + path + url.search;
+}
+
+const EXPECTED_AUTHORITY = "a host name or port (letters, digits, '.' and '-' only)";
+const EXPECTED_URL = "an absolute http:// or https:// URL without userinfo, fragment or '*'";
+const EXPECTED_URL_NO_QUERY =
+  "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
+
+/** A field that keeps its `authorized_uris` entry from rendering, and the form it must take. */
+export interface UnrenderableUriField {
+  field: string;
+  expected: string;
+}
+
+function renderPattern(
+  pattern: string,
+  fields: Readonly<Record<string, unknown>>,
+): { uri: string } | UnrenderableUriField {
+  const urlForm = parseUrlFormPattern(pattern);
+  if (urlForm) {
+    const bare = urlForm.suffix === "";
+    const base = renderUrlValue(fields[urlForm.field], bare);
+    if (base === null) {
+      return { field: urlForm.field, expected: bare ? EXPECTED_URL : EXPECTED_URL_NO_QUERY };
+    }
+    // A suffix brings its own `/`; a bare entry keeps the value's exact path (`…/hook/`).
+    return { uri: bare ? base : base.replace(/\/$/, "") + urlForm.suffix };
+  }
+  const bad = credentialTemplateRefs(pattern).find((ref) => {
+    const value = fields[ref];
+    return typeof value !== "string" || !AUTHORITY_VALUE.test(value);
+  });
+  if (bad !== undefined) return { field: bad, expected: EXPECTED_AUTHORITY };
+  // Every referenced value was just checked to be a string.
+  return { uri: renderCredentialTemplate(pattern, fields as Readonly<Record<string, string>>) };
 }
 
 /**
@@ -101,18 +140,23 @@ export function renderAuthorizedUris(
   fields: Readonly<Record<string, string>>,
 ): string[] {
   return patterns.flatMap((pattern) => {
-    const urlForm = parseUrlFormPattern(pattern);
-    if (urlForm) {
-      const base = renderUrlValue(fields[urlForm.field]);
-      if (base === null) return [];
-      // A suffix brings its own `/`; a bare entry keeps the value's exact path (`…/hook/`).
-      return [urlForm.suffix ? base.replace(/\/$/, "") + urlForm.suffix : base];
-    }
-    const refs = credentialTemplateRefs(pattern);
-    const renderable = refs.every((ref) => {
-      const value = fields[ref];
-      return typeof value === "string" && AUTHORITY_VALUE.test(value);
-    });
-    return renderable ? [renderCredentialTemplate(pattern, fields)] : [];
+    const rendered = renderPattern(pattern, fields);
+    return "uri" in rendered ? [rendered.uri] : [];
   });
+}
+
+/**
+ * The fields whose value would make {@link renderAuthorizedUris} drop an entry, once per field,
+ * so a connection can be refused when it is written rather than on every later call (#1627).
+ */
+export function unrenderableAuthorizedUriFields(
+  patterns: readonly string[],
+  fields: Readonly<Record<string, unknown>>,
+): UnrenderableUriField[] {
+  const byField = new Map<string, UnrenderableUriField>();
+  for (const pattern of patterns) {
+    const rendered = renderPattern(pattern, fields);
+    if (!("uri" in rendered) && !byField.has(rendered.field)) byField.set(rendered.field, rendered);
+  }
+  return [...byField.values()];
 }

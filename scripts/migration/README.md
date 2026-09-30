@@ -948,9 +948,12 @@ client would open `./data/pglite`) and prints the database it reached first.
 **Not a runbook.** `@appstrate/activecampaign` 1.0.3, `wordpress` / `woocommerce` 1.0.4 and
 `webhooks` 1.0.3 replace `allow_all_uris` with `authorized_uris` rendered from one URL field of
 the connection (#1627, #1628); a connection whose field does not render has every call refused.
+From this release a new or updated connection with such a value is refused at connect time, so
+only connections stored before it can be in that state.
 `0034` gives each ActiveCampaign connection `api_url = https://<account_name>.api-us1.com` and
 drops `account_name` (gone from 1.0.3), then lists every connection of the four integrations
-whose URL field would not render — id and reason, never a value. Run `--apply` just BEFORE the
+whose URL field would not render — id and the form the field must take, never a value (a
+query string passes only in the bare `webhook_url` entry). Run `--apply` just BEFORE the
 deploy (the running 1.0.2 manifest ignores both fields under `allow_all_uris`, so nothing is
 refused in between), then the dry run again after it.
 

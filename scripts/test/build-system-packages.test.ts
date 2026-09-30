@@ -64,12 +64,15 @@ describe("findSchemaVersionDrift", () => {
 /** An integration whose `primary` auth carries `auth`. */
 const withAuth = (auth: unknown) => ({ name: "@appstrate/zoom", auths: { primary: auth } });
 const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
+const CUSTOM = { type: "custom" };
 
 describe("findAllowAllInjectedCredential", () => {
   it("accepts an injected credential bound by authorized_uris, templated or literal", () => {
     for (const authorized_uris of [["https://api.zoom.us/**"], ["{$credential.site_url}/**"]]) {
       expect(
-        findAllowAllInjectedCredential([[DIR, withAuth({ authorized_uris, delivery: HTTP })]]),
+        findAllowAllInjectedCredential([
+          [DIR, withAuth({ ...CUSTOM, authorized_uris, delivery: HTTP })],
+        ]),
       ).toEqual([]);
     }
   });
@@ -77,13 +80,27 @@ describe("findAllowAllInjectedCredential", () => {
   it("accepts allow_all_uris when nothing is injected over http", () => {
     for (const delivery of [undefined, { env: { TOKEN: { value: "{$credential.token}" } } }]) {
       expect(
-        findAllowAllInjectedCredential([[DIR, withAuth({ allow_all_uris: true, delivery })]]),
+        findAllowAllInjectedCredential([
+          [DIR, withAuth({ ...CUSTOM, allow_all_uris: true, delivery })],
+        ]),
       ).toEqual([]);
+    }
+  });
+
+  it("rejects an auth-type default header under allow_all_uris, without delivery.http", () => {
+    for (const type of ["oauth2", "api_key", "basic"]) {
+      const env = { env: { TOKEN: { value: "{$credential.token}" } } };
+      expect(
+        findAllowAllInjectedCredential([
+          [DIR, withAuth({ type, allow_all_uris: true, delivery: env })],
+        ]),
+      ).toEqual([{ dirName: DIR, authKey: "primary" }]);
     }
   });
 
   it("rejects delivery.http under allow_all_uris, even next to an authorized_uris list", () => {
     const auth = {
+      ...CUSTOM,
       authorized_uris: ["https://*.api-us1.com/**"],
       allow_all_uris: true,
       delivery: HTTP,
@@ -100,9 +117,9 @@ describe("findAllowAllInjectedCredential", () => {
           "integration-a-1.0.0",
           {
             auths: {
-              primary: { allow_all_uris: true, delivery: HTTP },
-              secondary: { allow_all_uris: false, delivery: HTTP },
-              tertiary: { allow_all_uris: true, delivery: HTTP },
+              primary: { ...CUSTOM, allow_all_uris: true, delivery: HTTP },
+              secondary: { ...CUSTOM, allow_all_uris: false, delivery: HTTP },
+              tertiary: { ...CUSTOM, allow_all_uris: true, delivery: HTTP },
             },
           },
         ],

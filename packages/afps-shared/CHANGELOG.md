@@ -26,11 +26,18 @@ consumer's publish rather than the first user's `npm install`.
   issue #1627) — a pattern that is exactly one `{$credential.<field>}` at index 0,
   followed by nothing or a placeholder-free `/` suffix (`{$credential.site_url}/**`),
   renders the field as a whole URL: it must parse as an absolute `http:`/`https:`
-  URL with a host, no userinfo, query or fragment and no `*`; it renders as
+  URL with a host, no userinfo or fragment and no `*`; it renders as
   origin + path (a bare entry keeps the exact path; before a suffix one
-  trailing `/` is dropped), then the suffix. Any other value drops
-  the entry. New export `parseUrlFormPattern(pattern)` splits such a pattern into
-  `{ field, suffix }` (`null` otherwise). Authority-form patterns are unchanged.
+  trailing `/` is dropped), then the suffix. A query string is kept for a bare
+  entry only (`{$credential.webhook_url}` — Google Chat, Power Automate), which
+  is an exact match the query cannot widen; before a suffix it drops the entry.
+  Any other value drops the entry. New export `parseUrlFormPattern(pattern)`
+  splits such a pattern into `{ field, suffix }` (`null` otherwise).
+  Authority-form patterns are unchanged.
+- **`unrenderableAuthorizedUriFields(patterns, fields)`** (`./credential-template`,
+  issue #1627) — the fields whose value would make `renderAuthorizedUris` drop an
+  entry, once per field, each with the form it must take (`{ field, expected }`,
+  never the value), so a connection can be refused when it is written.
 
 ## [0.9.1] — unreleased
 

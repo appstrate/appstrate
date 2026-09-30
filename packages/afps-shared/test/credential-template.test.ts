@@ -6,6 +6,7 @@ import {
   credentialTemplateRefs,
   parseUrlFormPattern,
   renderAuthorizedUris,
+  unrenderableAuthorizedUriFields,
 } from "../src/credential-template.ts";
 
 describe("credentialTemplateRefs", () => {
@@ -166,5 +167,70 @@ describe("renderAuthorizedUris — URL form", () => {
   it("drops the entry when the field is missing or inherited", () => {
     expect(renderAuthorizedUris([site], {})).toEqual([]);
     expect(renderAuthorizedUris(["{$credential.constructor}/**"], {})).toEqual([]);
+  });
+
+  it("keeps the query of a bare entry (Google Chat, Power Automate webhooks)", () => {
+    const hook = "https://chat.googleapis.com/v1/spaces/S/messages?key=k&token=t";
+    expect(renderAuthorizedUris(["{$credential.url}"], { url: hook })).toEqual([hook]);
+    expect(
+      renderAuthorizedUris(["{$credential.url}"], { url: "https://flow.example.com?sig=s" }),
+    ).toEqual(["https://flow.example.com/?sig=s"]);
+  });
+
+  for (const bad of [
+    "https://flow.example.com/hook?sig=s#x",
+    "https://u@flow.example.com/hook?sig=s",
+    "https://flow.example.com/hook?sig=*",
+  ]) {
+    it(`drops a bare entry whose value is ${JSON.stringify(bad)}`, () => {
+      expect(renderAuthorizedUris(["{$credential.url}"], { url: bad })).toEqual([]);
+    });
+  }
+});
+
+describe("unrenderableAuthorizedUriFields", () => {
+  const patterns = [
+    "https://static.example.com/**",
+    "{$credential.site_url}/**",
+    "{$credential.site_url}/wp-json/**",
+    "{$credential.hook}",
+    "ssh://{$credential.host}:{$credential.port}",
+  ];
+
+  it("is empty when every templated entry renders", () => {
+    const fields = {
+      site_url: "https://shop.example.com",
+      hook: "https://hooks.example.com/x?key=k",
+      host: "box.example.com",
+      port: "22",
+    };
+    expect(unrenderableAuthorizedUriFields(patterns, fields)).toEqual([]);
+  });
+
+  it("names each offending field once, with the form it must take", () => {
+    const fields = {
+      site_url: "mysite.com",
+      hook: "https://h.example.com#x",
+      host: "a/b",
+      port: 22,
+    };
+    expect(unrenderableAuthorizedUriFields(patterns, fields).map((f) => f.field)).toEqual([
+      "site_url",
+      "hook",
+      "host",
+    ]);
+    const [site, hook, host] = unrenderableAuthorizedUriFields(patterns, fields);
+    expect(site!.expected).toContain("query string");
+    expect(hook!.expected).not.toContain("query string");
+    expect(host!.expected).toContain("host name");
+  });
+
+  it("never echoes the value", () => {
+    const [entry] = unrenderableAuthorizedUriFields(["{$credential.u}/**"], { u: "sk-secret" });
+    expect(JSON.stringify(entry)).not.toContain("sk-secret");
+  });
+
+  it("ignores untemplated patterns", () => {
+    expect(unrenderableAuthorizedUriFields(["https://api.example.com/**"], {})).toEqual([]);
   });
 });

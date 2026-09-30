@@ -262,6 +262,22 @@ describe("proxyCall — credential-exfiltration guard", () => {
       await expectRefused(call(up.fetchImpl, `${ATTACKER}/wp-json/x`, extra), HEADER_SECRET);
       expect(up.hits).toEqual([`${ALLOWED}/wp-json/x`]);
     });
+
+    it("matches a bare {{webhook_url}} with a query exactly — the query cannot widen it", async () => {
+      const hook = `${ALLOWED}/hook?key=a`;
+      await seedEndpointIntegration(
+        ctx,
+        { webhook_url: hook, secret_header_value: HEADER_SECRET },
+        { authorizedUris: ["{$credential.webhook_url}"], allowAllUris: false },
+      );
+      const up = upstream();
+      const extra = { headers: { "X-Secret": "{{secret_header_value}}" } };
+      expect((await call(up.fetchImpl, "{{webhook_url}}", extra)).status).toBe(200);
+      for (const other of [`${ALLOWED}/hook?key=b`, `${ALLOWED}/hook`, `${hook}&x=1`]) {
+        await expectRefused(call(up.fetchImpl, other, extra), HEADER_SECRET);
+      }
+      expect(up.hits).toEqual([hook]);
+    });
   });
 
   describe("allow_all_uris without authorized_uris", () => {

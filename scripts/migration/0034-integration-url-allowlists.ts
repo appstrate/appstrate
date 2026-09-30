@@ -10,14 +10,17 @@
  * `@appstrate/activecampaign` 1.0.3, `wordpress` / `woocommerce` 1.0.4 and `webhooks` 1.0.3 drop
  * `allow_all_uris` for `authorized_uris` rendered from one URL field of the connection
  * (`{$credential.api_url}/**`, `{$credential.site_url}/**`, `{$credential.webhook_url}`). A
- * connection whose field does not render has every call refused.
+ * connection whose field does not render has every call refused; from this release a new or
+ * updated connection is refused at connect time instead (`unrenderableAuthorizedUriFields`).
  *
  * 1. Rewrite: an ActiveCampaign connection without `api_url` gets
  *    `https://<account_name>.api-us1.com`, and `account_name` (gone from 1.0.3) is removed. An
  *    account on another API domain must then edit its connection. Skipped when `account_name` is
  *    not a hostname label. Idempotent: it only touches connections still holding `account_name`.
  * 2. Audit: every connection of the four integrations whose URL field would not render, with its
- *    id and the reason — never a value. Same renderer as the runtime (`renderAuthorizedUris`).
+ *    id and the form the field must take — never a value. Same rules as the runtime and the
+ *    connect-time check (`unrenderableAuthorizedUriFields`): a query string is refused before a
+ *    `/**` suffix, allowed in the bare `webhook_url` entry.
  *
  * Run `--apply` just BEFORE the deploy: the running 1.0.2 manifest reads neither `account_name` nor
  * `api_url` at runtime (`allow_all_uris`), so no call is refused in between; re-run the dry run
@@ -26,38 +29,21 @@
  */
 
 import { SQL } from "bun";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
 import { decryptCredentials, encryptCredentialEnvelope } from "@appstrate/connect";
 
-/** `auths.primary` URL field and `authorized_uris` of each integration, as shipped. */
-const URL_AUTHS: Record<string, { field: string; patterns: string[] }> = {
-  "@appstrate/activecampaign": { field: "api_url", patterns: ["{$credential.api_url}/**"] },
-  "@appstrate/wordpress": { field: "site_url", patterns: ["{$credential.site_url}/**"] },
-  "@appstrate/woocommerce": { field: "site_url", patterns: ["{$credential.site_url}/**"] },
-  "@appstrate/webhooks": { field: "webhook_url", patterns: ["{$credential.webhook_url}"] },
+/** `auths.primary.authorized_uris` of each integration, as shipped. */
+const URL_AUTHS: Record<string, string[]> = {
+  "@appstrate/activecampaign": ["{$credential.api_url}/**"],
+  "@appstrate/wordpress": ["{$credential.site_url}/**"],
+  "@appstrate/woocommerce": ["{$credential.site_url}/**"],
+  "@appstrate/webhooks": ["{$credential.webhook_url}"],
 };
 const ACTIVECAMPAIGN = "@appstrate/activecampaign";
 const HOST_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 
 type Envelope = { v: 2; outputs: Record<string, unknown>; inputs?: Record<string, unknown> };
 class DryRunRollback extends Error {}
-
-/** Why `value` does not render as a URL-form entry; never echoes the value. */
-function whyNotRendered(field: string, value: unknown): string {
-  if (typeof value !== "string" || value === "") return `missing ${field}`;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return `${field} is not an absolute URL`;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return `${field} is not http(s)`;
-  if (url.username || url.password) return `${field} carries userinfo`;
-  if (value.includes("?")) return `${field} carries a query string`;
-  if (value.includes("#")) return `${field} carries a fragment`;
-  if (value.includes("*")) return `${field} contains *`;
-  return `${field} does not render`;
-}
 
 const apply = process.argv.includes("--apply");
 const out = (line: string) => process.stdout.write(`${line}\n`);
@@ -108,13 +94,12 @@ try {
         }
       }
 
-      const { field, patterns } = URL_AUTHS[row.pkg]!;
-      const fields = Object.fromEntries(
-        Object.entries(outputs).filter((e): e is [string, string] => typeof e[1] === "string"),
-      );
-      if (renderAuthorizedUris(patterns, fields).length > 0) continue;
+      const [bad] = unrenderableAuthorizedUriFields(URL_AUTHS[row.pkg]!, outputs);
+      if (!bad) continue;
       refused += 1;
-      out(`  REFUSED ${row.pkg} ${row.id}: ${whyNotRendered(field, outputs[field])}`);
+      const value = outputs[bad.field];
+      const why = typeof value === "string" && value !== "" ? `must be ${bad.expected}` : "missing";
+      out(`  REFUSED ${row.pkg} ${row.id}: ${bad.field} ${why}`);
     }
 
     out(`${rows.length} connection(s) scanned, ${rewritten} rewritten, ${refused} refused`);

@@ -690,9 +690,14 @@ instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
 `"{$credential.webhook_url}"` for one exact URL. The placeholder comes first, alone,
 followed by nothing or a suffix starting with `/`; the field must be declared and
 `required`. Each connection's list is rendered from its value — an absolute
-`http(s)` URL without userinfo, query string, fragment or `*` — and a value that
-does not qualify drops the entry, so a connection left with no entry has every call
-refused.
+`http(s)` URL without userinfo, fragment or `*`, and without a query string unless
+the entry is the bare placeholder: `"{$credential.webhook_url}"` is matched exactly,
+so a Google Chat or Power Automate URL keeps its `?key=…&token=…` without widening
+anything, while a query before a `/**` suffix is refused. A value that does not
+qualify drops the entry, so a connection left with no entry has every call refused;
+the platform therefore refuses such a value when the connection is created or its
+credentials are updated (a 400 `validation_failed` naming `credentials.<field>` and
+the form it must take, never the value).
 Prefer the exact form when the host is shared between tenants (`hooks.slack.com`).
 Rendered entries never exempt a host from the SSRF blocklist, and never share cookies.
 
