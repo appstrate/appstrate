@@ -93,6 +93,11 @@ describe("integration connection — label minting", () => {
     expect((await connect(ctx.user.id, "default", "SK-…abcd")).label).toBe("SK-…abcd");
   });
 
+  it("cuts an over-long identity to the max", async () => {
+    const full = "a".repeat(CONNECTION_LABEL_MAX);
+    expect((await connect(ctx.user.id, "default", `${full}bcdef`)).label).toBe(full);
+  });
+
   it("cuts a max-length base so the suffixed label still fits the max", async () => {
     const full = "a".repeat(CONNECTION_LABEL_MAX);
     expect((await connect(ctx.user.id, "default", full)).label).toBe(full);

@@ -38,20 +38,36 @@ export interface RunLaunch {
   dependencyOverrides?: Record<string, string>;
 }
 
+/** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
+const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
+
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
  * recovery modal's picks. Everything else the user chose rides along — the
  * input typed in the run modal above all (#1539). The launch's own pick for an
- * integration the 409 names is dropped: the modal opens those on no pick, so
- * replaying it would only be refused again. Picks for other integrations are kept.
+ * integration is dropped only when the 409 refuses that pick itself
+ * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
+ * of it). Under any other code — a connection to repair, above all — the pick
+ * is kept: dropping it could let the retry bind another account.
  */
 export function retryLaunch(
   launch: RunLaunch,
   picks: Record<string, string[]>,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
-  const refused = new Set(errors.map((e) => integrationIdOfField(e.field)));
-  const kept = Object.entries(launch.connectionOverrides ?? {}).filter(([id]) => !refused.has(id));
+  const own = launch.connectionOverrides ?? {};
+  const refused = new Set(
+    errors.flatMap((e) => {
+      const id = integrationIdOfField(e.field);
+      const refusesPick =
+        OWN_PICK_REFUSALS.has(e.code) ||
+        (e.code === "auth_serves_no_selected_tool" &&
+          e.connection_id !== undefined &&
+          (own[id] ?? []).includes(e.connection_id));
+      return refusesPick ? [id] : [];
+    }),
+  );
+  const kept = Object.entries(own).filter(([id]) => !refused.has(id));
   return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
 }
 

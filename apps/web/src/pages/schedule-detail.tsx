@@ -222,7 +222,7 @@ function ScheduleParams({
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">
           <p className="text-muted-foreground mb-1 text-xs">{t("schedule.paramTimezone")}</p>
-          <p className="text-sm font-medium">{schedule.timezone ?? "UTC"}</p>
+          <p className="text-sm font-medium">{schedule.timezone}</p>
         </div>
 
         <div className="border-border bg-muted/30 rounded-lg border p-4">

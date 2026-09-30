@@ -707,8 +707,11 @@ export const integrationsPaths = {
         "id is a 404 here), with the connections it minted. If it was the " +
         "default, the cascade re-resolves (org default, else system client) " +
         "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default " +
-        "(enforced or soft) names one of the connections it minted; a member pin does not block it " +
-        "(that member's next run fails with `pinned_connection_unavailable`). " +
+        "(enforced or soft) names one of the connections it minted; a member pin does not block it. " +
+        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) " +
+        "and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration " +
+        "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
+        "with `pinned_connection_unavailable`. " +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

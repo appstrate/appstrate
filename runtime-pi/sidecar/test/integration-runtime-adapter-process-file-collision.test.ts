@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +89,7 @@ describe("process adapter — delivery.files across connections of one run", () 
     expect(error.message).toContain("[conn-db]");
     expect(error.message).toContain(declaredPath);
     expect(await readFile(declaredPath, "utf8")).toBe("web-key");
-    expect(await Bun.file(join(tmpdir(), `appstrate-mounts-${runId}`)).exists()).toBe(false);
+    expect(existsSync(join(tmpdir(), `appstrate-mounts-${runId}`))).toBe(false);
   });
 
   it("accepts the same connection again and connections on distinct paths", async () => {

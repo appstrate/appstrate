@@ -59,7 +59,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   spawned whole or not at all (`integration_dropped` reasons `no_delivery`,
   `bound_set_incomplete`). Under the `process` runner adapter, a connection
   declaring a `delivery.files` path another connection of the run already
-  holds refuses to spawn. A remote run (`POST /api/runs/remote`) binding
+  holds refuses to spawn, so an integration with a fixed file path (SSH's
+  `/run/secrets/ssh_key`) binds several connections only under the `docker`
+  runner adapter. A remote run (`POST /api/runs/remote`) binding
   several connections to one integration is refused with
   `409 agent_not_ready`.
 - **`GET /api/me/connections/{connectionId}/delete-impact`** lists the
@@ -256,7 +258,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent patches could combine into a schedule running as a member on
   their private connection. It is a compare-and-set on `updated_at`, answering
   `409 schedule_modified_concurrently` when the schedule was written since it
-  was read (a patch, a connection delete, a fire): reload and retry.
+  was read (a patch, a connection delete, a fire disabling it for an actor
+  who lost access): reload and retry.
 - **A schedule fire runs what the schedule row holds now.** The queue job
   carried a copy of the schedule taken when armed, so a stale job could fire a
   disabled schedule or replay replaced values; it carries only

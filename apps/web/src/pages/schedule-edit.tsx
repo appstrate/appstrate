@@ -70,7 +70,7 @@ export function ScheduleEditPage() {
         defaultValues={{
           name: schedule.name ?? "",
           cron_expression: schedule.cron_expression,
-          timezone: schedule.timezone ?? "UTC",
+          timezone: schedule.timezone,
           enabled: schedule.enabled ?? true,
           input: schedule.input ?? {},
           model_id_override: schedule.model_id_override ?? null,

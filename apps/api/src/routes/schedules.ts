@@ -549,12 +549,11 @@ export function createSchedulesRouter() {
     // Only when this patch touches either half: an unrelated patch (say
     // `{enabled:false}`) on a row written before this gate existed must stay
     // applicable. `updateSchedule` recomputes `next_run_at` from the EFFECTIVE
-    // pair, so that is the pair checked here — same `??` fallbacks, same
-    // "UTC" default.
+    // pair, so that is the pair checked here — same `??` fallbacks.
     if (data.cron_expression !== undefined || data.timezone !== undefined) {
       assertFirable(
         data.cron_expression ?? existing.cron_expression,
-        data.timezone ?? existing.timezone ?? "UTC",
+        data.timezone ?? existing.timezone,
       );
     }
 

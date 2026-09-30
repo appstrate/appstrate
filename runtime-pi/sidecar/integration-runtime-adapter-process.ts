@@ -283,19 +283,6 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
- * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
- * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
- * sidecar's tmp space and surface the actual path via an env var
- * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
- * it up. Pure-Docker deployments don't hit the fallback (the runner image
- * always permits writes to `/tmp` and `/run/`).
- *
- * Returns the set of created paths so `shutdown()` can clean them up.
- */
-/**
  * R8a — safe-path floor for `delivery.files` on the process adapter.
  *
  * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
@@ -324,6 +311,20 @@ export function isHostPathSafeForMount(hostPath: string): boolean {
   return isPathSafeForMount(hostPath);
 }
 
+/**
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
+ * adapter. Subprocesses share the host filesystem, so we attempt to write
+ * each entry at the manifest-declared absolute path with the requested
+ * mode. When that fails (typically a dev machine without write permission
+ * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
+ * sidecar's tmp space and surface the actual path via an env var
+ * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
+ * it up. Pure-Docker deployments don't hit the fallback (the runner image
+ * always permits writes to `/tmp` and `/run/`).
+ *
+ * Returns the written paths (`createdPaths`), which `shutdown()` removes, and
+ * the `APPSTRATE_FILE_MOUNT_*` entries of the fallback (`envOverrides`).
+ */
 export async function materializeFileMountsOnHost(
   runId: string,
   fileMounts: Record<string, { content_b64: string; mode: string }>,
