@@ -43,6 +43,7 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  allowlistUnrendered,
   cookieScope,
   credentialUrlPolicy,
   exfiltrationRefusal,
@@ -51,6 +52,7 @@ import {
   hostLiterallyAllowlisted,
   redactCredentialHost,
   RedirectBlockedError,
+  UNRENDERED_ALLOWLIST_REFUSAL,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -188,6 +190,12 @@ export interface ApiCallBaseDeps {
 }
 
 export interface ApiCallDeps extends ApiCallBaseDeps {
+  /**
+   * The manifest's declared (unrendered) `authorized_uris`. Matching uses the connection's
+   * rendered `CredentialsResponse.authorizedUris`; only a host written literally HERE pins the
+   * SSRF gate or shares cookies, so a connection-supplied host never does.
+   */
+  declaredUris: readonly string[];
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
@@ -328,13 +336,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    targets when allowAllUris is set). The SSRF branches add the
   //    DNS-resolving rebind layer over the literal blocklist (see
   //    `refuseSsrfTarget`). On the allowlist branch, the SSRF gate
-  //    applies UNLESS some entry pins this exact host literally —
+  //    applies UNLESS some DECLARED entry pins this exact host literally —
   //    a named host resolving internally is the operator's declared
   //    topology (on-prem APIs are legitimate allowlist targets), but
   //    the AFPS glob grammar lets `**` span the host (`https://**`),
   //    and a glob-matched host is agent-chosen, not operator-chosen —
   //    without the gate that branch would be strictly weaker than
-  //    allow_all.
+  //    allow_all. A declared allowlist rendering to nothing refuses every target.
   // 4a. Credential-exfiltration guard (docs/architecture/SIDECAR.md).
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
@@ -350,7 +358,19 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
 
-  if (policy.refuse) {
+  if (
+    allowlistUnrendered({
+      declaredUris: deps.declaredUris,
+      authorizedUris,
+      allowAllUris: policy.allowAllUris,
+    })
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Integration "${integrationId}": ${UNRENDERED_ALLOWLIST_REFUSAL}`,
+    };
+  } else if (policy.refuse) {
     return { ok: false, status: 403, error: exfiltrationRefusal(integrationId) };
   } else if (policy.allowAllUris) {
     const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
@@ -360,10 +380,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       return {
         ok: false,
         status: 403,
-        error: `URL not authorized for integration "${integrationId}". Allowed: ${authorizedUris.join(", ")}`,
+        // The declared entries: a rendered one may be a secret (an exact webhook URL).
+        error: `URL not authorized for integration "${integrationId}". Allowed: ${deps.declaredUris.join(", ")}`,
       };
     }
-    if (!hostLiterallyAllowlisted(resolvedUrl, authorizedUris)) {
+    if (!hostLiterallyAllowlisted(resolvedUrl, deps.declaredUris)) {
       const refusal = await refuseSsrfTarget(resolvedUrl, redactFields, deps.resolveHost);
       if (refusal) return refusal;
     }
@@ -378,7 +399,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const cookies = cookieScope(
     cookieJar,
     scope,
-    policy.allowAllUris || !authorizedUris.length ? null : authorizedUris,
+    policy.allowAllUris || !authorizedUris.length ? null : deps.declaredUris,
   );
 
   // 5b. Pre-substitute headers with the *initial* creds so we can

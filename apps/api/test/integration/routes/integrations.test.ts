@@ -763,6 +763,85 @@ describe("api_key credentials schema validation (delivery.http silent-no-op guar
   });
 });
 
+// #1627 — a templated `authorized_uris` entry must render with the submitted fields.
+describe("connect/fields — templated authorized_uris render at connect time", () => {
+  let ctx: TestContext;
+
+  function templatedManifest(name: string, authorizedUris: string[]): IntegrationManifest {
+    const m = gmailManifest(name);
+    m.auths!.api!.authorized_uris = authorizedUris;
+    m.auths!.api!.credentials = {
+      schema: {
+        type: "object",
+        required: ["api_key", "site_url"],
+        properties: { api_key: { type: "string" }, site_url: { type: "string" } },
+      },
+    };
+    return m;
+  }
+
+  const connect = (name: string, siteUrl: string) =>
+    app.request(`/api/integrations/${name}/auths/api/connect/fields`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET", site_url: siteUrl } }),
+    });
+
+  const rowsOf = (name: string) =>
+    db.select().from(integrationConnections).where(eq(integrationConnections.integrationId, name));
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, templatedManifest("@myorg/wp", ["{$credential.site_url}/**"]));
+    await seedIntegration(ctx.orgId, templatedManifest("@myorg/hook", ["{$credential.site_url}"]));
+    await seedIntegration(
+      ctx.orgId,
+      templatedManifest("@myorg/plain", ["https://api.example.com/**"]),
+    );
+  });
+
+  for (const bad of ["mysite.com", "https://mysite.com/?page=1", "https://user@mysite.com"]) {
+    it(`refuses ${JSON.stringify(bad)} with a field-level 400 that does not echo it`, async () => {
+      const res = await connect("@myorg/wp", bad);
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      expect(text).not.toContain(bad);
+      const problem = JSON.parse(text) as {
+        code: string;
+        detail: string;
+        errors: { field: string; code: string; title: string; message: string }[];
+      };
+      expect(problem.code).toBe("validation_failed");
+      expect(problem.errors).toEqual([
+        {
+          field: "credentials.site_url",
+          code: "unrenderable_authorized_uri",
+          title: "Invalid Connection Field",
+          message: expect.stringContaining("absolute http:// or https:// URL"),
+        },
+      ]);
+      expect(problem.detail).toContain("credentials.site_url");
+      expect(await rowsOf("@myorg/wp")).toHaveLength(0);
+    });
+  }
+
+  it("accepts a URL that renders", async () => {
+    expect((await connect("@myorg/wp", "https://mysite.com/blog")).status).toBe(200);
+    expect(await rowsOf("@myorg/wp")).toHaveLength(1);
+  });
+
+  it("accepts a query string in the bare form only", async () => {
+    const hook = "https://chat.example.com/v1/spaces/S/messages?key=k&token=t";
+    expect((await connect("@myorg/hook", hook)).status).toBe(200);
+    expect((await connect("@myorg/wp", hook)).status).toBe(400);
+  });
+
+  it("leaves an untemplated allowlist unaffected", async () => {
+    expect((await connect("@myorg/plain", "mysite.com")).status).toBe(200);
+  });
+});
+
 // R8b — importConnectionSchema accepts JSON-typed credentials (not string-only)
 describe("importConnectionSchema — non-string credential values (R8b)", () => {
   let ctx: TestContext;

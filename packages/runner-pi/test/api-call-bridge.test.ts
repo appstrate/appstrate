@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { Tool as AfpsTool, ToolResult } from "@appstrate/afps-runtime/resolvers";
 import { buildApiCallExtensionFactory } from "../src/api-call-bridge.ts";
 import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
@@ -90,9 +91,12 @@ async function registerApiCall(execute: AfpsTool["execute"]) {
     workspace: "/tmp",
     emitEvent: (event) => events.push(event),
   });
-  const registered: Array<{ execute: (id: string, params: unknown) => Promise<unknown> }> = [];
+  const registered: Array<{
+    execute: (id: string, params: unknown) => Promise<unknown>;
+    parameters: unknown;
+  }> = [];
   factory!({ registerTool: (t: never) => registered.push(t) } as never);
-  return { execute: registered[0]!.execute, events };
+  return { execute: registered[0]!.execute, parameters: registered[0]!.parameters, events };
 }
 
 describe("buildApiCallExtensionFactory", () => {
@@ -130,6 +134,28 @@ describe("buildApiCallExtensionFactory", () => {
       "socket closed",
     );
     expect(events.map((e) => e.type)).toEqual(["api_call.called", "api_call.failed"]);
+  });
+
+  // Pi validates arguments against `parameters` before `execute` ever runs.
+  it("publishes a target schema Pi accepts for a {{field}} base URL (#1627)", async () => {
+    const { parameters } = await registerApiCall(async () => ({ content: [] }));
+    const accepts = (target: string): boolean => {
+      try {
+        validateToolArguments({ name: "t", description: "", parameters } as never, {
+          type: "toolCall",
+          id: "1",
+          name: "t",
+          arguments: { target },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(accepts("https://api.acme.com/x")).toBe(true);
+    expect(accepts("{{site_url}}/wp-json/x")).toBe(true);
+    expect(accepts("{{webhook_url}}")).toBe(true);
+    expect(accepts("not a url")).toBe(false);
   });
 
   it("exposes no api_call the agent did not select", async () => {

@@ -45,3 +45,19 @@ export function redactionFields(
 export function exfiltrationRefusal(integrationId: string): string {
   return `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`;
 }
+
+/**
+ * A declared allowlist that renders to nothing for this connection (its URL field is unset or
+ * not an absolute http(s) URL): refuse every target — never the SSRF-only no-allowlist branch.
+ */
+export function allowlistUnrendered(input: {
+  declaredUris: readonly string[];
+  authorizedUris: readonly string[];
+  allowAllUris: boolean;
+}): boolean {
+  return !input.allowAllUris && input.declaredUris.length > 0 && input.authorizedUris.length === 0;
+}
+
+/** Names no value: the connection field that failed to render may be a secret. */
+export const UNRENDERED_ALLOWLIST_REFUSAL =
+  "the connection's URL does not render the integration's authorized_uris allowlist; fix the connection (an absolute http(s) URL).";

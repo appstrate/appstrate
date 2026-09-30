@@ -36,6 +36,7 @@ import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
+import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
@@ -288,14 +289,23 @@ const responseModeSchema = z
   })
   .optional();
 
+const httpUrl = z.url({ protocol: /^https?$/ });
+/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
+const URL_FIELD_TARGET = /^\{\{\s*\w+\s*\}\}(?:\/.*)?$/;
+
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
   method: z
     .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
     .describe("HTTP method for the upstream request"),
+  // A union, not a refine: it reaches the JSON schema every api_call tool publishes.
   target: z
-    .url({ protocol: /^https?$/, error: "target must be an absolute http(s) URL" })
-    .describe("Absolute URL of the upstream endpoint"),
+    .union([httpUrl, z.string().regex(URL_FIELD_TARGET)], {
+      error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
+    })
+    .describe(
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path",
+    ),
   headers: z
     .record(z.string(), z.string())
     .optional()
@@ -331,6 +341,11 @@ export const apiCallRequestSchema = z.object({
 export const apiCallRequestJsonSchema: JSONSchema = z.toJSONSchema(apiCallRequestSchema, {
   target: "draft-7",
 }) as JSONSchema;
+
+/** The `target` property of {@link apiCallRequestJsonSchema}, for tool schemas composed by hand. */
+export const apiCallTargetJsonSchema = (
+  apiCallRequestJsonSchema as { properties: { target: Record<string, unknown> } }
+).properties.target;
 
 /**
  * Flat view over the subset of fields {@link makeApiCallTool} consumes
@@ -1719,9 +1734,31 @@ export async function serializeFetchResponse(
   };
 }
 
-function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
+/**
+ * Match against `meta.authorizedUris`, or — when the caller substitutes — `rendered`: the
+ * substituted target and the list rendered for the connection. Errors name only `target` and
+ * the declared entries, never a rendered value (it may be a secret, e.g. an exact webhook URL).
+ */
+export function enforceAuthorizedUris(
+  meta: ApiCallMeta,
+  target: string,
+  rendered: { target: string; authorizedUris: readonly string[] } = {
+    target,
+    authorizedUris: meta.authorizedUris ?? [],
+  },
+): void {
   if (meta.allowAllUris) return;
-  const patterns = meta.authorizedUris ?? [];
+  const declared = meta.authorizedUris ?? [];
+  const patterns = rendered.authorizedUris;
+  if (
+    allowlistUnrendered({ declaredUris: declared, authorizedUris: patterns, allowAllUris: false })
+  ) {
+    throw new AuthorizedUrisError(
+      "AUTHORIZED_URIS_EMPTY",
+      `Integration ${meta.name}: ${UNRENDERED_ALLOWLIST_REFUSAL}`,
+      { integration: meta.name, target },
+    );
+  }
   if (patterns.length === 0) {
     throw new AuthorizedUrisError(
       "AUTHORIZED_URIS_EMPTY",
@@ -1731,12 +1768,12 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
     );
   }
   for (const pattern of patterns) {
-    if (matchesAuthorizedUriSpec(pattern, target)) return;
+    if (matchesAuthorizedUriSpec(pattern, rendered.target)) return;
   }
   throw new AuthorizedUrisError(
     "AUTHORIZED_URIS_MISMATCH",
     `Integration ${meta.name}: target ${target} is not in authorized_uris allowlist`,
-    { integration: meta.name, target, allowlist: patterns },
+    { integration: meta.name, target, allowlist: declared },
   );
 }
 
@@ -1854,7 +1891,8 @@ export function hostLiterallyAllowlisted(url: string, specs: readonly string[]):
     const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
     if (!m) continue;
     const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
-    if (hostPart.includes("*")) continue;
+    // A templated host (`{$credential.host}`) is connection-chosen, never a pin.
+    if (hostPart.includes("*") || hostPart.includes("{")) continue;
     if (hostPart.toLowerCase() === host) return true;
   }
   return false;

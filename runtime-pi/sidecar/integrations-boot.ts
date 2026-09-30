@@ -1432,7 +1432,7 @@ export async function bootIntegrations(
           const credAdapter = createApiCallCredentialAdapter({
             source,
             authKey: apiCall.authKey,
-            authorizedUris: apiCall.authorizedUris,
+            declaredUris: apiCall.authorizedUris,
             ...(apiCall.allowAllUris ? { allowAllUris: true } : {}),
           });
           const integ: ApiCallIntegrationConfig = {
@@ -1440,6 +1440,7 @@ export async function bootIntegrations(
             integrationId: spec.integrationId,
             connectionId: connection.id,
             toolName: apiCall.toolName,
+            declaredUris: apiCall.authorizedUris,
             fetchCredentials: credAdapter.fetchCredentials,
             refreshCredentials: credAdapter.refreshCredentials,
             // Resumable-upload protocols the manifest declared (plumbed via

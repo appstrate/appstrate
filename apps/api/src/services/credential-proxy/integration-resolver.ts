@@ -88,7 +88,10 @@ interface ResolveIntegrationProxyInput {
 }
 
 interface ResolvedIntegrationProxyCredentials {
+  /** `payload.authorizedUris` is rendered for the connection: it decides what matches. */
   payload: ProxyCredentialsPayload;
+  /** The auth's declared (unrendered) `authorized_uris`: only its literal hosts share cookies. */
+  declaredUris: readonly string[];
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;
   authKey: string;
@@ -118,7 +121,12 @@ export async function resolveIntegrationProxyCredentials(
   }
 
   const payload = buildPayload(input.integrationId, manifest, connection);
-  return { payload, connectionId: connection.id, authKey: connection.authKey };
+  return {
+    payload,
+    declaredUris: declaredUrisOf(manifest, connection.authKey),
+    connectionId: connection.id,
+    authKey: connection.authKey,
+  };
 }
 
 /**
@@ -250,7 +258,12 @@ export async function forceRefreshIntegrationProxyCredentials(
   const fields = classified.result.fields;
   const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
   if (!payload) return null;
-  return { payload, connectionId: connection.id, authKey: connection.authKey };
+  return {
+    payload,
+    declaredUris: declaredUrisOf(manifest, connection.authKey),
+    connectionId: connection.id,
+    authKey: connection.authKey,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -316,6 +329,10 @@ function buildPayload(
     );
   }
   return payload;
+}
+
+function declaredUrisOf(manifest: IntegrationManifest, authKey: string): readonly string[] {
+  return (manifest.auths?.[authKey] as AfpsManifestAuth | undefined)?.authorized_uris ?? [];
 }
 
 /**

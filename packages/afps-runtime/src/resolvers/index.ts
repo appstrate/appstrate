@@ -56,9 +56,11 @@ export { substituteVars } from "./template-vars.ts";
 
 // Credential-exfiltration guard shared by the three `api_call` paths.
 export {
+  allowlistUnrendered,
   credentialUrlPolicy,
   exfiltrationRefusal,
   redactionFields,
+  UNRENDERED_ALLOWLIST_REFUSAL,
   type CredentialUrlPolicy,
 } from "./credential-guard.ts";
 
@@ -74,6 +76,7 @@ export {
   hostLiterallyAllowlisted,
   compileEgressPolicy,
   apiCallRequestJsonSchema,
+  apiCallTargetJsonSchema,
   resolveSafeFile,
   resolveSafePath,
   resolveWorkspaceFile,

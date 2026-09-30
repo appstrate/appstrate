@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
+
+- `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's
+  declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
+  connection) decides what matches; only a host written literally in `declaredUris`
+  exempts a target from the SSRF net, and only those hosts share cookies across
+  origins. `hostLiterallyAllowlisted` never pins a templated host (`{…}`).
+- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the creds
+  file's fields (`renderAuthorizedUris`, `@appstrate/afps-shared/credential-template`)
+  and enforces it on the substituted target, so `{{site_url}}/wp-json/…` matches a
+  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target that
+  starts with a `{{field}}` followed by nothing or a `/` path; `apiCallRequestJsonSchema`
+  publishes it (`anyOf` a `uri` or that pattern), and the new `apiCallTargetJsonSchema`
+  export is its `target` property for tool schemas composed by hand.
+- A declared allowlist that renders to nothing for the connection (its URL field unset
+  or not an absolute http(s) URL) refuses every target instead of falling back to the
+  no-allowlist SSRF branch: `allowlistUnrendered` + `UNRENDERED_ALLOWLIST_REFUSAL`, applied
+  by `preflightUrl` / `guardedFetch`, the local resolver and the sidecar.
+- Off-allowlist refusals (`preflightUrl`, `enforceAuthorizedUris`) name the DECLARED
+  entries, never a rendered one — an exact-URL entry such as `{$credential.webhook_url}`
+  renders to a secret. `enforceAuthorizedUris(meta, target, rendered?)` takes the
+  substituted target and the rendered list as one optional `rendered` argument.
+
 ### Changed — `X-Run-Id` is a reserved transport header
 
 - An `api_call`'s own `x-run-id` header (any casing) is now dropped, like the

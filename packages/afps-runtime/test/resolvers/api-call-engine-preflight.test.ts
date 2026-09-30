@@ -73,6 +73,7 @@ describe("redirect loop error", () => {
       fetchFn: (async (u: string) =>
         new Response(null, { status: 302, headers: { location: u } })) as unknown as typeof fetch,
       authorizedUris: ["https://api.acme.com/**"],
+      declaredUris: ["https://api.acme.com/**"],
       resolveHost: publicResolver,
       credentialFields: { api_key: secret },
     }).then(
@@ -125,6 +126,12 @@ describe("hostLiterallyAllowlisted", () => {
     ).toBe(true);
   });
 
+  it("never pins a templated host, even one spelled literally in the target", () => {
+    expect(
+      hostLiterallyAllowlisted("https://{$credential.host}/x", ["https://{$credential.host}/**"]),
+    ).toBe(false);
+  });
+
   it("returns false on an unparseable URL", () => {
     expect(hostLiterallyAllowlisted("::::", ["https://api.example.com/**"])).toBe(false);
   });
@@ -134,6 +141,7 @@ describe("preflightUrl — SSRF gate per branch", () => {
   it("allow_all: refuses a hostname resolving into a blocked range", async () => {
     const res = await preflightUrl("https://rebind.example/x", {
       allowAllUris: true,
+      declaredUris: [],
       resolveHost: internalResolver,
     });
     expect(res.ok).toBe(false);
@@ -143,6 +151,7 @@ describe("preflightUrl — SSRF gate per branch", () => {
   it("allow_all: fails closed on resolution failure with a redacted host", async () => {
     const res = await preflightUrl("https://gone.example/secret?token=x", {
       allowAllUris: true,
+      declaredUris: [],
       resolveHost: async () => {
         throw new Error("ENOTFOUND");
       },
@@ -156,6 +165,7 @@ describe("preflightUrl — SSRF gate per branch", () => {
 
   it("no allowlist: same gate applies", async () => {
     const res = await preflightUrl("https://rebind.example/x", {
+      declaredUris: [],
       resolveHost: internalResolver,
     });
     expect(res.ok).toBe(false);
@@ -164,6 +174,7 @@ describe("preflightUrl — SSRF gate per branch", () => {
   it("glob-matched allowlist host stays behind the SSRF gate", async () => {
     const res = await preflightUrl("https://rebind.example/x", {
       authorizedUris: ["https://**"],
+      declaredUris: ["https://**"],
       resolveHost: internalResolver,
     });
     expect(res.ok).toBe(false);
@@ -174,16 +185,43 @@ describe("preflightUrl — SSRF gate per branch", () => {
     const resolveHost = mock(internalResolver);
     const res = await preflightUrl("https://intranet.corp/api", {
       authorizedUris: ["https://intranet.corp/**"],
+      declaredUris: ["https://intranet.corp/**"],
       resolveHost,
     });
     expect(res.ok).toBe(true);
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
+  it("a host rendered from a connection value is never pinned (SSRF gate applies)", async () => {
+    const resolveHost = mock(internalResolver);
+    const res = await preflightUrl("https://intranet.corp/api", {
+      authorizedUris: ["https://intranet.corp/**"],
+      declaredUris: ["https://{$credential.host}/**"],
+      resolveHost,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("ssrf");
+    expect(resolveHost).toHaveBeenCalled();
+  });
+
+  it("a rendered IP-literal internal host is literal-blocked", async () => {
+    for (const url of ["https://169.254.169.254/latest", "https://127.0.0.1/x"]) {
+      const host = new URL(url).host;
+      const res = await preflightUrl(url, {
+        authorizedUris: [`https://${host}/**`],
+        declaredUris: ["https://{$credential.host}/**", "{$credential.site_url}/**"],
+        resolveHost: publicResolver,
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.reason).toBe("ssrf");
+    }
+  });
+
   it("off-allowlist target is refused before any DNS work", async () => {
     const resolveHost = mock(publicResolver);
     const res = await preflightUrl("https://evil.example/x", {
       authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
       resolveHost,
     });
     expect(res.ok).toBe(false);
@@ -191,10 +229,40 @@ describe("preflightUrl — SSRF gate per branch", () => {
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
+  it("a declared list the connection does not render refuses every target (#1627)", async () => {
+    const resolveHost = mock(publicResolver);
+    const res = await preflightUrl("https://attacker.example/steal", {
+      authorizedUris: [],
+      declaredUris: ["{$credential.site_url}/**"],
+      resolveHost,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe("not_authorized");
+      expect(res.message).toContain("does not render");
+    }
+    expect(resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("an off-allowlist refusal names the declared entries, never a rendered one", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const res = await preflightUrl("https://example.com/", {
+      authorizedUris: [hook],
+      declaredUris: ["{$credential.webhook_url}"],
+      resolveHost: publicResolver,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.message).toContain("{$credential.webhook_url}");
+      expect(res.message).not.toContain("SECRETTOKEN");
+    }
+  });
+
   it("IP-literal internal target is literal-blocked before DNS", async () => {
     const resolveHost = mock(publicResolver);
     const res = await preflightUrl("https://169.254.169.254/latest/meta-data", {
       allowAllUris: true,
+      declaredUris: [],
       resolveHost,
     });
     expect(res.ok).toBe(false);
@@ -210,6 +278,7 @@ describe("preflightUrl — SSRF gate per branch", () => {
     for (const opts of branches) {
       const res = await preflightUrl("https://ok.example/x", {
         ...opts,
+        declaredUris: opts.authorizedUris ?? [],
         resolveHost: publicResolver,
       });
       expect(res.ok).toBe(true);

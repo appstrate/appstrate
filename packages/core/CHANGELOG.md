@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`integrationManifestSchema`** (`@appstrate/core/integration`, issue #1627)
+  accepts URL-form templated `authorized_uris` entries — exactly one
+  `{$credential.<field>}` at index 0, followed by nothing or a `/` path without
+  placeholders (`{$credential.site_url}/**`) — alongside the `scheme://`
+  authority form, and no longer refuses a templated entry (either form) on an
+  auth exposing `api_call`: its consumers pin only the declared literal
+  entries, never a rendered one. The field rules (declared and required) and
+  the `connect` / `oauth2` prohibitions are unchanged. Uses
+  `parseUrlFormPattern` (`@appstrate/afps-shared/credential-template`), new in
+  `@appstrate/afps-shared@0.9.2` (published 2026-09-30); the dependency range
+  moves from `^0.9.1` to `^0.9.2`.
 - **BREAKING: `ConnectionResolutionErrorCode` gains `override_outranked`**
   (`@appstrate/core/integration`) — a launch override (run or schedule) naming
   a connection outside the set an admin pin or an enforced org default binds

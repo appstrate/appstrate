@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/activecampaign",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "ActiveCampaign (API)",
@@ -15,22 +15,25 @@
   "auths": {
     "primary": {
       "type": "api_key",
-      "authorized_uris": ["https://*.api-us1.com/**"],
-      "allow_all_uris": true,
+      "authorized_uris": ["{$credential.api_url}/**"],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "account_name": {
               "type": "string",
-              "description": "Your ActiveCampaign account name (subdomain from yourname.activehosted.com)"
+              "description": "Optional — account subdomain (yourname in yourname.api-us1.com), kept for https://{{account_name}}.api-us1.com URLs; calls are allowed under api_url only"
+            },
+            "api_url": {
+              "type": "string",
+              "description": "API URL from Settings → Developer, with https:// (e.g. https://youraccount.api-us1.com)"
             },
             "api_key": {
               "type": "string",
               "description": "API key from Settings → Developer"
             }
           },
-          "required": ["account_name", "api_key"]
+          "required": ["api_url", "api_key"]
         }
       },
       "delivery": {

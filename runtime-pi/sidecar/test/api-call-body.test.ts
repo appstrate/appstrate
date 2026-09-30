@@ -61,6 +61,7 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
         namespace: "test",
         integrationId: "@appstrate/test",
         connectionId: "conn-1",
+        declaredUris: ["https://api.example.com/**"],
         fetchCredentials: async () => integrationCreds(token),
         refreshCredentials: async () => integrationCreds(token),
       },

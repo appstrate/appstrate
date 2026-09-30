@@ -52,12 +52,15 @@ const proxyParameters = [
     in: "header",
     required: true,
     description:
-      "Absolute URL of the upstream endpoint. Must match the integration manifest auth's " +
-      "`authorized_uris` unless `allow_all_uris: true`. `allow_all_uris` is ignored when a " +
+      "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders " +
+      "(e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before " +
+      "any check; the substituted URL must be absolute. It must match the integration " +
+      "manifest auth's `authorized_uris` (rendered for the connection) unless " +
+      "`allow_all_uris: true`. `allow_all_uris` is ignored when a " +
       "`{{credential_field}}` placeholder appears in this URL, a header, or a substituted " +
       "body: the target and every redirect hop must then match `authorized_uris`, and the " +
       "call is refused when that list is empty.",
-    schema: { type: "string", format: "uri" },
+    schema: { type: "string" },
   },
   {
     name: "X-Session-Id",

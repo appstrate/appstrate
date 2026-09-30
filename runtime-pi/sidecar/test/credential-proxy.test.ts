@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
           headers: { "Content-Type": "application/json" },
         }),
     ) as unknown as typeof fetch,
+    declaredUris: ["https://api.example.com/**"],
     fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "tok-123" },
       authorizedUris: ["https://api.example.com/**"],
@@ -109,6 +110,81 @@ describe("executeApiCall — structured failures", () => {
       expect(result.status).toBe(403);
       expect(result.error).toMatch(/not authorized/);
     }
+  });
+});
+
+describe("executeApiCall — connection-rendered allowlists (#1627)", () => {
+  function recordingFetch() {
+    const calls: string[] = [];
+    const fetchFn = mock(async (url: string | URL) => {
+      calls.push(String(url));
+      return new Response("ok");
+    });
+    return { fetchFn: fetchFn as unknown as typeof fetch, calls };
+  }
+  const call = (targetUrl: string, deps: ApiCallDeps) =>
+    executeApiCall(
+      {
+        integrationId: "@appstrate/wordpress",
+        connectionId: "conn-1",
+        targetUrl,
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+  it("refuses every target when the connection's URL does not render the declared list", async () => {
+    const { fetchFn, calls } = recordingFetch();
+    const result = await call(
+      "https://attacker.example/steal",
+      makeDeps({
+        fetchFn,
+        declaredUris: ["{$credential.site_url}/**"],
+        // `mysite.com` has no scheme: the platform renders nothing.
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { site_url: "mysite.com", basic: "YWRtaW46czNjcmV0" },
+          authorizedUris: [],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Basic ",
+          credentialFieldName: "basic",
+        })),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("does not render");
+      expect(result.error).not.toContain("mysite.com");
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("an off-list refusal names the declared template, never the rendered secret URL", async () => {
+    const hook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN";
+    const { fetchFn, calls } = recordingFetch();
+    const result = await call(
+      "https://example.com/",
+      makeDeps({
+        fetchFn,
+        declaredUris: ["{$credential.webhook_url}"],
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { webhook_url: hook },
+          authorizedUris: [hook],
+          allowAllUris: false,
+          credentialFieldName: "webhook_url",
+        })),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.error).toContain("{$credential.webhook_url}");
+      expect(result.error).not.toContain("SECRETTOKEN");
+    }
+    expect(calls).toEqual([]);
   });
 });
 
@@ -1916,6 +1992,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         makeDeps({
           fetchFn: fetchFn as unknown as typeof fetch,
           fetchCredentials,
+          declaredUris: [],
           resolveHost: async () => ["169.254.169.254"],
         }),
       );
@@ -1934,6 +2011,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         makeDeps({
           fetchFn: fetchFn as unknown as typeof fetch,
           fetchCredentials,
+          declaredUris: [],
           resolveHost: async () => {
             throw new Error("ENOTFOUND");
           },
@@ -1956,6 +2034,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchCredentials: ssrfGuardCreds,
+        declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7", "10.0.0.5"],
       }),
@@ -1970,6 +2049,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchCredentials: ssrfGuardCreds,
+        declaredUris: [],
         fetchFn: fetchFn as unknown as typeof fetch,
         resolveHost: async () => ["203.0.113.7"],
       }),
@@ -1996,6 +2076,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     const result = await call(
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
+        declaredUris: ["https://intranet.corp.example/**"],
         fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "tok" },
           authorizedUris: ["https://intranet.corp.example/**"],
@@ -2092,7 +2173,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
   it("IP-literal targets skip resolution but stay literal-blocked", async () => {
     const resolveHost = mock(async () => ["203.0.113.7"]);
     const result = await call(
-      makeDeps({ fetchCredentials: ssrfGuardCreds, resolveHost }),
+      makeDeps({ fetchCredentials: ssrfGuardCreds, declaredUris: [], resolveHost }),
       "https://169.254.169.254/latest/meta-data",
     );
     expect(result.ok).toBe(false);
@@ -2237,7 +2318,11 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=DROPBOX");
-    const deps = makeDeps({ fetchFn, fetchCredentials: dropboxCreds });
+    const deps = makeDeps({
+      fetchFn,
+      declaredUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      fetchCredentials: dropboxCreds,
+    });
 
     await executeApiCall(
       {

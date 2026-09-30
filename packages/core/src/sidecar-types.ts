@@ -231,7 +231,11 @@ export interface ApiCallSpec {
    * alias while {@link authKey} retains the complete credential lookup key.
    */
   toolName: string;
-  /** URI allowlist (verbatim from `auths.{authKey}.authorized_uris`). */
+  /**
+   * `auths.{authKey}.authorized_uris` as DECLARED (unrendered). Matching uses the connection's
+   * rendered list from the credentials source; this one decides which hosts are pinned literally
+   * (SSRF exemption, cookie siblings), which a `{$credential.<field>}` entry never is.
+   */
   authorizedUris: readonly string[];
   /**
    * Skip the `authorized_uris` allowlist (SSRF blocklist still applies).
@@ -365,8 +369,8 @@ export interface IntegrationSpawnSpec {
    * `_meta["dev.appstrate/api"]` vendor extension AND selected by the agent.
    * Orthogonal to {@link sourceKind} — populated for `local`/`remote`/`none`
    * alike. For each entry the sidecar registers a `{namespace}__{toolName}`
-   * tool that proxies an arbitrary upstream request bounded by
-   * {@link ApiCallSpec.authorizedUris}, injecting the resolved auth's
+   * tool that proxies an arbitrary upstream request bounded by the auth's
+   * `authorized_uris` (see {@link ApiCallSpec.authorizedUris}), injecting the resolved auth's
    * credential header via the same machinery as `delivery.http`.
    *
    * A single opted-in auth → `toolName: "api_call"`; multiple →

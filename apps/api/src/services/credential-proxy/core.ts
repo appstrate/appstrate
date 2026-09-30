@@ -219,12 +219,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     ...(input.run ? { run: input.run } : {}),
   };
   let resolved;
+  let declaredUris: readonly string[];
   // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
   let refreshSelection;
   let connectionId: string;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
+    declaredUris = result.declaredUris;
     connectionId = result.connectionId;
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
@@ -364,7 +366,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
   const jarTtl = input.cookieJarTtlSeconds;
-  const literalAllowlist = policy.allowAllUris ? null : authorizedUris;
+  // Siblings share cookies only across hosts the manifest names literally, never a rendered one.
+  const literalAllowlist = policy.allowAllUris ? null : declaredUris;
   // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
   // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
   const captured: Array<[string, string[]]> = [];

@@ -41,6 +41,7 @@
 import type { Tool } from "@afps-spec/types";
 import type { Bundle } from "../bundle/types.ts";
 import {
+  enforceAuthorizedUris,
   makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
@@ -49,6 +50,7 @@ import {
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import {
   apiCallToolNameForAuth,
   assertUniqueApiToolAuthTokens,
@@ -121,7 +123,7 @@ interface ApiCallIntegrationMeta {
   authKey: string;
   /** Auth type (`oauth2` | `api_key` | `basic` | `custom`). */
   authType: string;
-  /** URL allowlist enforced by the tool before dispatch. */
+  /** DECLARED `authorized_uris`, unrendered: `{$credential.<field>}` entries render per connection. */
   authorizedUris: string[];
   /** When true, the tool skips the URL allowlist (SSRF blocklist still applies upstream). */
   allowAllUris: boolean;
@@ -235,15 +237,6 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
     });
   }
   return out;
-}
-
-/** Build the {@link ApiCallMeta} the HTTP core uses for `authorizedUris` enforcement. */
-function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
-  return {
-    name: meta.name,
-    authorizedUris: meta.authorizedUris,
-    allowAllUris: meta.allowAllUris,
-  };
 }
 
 /**
@@ -417,8 +410,9 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
+        // `buildCall` enforces authorized_uris on the SUBSTITUTED target (`{{site_url}}/…`).
         tools.push(
-          makeApiCallTool(toApiCallMeta(meta), this.buildCall(meta, entry), {
+          makeApiCallTool({ name: meta.name, allowAllUris: true }, this.buildCall(meta, entry), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -446,6 +440,9 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     meta: ApiCallIntegrationMeta,
     entry: LocalIntegrationCredentialsFile["integrations"][string],
   ): ApiCallFn {
+    // Matching uses the list rendered for this connection; the SSRF pin and cookie
+    // siblings use the declared one, so a connection-supplied host is never trusted.
+    const authorizedUris = renderAuthorizedUris(meta.authorizedUris, entry.fields);
     return async (req, ctx) => {
       const fields = entry.fields;
 
@@ -453,6 +450,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       const templates = [req.target];
       if (typeof req.body === "string") templates.push(req.body);
       const target = substituteVars(req.target, fields);
+      enforceAuthorizedUris(meta, req.target, { target, authorizedUris });
 
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
@@ -486,7 +484,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         templates,
         fields,
         allowAllUris: meta.allowAllUris,
-        authorizedUris: meta.authorizedUris,
+        authorizedUris,
       });
       if (policy.refuse) {
         throw new ResolverError(
@@ -526,7 +524,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           url: target,
           init,
           fetchFn: this.fetchImpl,
-          authorizedUris: meta.authorizedUris,
+          authorizedUris,
+          declaredUris: meta.authorizedUris,
           allowAllUris: policy.allowAllUris,
           injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
           integrationId: meta.name,

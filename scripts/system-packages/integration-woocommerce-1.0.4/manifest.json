@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/woocommerce",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "WooCommerce (API)",
@@ -15,15 +15,14 @@
   "auths": {
     "primary": {
       "type": "custom",
-      "authorized_uris": [],
-      "allow_all_uris": true,
+      "authorized_uris": ["{$credential.site_url}/**"],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "site_url": {
               "type": "string",
-              "description": "WooCommerce site URL (e.g. https://mystore.com)"
+              "description": "Full WooCommerce site URL with https:// and no query string (e.g. https://mystore.com)"
             },
             "consumer_key": {
               "type": "string",
