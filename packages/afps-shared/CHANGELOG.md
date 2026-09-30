@@ -14,6 +14,11 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-09-30
+
+Additive only. Publish before any `@appstrate/core` that imports
+`parseUrlFormPattern` (core raises its range to `^0.9.2`).
+
 ### Added
 
 - **`GuardedFetchOptions.cookies`** — optional per-hop cookie state for
@@ -39,7 +44,7 @@ consumer's publish rather than the first user's `npm install`.
   entry, once per field, each with the form it must take (`{ field, expected }`,
   never the value), so a connection can be refused when it is written.
 
-## [0.9.1] — unreleased
+## [0.9.1] — 2026-09-24
 
 Additive only. `@appstrate/core` declares `^0.9.1`, so tag `afps-shared@0.9.1`
 on the squash commit right after merge (`docs/deployment/RELEASING_CORE.md` §1).
