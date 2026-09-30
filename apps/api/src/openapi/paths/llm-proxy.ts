@@ -45,7 +45,7 @@ const baseParameters = [
   // are served from the stored response for 24h" — was a promise the runtime
   // never kept. It now reads as one: `idempotencyGuard` answers
   // `400 idempotency_not_supported` here like on any other unsupported
-  // mutating route. The `x-llm-proxy-cache-status` header below documents the
+  // mutating route. The `Cache-Status` header below documents the
   // separate, content-addressed response cache these routes *do* have.
 ] as const;
 
@@ -56,12 +56,15 @@ const baseResponses = {
       "(`stream: true`), the response is `text/event-stream`; otherwise " +
       "`application/json`.",
     headers: {
-      "x-llm-proxy-cache-status": {
+      "Cache-Status": {
         description:
-          "Present only when the response cache is enabled (non-streaming " +
-          "2xx responses). `MISS` when the upstream was hit and the result " +
-          "stored; `HIT` when served from cache.",
-        schema: { type: "string", enum: ["HIT", "MISS"] },
+          "RFC 9211. This proxy's member is present only when the response " +
+          "cache is enabled (non-streaming 2xx responses): " +
+          "`appstrate-llm-proxy; hit` when served from cache, " +
+          "`appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was " +
+          "called and the result stored — appended after any member an " +
+          "upstream cache set.",
+        schema: { type: "string" },
       },
     },
     content: {

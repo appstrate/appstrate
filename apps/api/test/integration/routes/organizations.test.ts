@@ -1176,7 +1176,7 @@ describe("Organizations API", () => {
         recipientType: "user",
         recipientId: leaver.id,
         type: "run_completed",
-        payload: { status: "success" },
+        payload: { packageId: pkg.id, status: "success" },
       });
       const key = await seedApiKey({
         orgId: ctx.orgId,

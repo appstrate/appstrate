@@ -5,7 +5,7 @@
 // (`services/skill-read.ts`); REST RBAC is unchanged.
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, EmbeddedResource, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { Context } from "hono";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
@@ -15,10 +15,12 @@ import { readSkillSnapshot, type SkillSnapshot } from "../../services/skill-read
 import { assertPermission } from "../../middleware/require-permission.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { asString, RESOURCE_BLOB_MAX_BYTES, textResult } from "./tool-results.ts";
+import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
 
 export interface SkillToolContext {
   readSkill: (packageId: string) => Promise<SkillSnapshot>;
+  /** Public origin — a binary file's embedded resource names its REST content URL. */
+  origin: string;
   requestId: string;
   observe: (event: { tool: "read_skill"; durationMs: number; status: number }) => void;
 }
@@ -40,15 +42,39 @@ export function skillReaderFor(
 const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 const OVERSIZED_NOTE = "Content omitted — it exceeds the inline size limit.";
 
-/** One file, as `GET …/files/content` would serve it, inlined within the MCP limits. */
-function projectFile(path: string, bytes: Uint8Array): Record<string, unknown> {
+/** The `GET …/files/content` URL serving `path` of the definition read. */
+function fileContentUrl(origin: string, skill: SkillSnapshot, path: string): string {
+  const url = new URL(`/api/packages/${skill.packageId}/files/content`, origin);
+  url.searchParams.set("path", path);
+  if (skill.version !== null) url.searchParams.set("version", skill.version);
+  return url.toString();
+}
+
+/**
+ * One file, as `GET …/files/content` would serve it, inlined within the MCP
+ * limits: text in the JSON, a small binary as an embedded `blob` resource.
+ */
+function projectFile(
+  origin: string,
+  skill: SkillSnapshot,
+  path: string,
+  bytes: Uint8Array,
+): { meta: Record<string, unknown>; resource?: EmbeddedResource } {
   const { kind, text } = classifyPackageFile(path, bytes);
-  const base = { path, size: bytes.byteLength, media_kind: kind };
-  if (text !== null) return { ...base, content: text };
+  const meta = { path, size: bytes.byteLength, media_kind: kind };
+  if (text !== null) return { meta: { ...meta, content: text } };
   if (kind === "binary" && bytes.byteLength <= RESOURCE_BLOB_MAX_BYTES) {
-    return { ...base, content_base64: Buffer.from(bytes).toString("base64") };
+    const resource: EmbeddedResource = {
+      type: "resource",
+      resource: {
+        uri: fileContentUrl(origin, skill, path),
+        mimeType: "application/octet-stream",
+        blob: Buffer.from(bytes).toString("base64"),
+      },
+    };
+    return { meta, resource };
   }
-  return { ...base, note: OVERSIZED_NOTE };
+  return { meta: { ...meta, note: OVERSIZED_NOTE } };
 }
 
 export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefinition {
@@ -59,6 +85,28 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
       "served. With `path`: one of those files (scripts, references) at that version. A skill " +
       "a chat turn injected is readable at the definition injected; any other needs " +
       "`skills:read`.",
+    outputSchema: {
+      type: "object",
+      required: ["id", "version", "definition"],
+      properties: {
+        id: { type: "string" },
+        version: { type: ["string", "null"], description: "`null` for the stored tree." },
+        definition: { type: "string", enum: ["draft", "published"] },
+        content: { type: ["string", "null"], description: "Text content, inlined when small." },
+        note: { type: "string" },
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["path", "size"],
+            properties: { path: { type: "string" }, size: { type: "integer" } },
+          },
+        },
+        path: { type: "string" },
+        size: { type: "integer" },
+        media_kind: { type: "string" },
+      },
+    },
     annotations: {
       title: "Read skill",
       readOnlyHint: true,
@@ -97,7 +145,7 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
         const entry = snapshotFile(skill.snapshot, SKILL_ENTRY);
         const text = entry ? classifyPackageFile(SKILL_ENTRY, entry).text : null;
         done(200);
-        return textResult({
+        return jsonResult({
           ...head,
           content: text,
           ...(entry && text === null ? { note: OVERSIZED_NOTE } : {}),
@@ -109,12 +157,14 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
       const bytes = snapshotFile(skill.snapshot, path);
       if (!bytes) throw notFound("File not found");
       done(200);
-      return textResult({ ...head, ...projectFile(path, bytes) });
+      const { meta, resource } = projectFile(ctx.origin, skill, path, bytes);
+      const result = jsonResult({ ...head, ...meta });
+      return resource ? { ...result, content: [...result.content, resource] } : result;
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       done(err.status);
       // The REST answer to the same read: status plus its problem body.
-      return textResult({ status: err.status, body: err.toProblemDetail(ctx.requestId) }, true);
+      return jsonResult({ status: err.status, body: err.toProblemDetail(ctx.requestId) }, true);
     }
   };
   return { descriptor, handler };

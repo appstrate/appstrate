@@ -2,8 +2,8 @@
 
 /**
  * Response-level cache for `/api/llm-proxy/*`. Opt-in via
- * `LLM_PROXY_CACHE_MODE` (off | simple). Emits
- * `x-llm-proxy-cache-status: HIT | MISS` on cached responses.
+ * `LLM_PROXY_CACHE_MODE` (off | simple). Reports its outcome as an RFC 9211
+ * `Cache-Status` member ({@link CACHE_STATUS_HIT} / {@link CACHE_STATUS_MISS}).
  *
  * Scope:
  *   - Non-streaming JSON only. Streaming SSE bypasses the cache — a
@@ -53,6 +53,10 @@ const CACHE_REPLAY_HEADERS = new Set([
   "ratelimit-reset",
   "ratelimit-policy",
 ]);
+
+/** RFC 9211 `Cache-Status` members of this cache (identifier `appstrate-llm-proxy`). */
+export const CACHE_STATUS_HIT = "appstrate-llm-proxy; hit";
+export const CACHE_STATUS_MISS = "appstrate-llm-proxy; fwd=uri-miss; stored";
 
 /** Canonical key shape: hash so the Redis key length stays bounded. */
 function buildCacheKey(input: {
@@ -123,7 +127,7 @@ export async function lookupResponse(
   }
 
   const headers = new Headers(parsed.headers);
-  headers.set("x-llm-proxy-cache-status", "HIT");
+  headers.set("Cache-Status", CACHE_STATUS_HIT);
   return {
     hit: true,
     cacheKey,

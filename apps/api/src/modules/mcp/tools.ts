@@ -65,7 +65,7 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
-import { asString, RESOURCE_BLOB_MAX_BYTES, textResult } from "./tool-results.ts";
+import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 
@@ -326,6 +326,45 @@ function describePayload(
   };
 }
 
+const STRING_LIST = { type: "array", items: { type: "string" } };
+
+/** `describePayload`'s shape — `describe_operation`'s result and `best_match`. */
+const OPERATION_DEFINITION_SCHEMA: NonNullable<Tool["outputSchema"]> = {
+  type: "object",
+  required: ["operation_id", "method", "path", "path_params", "granted", "parameters", "responses"],
+  properties: {
+    operation_id: { type: "string" },
+    method: { type: "string" },
+    path: { type: "string" },
+    path_params: STRING_LIST,
+    summary: { type: "string" },
+    description: { type: "string" },
+    required_permissions: STRING_LIST,
+    target_space_permissions: STRING_LIST,
+    ceiling_permissions: STRING_LIST,
+    granted: { type: "boolean" },
+    parameters: { type: "array" },
+    request_body: { type: ["object", "null"] },
+    responses: { type: "object" },
+    referenced_schemas: { type: "object" },
+  },
+};
+
+/** `readResponse`'s envelope around a dispatched REST answer. */
+const DISPATCHED_RESPONSE_SCHEMA: NonNullable<Tool["outputSchema"]> = {
+  type: "object",
+  required: ["status"],
+  properties: {
+    status: { type: "integer", description: "The HTTP status the REST operation answered." },
+    etag: { type: "string", description: "Send back as `if_match` on the next write." },
+    truncated: { type: "boolean" },
+    body: { description: "The response body — parsed JSON, else text." },
+    note: { type: "string" },
+    content_type: { type: "string" },
+    bytes: { type: ["integer", "null"] },
+  },
+};
+
 /** A denial's ceiling half: named only when a delegated credential's scopes miss one. */
 function deniedCeiling(
   op: CatalogOperation,
@@ -352,6 +391,41 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
       "permissions they need in YOUR space: report that to the user instead of trying them. " +
       "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
       "capped at `limit`.",
+    outputSchema: {
+      type: "object",
+      required: ["total", "operations", "denied_total", "denied"],
+      properties: {
+        total: { type: "integer" },
+        operations: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["operation_id", "method", "path"],
+            properties: {
+              operation_id: { type: "string" },
+              method: { type: "string" },
+              path: { type: "string" },
+              summary: { type: "string" },
+              tags: STRING_LIST,
+            },
+          },
+        },
+        denied_total: { type: "integer" },
+        denied: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["operation_id", "required_permissions"],
+            properties: {
+              operation_id: { type: "string" },
+              required_permissions: STRING_LIST,
+              ceiling_permissions: STRING_LIST,
+            },
+          },
+        },
+        best_match: OPERATION_DEFINITION_SCHEMA,
+      },
+    },
     annotations: {
       title: "Search API operations",
       readOnlyHint: true,
@@ -414,7 +488,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     const bestMatch =
       tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
 
-    return textResult({
+    return jsonResult({
       total: granted.length,
       operations: shown.map((op) => ({
         operation_id: op.operationId,
@@ -453,6 +527,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       "OAuth token): its scopes must include each, so they make an operation unavailable when " +
       "your credential's scopes omit one, whatever your role holds. A granted " +
       "operation can still be refused on the record it acts on; that refusal names its reason.",
+    outputSchema: OPERATION_DEFINITION_SCHEMA,
     annotations: {
       title: "Describe API operation",
       readOnlyHint: true,
@@ -498,7 +573,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas, ctx));
+    return jsonResult(describePayload(op, componentSchemas, ctx));
   };
 
   return { descriptor, handler };
@@ -578,7 +653,7 @@ export async function readResponse(
   const isError = response.status >= 400;
 
   if (contentType.includes("text/event-stream")) {
-    return textResult(
+    return jsonResult(
       {
         status: response.status,
         error:
@@ -598,7 +673,7 @@ export async function readResponse(
   const isTextual = contentType === "" || isTextShapedContentType(contentType);
   if (!isTextual) {
     const len = response.headers.get("content-length");
-    return textResult(
+    return jsonResult(
       {
         status: response.status,
         note: "Non-text response body omitted.",
@@ -628,7 +703,7 @@ export async function readResponse(
 
   // The version to send back as `if_match` on the next write to this resource.
   const etag = response.headers.get("etag");
-  return textResult(
+  return jsonResult(
     {
       status: response.status,
       ...(etag ? { etag } : {}),
@@ -662,6 +737,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "pass it back as `if_match` on the next write to that resource. A write refused with " +
       "412 means it changed since you read it: re-read, reapply your change, retry; 428 means " +
       "the write requires `if_match` (package draft updates do — read the package first).",
+    outputSchema: DISPATCHED_RESPONSE_SCHEMA,
     annotations: {
       title: "Invoke API operation",
       // Dispatches any of ~222 operations, including POST/PUT/DELETE — declare
@@ -753,7 +829,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult(
+      return jsonResult(
         { error: `Missing path_params. Required: ${op.pathParams.join(", ")}` },
         true,
       );
@@ -770,7 +846,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+      return jsonResult({ error: `Invalid header name or value: ${name}` }, true);
     };
     const headers = new Headers(ctx.authHeaders);
     const ifMatch = asString(args.if_match);
@@ -815,7 +891,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult({ error: "`body` must be a JSON object." }, true);
+      return jsonResult({ error: "`body` must be a JSON object." }, true);
     }
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
@@ -1141,7 +1217,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      return textResult(launched.step.payload, true);
+      return jsonResult(launched.step.payload, true);
     }
 
     const runId = launched.launch.runId;
@@ -1189,16 +1265,11 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         signal,
       });
       if (files.length > 0) {
-        return {
-          content: [
-            { type: "text", text: JSON.stringify({ ...final.payload, files }, null, 2) },
-            ...files.map(fileResourceLink),
-          ],
-          isError: false,
-        };
+        const result = jsonResult({ ...final.payload, files });
+        return { ...result, content: [...result.content, ...files.map(fileResourceLink)] };
       }
     }
-    return textResult(final.payload, final.isError);
+    return jsonResult(final.payload, final.isError);
   };
 
   return { descriptor, handler };
@@ -1252,6 +1323,32 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
       "or read with read_file. Returns `{ files: [...], hasMore }`.",
+    outputSchema: {
+      type: "object",
+      required: ["files", "hasMore"],
+      properties: {
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["id", "uri", "name", "mime", "size", "downloadable"],
+            properties: {
+              id: { type: "string" },
+              uri: { type: "string" },
+              name: { type: "string" },
+              mime: { type: "string" },
+              size: { type: "number" },
+              runId: { type: ["string", "null"] },
+              packageId: { type: ["string", "null"] },
+              createdAt: { type: ["string", "null"] },
+              downloadable: { type: "boolean" },
+              capabilities: { type: ["object", "null"] },
+            },
+          },
+        },
+        hasMore: { type: "boolean" },
+      },
+    },
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1316,7 +1413,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       durationMs: performance.now() - start,
       shownCount: files.length,
     });
-    return textResult({ files, hasMore: body?.hasMore === true });
+    return jsonResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };
@@ -1487,6 +1584,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(their own or org-shared). Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
+    outputSchema: DISPATCHED_RESPONSE_SCHEMA,
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -1608,6 +1706,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     buildReadFileTool(ctx),
     buildReadSkillTool({
       readSkill: ctx.readSkill,
+      origin: ctx.origin,
       requestId: ctx.requestId,
       observe: (event) => emit(ctx, event),
     }),

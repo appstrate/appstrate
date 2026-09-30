@@ -84,6 +84,26 @@ const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
 ];
 
 /**
+ * Better Auth's limiter answers from `onRequest`, before any plugin hook, with
+ * `{ message }` under `X-Retry-After` and no `Content-Type`. On the OAuth
+ * endpoints that is restated as RFC 6749 §5.2 JSON under the standard
+ * `Retry-After` (RFC 9110 §10.2.3) — the shape the device/CLI limiters answer.
+ */
+export function oauthRateLimitResponse(path: string, res: Response): Response {
+  const retryAfter = res.headers.get("X-Retry-After");
+  if (res.status !== 429 || retryAfter === null || !path.startsWith("/api/auth/oauth2/")) {
+    return res;
+  }
+  return Response.json(
+    {
+      error: "temporarily_unavailable",
+      error_description: `Too many requests. Retry after ${retryAfter}s.`,
+    },
+    { status: 429, headers: { "Retry-After": retryAfter, "Cache-Control": "no-store" } },
+  );
+}
+
+/**
  * Mount the Better Auth handler and install the full auth middleware chain
  * on the given Hono app. Behavior must stay byte-identical between the
  * production and test harness callers — any change here must preserve the
@@ -114,7 +134,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // middleware), and both rewrites below copy the inbound headers, so the
     // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
-    return getAuth().handler(req);
+    return oauthRateLimitResponse(c.req.path, await getAuth().handler(req));
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.

@@ -5534,7 +5534,7 @@
                     "id": {
                       "type": "string",
                       "format": "uuid",
-                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                      "description": "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes."
                     },
                     "spaceId": {
                       "type": ["string", "null"],
@@ -5586,11 +5586,11 @@
       }
     },
     "/api/integrations/{packageId}/oauth-clients/{clientId}": {
-      "put": {
+      "patch": {
         "operationId": "rotateIntegrationOAuthClient",
         "tags": ["Integrations"],
-        "summary": "Rotate a custom OAuth client's credentials",
-        "description": "Rotates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
+        "summary": "Update a custom OAuth client (rotate its secret, change its redirect URI or method)",
+        "description": "Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change (409). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -5625,24 +5625,26 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["client_id"],
+                "description": "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both.",
                 "properties": {
                   "client_id": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one."
                   },
                   "client_secret": {
                     "type": "string",
-                    "description": "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable."
+                    "description": "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400."
                   },
                   "token_endpoint_auth_method": {
                     "type": "string",
                     "enum": ["client_secret_post", "client_secret_basic", "none"],
-                    "description": "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies."
+                    "description": "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret."
                   },
                   "redirect_uri": {
-                    "type": "string",
-                    "format": "uri"
+                    "type": ["string", "null"],
+                    "format": "uri",
+                    "description": "Omit to keep the stored value; `null` clears it (the platform callback applies)."
                   }
                 },
                 "additionalProperties": false
@@ -5652,7 +5654,7 @@
         },
         "responses": {
           "200": {
-            "description": "Rotated",
+            "description": "Updated",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5681,7 +5683,7 @@
                     "id": {
                       "type": "string",
                       "format": "uuid",
-                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                      "description": "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes."
                     },
                     "spaceId": {
                       "type": ["string", "null"],
@@ -5728,6 +5730,24 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`client_id_immutable` — the body names a different `client_id`; register it as a new client instead",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -5868,7 +5888,7 @@
                     "id": {
                       "type": "string",
                       "format": "uuid",
-                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                      "description": "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes."
                     },
                     "spaceId": {
                       "type": ["string", "null"],
@@ -8379,7 +8399,7 @@
                     "id": {
                       "type": "string",
                       "format": "uuid",
-                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                      "description": "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes."
                     },
                     "spaceId": {
                       "type": ["string", "null"],
@@ -8431,11 +8451,11 @@
       }
     },
     "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
-      "put": {
+      "patch": {
         "operationId": "rotateOrgIntegrationOAuthClient",
         "tags": ["Integrations"],
-        "summary": "Rotate an org-level OAuth client's credentials",
-        "description": "Rotates one org-level client in place, by its id (a space client id is a 404 here). Requires `org-integrations:configure`, which is never granted to an API key.",
+        "summary": "Update an org-level OAuth client (rotate its secret, change its redirect URI or method)",
+        "description": "Updates one org-level client in place, by its id (a space client id is a 404 here). Its `client_id` cannot change (409). Requires `org-integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8463,24 +8483,26 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["client_id"],
+                "description": "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both.",
                 "properties": {
                   "client_id": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one."
                   },
                   "client_secret": {
                     "type": "string",
-                    "description": "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable."
+                    "description": "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400."
                   },
                   "token_endpoint_auth_method": {
                     "type": "string",
                     "enum": ["client_secret_post", "client_secret_basic", "none"],
-                    "description": "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies."
+                    "description": "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret."
                   },
                   "redirect_uri": {
-                    "type": "string",
-                    "format": "uri"
+                    "type": ["string", "null"],
+                    "format": "uri",
+                    "description": "Omit to keep the stored value; `null` clears it (the platform callback applies)."
                   }
                 },
                 "additionalProperties": false
@@ -8490,7 +8512,7 @@
         },
         "responses": {
           "200": {
-            "description": "Rotated",
+            "description": "Updated",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8519,7 +8541,7 @@
                     "id": {
                       "type": "string",
                       "format": "uuid",
-                      "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
+                      "description": "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes."
                     },
                     "spaceId": {
                       "type": ["string", "null"],
@@ -8566,6 +8588,24 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`client_id_immutable` — the body names a different `client_id`; register it as a new client instead",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -14226,7 +14266,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count.",
+            "description": "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections fall within one hour. The first rejection after the hour has lapsed restarts the count; a reconnect resets it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14507,37 +14547,105 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid",
-                            "description": "Notification id"
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "run_completed"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "status"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The run's agent; null once the agent is deleted."
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "running",
+                                      "success",
+                                      "failed",
+                                      "timeout",
+                                      "cancelled"
+                                    ]
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
                           },
-                          "type": {
-                            "type": "string",
-                            "description": "Notification kind, e.g. run_completed"
-                          },
-                          "runId": {
-                            "type": ["string", "null"],
-                            "description": "Originating run id, when the notification references one"
-                          },
-                          "payload": {
-                            "type": ["object", "null"],
-                            "additionalProperties": true,
-                            "description": "Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`."
-                          },
-                          "read_at": {
-                            "type": ["string", "null"],
-                            "format": "date-time",
-                            "description": "When the recipient marked it read; null if unread"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
+                          {
+                            "type": "object",
+                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "package_shared"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "package_type", "shared_by_name"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": "string"
+                                  },
+                                  "package_type": {
+                                    "type": "string",
+                                    "enum": ["agent", "skill", "integration", "mcp-server"]
+                                  },
+                                  "shared_by_name": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
                           }
-                        }
+                        ]
                       }
                     },
                     "hasMore": {
@@ -23901,11 +24009,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24018,11 +24125,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24159,11 +24265,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24269,11 +24374,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24349,11 +24453,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24432,11 +24535,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24515,11 +24617,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },
@@ -24598,11 +24699,10 @@
           "200": {
             "description": "Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`.",
             "headers": {
-              "x-llm-proxy-cache-status": {
-                "description": "Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache.",
+              "Cache-Status": {
+                "description": "RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set.",
                 "schema": {
-                  "type": "string",
-                  "enum": ["HIT", "MISS"]
+                  "type": "string"
                 }
               }
             },

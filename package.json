@@ -72,11 +72,12 @@
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",
     "verify:dead-code": "knip-bun",
     "test:system-packages": "bun scripts/conformance/run.ts",
-    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults verify:release-version verify:env-docs verify:workflows detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation verify:module-sql-boundary verify:license-boundary typecheck:scripts verify:module-contract verify:dead-code verify:no-migration-dml",
+    "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults verify:release-version verify:env-docs verify:workflows detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation verify:module-sql-boundary verify:license-boundary typecheck:scripts verify:module-contract verify:dead-code verify:no-migration-dml verify:overrides",
     "verify:module-isolation": "bun scripts/verify-module-isolation.ts",
     "verify:module-sql-boundary": "bun scripts/verify-module-sql-boundary.ts",
     "verify:license-boundary": "bun scripts/verify-license-boundary.ts",
     "verify:no-migration-dml": "bun scripts/verify-no-migration-dml.ts",
+    "verify:overrides": "bun scripts/verify-overrides.ts",
     "verify:module-contract": "bun scripts/verify-module-contract.ts",
     "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "build-runtime": "bun run docker:build:runtime",
@@ -145,7 +146,7 @@
     "@electric-sql/pglite": "^0.5.8"
   },
   "overrides": {
-    "zod": "4.5.4",
+    "zod": "4.6.5",
     "jose": "6.2.12",
     "ai": "^7.0.107",
     "@ai-sdk/react": "^4.0.110",

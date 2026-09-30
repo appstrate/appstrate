@@ -6,6 +6,86 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Two additive migrations apply at boot**: `0078` adds
+  `integration_connections.refresh_failures_since`; `0079` adds the
+  `notifications_type_valid` CHECK. Before the deploy, confirm no other kind
+  exists: `SELECT type, count(*) FROM notifications WHERE type NOT IN
+('run_completed', 'package_shared') GROUP BY type;` must return no row
+  (#1641).
+
+### Changed
+
+- **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
+  its `client_id` can no longer change** (#1641). `PATCH
+/api/integrations/{packageId}/oauth-clients/{clientId}` and `PATCH
+/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}` replace the
+  `PUT` of each. An absent field is left unchanged (an absent `redirect_uri`
+  used to clear it; send `null`). A different `client_id` answers `409
+client_id_immutable`: the connections a client minted refresh only with the
+  `client_id` their tokens were issued to, so a new one is a new client. The
+  audit action `integration.oauth_client.rotated` is now
+  `integration.oauth_client.updated`; create/update/delete rows record the
+  client before and after (never its secret).
+- **BREAKING (API): the LLM proxy reports its cache outcome as RFC 9211
+  `Cache-Status`** (#1641). `x-llm-proxy-cache-status` is gone; a cached reply
+  carries `Cache-Status: appstrate-llm-proxy; hit`, a stored miss
+  `appstrate-llm-proxy; fwd=uri-miss; stored`, after any upstream member.
+- **BREAKING (MCP): `read_skill` returns a binary file as an embedded
+  resource** (#1641). The `content_base64` field is gone; the bytes arrive as a
+  `resource` content block with `blob`, whose `uri` is the file's REST content
+  URL.
+- **Platform MCP tools return structured output** (#1641). Every JSON result
+  carries `structuredContent` beside its text block (MCP 2025-06-18), and the
+  tools with a stable result shape declare an `outputSchema`.
+- **Notification kinds are a declared union** (#1641). `GET /api/notifications`
+  items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
+  typed payload each, and the database refuses any other kind.
+- **The OAuth endpoints' 429 is a standard OAuth error** (#1641).
+  `/api/auth/oauth2/*` answers `Retry-After` and `application/json
+{"error":"temporarily_unavailable","error_description":…}` (RFC 6749 §5.2)
+  instead of Better Auth's `X-Retry-After` and untyped `{message}`.
+- **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
+  `@appstrate/module-chat` are private workspace packages** (#1641). None was
+  ever published; the dead `publishConfig` is removed.
+
+### Fixed
+
+- **Isolated upstream 401s no longer disconnect an API-key connection**
+  (#1641). Rejections of a credential that cannot refresh count toward
+  `INTEGRATION_REFRESH_MAX_FAILURES` only within one hour of the first; a
+  reconnect still resets the count.
+- **A UUID-shaped system OAuth client, model or provider-key id fails boot**
+  (#1641). Such an id would take precedence over an organization's own row
+  with the same id.
+- **The root `zod` override no longer pins below the declared floor** (#1641).
+  `overrides.zod` moves from 4.5.4 to 4.6.5, the version every workspace
+  declares; `verify:overrides` (in `bun run check`) fails when an override
+  does not satisfy a declared range.
+
+### Security
+
+- **The credential proxy authorizes a call against the published integration
+  manifest** (#1641). A call naming a run (`X-Run-Id`) reads the version that
+  run froze at kickoff; any other call reads the `latest` published version,
+  never the editable draft. An integration that was never published is
+  refused: publish it before calling it through the proxy (`appstrate run`
+  without `--report` included).
+- **An auth whose credential the proxy injects must name its hosts** (#1641).
+  Every manifest write and import refuses `allow_all_uris`, or an
+  `authorized_uris` entry that leaves the host to the caller (`https://**`,
+  `https://*.com/**`), on an auth that injects a credential over HTTP; the
+  platform proxy, the sidecar and `appstrate run` refuse the same calls.
+  BREAKING: such existing custom integrations stop reaching any host — replace
+  `allow_all_uris` with `authorized_uris` naming the hosts.
+- **OAuth client secrets and upstream session cookies no longer sit in
+  plaintext in Redis** (#1641). The OAuth connect state stores only the client
+  reference, re-resolved at the callback like token refresh does; the
+  credential-proxy cookie jar is encrypted with the connection-credential
+  keyring. A connect started before the deploy fails at its callback and must
+  be retried; a cookie jar written before it reads as empty.
+
 ## [1.0.0-beta.64] - 2026-09-30
 
 ### Operators

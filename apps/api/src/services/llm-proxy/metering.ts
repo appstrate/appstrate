@@ -43,7 +43,7 @@ import {
   STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
-import { storeResponse } from "./response-cache.ts";
+import { CACHE_STATUS_MISS, storeResponse } from "./response-cache.ts";
 import { asRecord, LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 
@@ -516,8 +516,8 @@ interface MeteredForwardOptions {
   swap?: ModelSwap | null;
   /**
    * Response-cache write for a non-streaming 2xx reply. When set, the forwarded
-   * (already alias-swapped) body is persisted and the `x-llm-proxy-cache-status:
-   * MISS` header is stamped. `null` → no caching (the sole caller always
+   * (already alias-swapped) body is persisted and {@link CACHE_STATUS_MISS} is
+   * appended to `Cache-Status` (RFC 9211: after any upstream cache's member). `null` → no caching (the sole caller always
    * passes the field; it is `null` whenever no cache key was resolved).
    */
   cache?: { cacheKey: string; ttlSeconds: number } | null;
@@ -850,7 +850,7 @@ export async function forwardMeteredResponse(
         error: getErrorMessage(err),
       });
     });
-    headers.set("x-llm-proxy-cache-status", "MISS");
+    headers.append("Cache-Status", CACHE_STATUS_MISS);
   }
   return new Response(clientBody, { status: upstream.status, headers });
 }

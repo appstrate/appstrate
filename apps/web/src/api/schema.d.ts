@@ -1720,11 +1720,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Rotate a custom OAuth client's credentials
-         * @description Rotates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
-         */
-        put: operations["rotateIntegrationOAuthClient"];
+        put?: never;
         post?: never;
         /**
          * Delete a custom OAuth client
@@ -1733,7 +1729,11 @@ export interface paths {
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a custom OAuth client (rotate its secret, change its redirect URI or method)
+         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change (409). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
+         */
+        patch: operations["rotateIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
@@ -2742,11 +2742,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Rotate an org-level OAuth client's credentials
-         * @description Rotates one org-level client in place, by its id (a space client id is a 404 here). Requires `org-integrations:configure`, which is never granted to an API key.
-         */
-        put: operations["rotateOrgIntegrationOAuthClient"];
+        put?: never;
         post?: never;
         /**
          * Delete an org-level OAuth client
@@ -2755,7 +2751,11 @@ export interface paths {
         delete: operations["deleteOrgIntegrationOAuthClient"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update an org-level OAuth client (rotate its secret, change its redirect URI or method)
+         * @description Updates one org-level client in place, by its id (a space client id is a 404 here). Its `client_id` cannot change (409). Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        patch: operations["rotateOrgIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/orgs": {
@@ -9227,14 +9227,20 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
+            /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
-                    "X-Retry-After"?: string;
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        error: "temporarily_unavailable";
+                        error_description: string;
+                    };
+                };
             };
         };
     };
@@ -9371,14 +9377,20 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
+            /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
-                    "X-Retry-After"?: string;
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        error: "temporarily_unavailable";
+                        error_description: string;
+                    };
+                };
             };
         };
     };
@@ -12496,7 +12508,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -12845,78 +12857,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    rotateIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
-                clientId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    client_id: string;
-                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
-                    client_secret?: string;
-                    /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
-                     * @enum {string}
-                     */
-                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
-                    /** Format: uri */
-                    redirect_uri?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Rotated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
-                         */
-                        id: string;
-                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
-                        spaceId: string | null;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        /**
-                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
-                         * @enum {string|null}
-                         */
-                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     deleteIntegrationOAuthClient: {
         parameters: {
             query?: never;
@@ -12960,6 +12900,93 @@ export interface operations {
             };
         };
     };
+    rotateIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one. */
+                    client_id?: string;
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /**
+                     * Format: uri
+                     * @description Omit to keep the stored value; `null` clears it (the platform callback applies).
+                     */
+                    redirect_uri?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `client_id_immutable` — the body names a different `client_id`; register it as a new client instead */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     promoteIntegrationOAuthClient: {
         parameters: {
             query?: never;
@@ -12990,7 +13017,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -13400,8 +13427,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13479,8 +13506,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13558,8 +13585,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13637,8 +13664,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15472,19 +15499,22 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: {
+                        data: ({
                             /**
                              * Format: uuid
                              * @description Notification id
                              */
                             id: string;
-                            /** @description Notification kind, e.g. run_completed */
-                            type: string;
+                            /** @constant */
+                            type: "run_completed";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
-                            /** @description Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
+                            /** @description Render-without-join data. */
                             payload: {
-                                [key: string]: unknown;
+                                /** @description The run's agent; null once the agent is deleted. */
+                                packageId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
                             } | null;
                             /**
                              * Format: date-time
@@ -15493,7 +15523,31 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                        }[];
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "package_shared";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @enum {string} */
+                                package_type: "agent" | "skill" | "integration" | "mcp-server";
+                                shared_by_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
                     };
@@ -16246,79 +16300,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
-                         */
-                        id: string;
-                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
-                        spaceId: string | null;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        /**
-                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
-                         * @enum {string|null}
-                         */
-                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    rotateOrgIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
-                clientId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    client_id: string;
-                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
-                    client_secret?: string;
-                    /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
-                     * @enum {string}
-                     */
-                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
-                    /** Format: uri */
-                    redirect_uri?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Rotated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -16376,6 +16358,93 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description A connection the client minted is named by an admin pin or an org default */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    rotateOrgIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Immutable. Accepted only when equal to the stored value; a different one is refused with 409 `client_id_immutable` — the connections this client minted can only refresh with the `client_id` their tokens were issued to. A new `client_id` is a new client: register it, make it the default, then delete this one. */
+                    client_id?: string;
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Sent with a `client_secret`, omitting it leaves the method undeclared (the manifest's value applies); sent alone, it changes the method of the stored secret.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /**
+                     * Format: uri
+                     * @description Omit to keep the stored value; `null` clears it (the platform callback applies).
+                     */
+                    redirect_uri?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `client_id_immutable` — the body names a different `client_id`; register it as a new client instead */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -24357,7 +24426,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count. */
+            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections fall within one hour. The first rejection after the hour has lapsed restarts the count; a reconnect resets it. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -24387,8 +24456,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24459,8 +24528,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24531,8 +24600,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24603,8 +24672,8 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {

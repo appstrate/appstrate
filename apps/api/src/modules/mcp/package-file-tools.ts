@@ -19,7 +19,7 @@ import {
   preflightBundleImport,
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
-import { asString, textResult } from "./tool-results.ts";
+import { asString, jsonResult } from "./tool-results.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -125,6 +125,47 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
     description:
       "Validate a file-backed .afps/.zip/.afps-bundle using the exact import preflight. " +
       "Performs no mutation. Returns package identities, root, integrity and conflicts.",
+    outputSchema: {
+      type: "object",
+      required: ["valid", "importable", "file", "root", "integrity", "packages", "conflicts"],
+      properties: {
+        valid: { type: "boolean" },
+        importable: { type: "boolean" },
+        file: {
+          type: "object",
+          required: ["id", "uri", "name", "mime", "size"],
+          properties: {
+            id: { type: "string" },
+            uri: { type: "string" },
+            name: { type: "string" },
+            mime: { type: "string" },
+            size: { type: "integer" },
+          },
+        },
+        root: { type: "string" },
+        integrity: { type: "string" },
+        packages: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["identity", "type", "integrity"],
+            properties: {
+              identity: { type: "string" },
+              type: { type: ["string", "null"] },
+              integrity: { type: "string" },
+            },
+          },
+        },
+        conflicts: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["identity", "reason"],
+            properties: { identity: { type: "string" }, reason: { type: "string" } },
+          },
+        },
+      },
+    },
     annotations: {
       title: "Validate package file",
       readOnlyHint: true,
@@ -143,7 +184,7 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
         ctx.scope,
         ctx.authorizeBundle,
       );
-      return textResult({
+      return jsonResult({
         valid: true,
         importable: conflicts.length === 0,
         file: {
@@ -164,7 +205,7 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
       });
     } catch (err) {
       if (err instanceof McpError) throw err;
-      return textResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
+      return jsonResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
     }
   };
   return { descriptor, handler };
@@ -215,10 +256,10 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
           after: audit.after,
         });
       }
-      return textResult({ ...result, file_uri: fileUri(file.fileId) });
+      return jsonResult({ ...result, file_uri: fileUri(file.fileId) });
     } catch (err) {
       if (err instanceof McpError) throw err;
-      return textResult({ error: getErrorMessage(err) }, true);
+      return jsonResult({ error: getErrorMessage(err) }, true);
     }
   };
   return { descriptor, handler };
@@ -261,6 +302,44 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     description:
       "Return the executable MCP-server runtimes this Appstrate build supports and an exact " +
       "minimal manifest template for each. Call this before authoring a local MCP package.",
+    outputSchema: {
+      type: "object",
+      required: [
+        "archive_required",
+        "package_archive_max_bytes",
+        "schema_version",
+        "entry_point_must_exist",
+        "required_archive_files",
+        "runtimes",
+      ],
+      properties: {
+        archive_required: { type: "boolean" },
+        package_archive_max_bytes: { type: "integer" },
+        schema_version: { type: "string" },
+        entry_point_must_exist: { type: "boolean" },
+        required_archive_files: { type: "array", items: { type: "string" } },
+        runtimes: {
+          type: "array",
+          items: {
+            type: "object",
+            required: [
+              "runtime",
+              "manifest_version",
+              "server_type",
+              "entry_point",
+              "manifest_template",
+            ],
+            properties: {
+              runtime: { type: "string" },
+              manifest_version: { type: "string" },
+              server_type: { type: "string" },
+              entry_point: { type: "string" },
+              manifest_template: { type: "object" },
+            },
+          },
+        },
+      },
+    },
     annotations: {
       title: "Get MCP runtime capabilities",
       readOnlyHint: true,
@@ -270,7 +349,7 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
   const handler = async (): Promise<CallToolResult> =>
-    textResult({
+    jsonResult({
       archive_required: true,
       package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
       schema_version: AFPS_SCHEMA_VERSION,

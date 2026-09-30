@@ -5,24 +5,30 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 /**
  * 429 for the `/api/auth/oauth2/*` endpoints, which Better Auth's own limiter
  * guards (the budgets are the `rateLimit` block of `oauthProvider()` in
- * `auth/plugins.ts`). Its refusal is NOT the platform shape: a bare
- * `{ message }` body under `X-Retry-After`, where
- * `#/components/responses/RateLimited` is a ProblemDetail under `Retry-After`.
- * Spelled out here rather than $ref'd so the spec states which one a caller
- * gets.
- *
- * No `content`: the limiter hands the runtime a string body and names no media
- * type (`rateLimitResponse`, `better-auth/dist/api/rate-limiter`), so the
- * response carries no `Content-Type` at all. A media type here would state a
- * header the caller never receives; the body shape is in the description.
+ * `auth/plugins.ts`). Its refusal is restated at the mount
+ * (`oauthRateLimitResponse`, `lib/auth-pipeline.ts`) in the RFC 6749 §5.2
+ * error shape rather than `#/components/responses/RateLimited`'s ProblemDetail:
+ * OAuth clients parse `{ error }`.
  */
 const providerRateLimited = {
   description:
-    'Too many requests — Better Auth\'s per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation.',
+    "Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`).",
   headers: {
-    "X-Retry-After": {
+    "Retry-After": {
       description: "Seconds until the current window resets.",
-      schema: { type: "string" },
+      schema: { type: "integer", minimum: 0 },
+    },
+  },
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["error", "error_description"],
+        properties: {
+          error: { type: "string", const: "temporarily_unavailable" },
+          error_description: { type: "string" },
+        },
+      },
     },
   },
 };

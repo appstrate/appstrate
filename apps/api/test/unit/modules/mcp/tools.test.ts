@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
@@ -1166,5 +1167,58 @@ describe("undeclared tool arguments", () => {
     );
     await byName.get("list_files")!.handler({ runId: "run_1" }, noExtra);
     expect(new URL(calls[0]!.url).searchParams.get("runId")).toBe("run_1");
+  });
+});
+
+/**
+ * MCP 2025-06-18 structured output: a client that listed a tool's
+ * `outputSchema` REJECTS a success without `structuredContent`, or one that
+ * does not validate — the SDK validator below is the one those clients run.
+ */
+describe("structured tool output", () => {
+  const validator = new AjvJsonSchemaValidator();
+  const fileList = () =>
+    new Response(
+      JSON.stringify({
+        data: [{ id: "file_1", uri: "appfile://file_1", name: "a.txt", size: 3 }],
+        hasMore: false,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  it("answers each declared schema with conforming structuredContent, mirrored as text", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const cases: Array<[string, Record<string, unknown>, () => Response]> = [
+      ["search_operations", { query: "agent" }, fileList],
+      ["describe_operation", { operation_id: op.operationId }, fileList],
+      ["invoke_operation", { operation_id: op.operationId }, fileList],
+      ["get_me", {}, fileList],
+      ["list_files", {}, fileList],
+      ["get_runtime_capabilities", {}, fileList],
+    ];
+    for (const [name, args, respond] of cases) {
+      const { byName } = makeTools(FULL_SURFACE, false, undefined, respond);
+      const tool = byName.get(name)!;
+      expect(tool.descriptor.outputSchema).toBeDefined();
+      const result = await tool.handler(args, noExtra);
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent).toEqual(parseResult(result));
+      const verdict = validator.getValidator(tool.descriptor.outputSchema!)(
+        result.structuredContent,
+      );
+      expect({ name, ...verdict }).toMatchObject({ name, valid: true });
+    }
+  });
+
+  it("carries no structuredContent on a tool error", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName } = makeTools(FULL_SURFACE, false, undefined, () =>
+      Response.json({ title: "nope" }, { status: 500 }),
+    );
+    const result = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
   });
 });

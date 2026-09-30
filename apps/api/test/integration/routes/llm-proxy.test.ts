@@ -45,6 +45,10 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
+import {
+  CACHE_STATUS_HIT as HIT,
+  CACHE_STATUS_MISS as MISS,
+} from "../../../src/services/llm-proxy/response-cache.ts";
 
 /**
  * Drive the response cache through its ONLY input — the env. There is no
@@ -750,7 +754,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     restoreCacheEnv();
   });
 
-  it("returns x-llm-proxy-cache-status: MISS on first call and HIT on identical second call", async () => {
+  it("reports an RFC 9211 Cache-Status miss on the first call and a hit on an identical second", async () => {
     const h = await buildHarness();
     let upstreamCalls = 0;
 
@@ -777,7 +781,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(first.status).toBe(200);
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(first.headers.get("cache-status")).toBe(MISS);
     const firstJson = (await first.json()) as { id: string };
     expect(firstJson.id).toBe("chatcmpl_1");
 
@@ -787,11 +791,35 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(second.status).toBe(200);
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBe("HIT");
+    expect(second.headers.get("cache-status")).toBe(HIT);
     const secondJson = (await second.json()) as { id: string };
     // Replayed verbatim — same id as the first call, no upstream re-hit.
     expect(secondJson.id).toBe("chatcmpl_1");
     expect(upstreamCalls).toBe(1);
+  });
+
+  it("appends its member after the one an upstream cache set", async () => {
+    const h = await buildHarness();
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl_1",
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+            usage: { prompt_tokens: 10, completion_tokens: 4 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-status": "edge; fwd=miss" },
+          },
+        ),
+    );
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "chain" }] }),
+    });
+    expect(res.headers.get("cache-status")).toBe(`edge; fwd=miss, ${MISS}`);
   });
 
   it("misses when the request body changes (key includes request payload)", async () => {
@@ -821,9 +849,9 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       });
 
     const a = await callWith("first prompt");
-    expect(a.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(a.headers.get("cache-status")).toBe(MISS);
     const b = await callWith("second prompt");
-    expect(b.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(b.headers.get("cache-status")).toBe(MISS);
     expect(upstreamCalls).toBe(2);
   });
 
@@ -867,7 +895,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     expect(first.status).toBe(200);
     // Streaming responses are not tagged with cache status — they bypass
     // the cache layer entirely.
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(first.headers.get("cache-status")).toBeNull();
     await first.text(); // drain
 
     const second = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
@@ -876,7 +904,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(second.status).toBe(200);
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(second.headers.get("cache-status")).toBeNull();
     await second.text();
     expect(upstreamCalls).toBe(2);
   });
@@ -941,14 +969,14 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       headers: authHeaders(h),
       body,
     });
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(first.headers.get("cache-status")).toBeNull();
 
     const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
       headers: authHeaders(h),
       body,
     });
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(second.headers.get("cache-status")).toBeNull();
     expect(upstreamCalls).toBe(2);
   });
 });
