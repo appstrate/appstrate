@@ -116,6 +116,7 @@ function apiIntegration(
     namespace,
     integrationId,
     connectionId: "conn-1",
+    declaredUris: [],
     fetchCredentials:
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials:
