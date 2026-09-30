@@ -20,15 +20,32 @@ export type { ListenClient };
 // Initialization
 // ---------------------------------------------------------------------------
 
+type PGliteClient = import("@electric-sql/pglite").PGlite;
+
 let _closeDb: (() => Promise<void>) | null = null;
 let _listenClient: ListenClient | null = null;
-let _pgliteClient: import("@electric-sql/pglite").PGlite | null = null;
+let _pgliteClient: PGliteClient | null = null;
 let _pgQueryClient: import("postgres").Sql | null = null;
 
 /** Access the raw PGlite client (for exec() multi-statement support). Only available in embedded mode. */
-export function getPGliteClient(): import("@electric-sql/pglite").PGlite | null {
+export function getPGliteClient(): PGliteClient | null {
   return _pgliteClient;
 }
+
+// `bun --hot` (the dev server) re-evaluates this module without restarting the
+// process. A second PGlite opened on a data directory the first still holds
+// corrupts it (the next boot aborts inside the core migrations), so instances
+// live on `globalThis`, which survives re-evaluation, keyed by data directory.
+// Each entry also keeps the unsubscribes of the LISTEN handlers registered on it: the evaluation
+// that registered them is gone after a reload, which registers its own.
+const PGLITE_INSTANCES = Symbol.for("appstrate.db.pgliteInstances");
+interface PGliteInstance {
+  client: PGliteClient;
+  unlisten: (() => Promise<void>)[];
+}
+const pgliteInstances = ((globalThis as { [PGLITE_INSTANCES]?: Map<string, PGliteInstance> })[
+  PGLITE_INSTANCES
+] ??= new Map());
 
 async function initPGlite(): Promise<Db> {
   const { PGlite } = await import("@electric-sql/pglite");
@@ -38,13 +55,23 @@ async function initPGlite(): Promise<Db> {
 
   const dataDir = resolve(env.PGLITE_DATA_DIR);
   mkdirSync(dataDir, { recursive: true });
-  const client = new PGlite(dataDir);
+  let instance: PGliteInstance | undefined = pgliteInstances.get(dataDir);
+  if (instance) {
+    await Promise.all(instance.unlisten.splice(0).map((unlisten) => unlisten()));
+  } else {
+    instance = { client: new PGlite(dataDir), unlisten: [] };
+    pgliteInstances.set(dataDir, instance);
+  }
+  const { client, unlisten } = instance;
 
   _pgliteClient = client;
-  _closeDb = () => client.close();
+  _closeDb = () => {
+    pgliteInstances.delete(dataDir);
+    return client.close();
+  };
   _listenClient = {
     listen: async (channel, handler) => {
-      await client.listen(channel, handler);
+      unlisten.push(await client.listen(channel, handler));
     },
   };
 

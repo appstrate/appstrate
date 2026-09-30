@@ -140,6 +140,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${opts.userId.slice(0, 6)}`,
+        label: `acct-${opts.userId.slice(0, 6)}`,
         spaceId: opts.spaceId,
         userId: opts.userId,
         endUserId: null,

@@ -163,18 +163,22 @@ export function readApiCallIntegrationMetas(
   bundle: Bundle,
   ref: IntegrationRef,
 ): ApiCallIntegrationMeta[] {
+  return projectApiCallMetas(ref.name, readIntegrationManifest(bundle, ref));
+}
+
+/**
+ * The integration manifest `ref` resolves to in the bundle, unvalidated: its
+ * `integration.json` (else `manifest.json`) file, else the package's parsed
+ * manifest; `undefined` when the bundle does not carry the package.
+ */
+export function readIntegrationManifest(bundle: Bundle, ref: IntegrationRef): unknown {
   const pkg = resolvePackageRef(bundle, ref);
-  let parsed: unknown = pkg?.manifest;
-  if (pkg) {
-    for (const candidate of ["integration.json", "manifest.json"] as const) {
-      const bytes = pkg.files.get(candidate);
-      if (bytes) {
-        parsed = JSON.parse(new TextDecoder().decode(bytes));
-        break;
-      }
-    }
+  if (!pkg) return undefined;
+  for (const candidate of ["integration.json", "manifest.json"] as const) {
+    const bytes = pkg.files.get(candidate);
+    if (bytes) return JSON.parse(new TextDecoder().decode(bytes));
   }
-  return projectApiCallMetas(ref.name, parsed);
+  return pkg.manifest;
 }
 
 function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationMeta[] {
@@ -273,6 +277,12 @@ const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "x-integration-id",
   "x-target",
   "appstrate-user",
+  // Set by the platform (`extraHeaders`) to scope the call to its run; an agent
+  // copy under another casing would merge into "a, b" and break the call.
+  // `x-connection-id` stays open only so a caller that already knows a connection
+  // id can name it: the api_call tool has no way to address a member of a set,
+  // which is why a remote run binds one connection per integration (run-creation).
+  "x-run-id",
 ]);
 
 // ─────────────────────────────────────────────

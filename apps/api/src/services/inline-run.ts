@@ -380,7 +380,7 @@ export async function triggerInlineRun(params: {
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
   const { orgId, spaceId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
-  const { manifest, prompt, modelIdOverride, proxyIdOverride, connectionOverrides } = preflight;
+  const { manifest, prompt, modelIdOverride, proxyIdOverride, launchOverrides } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
   // `undefined`; map that to NULL so an input-less inline run persists
@@ -427,7 +427,7 @@ export async function triggerInlineRun(params: {
       proxyId: proxyIdOverride,
       spaceId,
       apiKeyId,
-      connectionOverrides,
+      launchOverrides,
       traceparent,
       // The preflight's own memo, already seeded with the PINNED integration
       // manifests — the pipeline must not resolve them a second time.

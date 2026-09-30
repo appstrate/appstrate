@@ -151,10 +151,13 @@ function captureWarnings(): string[] {
 
 afterEach(() => stopCapture());
 
-function localSpec(integrationId: string): IntegrationSpawnSpec {
+function localSpec(integrationId: string, connectionId?: string): IntegrationSpawnSpec {
   return {
     integrationId,
     namespace: "thirdparty",
+    ...(connectionId
+      ? { connection: { id: connectionId, label: connectionId, accountId: null } }
+      : {}),
     sourceKind: "local",
     manifest: {
       name: integrationId,
@@ -190,10 +193,10 @@ describe("process adapter — runner uids and peer attribution", () => {
   }
 
   /** SubprocessTransport spawns on `start()`, so nothing is launched here. */
-  function spawn(adapter: IntegrationRuntimeAdapter, integrationId: string) {
+  function spawn(adapter: IntegrationRuntimeAdapter, integrationId: string, connectionId?: string) {
     return adapter.spawn({
       runId: "run-peers",
-      spec: localSpec(integrationId),
+      spec: localSpec(integrationId, connectionId),
       bundleRoot,
       egress: null,
       workspaceHandle: null,
@@ -230,6 +233,20 @@ describe("process adapter — runner uids and peer attribution", () => {
     const attribute = adapter.peerAttribution();
     expect(await attribute(peer(40000))).toBe("@orga/a");
     expect(await attribute(peer(40001))).toBe("@orga/b");
+  });
+
+  it("attributes two connections of one integration to two runners", async () => {
+    const adapter = await newAdapter();
+    await spawn(adapter, "@orga/a", "conn-work");
+    await spawn(adapter, "@orga/a", "conn-perso");
+    table = [
+      HEADER,
+      row(0, loopback(40000), loopback(LISTENER), "01", FIRST),
+      row(1, loopback(40001), loopback(LISTENER), "01", FIRST + 1),
+    ].join("\n");
+    const attribute = adapter.peerAttribution();
+    expect(await attribute(peer(40000))).toBe("@orga/a#conn-work");
+    expect(await attribute(peer(40001))).toBe("@orga/a#conn-perso");
   });
 
   it("treats uids outside the pool as non-runners and refuses unregistered pool uids", async () => {
@@ -433,10 +450,11 @@ describe("process adapter — transparent egress plane (#779)", () => {
     adapter: IntegrationRuntimeAdapter,
     integrationId: string,
     egress: RuntimeEgressContext,
+    connectionId?: string,
   ) {
     return adapter.spawn({
       runId: "run-plane",
-      spec: localSpec(integrationId),
+      spec: localSpec(integrationId, connectionId),
       bundleRoot,
       egress,
       workspaceHandle: null,
@@ -539,6 +557,21 @@ describe("process adapter — transparent egress plane (#779)", () => {
     expect(await sendAs(1000, ports.tls, hello)).toHaveLength(0);
     expect(await sendAs(FIRST, ports.tls, buildClientHello("evil.test"))).toHaveLength(0);
     expect(upstream.received).toHaveLength(0);
+  });
+
+  it("serves each connection of one integration its own policy", async () => {
+    const adapter = await newAdapter();
+    const OTHER = "api.other.test";
+    await spawn(adapter, "@orga/connect", connectEgress, "conn-work");
+    await spawn(
+      adapter,
+      "@orga/connect",
+      { ...connectEgress, policy: { ...policy, allowsAuthority: (host) => host === OTHER } },
+      "conn-perso",
+    );
+    const other = buildClientHello(OTHER);
+    expect(await sendAs(FIRST, ports.tls, other)).toHaveLength(0);
+    expect((await sendAs(FIRST + 1, ports.tls, other)).equals(other)).toBe(true);
   });
 
   it("starts no plane at prepare, nor for a MITM-delivery runner", async () => {

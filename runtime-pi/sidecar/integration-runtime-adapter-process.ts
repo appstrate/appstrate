@@ -42,7 +42,12 @@ import {
   type TransparentEgressPlane,
   type TransparentEgressPlaneOptions,
 } from "./integration-transparent-listener.ts";
-import { noRunnerPeers, policyForRunnerPeer, type PeerAttribution } from "./runner-peers.ts";
+import {
+  noRunnerPeers,
+  policyForRunnerPeer,
+  runnerKeyOf,
+  type PeerAttribution,
+} from "./runner-peers.ts";
 import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
@@ -278,19 +283,6 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
- * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
- * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
- * sidecar's tmp space and surface the actual path via an env var
- * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
- * it up. Pure-Docker deployments don't hit the fallback (the runner image
- * always permits writes to `/tmp` and `/run/`).
- *
- * Returns the set of created paths so `shutdown()` can clean them up.
- */
-/**
  * R8a — safe-path floor for `delivery.files` on the process adapter.
  *
  * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
@@ -319,6 +311,20 @@ export function isHostPathSafeForMount(hostPath: string): boolean {
   return isPathSafeForMount(hostPath);
 }
 
+/**
+ * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
+ * adapter. Subprocesses share the host filesystem, so we attempt to write
+ * each entry at the manifest-declared absolute path with the requested
+ * mode. When that fails (typically a dev machine without write permission
+ * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
+ * sidecar's tmp space and surface the actual path via an env var
+ * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
+ * it up. Pure-Docker deployments don't hit the fallback (the runner image
+ * always permits writes to `/tmp` and `/run/`).
+ *
+ * Returns the written paths (`createdPaths`), which `shutdown()` removes, and
+ * the `APPSTRATE_FILE_MOUNT_*` entries of the fallback (`envOverrides`).
+ */
 export async function materializeFileMountsOnHost(
   runId: string,
   fileMounts: Record<string, { content_b64: string; mode: string }>,
@@ -413,10 +419,10 @@ export function createProcessIntegrationRuntimeAdapter({
   const createdPaths: string[] = [];
   // Read once: admission and attribution judge the same pool.
   const uidPool = parseRunnerUidPool(process.env.APPSTRATE_RUNNER_UIDS);
-  /** Runner uid → integration id, one uid per `spawn()`, allocated in pool order. */
+  /** Runner uid → {@link runnerKeyOf}, one uid per `spawn()`, allocated in pool order. */
   const runnersByUid = new Map<number, string>();
   let allocatedUids = 0;
-  /** Integration id → policy the transparent plane serves that runner. */
+  /** {@link runnerKeyOf} → policy the transparent plane serves that runner. */
   const transparentPolicies = new Map<string, EgressPolicy>();
   let plane: Promise<TransparentEgressPlane | null> | null = null;
   /** Set by `shutdown()`: a plane started after it would have no one to close it. */
@@ -467,6 +473,8 @@ export function createProcessIntegrationRuntimeAdapter({
       ...transparentPlane,
     }));
   };
+  /** Declared `delivery.files` path → connection whose bytes sit there (`null`: connect run). */
+  const declaredPathHolders = new Map<string, string | null>();
 
   return {
     id: "process",
@@ -499,7 +507,7 @@ export function createProcessIntegrationRuntimeAdapter({
         );
       }
       allocatedUids += 1;
-      runnersByUid.set(uid, spec.integrationId);
+      runnersByUid.set(uid, runnerKeyOf(spec));
       // The runner reads its bundle and, when MITM-delivered, the run CA in place,
       // on its own uid, and both sit under a 0700 mkdtemp root; the entries inside
       // are written under the sidecar's umask (022 — nothing sets another), so only
@@ -516,7 +524,7 @@ export function createProcessIntegrationRuntimeAdapter({
       // bypass credential injection. Up before the runner starts: its DNS lands
       // on the plane from its first lookup.
       if (egress && egress.caCertHostPath === null) {
-        transparentPolicies.set(spec.integrationId, egress.policy);
+        transparentPolicies.set(runnerKeyOf(spec), egress.policy);
         await ensurePlane();
       }
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
@@ -563,6 +571,20 @@ export function createProcessIntegrationRuntimeAdapter({
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
+        const holder = spec.connection?.id ?? null;
+        const declaredPaths = Object.keys(spec.fileMounts).map(normalizeMountPath);
+        const held = declaredPaths.find((path) => {
+          const current = declaredPathHolders.get(path);
+          return current !== undefined && current !== holder;
+        });
+        if (held !== undefined) {
+          throw new Error(
+            `${spec.integrationId} [${spec.connection?.label ?? "connect"}]: refusing to spawn — ` +
+              `delivery.files path "${held}" already holds another connection's credential ` +
+              `in this run, and this runner would read that connection's file.`,
+          );
+        }
+        for (const path of declaredPaths) declaredPathHolders.set(path, holder);
         const { createdPaths: paths, envOverrides } = await materializeFileMountsOnHost(
           runId,
           spec.fileMounts,

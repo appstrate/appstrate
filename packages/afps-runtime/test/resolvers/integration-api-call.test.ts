@@ -1157,6 +1157,40 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     expect(h["X-Target"]).toBe("https://api.acme.com/v1/me");
   });
 
+  it("drops an agent-supplied X-Run-Id (any casing) but keeps X-Connection-Id", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const resolver = new RemoteAppstrateIntegrationResolver({
+      instance: "https://app.appstrate.com",
+      apiKey: "ask_test",
+      spaceId: "spc_1",
+      extraHeaders: { "X-Run-Id": "run_real" },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { "x-run-id": "run_forged", "X-Connection-Id": "conn_1" },
+      },
+      ctx,
+    );
+    const h = calls[0]!.init.headers as Record<string, string>;
+    // One key only — a second casing would be merged by fetch into "run_forged, run_real".
+    expect(Object.keys(h).filter((k) => k.toLowerCase() === "x-run-id")).toEqual(["X-Run-Id"]);
+    expect(h["X-Run-Id"]).toBe("run_real");
+    expect(h["X-Connection-Id"]).toBe("conn_1");
+  });
+
   it("does not enforce authorizedUris locally (platform gates server-side)", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});

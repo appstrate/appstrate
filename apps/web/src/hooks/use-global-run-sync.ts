@@ -46,14 +46,12 @@ import {
  * server-side truth anyway.
  */
 function handleConnectionUpdate(qc: QueryClient) {
-  // Connections page (`/preferences/connections`) — the orange
-  // "Reconnection required" badge reads off this typed query.
-  qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
-  // Integration list (sidebar status, integrations page count) +
-  // detail subtree (auth statuses, connection lists, agent-resolution
-  // verdicts, the resolution verdict that powers the agent picker
-  // dropdown). The typed keys are `[method, "/api/integrations…", init]`,
-  // so the shared helper matches on the path element.
+  // Connections page (`/preferences/connections`, whose orange "Reconnection
+  // required" badge reads off `/api/me/connections`), integration list
+  // (sidebar status, integrations page count) + detail subtree (auth
+  // statuses, connection lists, agent-resolution verdicts, the resolution
+  // verdict that powers the agent picker dropdown) — all refreshed by the
+  // shared helper, which matches on the typed key's path element.
   void invalidateIntegrationQueries(qc);
 }
 

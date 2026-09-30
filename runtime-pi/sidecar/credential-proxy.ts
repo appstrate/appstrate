@@ -14,7 +14,7 @@
  *   4. Inject the credential header server-side.
  *   5. Forward the request to the upstream API.
  *   6. Retry once on 401 with a refreshed token.
- *   7. Log persistent auth failures locally (once per integration per run).
+ *   7. Log persistent auth failures locally (once per connection per run).
  *
  * The MCP `api_call` tool handler in `runtime-pi/sidecar/mcp.ts`
  * takes typed JSON-RPC arguments and calls this helper directly, then
@@ -99,6 +99,7 @@ export type ApiCallRequestBody =
 
 interface ApiCallArgs {
   integrationId: string;
+  connectionId: string;
   targetUrl: string;
   method: string;
   /** Hop-by-hop and routing headers must already be filtered out. */
@@ -164,7 +165,7 @@ type ApiCallResult = ApiCallSuccess | ApiCallFailure;
  * The integration-agnostic half of {@link ApiCallDeps}: everything the
  * credential-proxy core needs that is scoped to the RUN rather than to one
  * integration. Built once per sidecar (`buildSidecarRuntimeDeps`) and shared;
- * the credential pair is layered on per integration at tool-build time.
+ * the credential pair is layered on per bound connection at tool-build time.
  */
 export interface ApiCallBaseDeps {
   config: SidecarConfig;
@@ -172,9 +173,9 @@ export interface ApiCallBaseDeps {
   cookieJar: CookieJar;
   fetchFn: typeof fetch;
   /**
-   * Set tracking which integrations already had a persistent auth
+   * Set tracking which credential scopes already had a persistent auth
    * failure logged in this run. Mutated by the function — shared
-   * across calls so a flapping integration only logs once and so the
+   * across calls so a flapping connection only logs once and so the
    * 401-retry path skips the refresh after the first failure.
    */
   reportedAuthFailures: Set<string>;
@@ -244,6 +245,16 @@ function assertNever(value: never): never {
 }
 
 /**
+ * Per-connection key of the cookie jar and the 401 verdicts (`reportedAuthFailures`): two
+ * connections of one integration never share a cookie nor a persistent-401 verdict. NUL occurs
+ * in neither a package id (`INTEGRATION_ID_RE`) nor a connection uuid, so the two parts are
+ * unambiguous and no integration id can be crafted to forge another's scope.
+ */
+export function credentialScope(integrationId: string, connectionId: string): string {
+  return `${integrationId}\u0000${connectionId}`;
+}
+
+/**
  * The strings a `substituteBody: true` request body runs substitution on —
  * the exfil guard scans exactly these, never a re-serialisation (JSON escaping
  * would hide `{{\tkey}}`). Exhaustive via `assertNever`.
@@ -277,6 +288,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
     deps;
   const { integrationId, targetUrl, method, body, substituteBody } = args;
+  const scope = credentialScope(integrationId, args.connectionId);
 
   // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
   // once, before any substitution runs. Doing it on the resolved value (what
@@ -369,11 +381,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     if (refusal) return refusal;
   }
 
-  // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md).
-  //     Siblings are gated per URL, whatever gated the initial target.
+  // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
+  //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(
     cookieJar,
-    integrationId,
+    scope,
     policy.allowAllUris || !policy.authorizedUris.length ? null : policy.authorizedUris,
   );
 
@@ -635,7 +647,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     config.platformApiUrl &&
     config.runToken &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId).catch(() => null);
     if (fresh) {
@@ -661,17 +673,20 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 8. Terminal-hop Set-Cookie capture (buffered: idempotent re-merge; streaming: no follower).
   cookies.capture(upstreamFinalUrl, upstream.headers.getSetCookie());
 
-  // 9. Log a persistent auth failure once per integration per run. The flag is
+  // 9. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
   if (
     upstream.status === 401 &&
     credentialInjection === "inject" &&
-    !reportedAuthFailures.has(integrationId)
+    !reportedAuthFailures.has(scope)
   ) {
-    reportedAuthFailures.add(integrationId);
-    logger.warn("Upstream returned 401 after refresh attempt", { integrationId });
+    reportedAuthFailures.add(scope);
+    logger.warn("Upstream returned 401 after refresh attempt", {
+      integrationId,
+      connectionId: args.connectionId,
+    });
   }
 
   // 10. Success-path diagnostic envelope (#404). One structured line per

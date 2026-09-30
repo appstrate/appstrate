@@ -10,8 +10,9 @@
  *      connect/fields gets 403 with detail `connection_blocked_by_admin`; an
  *      owner SESSION is exempt, an owner-minted API KEY is not.
  *   2. PATCH /:packageId/connections/:connectionId metadata authorization —
- *      owner edit (200), admin toggling sharedWithOrg on a row they don't own
- *      (403, owner-consent rule), unrelated member (403), foreign-space row (404).
+ *      owner edit (200), admin sharing a row they don't own (403, owner-consent
+ *      rule) but unsharing it (200, 409 while pinned), unrelated member (403),
+ *      foreign-space row (404).
  *   3. `integrations:configure` is session-only — the governance mutations
  *      (settings gate, agent pins, org default) refuse every API key,
  *      whatever its creator's role.
@@ -39,6 +40,7 @@ import { and, eq } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections,
+  integrationPins,
   packageShares,
   spacePackages,
 } from "@appstrate/db/schema";
@@ -488,6 +490,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: opts.shared ?? false,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -528,7 +531,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     expect(row?.label).toBe("My Gmail");
   });
 
-  it("403s an admin toggling sharedWithOrg on a connection they don't own (owner-consent rule)", async () => {
+  it("403s an admin sharing a connection they don't own (owner-consent rule)", async () => {
     // Connection owned by a member, NOT by the admin (ctx.user is owner/admin).
     const member = await createTestUser({ email: "conn-owner@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
@@ -539,11 +542,11 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ shared_with_org: true }),
     });
-    // Admin is allowed to edit metadata in general, but shared_with_org is
-    // consent — only the owner may flip it.
+    // Admin is allowed to edit metadata in general, but sharing is consent —
+    // only the owner may give it.
     expect(res.status).toBe(403);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/only the connection owner can change shared_with_org/i);
+    expect(body.detail ?? "").toMatch(/only the connection owner can share it/i);
 
     // Not flipped.
     const [row] = await db
@@ -551,6 +554,67 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row?.shared).toBe(false);
+  });
+
+  /** PATCH `shared_with_org` on `connId` as the session behind `headers`. */
+  function patchShared(connId: string, shared: boolean, headers: Record<string, string>) {
+    return app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
+      method: "PATCH",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ shared_with_org: shared }),
+    });
+  }
+
+  async function isShared(connId: string): Promise<boolean | undefined> {
+    const [row] = await db
+      .select({ shared: integrationConnections.sharedWithOrg })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    return row?.shared;
+  }
+
+  it("lets an integrations:configure holder unshare a colleague's connection (200)", async () => {
+    const member = await createTestUser({ email: "sharer@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const connId = await seedConn({ userId: member.id, shared: true });
+
+    const res = await patchShared(connId, false, authHeaders(ctx));
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { shared_with_org: boolean }).shared_with_org).toBe(false);
+    expect(await isShared(connId)).toBe(false);
+  });
+
+  it("403s a non-governor member unsharing a colleague's connection", async () => {
+    const connId = await seedConn({ userId: ctx.user.id, shared: true });
+    // An open default space gives a plain member `operator`: connect, not configure.
+    const member = await createTestUser({ email: "operator@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+
+    const res = await patchShared(connId, false, memberHeaders(member.cookie, ctx));
+
+    expect(res.status).toBe(403);
+    expect(await isShared(connId)).toBe(true);
+  });
+
+  it("409s an admin unsharing a colleague's connection while an admin pin names it", async () => {
+    const member = await createTestUser({ email: "pinned@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const connId = await seedConn({ userId: member.id, shared: true });
+    const agent = await seedPackage({ id: "@myorg/pinning-agent", orgId: ctx.orgId });
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: agent.id,
+      integrationId: "@myorg/gmail",
+      userId: null,
+      connectionIds: [connId],
+    });
+
+    const res = await patchShared(connId, false, authHeaders(ctx));
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe("connection_pinned");
+    expect(await isShared(connId)).toBe(true);
   });
 
   it("403s an unrelated member editing someone else's connection", async () => {
@@ -614,6 +678,7 @@ describe("integrations:configure is never grantable to an API key", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
         sharedWithOrg: true,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -637,7 +702,7 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });
@@ -650,11 +715,11 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { connection_id: string };
-    expect(body.connection_id).toBe(connId);
+    const body = (await res.json()) as { connection_ids: string[] };
+    expect(body.connection_ids).toEqual([connId]);
   });
 
   it("validateScopes refuses integrations:configure at mint time, for an owner", async () => {
@@ -800,7 +865,7 @@ describe("integrations:configure is never grantable to an API key", () => {
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_id: connId }),
+      body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
   });
@@ -841,6 +906,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
         sharedWithOrg: false,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     const connId = row!.id;

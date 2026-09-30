@@ -26,9 +26,28 @@ import type { AgentDetail } from "@appstrate/shared-types";
 import { AgentInputForm } from "./agent-input-form";
 import type { AgentInputSettings } from "@appstrate/core/input-resolution";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
-import { RunOverridesPanel, type RunOverridesValue } from "./run-overrides-panel";
+import { RunOverridesPanel } from "./run-overrides-panel";
 import { AgentVersionField } from "./package-version-select";
-import { ActorSelect, type ActorValue } from "./actor-select";
+import { ActorSelect } from "./actor-select";
+import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
+import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
+import { VERSION_PUBLISHED } from "../lib/version-selector";
+import {
+  type ConnectionChoice,
+  type SubmittedPicks,
+  pendingConnectionChoices,
+  picksAfterActorChange,
+  refusalForActor,
+} from "../lib/connection-choice";
+import { withConnectionOverride } from "../lib/connection-set";
+import {
+  type ActorValue,
+  type RunOverridesValue,
+  sameActor,
+  scheduleOverridePayload,
+} from "../lib/schedule-payload";
+import { useAuth } from "../hooks/use-auth";
+import { usePackageDetail } from "../hooks/use-packages";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
@@ -72,13 +91,10 @@ interface ScheduleSaveData {
   version_override?: string | null;
   /**
    * Per-integration connection picks frozen on the schedule row
-   * (`package_schedules.connection_overrides`). Flat map keyed by
-   * integration id: `{ "@scope/integration": "<connection_id>" }`. Same
-   * wire shape as the run-route's `connection_overrides` (validated by
-   * `routes/schedules.ts`'s `z.record(z.string(), z.string())`); `null`
-   * clears on edit.
+   * (`package_schedules.connection_overrides`), same wire shape as the run
+   * route's `connection_overrides`; `null` clears on edit.
    */
-  connection_overrides?: Record<string, string> | null;
+  connection_overrides?: Record<string, string[]> | null;
   /**
    * Schedule execution identity (#738). Omitted on create → server defaults to
    * the caller. Omitted on edit → actor left unchanged (never cleared).
@@ -98,7 +114,7 @@ interface ScheduleFormProps {
     generation_config_override?: ModelGenerationSettings | null;
     proxy_id_override?: string | null;
     version_override?: string | null;
-    connection_overrides?: Record<string, string> | null;
+    connection_overrides?: Record<string, string[]> | null;
     actor?: ActorValue;
   };
   /** The schedule's current actor (edit mode) — used to detect a real change. */
@@ -121,12 +137,6 @@ interface ScheduleFormProps {
   homeWritable?: boolean;
   /** Package id needed by RunOverridesPanel to fetch versions. */
   packageId?: string;
-  /**
-   * Agent's declared integration deps — surfaces the connectionOverrides
-   * picker. Pass an empty array to hide. Read from
-   * `agentDetail.dependencies.integrations` at the page level.
-   */
-  agentIntegrations?: Array<{ id: string; tools?: string[] | "*" }>;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
@@ -135,6 +145,11 @@ interface ScheduleFormProps {
   onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
+  /**
+   * What the last save was refused over (`409 missing_integration_connection`):
+   * a scheduled fire cannot ask which connection to use.
+   */
+  connectionChoices?: readonly ConnectionChoice[];
 }
 
 interface FormFields {
@@ -149,7 +164,6 @@ export function ScheduleForm({
   defaultValues,
   currentActor,
   inputWrapper,
-  agentIntegrations,
   persistedModelId,
   persistedGenerationConfig,
   persistedProxyId,
@@ -163,6 +177,7 @@ export function ScheduleForm({
   onDelete,
   isPending,
   blockedMessage,
+  connectionChoices,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
@@ -235,14 +250,57 @@ export function ScheduleForm({
 
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
+  const { user } = useAuth();
+  // Who a fire runs as while the select holds nothing: the schedule's own actor
+  // on edit, the caller on create.
+  const baseActor: ActorValue | undefined = isEdit
+    ? currentActor
+    : user
+      ? { userId: user.id }
+      : undefined;
+  const runsAs = actor ?? baseActor;
+  // The pickers judge the VIEWER's connections; they only speak for a schedule
+  // that runs as the viewer.
+  const actorIsViewer = !!user && sameActor(runsAs, { userId: user.id });
+  const changeActor = (next: ActorValue | undefined) => {
+    setOverrides((prev) => {
+      const { connection_overrides: picks, ...rest } = prev;
+      const kept = picksAfterActorChange({
+        picks,
+        runsAs,
+        nextRunsAs: next ?? baseActor,
+        stored: isEdit
+          ? { actor: currentActor, picks: defaultValues?.connection_overrides ?? undefined }
+          : null,
+      });
+      return kept ? { ...rest, connection_overrides: kept } : rest;
+    });
+    setActor(next);
+  };
+  const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
+    setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
 
-  // True only when the selected actor differs from the schedule's current one.
-  // Exploring the picker (or re-selecting the same identity) is not a change, so
-  // it must not wipe the frozen connection picks.
-  const actorChanged =
-    !!actor &&
-    ((actor.userId ?? null) !== (currentActor?.userId ?? null) ||
-      (actor.endUserId ?? null) !== (currentActor?.endUserId ?? null));
+  // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
+  const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
+  const refused = refusalForActor(connectionChoices, submitted, runsAs);
+  const pending = pendingConnectionChoices(
+    refused,
+    submitted?.picks,
+    overrides.connection_overrides,
+  );
+  // Open while a refusal speaks for this actor, so answering it does not fold the pick away.
+  const overridesShown = overridesOpen || refused.length > 0;
+
+  // Rows come from the definition every fire runs: inherit is the latest published version,
+  // never the draft this page would otherwise project for an author.
+  const firedVersion = versionOverride ?? VERSION_PUBLISHED;
+  const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
+    ?.dependencies.integrations;
+  const showActorChoice =
+    !actorIsViewer &&
+    ((firedIntegrations?.length ?? 0) > 0 ||
+      refused.length > 0 ||
+      Object.keys(overrides.connection_overrides ?? {}).length > 0);
 
   const {
     register,
@@ -283,51 +341,21 @@ export function ScheduleForm({
     // anyway, so the two paths agree.
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
-    // On create: omit empty overrides entirely (server stores null).
-    // On edit: send `null` for cleared overrides so the row resets to
-    // "use the agent's persisted defaults". `undefined` would leave the
-    // existing override untouched per the Zod schema's optional rule.
-    const overridePayload = isEdit
-      ? {
-          model_id_override: overrides.model_id_override ?? null,
-          generation_config_override: overrides.generation_config_override ?? null,
-          proxy_id_override: overrides.proxy_id_override ?? null,
-          ...(versionOverrideChanged ? { version_override: versionOverride ?? null } : {}),
-          connection_overrides: overrides.connection_overrides ?? null,
-        }
-      : {
-          ...(overrides.model_id_override
-            ? { model_id_override: overrides.model_id_override }
-            : {}),
-          ...(overrides.generation_config_override
-            ? { generation_config_override: overrides.generation_config_override }
-            : {}),
-          ...(overrides.proxy_id_override
-            ? { proxy_id_override: overrides.proxy_id_override }
-            : {}),
-          ...(versionOverride ? { version_override: versionOverride } : {}),
-          ...(overrides.connection_overrides
-            ? { connection_overrides: overrides.connection_overrides }
-            : {}),
-        };
-
+    setSubmitted({ runsAs, picks: overrides.connection_overrides ?? {} });
     onSubmit({
       name: data.name || undefined,
       cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
       ...(isEdit ? { enabled: data.enabled } : {}),
-      ...overridePayload,
-      // Create: send whatever actor was picked (omitted → backend defaults to
-      // the caller). Edit: send only on a real change, and then drop the seeded
-      // connection_overrides so they reset under the new identity.
-      ...(isEdit
-        ? actorChanged
-          ? { actor, connection_overrides: undefined }
-          : {}
-        : actor
-          ? { actor }
-          : {}),
+      ...scheduleOverridePayload({
+        isEdit,
+        overrides,
+        versionOverride,
+        versionOverrideChanged,
+        actor,
+        currentActor,
+      }),
     });
   });
 
@@ -458,7 +486,7 @@ export function ScheduleForm({
                 is the caller. */}
             <ActorSelect
               value={actor}
-              onChange={setActor}
+              onChange={changeActor}
               placeholder={t("schedule.actorDefaultSelf")}
             />
             <p className="text-muted-foreground text-xs">{t("schedule.actorHint")}</p>
@@ -478,11 +506,13 @@ export function ScheduleForm({
             </div>
           )}
 
+          <ScheduleConnectionRefusals choices={pending} />
+
           {/* Overrides accordion — surfaces per-schedule overrides for model,
           proxy, and version. Same UX vocabulary as the Run modal so users
           learn the override layer once. */}
           {packageId && (
-            <Collapsible open={overridesOpen} onOpenChange={setOverridesOpen}>
+            <Collapsible open={overridesShown} onOpenChange={setOverridesOpen}>
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
@@ -492,7 +522,7 @@ export function ScheduleForm({
                   <ChevronDown
                     className={cn(
                       "text-muted-foreground size-4 transition-transform",
-                      overridesOpen && "rotate-180",
+                      overridesShown && "rotate-180",
                     )}
                   />
                 </button>
@@ -522,10 +552,20 @@ export function ScheduleForm({
                   persistedModelId={persistedModelId ?? null}
                   persistedGenerationConfig={persistedGenerationConfig ?? null}
                   persistedProxyId={persistedProxyId ?? null}
-                  {...(agentIntegrations ? { agentIntegrations } : {})}
+                  {...(actorIsViewer && firedIntegrations
+                    ? { agentIntegrations: firedIntegrations }
+                    : {})}
                   value={overrides}
                   onChange={setOverrides}
+                  version={firedVersion}
                 />
+                {showActorChoice && (
+                  <ScheduleActorConnectionChoice
+                    choices={refused}
+                    value={overrides.connection_overrides ?? {}}
+                    onChange={setConnectionPick}
+                  />
+                )}
               </CollapsibleContent>
             </Collapsible>
           )}

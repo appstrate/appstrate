@@ -445,7 +445,7 @@ export async function recordProxyUsage(
     userId: inputs.principal.kind === "jwt_user" ? inputs.principal.userId : null,
     // Attribution invariant: `runId` must reference a run in
     // `principal.orgId` — the route validates the caller-supplied
-    // `X-Run-Id` before the upstream call (`assertRunAttributable`), and
+    // `X-Run-Id` before the upstream call (`requireAttributableRun`), and
     // the composite FK `llm_usage(run_id, org_id) → runs(id, org_id)`
     // enforces it structurally for every new row. A row is attributed to at
     // most one context (ledger check `llm_usage_context_single`), so a

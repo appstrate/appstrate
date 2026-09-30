@@ -118,6 +118,7 @@ export {
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  readIntegrationManifest,
   type IntegrationApiCallResolver,
   type IntegrationRef,
 } from "./integration-api-call.ts";

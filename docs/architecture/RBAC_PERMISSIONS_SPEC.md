@@ -105,6 +105,29 @@ Scheduled runs re-resolve their user's space role at every fire and require
 space or removing that permission disables the schedule and records a failed run.
 End-user schedules retain their pinned-space identity check.
 
+**A schedule's actor splits its governance between a space permission and an org role** (#738).
+`schedules:write` / `schedules:delete` let a caller write schedules running as themselves or as
+an end-user of the space. A schedule running as ANOTHER platform member (`actor.userId` other
+than the caller's) runs every fire with that member's reach — every connection they hold — so
+naming such an actor, and any write to a schedule whose stored actor is such a member,
+additionally requires an org role in `ORG_ROLES_WITH_FULL_ACCESS` (`owner`, `admin`), read through `callerOrgRole` (the role
+pinned at admission, or a view-as persona's) — `mayGovernMemberSchedule`,
+`apps/api/src/routes/schedules.ts`. A `builder`, a custom role holding those permissions, and a
+space `admin` whose org role is `member` all get `403 forbidden`:
+
+- with `param: actor` on schedule creation, or on a `PATCH` that changes the actor, naming
+  another member (`assertMayGovern`) — asked before the membership lookup, so a
+  refused caller cannot probe who is a member either;
+- on any `PATCH` (whatever the fields, enabling and disabling included) or `DELETE` of a
+  schedule already running as another member (`assertMayGovern`), asked before the body
+  is read.
+
+The member a schedule runs as still writes it. The SPA's actor picker (`ActorSelect`) lists
+other members only to org owners and admins; anyone else is offered themselves, end-users, and
+the member the field started on. The schedule views hide the write controls of a schedule
+running as another member from anyone who is not an org owner or admin — the server decides
+(`403`), the org role only shapes the UI.
+
 Run visibility does not grant access to an agent's imposed input values. Without
 `agents:read`, registered-agent run responses return `input: null`, including launch,
 lists, cancellation and long polling. This also protects historical values after
@@ -636,7 +659,7 @@ LAUNCHING is unchanged (#636): an omitted selector is the published `latest`, an
 
 **An export resolves what the run resolves, to the byte.** `?source=draft` is the agent's DRAFT at the root — the half `write` gates above — and every transitive dependency at the PUBLISHED version its manifest range selects, against the published catalogue, which is exactly what a server-side `version=draft` run without `dependency_overrides` executes. Resolving that closure against draft state instead would have shipped the working copy of a skill the run route refuses in the same request: one selector cannot mean two sets of bytes depending on which door asked, and the export is the widest door. A dependency no published version satisfies fails the export the way it fails the run — the same `422 dependency_unresolved`, naming the dependency — rather than falling back. Running a dependency's working copy stays possible through the one act that says so — `dependency_overrides` — which carries the gate above.
 
-A schedule is judged when it is WRITTEN, not when it fires: the scheduler replays the authority decided at creation, exactly as it replays frozen `connection_overrides`. **A stored value is not an act, though.** On `PATCH /api/schedules/{id}`, `version_override` and each `dependency_overrides` entry are judged only when the body CARRIES the field and its value DIFFERS from the one the row already holds: handing back the selector a schedule has been running on for a month decides nothing about it. A holder of `schedules:write` therefore edits the cron or the input of a draft schedule they did not author, and it is MOVING one onto the draft — or onto a dependency's draft — that asks for `<type>:write`. Creation judges whatever is present, there being no stored value to compare against.
+A schedule is judged when it is WRITTEN, not when it fires: the scheduler replays the authority decided at creation, exactly as it replays frozen `connection_overrides`. **A stored value is not an act, though.** On `PATCH /api/schedules/{id}`, `version_override` and each `dependency_overrides` entry are judged only when the body CARRIES the field and its value DIFFERS from the one the row already holds: handing back the selector a schedule has been running on for a month decides nothing about it. A holder of `schedules:write` therefore edits the cron or the input of a draft schedule they did not author (unless it runs as another member, which takes an org owner or admin whatever the field, §3.3), and it is MOVING one onto the draft — or onto a dependency's draft — that asks for `<type>:write`. Creation judges whatever is present, there being no stored value to compare against.
 
 **What the model is told follows the same rule.** The agent and skill hints in `GET /api/me/context`, the chat system prompt and the MCP tool descriptions carry `home_writable` beside `published`, and a draft-only package is presented as runnable with `version=draft` only when that flag is true — otherwise as "not yet published, not runnable". `run_and_wait`'s `version` parameter says the same: omitted is the latest published version, `draft` is reserved to write authority and answers `403 draft_not_writable` otherwise.
 

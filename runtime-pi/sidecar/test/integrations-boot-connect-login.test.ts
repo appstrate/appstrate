@@ -41,9 +41,10 @@ function emptyWire(): IntegrationCredentialsWire {
   return { auths: [], deliveryPlans: {}, expiresAtEpochMs: {} };
 }
 
-function makeSource() {
+function makeSource(connectionId = "conn-a") {
   const fetchFn = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
   return createIntegrationCredentialsSource({
+    connectionId,
     integrationId: "@orga/wajax",
     platformApiUrl: "http://api",
     runToken: "run-tok",
@@ -117,10 +118,14 @@ function failingLoginTool(): AppstrateToolDefinition[] {
   ];
 }
 
+const CONN_A = { label: "Connexion 1", accountId: null };
+const CONN_B = { label: "Connexion 2", accountId: null };
+
 function spec(overrides?: Partial<IntegrationSpawnSpec>): IntegrationSpawnSpec {
   return {
     integrationId: "@orga/wajax",
     namespace: "@orga/wajax",
+    connection: { id: "conn-a", ...CONN_A },
     sourceKind: "local",
     manifest: {
       name: "@orga/wajax",
@@ -155,6 +160,7 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: ["fetch_invoices"],
       });
 
@@ -166,7 +172,7 @@ describe("runConnectLoginHook", () => {
       // No session header injectable before the hook runs.
       expect(source.deliveryPlans().session).toBeUndefined();
 
-      await runConnectLoginHook(spec(), host, source, allocatedNs);
+      await runConnectLoginHook(spec(), client, source, allocatedNs);
 
       // The captured session header now renders from the source — the MITM
       // listener will inject it on every subsequent upstream request.
@@ -191,9 +197,10 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
-      await expect(runConnectLoginHook(spec(), host, source, allocatedNs)).rejects.toThrow();
+      await expect(runConnectLoginHook(spec(), client, source, allocatedNs)).rejects.toThrow();
       // No session installed on failure.
       expect(source.deliveryPlans().session).toBeUndefined();
       expect(source.activeInputs()).toBeNull();
@@ -203,10 +210,15 @@ describe("runConnectLoginHook", () => {
   });
 
   it("throws when no MITM source exists (CA bring-up failed)", async () => {
-    const host = new McpHost();
-    await expect(runConnectLoginHook(spec(), host, null, "@orga/wajax")).rejects.toThrow(
-      /MITM credentials source/,
-    );
+    const pair = await createInProcessPair(loginTool("unused"));
+    const client = wrapClient(pair.client, { close: () => Promise.resolve() });
+    try {
+      await expect(runConnectLoginHook(spec(), client, null, "@orga/wajax")).rejects.toThrow(
+        /MITM credentials source/,
+      );
+    } finally {
+      await pair.close();
+    }
   });
 
   it("registers a re-login handler that re-mints the session on a reauth status", async () => {
@@ -219,11 +231,12 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
 
       // Initial login → sess-1, and the handler is registered for [401].
-      await runConnectLoginHook(spec(), host, source, allocatedNs);
+      await runConnectLoginHook(spec(), client, source, allocatedNs);
       expect(source.deliveryPlans().session!.value).toBe("sess-1");
       expect(rotating.loginCalls()).toBe(1);
       expect(source.shouldReauth("session", 401)).toBe(true);
@@ -251,11 +264,12 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
       const s = spec();
       s.connectLogin!.reauthOn = [419];
-      await runConnectLoginHook(s, host, source, allocatedNs);
+      await runConnectLoginHook(s, client, source, allocatedNs);
       expect(source.shouldReauth("session", 419)).toBe(true);
       expect(source.shouldReauth("session", 401)).toBe(false);
     } finally {
@@ -290,9 +304,10 @@ describe("runConnectLoginHook", () => {
       const allocatedNs = await host.register({
         namespace: "@orga/wajax",
         client,
+        connection: CONN_A,
         allowedTools: [],
       });
-      await runConnectLoginHook(spec(), host, source, allocatedNs);
+      await runConnectLoginHook(spec(), client, source, allocatedNs);
       expect(source.deliveryPlans().session!.value).toBe("boot");
 
       // Re-login fails → false, and the previously-captured session is left
@@ -303,6 +318,50 @@ describe("runConnectLoginHook", () => {
       expect(source.deliveryPlans().session!.value).toBe("boot");
     } finally {
       await pair.close();
+    }
+  });
+
+  it("a connection's re-login runs on ITS runner, not on the last-registered sibling's", async () => {
+    const a = rotatingLoginTool(["a-1", "a-2"]);
+    const b = rotatingLoginTool(["b-1", "b-2"]);
+    const pairA = await createInProcessPair(a.tools);
+    const pairB = await createInProcessPair(b.tools);
+    const clientA = wrapClient(pairA.client, { close: () => Promise.resolve() });
+    const clientB = wrapClient(pairB.client, { close: () => Promise.resolve() });
+    const host = new McpHost();
+    const sourceA = makeSource("conn-a");
+    const sourceB = makeSource("conn-b");
+    try {
+      // Boot order: each connection registers, then logs in; B registers last.
+      const nsA = await host.register({
+        namespace: "@orga/wajax",
+        client: clientA,
+        connection: CONN_A,
+        allowedTools: [],
+      });
+      await runConnectLoginHook(spec(), clientA, sourceA, nsA);
+      const nsB = await host.register({
+        namespace: "@orga/wajax",
+        client: clientB,
+        connection: CONN_B,
+        allowedTools: [],
+      });
+      expect(nsB).toBe(nsA);
+      await runConnectLoginHook(
+        spec({ connection: { id: "conn-b", ...CONN_B } }),
+        clientB,
+        sourceB,
+        nsB,
+      );
+
+      expect(await sourceA.refreshOnUnauthorized("session")).toBe(true);
+      expect(a.loginCalls()).toBe(2);
+      expect(b.loginCalls()).toBe(1);
+      expect(sourceA.deliveryPlans().session!.value).toBe("a-2");
+      expect(sourceB.deliveryPlans().session!.value).toBe("b-1");
+    } finally {
+      await pairA.close();
+      await pairB.close();
     }
   });
 });

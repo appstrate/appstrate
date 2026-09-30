@@ -113,14 +113,17 @@ export const integrationConnections = pgTable(
     // If "when did refresh last fail" is ever needed, build the reader first —
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
-    // (email/login) when available, else "Connexion N" (N = existing connection
-    // count + 1 in the same (space, integration, owner) group). Stable for the
-    // row's lifetime; user-editable. The UI shows it verbatim — a single source
-    // of truth, no render-time fallback gymnastics.
-    label: text("label"),
-    // Owner-set opt-in: when true, this connection is selectable by
-    // any actor of the same space during the run-time fallback
-    // resolution (see integration-connection-resolver). Off by default
+    // (email/login) when available, else "Connexion N" (N = 1 + the highest
+    // "Connexion <n>" in the same (space, integration), every owner), suffixed
+    // " (n)" when taken. Stable for the row's lifetime; user-editable. The UI
+    // shows it verbatim — a single source of truth, no render-time fallback
+    // gymnastics. Never empty and unique per (space, integration): the
+    // sidecar's `connection` tool argument addresses a bound connection by it.
+    label: text("label").notNull(),
+    // Owner-set opt-in: when true, any actor of the same space may
+    // bind this connection by an explicit pick (member pin, launch
+    // override, admin pin, org default); the resolver's fallback never
+    // binds it (see integration-connection-resolver). Off by default
     // — sharing is explicit consent, never silent.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -146,16 +149,19 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // spaceId-only scans (FK cascade on space delete) — not covered by
-    // the lookup index (which leads with integrationId).
-    index("idx_integration_conn_space").on(table.spaceId),
-    // Hot path for the fallback resolution: when an actor has no pin
-    // and no override, the resolver enumerates own + shared connections
-    // for (space, integration, authKey). Partial index keeps the sharing
-    // set small.
+    // The shared side of `actorOrSharedFilter` for one (space, integration):
+    // the connection pickers and the resolver's selectable rows (own +
+    // shared), and the shared-only checks of admin pins, org defaults and a
+    // schedule written for another member. Partial, so it stays the size of
+    // the sharing set.
     index("idx_integration_conn_shared")
       .on(table.spaceId, table.integrationId, table.authKey)
       .where(sql`${table.sharedWithOrg} = true`),
+    // A bound set spans owners of one (space, integration) and a tool call
+    // names its connection by label, so no two rows there share one. Its
+    // leading spaceId also serves spaceId-only scans (FK cascade on space
+    // delete).
+    uniqueIndex("idx_integration_conn_label").on(table.spaceId, table.integrationId, table.label),
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
@@ -166,6 +172,7 @@ export const integrationConnections = pgTable(
     // never disagree (an attacker-crafted INSERT bypassing the API still
     // hits the same gate).
     check("integration_connections_auth_key_valid", sql`"auth_key" ~ '^[a-z][a-z0-9_]*$'`),
+    check("integration_connections_label_not_empty", sql`label <> ''`),
   ],
 );
 

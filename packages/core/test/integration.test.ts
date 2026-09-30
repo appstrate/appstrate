@@ -31,6 +31,7 @@ import {
   readDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
+  selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
@@ -2148,5 +2149,38 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("selectedApiCallConfigs", () => {
+  const apiKeyAuth = (env: string) => ({
+    type: "api_key",
+    credentials: { schema: { type: "object", properties: {} } },
+    authorized_uris: ["https://api/**"],
+    delivery: { env: { [env]: { value: "{$credential.k}" } } },
+  });
+  const m = parse(
+    baseManifest({
+      source: { kind: "none" },
+      auths: { key: apiKeyAuth("K"), alt: apiKeyAuth("K2") },
+      _meta: { "dev.appstrate/api": { auths: { key: { upload_protocols: ["tus"] }, alt: {} } } },
+    }),
+  );
+  const authKeys = (selection: readonly string[] | "*" | undefined) =>
+    selectedApiCallConfigs(m, selection).map((cfg) => cfg.authKey);
+
+  it("grants every api_call under the wildcard", () => {
+    expect(authKeys("*")).toEqual(["key", "alt"]);
+  });
+  it("grants an api_call picked by its own name", () => {
+    expect(authKeys(["api_call__alt"])).toEqual(["alt"]);
+  });
+  it("grants an api_call picked through its api_upload companion", () => {
+    expect(authKeys(["api_upload__key"])).toEqual(["key"]);
+  });
+  it("grants none for an undefined, empty or unrelated selection", () => {
+    expect(authKeys(undefined)).toEqual([]);
+    expect(authKeys([])).toEqual([]);
+    expect(authKeys(["search"])).toEqual([]);
   });
 });

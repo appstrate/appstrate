@@ -25,6 +25,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
@@ -79,6 +80,7 @@ async function seedConnection(ctx: TestContext, authKey = "primary") {
     integrationId: INTEG,
     authKey,
     accountId: "default",
+    label: "default",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
@@ -110,6 +112,7 @@ async function seedAndResolve(
     spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(opts.tools),
+    resolvedConnections: await bindAllConnections(INTEG),
   });
   expect(specs.length).toBe(1);
   return specs[0]!;
@@ -222,6 +225,7 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([canonicalCall], longAuthKey),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
 
     expect(specs).toHaveLength(1);
@@ -272,6 +276,7 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([legacyCall], longAuthKey),
+      resolvedConnections: await bindAllConnections(INTEG),
     });
 
     // The selection names a tool that does not exist, so no api_call surface

@@ -230,8 +230,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
             icon={Users}
           />
         ) : (
-          <Table className="block md:table">
-            <TableHeader className="hidden md:table-header-group">
+          <Table className="block xl:table">
+            <TableHeader className="hidden xl:table-header-group">
               <TableRow>
                 <TableHead>{t("spaceMembers.colMember")}</TableHead>
                 <TableHead>{t("spaceMembers.colSource")}</TableHead>
@@ -239,7 +239,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                 <TableHead className="w-px" />
               </TableRow>
             </TableHeader>
-            <TableBody className="grid gap-3 md:table-row-group [&_tr:last-child]:border md:[&_tr:last-child]:border-0">
+            <TableBody className="grid gap-3 xl:table-row-group [&_tr:last-child]:border xl:[&_tr:last-child]:border-0">
               {members.map((member) => {
                 // Owners and admins reach every space through their org role;
                 // `space_members` never holds them, so there is nothing to edit.
@@ -258,9 +258,9 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                 return (
                   <TableRow
                     key={member.userId}
-                    className="grid gap-3 rounded-md border p-3 md:table-row md:rounded-none md:border-x-0 md:border-t-0 md:p-0"
+                    className="grid gap-3 rounded-md border p-3 xl:table-row xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-0"
                   >
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
+                    <TableCell className="block min-w-0 p-0 whitespace-normal xl:table-cell xl:p-4">
                       <span className="font-medium wrap-anywhere">{memberLabel(member)}</span>
                       {member.email && member.email !== memberLabel(member) && (
                         <span className="text-muted-foreground block text-xs wrap-anywhere">
@@ -268,11 +268,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
+                    <TableCell className="block min-w-0 p-0 whitespace-normal xl:table-cell xl:p-4">
                       <Badge variant="outline">{t(`spaceMembers.source.${member.source}`)}</Badge>
                     </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
-                      <span className="text-muted-foreground mb-1 block text-xs md:hidden">
+                    <TableCell className="block min-w-0 p-0 whitespace-normal xl:table-cell xl:p-4">
+                      <span className="text-muted-foreground mb-1 block text-xs xl:hidden">
                         {t("spaceMembers.colRole")}
                       </span>
                       {editable ? (
@@ -281,7 +281,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                           options={roleOptions}
                           fallbackLabel={spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
                           placeholder={t("spaceMembers.noRole")}
-                          className="w-full md:w-[180px]"
+                          className="w-full xl:w-[180px]"
                           ariaLabel={t("spaceMembers.roleAriaLabel", { name: memberLabel(member) })}
                           disabled={updateMember.isPending || addMember.isPending}
                           onValueChange={(v) => changeRole(member, v)}
@@ -296,12 +296,12 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="block min-w-0 p-0 whitespace-normal md:table-cell md:p-4">
+                    <TableCell className="block min-w-0 p-0 whitespace-normal xl:table-cell xl:p-4">
                       {member.source === "explicit" && canRemove && (
                         <Button
                           variant="outline"
                           size="sm"
-                          className="w-full md:w-auto"
+                          className="w-full xl:w-auto"
                           onClick={() => setMemberToRemove(member)}
                           disabled={removeMember.isPending || !space || !!spaceError}
                         >

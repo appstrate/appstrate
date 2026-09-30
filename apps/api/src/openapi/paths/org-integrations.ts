@@ -129,13 +129,23 @@ export const orgIntegrationsPaths = {
       summary: "Delete an org-level OAuth client",
       description:
         "Deletes one org-level client by id (a space client id is a 404 here), " +
-        "with every connection it minted in any space of the org. " +
+        "with every connection it minted in any space of the org. Refused with 409 " +
+        "`connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. " +
         PERMISSION_NOTE,
       parameters: [...packageParams, clientIdParam],
       responses: {
         "204": { description: "OAuth client deleted", headers: STD_RESPONSE_HEADERS },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "A connection the client minted is named by an admin pin or an org default",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

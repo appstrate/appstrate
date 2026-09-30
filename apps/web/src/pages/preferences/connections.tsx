@@ -17,8 +17,11 @@ import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
+import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
+import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
+import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -45,26 +48,27 @@ function LabelEditor({
   saving,
   onSave,
 }: {
-  current: string | null;
+  current: string;
   saving: boolean;
-  onSave: (next: string | null) => void;
+  /** Calls `onSuccess` once saved: a refused label (e.g. already taken) stays open to fix. */
+  onSave: (next: string, onSuccess: () => void) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(current ?? "");
+  const [value, setValue] = useState(current);
 
   if (!editing) {
     return (
       <button
         type="button"
         onClick={() => {
-          setValue(current ?? "");
+          setValue(current);
           setEditing(true);
         }}
         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs"
         title={t("connections.editLabel")}
       >
-        <span>{current ?? t("connections.unnamed")}</span>
+        <span>{current}</span>
         <Pencil className="h-3 w-3" />
       </button>
     );
@@ -72,8 +76,8 @@ function LabelEditor({
 
   const commit = () => {
     const trimmed = value.trim();
-    onSave(trimmed.length === 0 ? null : trimmed);
-    setEditing(false);
+    if (trimmed.length === 0 || trimmed === current) setEditing(false);
+    else onSave(trimmed, () => setEditing(false));
   };
 
   return (
@@ -120,12 +124,15 @@ function ConnectionRow({
 }: {
   conn: MeConnectionEntry;
   onDisconnect: () => void;
-  onUpdateLabel?: (label: string | null) => void;
+  onUpdateLabel?: (label: string, onSuccess: () => void) => void;
   onToggleShare?: (next: boolean) => void;
   disconnecting: boolean;
   updating: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
+  const lockKey = connectionLockHintKey(conn.locked_by);
+  const lockHint = lockKey ? t(lockKey) : null;
 
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -183,9 +190,7 @@ function ConnectionRow({
           {onUpdateLabel ? (
             <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
           ) : (
-            <span className="text-foreground text-sm font-medium">
-              {conn.label ?? conn.identity ?? t("connections.unnamed")}
-            </span>
+            <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
           {statusBadge(t, conn)}
           {conn.shared_with_org && (
@@ -207,27 +212,31 @@ function ConnectionRow({
 
         {/* Share toggle */}
         {onToggleShare && (
-          <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={conn.shared_with_org}
-              disabled={updating}
-              onChange={(e) => onToggleShare(e.target.checked)}
-            />
-            <span>{t("connections.shareWithOrgLabel")}</span>
-          </label>
+          <DisabledReasonTooltip reason={conn.shared_with_org ? lockHint : null}>
+            <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={conn.shared_with_org}
+                disabled={updating || (conn.shared_with_org && !!lockHint)}
+                onChange={(e) => onToggleShare(e.target.checked)}
+              />
+              <span>{t("connections.shareWithOrgLabel")}</span>
+            </label>
+          </DisabledReasonTooltip>
         )}
       </div>
 
-      <Button
-        variant="destructive"
-        size="sm"
-        className="shrink-0"
-        onClick={onDisconnect}
-        disabled={disconnecting}
-      >
-        {t("btn.disconnect")}
-      </Button>
+      <DisabledReasonTooltip reason={lockHint}>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="shrink-0"
+          onClick={onDisconnect}
+          disabled={disconnecting || !!lockHint}
+        >
+          {t("btn.disconnect")}
+        </Button>
+      </DisabledReasonTooltip>
     </div>
   );
 }
@@ -310,12 +319,6 @@ export function PreferencesConnectionsPage() {
     displayName: string;
     identity: string | null;
     connectionId: string;
-    /**
-     * Number of agents that consume this integration in the space —
-     * surfaced in the confirm dialog so the user understands the blast
-     * radius before deleting the connection globally.
-     */
-    reused_by_agents: number;
   } | null>(null);
 
   const totalConnections = useMemo(
@@ -395,17 +398,19 @@ export function PreferencesConnectionsPage() {
                         displayName: group.display_name,
                         identity: conn.identity,
                         connectionId: conn.connection_id,
-                        reused_by_agents: conn.reused_by_agents ?? 0,
                       })
                     }
-                    onUpdateLabel={(label) =>
-                      updateIntegration.mutate({
-                        packageId: group.source_id,
-                        connectionId: conn.connection_id,
-                        orgId: conn.org.id,
-                        spaceId: conn.space.id,
-                        label,
-                      })
+                    onUpdateLabel={(label, onSuccess) =>
+                      updateIntegration.mutate(
+                        {
+                          packageId: group.source_id,
+                          connectionId: conn.connection_id,
+                          orgId: conn.org.id,
+                          spaceId: conn.space.id,
+                          label,
+                        },
+                        { onSuccess },
+                      )
                     }
                     onToggleShare={(next) =>
                       updateIntegration.mutate({
@@ -428,22 +433,16 @@ export function PreferencesConnectionsPage() {
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         title={t("btn.confirm", { ns: "common" })}
-        description={(() => {
-          if (!confirmState) return "";
-          const base = t("connections.deleteConfirm", {
-            name: confirmState.displayName,
-            account: confirmState.identity ?? "",
-          });
-          // Impact list surfaces the blast radius so the user can
-          // intentionally choose between deleting (here) vs changing the
-          // agent-side pick (on the agent page).
-          if (confirmState.reused_by_agents > 0) {
-            return `${base}\n\n${t("connections.deleteConfirmImpact", {
-              count: confirmState.reused_by_agents,
-            })}`;
-          }
-          return base;
-        })()}
+        // The blast radius is `ConnectionDeleteImpact` below — the caller's own
+        // pins and schedules the delete rewrites — not a second sentence here.
+        description={
+          confirmState
+            ? t("connections.deleteConfirm", {
+                name: confirmState.displayName,
+                account: confirmState.identity ?? "",
+              })
+            : ""
+        }
         isPending={disconnectIntegration.isPending}
         onConfirm={() => {
           if (!confirmState) return;
@@ -453,7 +452,12 @@ export function PreferencesConnectionsPage() {
           );
         }}
       >
-        {confirmState && <ConnectionTeardownSteps connectionId={confirmState.connectionId} />}
+        {confirmState && (
+          <>
+            <ConnectionDeleteImpact connectionId={confirmState.connectionId} />
+            <ConnectionTeardownSteps connectionId={confirmState.connectionId} />
+          </>
+        )}
       </ConfirmModal>
     </>
   );

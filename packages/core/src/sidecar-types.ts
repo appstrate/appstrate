@@ -173,10 +173,10 @@ export interface SidecarLaunchSpec {
 }
 
 /**
- * Per-integration spec consumed by the sidecar. The platform launcher
+ * Per-connection spec consumed by the sidecar. The platform launcher
  * resolves the chain `agent.dependencies.integrations[id] →
- * spacePackages → integration_connections` and emits one entry
- * per installed-and-connected integration.
+ * spacePackages → integration_connections` and emits one entry per
+ * connection bound to each installed integration.
  *
  * Bundle bytes are NOT inlined — they would blow past the Linux env
  * size limit (~1 MB) on real-world servers (the Gmail MCP server
@@ -247,6 +247,11 @@ export interface IntegrationSpawnSpec {
   integrationId: string;
   /** McpHost namespace — tool names are prefixed with `{namespace}__`. */
   namespace: string;
+  /**
+   * The bound connection this spec serves (N specs of one integration share the
+   * namespace); `label` is the `connection` selector value. Absent only on a connect run.
+   */
+  connection?: { id: string; label: string; accountId: string | null };
   /**
    * AFPS source kind — peer discriminant for the sidecar's spawn-mode
    * dispatch. Mirrors `manifest.source.kind` from the integration manifest
@@ -400,7 +405,7 @@ export interface IntegrationSpawnSpec {
   fileMounts?: Record<string, { content_b64: string; mode: string }>;
   /**
    * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
-   * per-integration MITM HTTPS proxy and uses these plans to apply the shared
+   * per-connection MITM HTTPS proxy and uses these plans to apply the shared
    * header-prefix and caller-override policy on every upstream request whose
    * URL matches an `authorizedUris` pattern of the matching auth.
    *
@@ -732,12 +737,12 @@ export interface IntegrationBootBreadcrumb {
 export interface IntegrationBootReport {
   /** False when any declared integration failed to boot — the agent aborts the run. */
   ok: boolean;
-  /** Count of integrations declared via `INTEGRATIONS_TO_SPAWN_JSON`. */
-  declared: number;
+  /** Count of spawn specs in `INTEGRATIONS_TO_SPAWN_JSON` — one per bound connection. */
+  declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
   /**
-   * Per-integration success — namespace + count of tools surfaced to the agent.
+   * Per-connection success — one entry per spawn spec.
    * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
    * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
    * only for local sources; omitted otherwise).
@@ -745,15 +750,22 @@ export interface IntegrationBootReport {
   spawned: Array<{
     integrationId: string;
     namespace: string;
+    /** Tells apart N entries sharing `integrationId` + `namespace`. */
+    connectionLabel?: string;
     toolCount: number;
     vendored?: boolean;
   }>;
   /**
-   * Per-integration failure — the error that prevented spawn/connect/register,
+   * Per-connection failure — the error that prevented spawn/connect/register,
    * OR the boot-contract violation of registering zero callable tools (a
    * declared integration that exposes nothing did not launch as declared).
    */
-  failed: Array<{ integrationId: string; error: string }>;
+  failed: Array<{
+    integrationId: string;
+    /** Absent on the whole-boot `integrationId: "*"` entry and on a spec binding no connection. */
+    connectionLabel?: string;
+    error: string;
+  }>;
   /** Ordered per-phase breadcrumbs for the run-log boot trail. */
   breadcrumbs: IntegrationBootBreadcrumb[];
 }

@@ -2,7 +2,7 @@
 #
 # Appstrate MCP Runner — Binary
 #
-# Spawned per-integration by the sidecar when an AFPS integration
+# Spawned per bound connection by the sidecar when an AFPS integration
 # manifest declares `server.type: "binary"`. The bundle ships a
 # self-contained executable; the runner just provides libc + TLS
 # trust and runs it.

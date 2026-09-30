@@ -66,12 +66,14 @@ import {
   X,
   ChevronRight,
   ArrowUpFromLine,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
   Tooltip,
@@ -100,9 +102,12 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
+import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
+import { keepAvailable, toggleCapped, unavailableConnectionIds } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
 import { DefaultCell } from "../components/default-cell";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
 import { maySetPackageActive } from "../lib/package-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
@@ -139,9 +144,10 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
-  connectionDisplayLabel,
+  connectionLockHintKey,
+  connectionRowGrants,
   isConnectionOwnedBy,
-} from "../components/integration-connect/connection-label";
+} from "../components/integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
@@ -938,8 +944,7 @@ function BlockUserConnectionsToggle({
  * information as a badge instead, where a suffix would fight the rename UI.
  */
 function connectionOptionLabel(c: IntegrationConnection): string {
-  const base = connectionDisplayLabel(c);
-  return c.owner_name ? `${base} — ${c.owner_name}` : base;
+  return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }
 
 function OrgDefaultSection({ packageId }: { packageId: string }) {
@@ -950,23 +955,38 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
   const remove = useDeleteIntegrationOrgDefault();
 
   const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
 
-  const [connectionId, setConnectionId] = useState("");
+  const [connectionIds, setConnectionIds] = useState<string[]>([]);
   const [enforce, setEnforce] = useState(false);
 
-  // Seed the form from the persisted default once loaded.
-  const seededFor = orgDefault?.connection_id ?? null;
+  // Seeded with only what is still shared, so the form shows what a save writes; the stored
+  // members no longer shared are named apart — every run falling back on them is refused.
+  const sharedIds = shared.map((c) => c.id);
+  const seedIds = keepAvailable(orgDefault?.connection_ids ?? [], sharedIds);
+  // Until the list loads, every stored member would read as unavailable.
+  const unavailableIds = connections
+    ? unavailableConnectionIds(orgDefault?.connection_ids ?? [], sharedIds)
+    : [];
+  // Sorted: a server reordering of the set must not read as a change and wipe the edit.
+  const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seededFor !== seeded) {
     setSeeded(seededFor);
-    setConnectionId(orgDefault?.connection_id ?? "");
+    setConnectionIds(seedIds);
     setEnforce(orgDefault?.enforce ?? false);
   }
+
+  const clearButton = orgDefault ? (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => remove.mutate({ params: { path: { packageId } } })}
+      disabled={remove.isPending}
+      data-testid="org-default-clear"
+    >
+      {t("integration.admin.orgDefault.clear")}
+    </Button>
+  ) : null;
 
   return (
     <div
@@ -980,63 +1000,64 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
         </p>
       </div>
 
+      {unavailableIds.length > 0 && (
+        <div
+          className="mb-3 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+          data-testid="org-default-unavailable-warning"
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          <span>
+            {t("integration.admin.orgDefault.unavailableWarning", {
+              count: unavailableIds.length,
+            })}
+          </span>
+        </div>
+      )}
+
       {shared.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {t("integration.admin.orgDefault.noPinnableConnections")}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-muted-foreground text-xs italic">
+            {t("integration.admin.orgDefault.noPinnableConnections")}
+          </p>
+          {clearButton}
+        </div>
       ) : (
         <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
           <div className="min-w-[14rem] flex-1">
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.orgDefault.connection")}
+              {t("integration.admin.orgDefault.connections")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={connectionId}
-              onChange={(e) => setConnectionId(e.target.value)}
-              data-testid="org-default-connection"
-            >
-              <option value="">{t("integration.admin.orgDefault.none")}</option>
-              {shared.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <ConnectionSetChecklist
+              connections={shared}
+              value={connectionIds}
+              onChange={setConnectionIds}
+              idPrefix="org-default-connection"
+              unavailableIds={unavailableIds}
+            />
           </div>
-          <label className="flex items-center gap-2 pb-1 text-xs">
+          <div className="flex items-center gap-2 pb-1 text-xs">
             <Checkbox
+              id="org-default-enforce"
               checked={enforce}
               onCheckedChange={(v) => setEnforce(v === true)}
               data-testid="org-default-enforce"
             />
-            {t("integration.admin.orgDefault.enforce")}
-          </label>
+            <label htmlFor="org-default-enforce">{t("integration.admin.orgDefault.enforce")}</label>
+          </div>
           <Button
             size="sm"
             onClick={() =>
-              connectionId &&
               upsert.mutate({
                 params: { path: { packageId } },
-                body: { connection_id: connectionId, enforce },
+                body: { connection_ids: connectionIds, enforce },
               })
             }
-            disabled={!connectionId || upsert.isPending}
+            disabled={connectionIds.length === 0 || upsert.isPending}
             data-testid="org-default-save"
           >
             {t("integration.admin.orgDefault.save")}
           </Button>
-          {orgDefault ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => remove.mutate({ params: { path: { packageId } } })}
-              disabled={remove.isPending}
-              data-testid="org-default-clear"
-            >
-              {t("integration.admin.orgDefault.clear")}
-            </Button>
-          ) : null}
+          {clearButton}
         </div>
       )}
     </div>
@@ -1044,10 +1065,60 @@ function OrgDefaultSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Centralised pin management. One pin per (agent, integration) — admin
- * picks which shared connection a given agent uses. Flat model: no
- * authKey to disambiguate (the connection's own authKey is implicit).
- * With an org default in place, this surface is for per-agent EXCEPTIONS.
+ * Checkbox set capped at {@link MAX_CONNECTIONS_PER_INTEGRATION}. `unavailableIds` are stored
+ * members no longer offered: listed unticked, so a save visibly drops them.
+ */
+function ConnectionSetChecklist({
+  connections,
+  value,
+  onChange,
+  idPrefix,
+  unavailableIds,
+}: {
+  connections: IntegrationConnection[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  idPrefix: string;
+  unavailableIds?: string[];
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <div className="flex flex-col gap-1" data-testid={`${idPrefix}s`}>
+      {connections.map((c) => {
+        const id = `${idPrefix}-${c.id}`;
+        const isChecked = value.includes(c.id);
+        return (
+          <div key={c.id} className="flex items-center gap-2 text-xs">
+            <Checkbox
+              id={id}
+              checked={isChecked}
+              disabled={!isChecked && value.length >= MAX_CONNECTIONS_PER_INTEGRATION}
+              onCheckedChange={() => onChange(toggleCapped(value, c.id))}
+              data-testid={id}
+            />
+            <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+          </div>
+        );
+      })}
+      {unavailableIds?.map((id) => (
+        <div
+          key={id}
+          className="flex items-center gap-2 text-xs"
+          data-testid={`${idPrefix}-unavailable-${id}`}
+        >
+          <Checkbox checked={false} disabled aria-hidden />
+          <span className="text-muted-foreground line-through">
+            {t("integration.admin.unavailableConnection")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
+ * write. With an org default in place, these are per-agent EXCEPTIONS.
  */
 function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -1058,30 +1129,27 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [newConnectionId, setNewConnectionId] = useState("");
+  const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
-  const connectionDisplay = (id: string): string => {
-    const c = (connections ?? []).find((x) => x.id === id);
-    if (!c) return id;
-    return connectionOptionLabel(c);
-  };
+
+  const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
   const onSubmitNewPin = () => {
-    if (!newAgent || !newConnectionId) return;
+    if (!canAddPin) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_id: newConnectionId },
+        body: { connection_ids: newConnectionIds },
       },
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewConnectionId("");
+          setNewConnectionIds([]);
         },
       },
     );
@@ -1117,27 +1185,33 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                   {t("integration.admin.pinManagement.colAgent")}
                 </TableHead>
                 <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAuth")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colConnection")}
+                  {t("integration.admin.pinManagement.colConnections")}
                 </TableHead>
                 <TableHead className="h-auto w-12 px-3 py-2" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow
-                  key={`${p.packageId}-${p.auth_key}`}
-                  data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
-                >
+                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
                   <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
                   <TableCell className="px-3 py-2">
-                    <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                      {p.auth_key}
-                    </span>
+                    {p.connection_ids.map((id, i) => {
+                      const c = pinnableConnections.find((x) => x.id === id);
+                      return (
+                        <span key={id}>
+                          {i > 0 && " · "}
+                          {c ? (
+                            connectionOptionLabel(c)
+                          ) : connections === undefined ? null : (
+                            // No longer shared or deleted: every run of this agent is refused.
+                            <span className="text-amber-700 dark:text-amber-300">
+                              {t("integration.admin.unavailableConnection")}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </TableCell>
-                  <TableCell className="px-3 py-2">{connectionDisplay(p.connection_id)}</TableCell>
                   <TableCell className="px-3 py-2">
                     <Button
                       size="icon"
@@ -1196,26 +1270,19 @@ function PinManagementSection({ packageId }: { packageId: string }) {
           </div>
           <div className="min-w-[12rem] flex-1">
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.pinManagement.colConnection")}
+              {t("integration.admin.pinManagement.colConnections")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newConnectionId}
-              onChange={(e) => setNewConnectionId(e.target.value)}
-              data-testid="pin-add-connection"
-            >
-              <option value="">—</option>
-              {pinnableConnections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <ConnectionSetChecklist
+              connections={pinnableConnections}
+              value={newConnectionIds}
+              onChange={setNewConnectionIds}
+              idPrefix="pin-add-connection"
+            />
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!newAgent || !newConnectionId || upsertPin.isPending}
+            disabled={!canAddPin || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
@@ -1303,11 +1370,11 @@ function ConnectionTableRow({
   const { user } = useAuth();
   const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
+  const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
-  const name = connectionDisplayLabel(connection);
+  const name = connection.label;
   const isShared = connection.shared_with_org === true;
   // The list now returns org-shared connections owned by OTHER members, so
   // every per-row control has to be gated on the same rule the API enforces —
@@ -1316,30 +1383,43 @@ function ConnectionTableRow({
   //               (`routes/me.ts`), no admin escape hatch by design;
   //   - share   → owner-only, because sharing is the owner's consent
   //               (`routes/integrations.ts`, `shared_with_org` branch);
+  //               UNsharing is also open to `integrations:configure`;
   //   - rename  → owner OR org admin (same route, label branch).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
   // Rename, share and reconnect all write the connection, which guards on
   // `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  const canRename = canConnect && (isOwn || can("integrations:configure"));
+  const { canRename, canToggleShare, shareLocked } = connectionRowGrants({
+    isOwn,
+    isShared,
+    canConnect,
+    canConfigure: can("integrations:configure"),
+    locked: !!connection.locked_by,
+  });
+  // An admin pin or the space default names the row: unsharing and deleting it
+  // are refused (409 `connection_pinned`) until it is removed from there.
+  const lockKey = connectionLockHintKey(connection.locked_by);
+  const lockHint = lockKey ? t(lockKey) : null;
   const startEdit = () => {
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
     setEditing(true);
   };
   const cancelEdit = () => {
     setEditing(false);
-    setDraftLabel(connection.label ?? "");
+    setDraftLabel(connection.label);
   };
   const submitLabel = () => {
     const next = draftLabel.trim();
-    if (next === (connection.label ?? "")) {
+    // A run addresses each bound connection by its label, so the label cannot
+    // be cleared: an empty field cancels the edit.
+    if (next === "" || next === connection.label) {
       setEditing(false);
       return;
     }
     updateConnection.mutate(
       {
         params: { path: { packageId, connectionId: connection.id } },
-        body: { label: next === "" ? null : next },
+        body: { label: next },
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -1390,12 +1470,12 @@ function ConnectionTableRow({
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-1">
-              <span className="truncate font-medium">{name}</span>
+            <div className="flex min-w-0 items-center gap-1">
+              <span className="min-w-0 truncate font-medium">{name}</span>
               {!isOwn && (
                 <Badge
                   variant="secondary"
-                  className="text-[0.6rem]"
+                  className="shrink-0 text-[0.6rem] whitespace-nowrap"
                   data-testid={`connection-owner-${connection.id}`}
                 >
                   {connection.owner_name
@@ -1478,27 +1558,37 @@ function ConnectionTableRow({
           )}
         </TableCell>
 
-        {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
+        {/* Org-share toggle — sharing is the owner's consent, a governor can only withdraw it */}
         <TableCell>
-          {isOwn && canConnect ? (
-            <label
-              className="flex items-center gap-1.5 text-xs"
-              title={t("integration.connection.shareWithOrg.help")}
-            >
-              <input
-                type="checkbox"
-                checked={isShared}
-                disabled={updateConnection.isPending}
-                onChange={(e) =>
-                  updateConnection.mutate({
-                    params: { path: { packageId, connectionId: connection.id } },
-                    body: { shared_with_org: e.target.checked },
-                  })
+          {canToggleShare ? (
+            <DisabledReasonTooltip reason={shareLocked ? lockHint : null}>
+              <label
+                className="flex items-center gap-1.5 text-xs"
+                title={
+                  shareLocked
+                    ? undefined
+                    : t(
+                        isOwn
+                          ? "integration.connection.shareWithOrg.help"
+                          : "integration.connection.shareWithOrg.unshareHelp",
+                      )
                 }
-                data-testid={`share-toggle-${connection.id}`}
-              />
-              {t("integration.connection.shareWithOrg.label")}
-            </label>
+              >
+                <input
+                  type="checkbox"
+                  checked={isShared}
+                  disabled={updateConnection.isPending || shareLocked}
+                  onChange={(e) =>
+                    updateConnection.mutate({
+                      params: { path: { packageId, connectionId: connection.id } },
+                      body: { shared_with_org: e.target.checked },
+                    })
+                  }
+                  data-testid={`share-toggle-${connection.id}`}
+                />
+                {t("integration.connection.shareWithOrg.label")}
+              </label>
+            </DisabledReasonTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">
               {t("integration.connection.shareWithOrg.label")}
@@ -1509,17 +1599,19 @@ function ConnectionTableRow({
         {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
         <TableCell className="text-right">
           {isOwn ? (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              onClick={onDelete}
-              disabled={disconnect.isPending}
-              title={t("integration.connection.delete")}
-              data-testid={`connection-delete-${connection.id}`}
-            >
-              <Trash2 className="text-destructive size-3.5" />
-            </Button>
+            <DisabledReasonTooltip reason={lockHint}>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={onDelete}
+                disabled={disconnect.isPending || !!lockHint}
+                title={lockHint ? undefined : t("integration.connection.delete")}
+                data-testid={`connection-delete-${connection.id}`}
+              >
+                <Trash2 className="text-destructive size-3.5" />
+              </Button>
+            </DisabledReasonTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
           )}
@@ -1538,7 +1630,12 @@ function ConnectionTableRow({
           )
         }
       >
-        {confirmDelete && <ConnectionTeardownSteps connectionId={connection.id} />}
+        {confirmDelete && (
+          <>
+            <ConnectionDeleteImpact connectionId={connection.id} />
+            <ConnectionTeardownSteps connectionId={connection.id} />
+          </>
+        )}
       </ConfirmModal>
     </>
   );

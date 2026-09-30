@@ -10,9 +10,17 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope } from "@appstrate/afps-runtime/resolvers";
-import { executeApiCall, type ApiCallDeps, type ApiCallRequestBody } from "../credential-proxy.ts";
+import {
+  credentialScope,
+  executeApiCall,
+  type ApiCallDeps,
+  type ApiCallRequestBody,
+} from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+
+/** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
+const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
 
 function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   return {
@@ -43,7 +51,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
 
 /** Cookies the run-wide jar holds for `url`'s own origin. */
 function jarCookies(deps: ApiCallDeps, integrationId: string, url: string): string | undefined {
-  return cookieScope(deps.cookieJar, integrationId, null).header(url, null);
+  return cookieScope(deps.cookieJar, scopeOf(integrationId), null).header(url, null);
 }
 
 describe("executeApiCall — structured failures", () => {
@@ -52,6 +60,7 @@ describe("executeApiCall — structured failures", () => {
     const result = await executeApiCall(
       {
         integrationId: "../traversal",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -71,6 +80,7 @@ describe("executeApiCall — structured failures", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/{{missing}}",
         method: "GET",
         callerHeaders: {},
@@ -86,6 +96,7 @@ describe("executeApiCall — structured failures", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://other.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -117,6 +128,7 @@ describe("executeApiCall — happy path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -168,6 +180,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
       const result = await executeApiCall(
         {
           integrationId: "gmail",
+          connectionId: "conn-1",
           targetUrl: "https://api.example.com/x",
           method: "GET",
           callerHeaders: {},
@@ -185,6 +198,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         // Caller-supplied header wins over the server injection, so this is
@@ -203,6 +217,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: { Authorization: "Bearer{{access_token}}" },
@@ -239,6 +254,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: { authorization: "Bearer caller" },
@@ -254,7 +270,7 @@ describe("executeApiCall — 401 retry path", () => {
     };
     expect(sent.headers.authorization).toBe("Bearer caller");
     expect(refreshCredentials).not.toHaveBeenCalled();
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(false);
   });
 
   it("refreshes credentials and replays the buffered request once", async () => {
@@ -287,6 +303,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -298,7 +315,7 @@ describe("executeApiCall — 401 retry path", () => {
     if (result.ok) expect(result.response.status).toBe(200);
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
     expect(callCount).toBe(2);
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(false);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(false);
   });
 
   it("does NOT retry when the refresh returns null (terminal — credential flagged platform-side)", async () => {
@@ -319,6 +336,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -330,7 +348,7 @@ describe("executeApiCall — 401 retry path", () => {
     if (result.ok) expect(result.response.status).toBe(401);
     expect(calls).toBe(1);
     expect(refreshCredentials).toHaveBeenCalledTimes(1);
-    expect(deps.reportedAuthFailures.has("gmail")).toBe(true);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(true);
   });
 
   it("does NOT replay a streaming-request body on 401", async () => {
@@ -361,6 +379,7 @@ describe("executeApiCall — 401 retry path", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -413,6 +432,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -456,6 +476,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -493,6 +514,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -528,6 +550,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/post",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -560,6 +583,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/loop",
         method: "GET",
         callerHeaders: {},
@@ -607,6 +631,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { authorization: "Bearer caller-token" },
@@ -647,6 +672,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { "x-api-key": "caller-secret" },
@@ -676,6 +702,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -715,6 +742,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         // Caller passes two cookies — one will be rotated by upstream, one won't.
@@ -758,6 +786,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/v1/login",
         method: "GET",
         callerHeaders: {},
@@ -793,6 +822,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -827,6 +857,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/old",
         method: "PUT",
         callerHeaders: { "content-type": "application/json" },
@@ -862,6 +893,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/check",
         method: "HEAD",
         callerHeaders: {},
@@ -892,6 +924,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -947,6 +980,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       const result = await executeApiCall(
         {
           integrationId: "demo",
+          connectionId: "conn-1",
           targetUrl: "https://api.example.com/start",
           method: "GET",
           callerHeaders: {},
@@ -979,6 +1013,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1035,6 +1070,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
         method: "GET",
         callerHeaders: {},
@@ -1083,6 +1119,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "webhooks",
+        connectionId: "conn-1",
         targetUrl: "https://hook.example.com/trigger",
         method: "GET",
         callerHeaders: {},
@@ -1115,6 +1152,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1149,6 +1187,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: {},
@@ -1185,6 +1224,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: {},
@@ -1217,6 +1257,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/authorize",
         method: "GET",
         callerHeaders: {},
@@ -1250,6 +1291,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/a",
         method: "GET",
         callerHeaders: {},
@@ -1282,6 +1324,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/upload",
         method: "POST",
         callerHeaders: {},
@@ -1327,6 +1370,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
         callerHeaders: {},
@@ -1386,6 +1430,7 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     executeApiCall(
       {
         integrationId: "gmail",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/messages",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -1498,6 +1543,7 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
       const r = await executeApiCall(
         {
           integrationId: "gmail",
+          connectionId: "conn-1",
           targetUrl: "https://api.example.com/messages",
           method: "GET",
           callerHeaders: { "X-Key": "{{api_key}}" },
@@ -1542,6 +1588,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { "X-Key": "{{api_key}}" },
@@ -1565,6 +1612,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "POST",
         callerHeaders: { "content-type": "application/json" },
@@ -1591,6 +1639,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/start",
         method: "GET",
         callerHeaders: { "X-Custom": "x" },
@@ -1664,6 +1713,7 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "{{webhook_url}}",
         method: "POST",
         callerHeaders: {},
@@ -1691,6 +1741,7 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://evil.example/collect",
         method: "POST",
         callerHeaders: {},
@@ -1731,6 +1782,7 @@ describe("executeApiCall — no credential in an error host", () => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl: "https://{{api_key}}.api-us1.com/v3/contacts",
         method: "GET",
         callerHeaders: {},
@@ -1752,6 +1804,7 @@ describe("executeApiCall — no credential in an error host", () => {
       const result = await executeApiCall(
         {
           integrationId: "wp",
+          connectionId: "conn-1",
           targetUrl: `https://${host}.nx.invalid/`,
           method: "GET",
           callerHeaders: {},
@@ -1782,6 +1835,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     executeApiCall(
       {
         integrationId: "demo",
+        connectionId: "conn-1",
         targetUrl,
         method: "GET",
         callerHeaders: {},
@@ -2045,6 +2099,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -2055,6 +2110,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.example.net/collect",
         method: "GET",
         callerHeaders: {},
@@ -2084,6 +2140,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       await executeApiCall(
         {
           integrationId: "kijiji",
+          connectionId: "conn-1",
           targetUrl: target,
           method: "GET",
           callerHeaders: {},
@@ -2102,6 +2159,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -2112,6 +2170,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "kijiji",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com:8443/inbox",
         method: "GET",
         callerHeaders: {},
@@ -2139,6 +2198,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://api.dropboxapi.com/2/files/list",
         method: "GET",
         callerHeaders: {},
@@ -2149,6 +2209,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "dropbox",
+        connectionId: "conn-1",
         targetUrl: "https://content.dropboxapi.com/2/files/download",
         method: "GET",
         callerHeaders: {},
@@ -2180,6 +2241,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "shopify",
+        connectionId: "conn-1",
         targetUrl: "https://victim.myshopify.com/admin",
         method: "GET",
         callerHeaders: {},
@@ -2190,6 +2252,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "shopify",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.myshopify.com/collect",
         method: "GET",
         callerHeaders: {},
@@ -2221,6 +2284,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "anyhost",
+        connectionId: "conn-1",
         targetUrl: "https://provider.example.com/login",
         method: "GET",
         callerHeaders: {},
@@ -2231,6 +2295,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "anyhost",
+        connectionId: "conn-1",
         targetUrl: "https://attacker.example.net/collect",
         method: "GET",
         callerHeaders: {},
@@ -2260,6 +2325,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "hybrid",
+        connectionId: "conn-1",
         targetUrl: "https://elsewhere.example.net/x",
         method: "GET",
         callerHeaders: {},
@@ -2271,6 +2337,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     await executeApiCall(
       {
         integrationId: "hybrid",
+        connectionId: "conn-1",
         targetUrl: "https://api.example.com/x?pin={{pin}}",
         method: "GET",
         callerHeaders: {},
@@ -2349,7 +2416,14 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
   ) {
     for (const targetUrl of targets) {
       await executeApiCall(
-        { integrationId: "shop", targetUrl, method: "POST", callerHeaders: {}, body: body() },
+        {
+          integrationId: "shop",
+          connectionId: "conn-1",
+          targetUrl,
+          method: "POST",
+          callerHeaders: {},
+          body: body(),
+        },
         deps,
       );
     }
@@ -2435,5 +2509,62 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
     expect(sent[1]).toEqual(["PHPSESSID=injected"]);
     // An own-origin rotation still wins over the injected session.
     expect(sent[3]).toEqual(["PHPSESSID=rotated"]);
+  });
+});
+
+describe("executeApiCall — two connections of one integration", () => {
+  // Per-connection tool deps share the run-wide jar and 401 set, exactly as
+  // `integrations-boot.ts` layers one credential pair per connection on them.
+  function sharedRunDeps(fetchFn: typeof fetch) {
+    const shared = {
+      cookieJar: new Map<string, string[]>(),
+      reportedAuthFailures: new Set<string>(),
+    };
+    const refreshA = mock(async () => null);
+    const refreshB = mock(async () => null);
+    return {
+      depsA: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshA }),
+      depsB: makeDeps({ ...shared, fetchFn, refreshCredentials: refreshB }),
+      refreshA,
+      refreshB,
+    };
+  }
+  const call = (connectionId: string) => ({
+    integrationId: "portal",
+    connectionId,
+    targetUrl: "https://api.example.com/x",
+    method: "GET",
+    callerHeaders: {},
+    body: { kind: "none" } as const,
+  });
+
+  it("never replays connection A's session cookie on connection B", async () => {
+    const cookiesSeen: (string | null)[] = [];
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
+      return new Response("ok", {
+        status: 200,
+        headers: cookiesSeen.length === 1 ? { "Set-Cookie": "sess=a-session; Path=/" } : {},
+      });
+    });
+    const { depsA, depsB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    await executeApiCall(call("conn-b"), depsB);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(cookiesSeen[1]).toBeNull();
+    // CONTROL — the session is still sticky on the connection that earned it.
+    expect(cookiesSeen[2]).toBe("sess=a-session");
+  });
+
+  it("does not let connection A's persistent 401 skip connection B's refresh", async () => {
+    const fetchFn = mock(async () => new Response("expired", { status: 401 }));
+    const { depsA, depsB, refreshA, refreshB } = sharedRunDeps(fetchFn as unknown as typeof fetch);
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
+    await executeApiCall(call("conn-b"), depsB);
+    expect(refreshB).toHaveBeenCalledTimes(1);
+    // CONTROL — A itself is not refreshed a second time.
+    await executeApiCall(call("conn-a"), depsA);
+    expect(refreshA).toHaveBeenCalledTimes(1);
   });
 });

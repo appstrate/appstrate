@@ -29,7 +29,7 @@ export async function seedProxyIntegration(
   await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: manifest.name });
 }
 
-/** Add a connection owned by the context user on `authKey`; returns its id. */
+/** Add a connection owned by the context user on `authKey`, labelled `accountId`; returns its id. */
 export async function seedProxyConnection(
   ctx: TestContext,
   packageId: string,
@@ -43,6 +43,7 @@ export async function seedProxyConnection(
       integrationId: packageId,
       authKey,
       accountId,
+      label: accountId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),

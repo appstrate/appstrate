@@ -4,13 +4,12 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
-import i18n from "../i18n";
-import { ApiError, client, type components } from "../api/client";
+import { client, type components } from "../api/client";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { onMutationError } from "../lib/mutation-error";
 import {
   packageKeys,
   agentsKeys,
@@ -21,56 +20,13 @@ import {
   invalidatePackageFiles,
 } from "../lib/query-keys";
 import { retryLaunch, type RunLaunch } from "../lib/run-launch";
-import type { MissingIntegrationFieldError } from "../components/missing-connections-modal";
+import type { MissingIntegrationFieldError } from "../lib/connection-choice";
+import { missingConnectionErrors } from "../lib/connection-choice";
 
 // NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
 // events, and the runs hooks are migrated with the same pinned keys. The
 // package/agent keys stay legacy too (see the note in use-packages.ts).
-
-/**
- * Refusals whose server sentence is replaced rather than prefixed. The raw
- * `detail` is English, so a French UI falling back to it tells the user
- * nothing they can act on.
- *
- * The two lock codes are about ONE named field and the server puts its name in
- * `param` (`input.<field>` / `locked_fields.<field>`) — hence the `field`
- * interpolation, which a code carrying no `param` simply leaves empty.
- * `draft_not_writable` is the launch refusal: the draft is the author's
- * working copy and runs only for whoever can write the package in its home
- * space, so the sentence has to say which version WILL run instead.
- */
-const REFUSAL_ERROR_KEYS: Record<string, string> = {
-  locked_input_field: "error.lockedInputField",
-  locked_required_field_empty: "error.lockedRequiredFieldEmpty",
-  draft_not_writable: "error.draftNotWritable",
-};
-
-function refusalMessage(err: ApiError): string | null {
-  const key = REFUSAL_ERROR_KEYS[err.code];
-  if (!key) return null;
-  // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
-  // the first segment is the prefix.
-  const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
-  return i18n.t(key, { field, ns: "agents" });
-}
-
-export function onMutationError(err: Error) {
-  // Skip the generic toast for missing_integration_connection (409): only a
-  // run launch raises it, and `useRunLauncher` — the one way to launch —
-  // answers it with the recovery modal, which says strictly more.
-  if (err instanceof ApiError && err.code === "missing_integration_connection") {
-    return;
-  }
-  if (err instanceof ApiError) {
-    const refusal = refusalMessage(err);
-    if (refusal) {
-      toast.error(refusal);
-      return;
-    }
-  }
-  toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) }));
-}
 
 /**
  * Persist the editor layer of input resolution for this space.
@@ -154,7 +110,9 @@ function useRunAgent(packageId: string) {
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
  * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
- * `retry` replays that launch with the user's picks.
+ * `retry` replays that launch with the user's picks. The retried launch becomes
+ * the kept one, so a second 409 builds on it: a pick one 409 dropped stays
+ * dropped.
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
@@ -162,11 +120,8 @@ export function useRunLauncher(packageId: string) {
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
 
   const onError = (err: Error) => {
-    if (err instanceof ApiError && err.code === "missing_integration_connection") {
-      setMissingErrors(
-        Array.isArray(err.details) ? (err.details as MissingIntegrationFieldError[]) : [],
-      );
-    }
+    const errors = missingConnectionErrors(err);
+    if (errors) setMissingErrors(errors);
   };
 
   return {
@@ -177,9 +132,11 @@ export function useRunLauncher(packageId: string) {
       lastLaunch.current = { launch, onSuccess };
       runAgent.mutate(launch, { onSuccess, onError });
     },
-    retry: (picks: Record<string, string>) => {
+    retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      runAgent.mutate(retryLaunch(launch, picks), {
+      const next = retryLaunch(launch, picks, missingErrors ?? []);
+      lastLaunch.current = { launch: next, onSuccess };
+      runAgent.mutate(next, {
         onSuccess: () => {
           setMissingErrors(null);
           onSuccess?.();

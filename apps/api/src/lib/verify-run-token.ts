@@ -9,6 +9,8 @@ import { parseSignedToken } from "./run-token.ts";
 import { forbidden, notFound, unauthorized } from "./errors.ts";
 import { runAgentIdentity } from "../services/state/runs.ts";
 
+type RunConnectionSnapshot = typeof runs.$inferSelect.resolvedConnections;
+
 /**
  * Verify the run token from the Authorization header.
  * Returns the run data or throws an ApiError.
@@ -37,10 +39,9 @@ export async function verifyRunToken(c: Context): Promise<{
     versionRef: string | null;
     /**
      * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199). The credentials resolver uses it to honour admin pins and
-     * per-run overrides past the kickoff handoff.
+     * (#199): the set bound per integration, which authorises a `connection_id`.
      */
-    resolvedConnections: Record<string, { connectionId: string; source: string }> | null;
+    resolvedConnections: RunConnectionSnapshot;
     /**
      * Snapshot of each declared integration's resolved manifest version frozen
      * at run kickoff (#686). The credentials resolver reads the integration

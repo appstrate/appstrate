@@ -1,0 +1,315 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * A connection shared with the org (`shared_with_org`) powers colleagues' runs.
+ * Every write that takes its owner's access to the connection's space away
+ * must unshare it in the same transaction — otherwise a departed member's
+ * credentials keep running, and nobody can stop them (unsharing is owner-only
+ * for everyone but a governor).
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { eq, inArray } from "drizzle-orm";
+import { db, truncateAll } from "../../helpers/db.ts";
+import {
+  createTestContext,
+  createTestOrg,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedAgent,
+  seedEndUser,
+  seedPackage,
+  seedSpace,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
+import {
+  localIntegrationManifest,
+  httpHeaderDelivery,
+} from "../../helpers/integration-manifests.ts";
+import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
+import {
+  leaveOrganization,
+  provisionMember,
+  removeMember,
+  updateMemberRole,
+} from "../../../src/services/organizations.ts";
+import { removeSpaceMember } from "../../../src/services/space-members.ts";
+import { updateSpace } from "../../../src/services/spaces.ts";
+import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
+import { presetPermissions } from "../../../src/lib/permissions.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
+
+const AGENT = "@lossorg/agent";
+const INTEGRATION = "@lossorg/svc";
+
+const agentManifest = {
+  name: AGENT,
+  version: "1.0.0",
+  type: "agent",
+  schema_version: "0.2",
+  display_name: "Access loss agent",
+  dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+  integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+};
+
+const integrationManifest = localIntegrationManifest({
+  name: INTEGRATION,
+  serverName: "@lossorg/svc-server",
+  version: "1.0.0",
+  auths: {
+    primary: {
+      type: "api_key",
+      authorizedUris: ["https://api.example.com/**"],
+      credentialFields: ["api_key"],
+      delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer ", field: "api_key" }),
+    },
+  },
+  tools_policy: { search: {} },
+});
+
+describe("unsharing on access loss", () => {
+  let ctx: TestContext;
+  const asOwner = () => ({ userId: ctx.user.id, firstPartySession: true });
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "lossorg" });
+    await seedPackage({
+      id: INTEGRATION,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      draftManifest: integrationManifest,
+    });
+  });
+
+  async function addMember(role: OrgRole = "member"): Promise<string> {
+    const user = await createTestUser();
+    await db.transaction((tx) => provisionMember(tx, ctx.orgId, user.id, role));
+    return user.id;
+  }
+
+  async function personalSpaceOf(userId: string): Promise<string> {
+    const [row] = await db
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(eq(spaces.ownerUserId, userId));
+    return row!.id;
+  }
+
+  async function seedConnection(opts: {
+    spaceId: string;
+    userId?: string;
+    endUserId?: string;
+    shared?: boolean;
+  }): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+        spaceId: opts.spaceId,
+        userId: opts.userId ?? null,
+        endUserId: opts.endUserId ?? null,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        scopesGranted: [],
+        sharedWithOrg: opts.shared ?? true,
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  /** The ids among `ids` still shared, sorted. */
+  async function stillShared(ids: string[]): Promise<string[]> {
+    const rows = await db
+      .select({ id: integrationConnections.id, shared: integrationConnections.sharedWithOrg })
+      .from(integrationConnections)
+      .where(inArray(integrationConnections.id, ids));
+    return rows
+      .filter((row) => row.shared)
+      .map((row) => row.id)
+      .sort();
+  }
+
+  describe("org exit", () => {
+    async function seedExitFixture() {
+      const member = await addMember();
+      const inDefault = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      const inPersonal = await seedConnection({
+        spaceId: await personalSpaceOf(member),
+        userId: member,
+      });
+      const ownerShared = await seedConnection({
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+      const endUserShared = await seedConnection({
+        spaceId: ctx.defaultSpaceId,
+        endUserId: endUser.id,
+      });
+      // The member's own organization is not the one they leave.
+      const { defaultSpaceId: otherOrgSpace } = await createTestOrg(member);
+      const otherOrg = await seedConnection({ spaceId: otherOrgSpace, userId: member });
+      return {
+        member,
+        unshared: [inDefault, inPersonal].sort(),
+        kept: [ownerShared, endUserShared, otherOrg].sort(),
+      };
+    }
+
+    it("removal unshares the member's connections in that org, and only those", async () => {
+      const f = await seedExitFixture();
+
+      const { unsharedConnectionIds } = await removeMember(ctx.orgId, f.member, asOwner());
+
+      expect([...unsharedConnectionIds].sort()).toEqual(f.unshared);
+      expect(await stillShared([...f.unshared, ...f.kept])).toEqual(f.kept);
+    });
+
+    it("leaving unshares them the same way", async () => {
+      const f = await seedExitFixture();
+
+      const { unsharedConnectionIds } = await leaveOrganization(ctx.orgId, f.member);
+
+      expect([...unsharedConnectionIds].sort()).toEqual(f.unshared);
+      expect(await stillShared([...f.unshared, ...f.kept])).toEqual(f.kept);
+    });
+  });
+
+  it("space member removal unshares only when the member really loses the space", async () => {
+    const member = await addMember();
+    const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+    const open = await seedSpace({ orgId: ctx.orgId, visibility: "open", defaultRole: "operator" });
+    for (const space of [closed, open]) {
+      await seedSpaceMember({ spaceId: space.id, userId: member, presetRole: "builder" });
+    }
+    const inClosed = await seedConnection({ spaceId: closed.id, userId: member });
+    const inOpen = await seedConnection({ spaceId: open.id, userId: member });
+    const admin = presetPermissions("admin");
+
+    const closedRemoval = await removeSpaceMember({
+      orgId: ctx.orgId,
+      space: closed,
+      userId: member,
+      actorPermissions: admin,
+    });
+    expect(closedRemoval.unsharedConnectionIds).toEqual([inClosed]);
+    // Still reaches the open space through its default role.
+    const { accessAfter, unsharedConnectionIds } = await removeSpaceMember({
+      orgId: ctx.orgId,
+      space: open,
+      userId: member,
+      actorPermissions: admin,
+    });
+
+    expect(accessAfter).not.toBeNull();
+    expect(unsharedConnectionIds).toEqual([]);
+    expect(await stillShared([inClosed, inOpen])).toEqual([inOpen]);
+  });
+
+  it("a demotion unshares where the org role was the only way in", async () => {
+    const admin = await addMember("admin");
+    // No member row: an admin reaches a closed space by org role alone.
+    const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+    const inClosed = await seedConnection({ spaceId: closed.id, userId: admin });
+    const inDefault = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: admin });
+
+    const { unsharedConnectionIds } = await updateMemberRole(ctx.orgId, admin, "member", asOwner());
+
+    expect(unsharedConnectionIds).toEqual([inClosed]);
+    expect(await stillShared([inClosed, inDefault])).toEqual([inDefault]);
+  });
+
+  it("closing an open space unshares its implicit members' connections", async () => {
+    const implicit = await addMember();
+    const explicit = await addMember();
+    const space = await seedSpace({ orgId: ctx.orgId, visibility: "open" });
+    await seedSpaceMember({ spaceId: space.id, userId: explicit, presetRole: "operator" });
+    const implicitConn = await seedConnection({ spaceId: space.id, userId: implicit });
+    const explicitConn = await seedConnection({ spaceId: space.id, userId: explicit });
+
+    const { unsharedConnectionIds } = await updateSpace(
+      ctx.orgId,
+      space.id,
+      { visibility: "closed" },
+      space,
+    );
+
+    expect(unsharedConnectionIds).toEqual([implicitConn]);
+    expect(await stillShared([implicitConn, explicitConn])).toEqual([explicitConn]);
+  });
+
+  // The share-side twin: a share committed after the access loss must not re-share what the
+  // loss unshared (the route's own access check ran before the loss).
+  it("refuses sharing a connection whose owner no longer reaches its space", async () => {
+    const member = await addMember();
+    const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+    await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
+    const lost = await seedConnection({ spaceId: closed.id, userId: member, shared: false });
+    const kept = await seedConnection({
+      spaceId: ctx.defaultSpaceId,
+      userId: member,
+      shared: false,
+    });
+    await removeSpaceMember({
+      orgId: ctx.orgId,
+      space: closed,
+      userId: member,
+      actorPermissions: presetPermissions("admin"),
+    });
+
+    await expect(updateConnectionMetadata(lost, { sharedWithOrg: true })).rejects.toMatchObject({
+      status: 409,
+      code: "connection_owner_without_access",
+    });
+    // Control: the same write where the owner still reaches the space.
+    await updateConnectionMetadata(kept, { sharedWithOrg: true });
+    expect(await stillShared([lost, kept])).toEqual([kept]);
+  });
+
+  it("an admin pin on a departed member's connection fails loudly at resolution", async () => {
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      draftManifest: agentManifest,
+    });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    await activatePackage(scope, AGENT);
+    await activatePackage(scope, INTEGRATION);
+    const member = await addMember();
+    const pinned = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: AGENT,
+      integrationId: INTEGRATION,
+      userId: null,
+      connectionIds: [pinned],
+    });
+    const resolve = () =>
+      resolveConnectionsForRun({
+        agentManifest,
+        packageId: AGENT,
+        actor: { type: "user", id: ctx.user.id },
+        scope,
+      });
+
+    const before = await resolve();
+    expect(before.errors).toEqual([]);
+    expect(before.resolved[INTEGRATION]?.map((c) => c.connectionId)).toEqual([pinned]);
+
+    await removeMember(ctx.orgId, member, asOwner());
+
+    const { errors } = await resolve();
+    expect(errors.map((e) => e.code)).toEqual(["pinned_connection_unavailable"]);
+  });
+});

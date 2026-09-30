@@ -709,14 +709,7 @@ describe("offered is not activated", () => {
       packageId: AGENT,
       userId: recipient.userId,
     });
-    await triggerScheduledRun(
-      schedule.id,
-      AGENT,
-      { type: "user", id: recipient.userId },
-      ctx.orgId,
-      recipient.personalSpaceId,
-      undefined,
-    );
+    await triggerScheduledRun(schedule.id);
     await waitForRunPipelineSettled();
     const scheduled = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(scheduled).toHaveLength(1);

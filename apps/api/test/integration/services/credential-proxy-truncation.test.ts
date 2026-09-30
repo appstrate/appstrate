@@ -60,6 +60,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     integrationId: PACKAGE_ID,
     authKey: "api",
     accountId: "acct-1",
+    label: "acct-1",
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),

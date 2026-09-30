@@ -179,17 +179,10 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       input: { folder: "scheduled", subject: "weekly digest" },
+      versionOverride: "draft",
     });
 
-    await triggerScheduledRun(
-      schedule.id,
-      AGENT_ID,
-      { type: "user", id: ctx.user.id },
-      ctx.orgId,
-      ctx.defaultSpaceId,
-      { folder: "scheduled", subject: "weekly digest" },
-      { versionOverride: "draft" },
-    );
+    await triggerScheduledRun(schedule.id);
 
     const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(row!.status).not.toBe("failed");
@@ -211,17 +204,10 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       input: { folder: "scheduled", subject: "weekly digest" },
+      versionOverride: "draft",
     });
 
-    await triggerScheduledRun(
-      schedule.id,
-      AGENT_ID,
-      { type: "user", id: ctx.user.id },
-      ctx.orgId,
-      ctx.defaultSpaceId,
-      { folder: "scheduled", subject: "weekly digest" },
-      { versionOverride: "draft" },
-    );
+    await triggerScheduledRun(schedule.id);
 
     const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(row!.status).toBe("failed");
