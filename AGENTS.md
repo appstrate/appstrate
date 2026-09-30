@@ -320,7 +320,7 @@ Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) �
   justification `knip.config.ts` demands at the call site — never to make a finding go away. What
   is out of scope, what knip derives on its own, and the ~161-finding false red the rule came out
   of: `docs/QUALITY_GATE.md`.
-- **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
+- **Tests**: `bun test` from root runs all packages in one process; `bun run test:tier0` runs them over several. See **Testing** below.
 
 ### Migrations
 
@@ -402,6 +402,7 @@ The skill **`testing`** (`.claude/skills/testing/SKILL.md`) owns the full guide 
 ### Running Tests
 
 ```sh
+bun run test:tier0                # Full suite on PGlite, over several processes (no Docker)
 bun test                          # Full suite; Docker tests skip unless TEST_DOCKER=1
 bun test apps/api/test/unit/      # API unit tests only (fast, no DB)
 bun test apps/api/test/           # API unit + integration
@@ -410,7 +411,7 @@ bun test packages/core/           # Core library tests (no DB)
 bun test packages/afps-runtime/   # AFPS bundle runtime tests
 ```
 
-**Locally, run only the tests your change touches** — the test files you edited plus the ones covering the code you changed (`bun test <file-or-dir>`). Do not run the full `bun test` suite locally to validate a change: CI (`.github/workflows/test.yml`) runs every tier on each PR, in parallel, against the merge with `main`. A local full run is slow and not a reliable signal anyway (shared test DB across sessions, port contention, filesystem ordering). `bun run check` runs no tests at all.
+**Locally, run only the tests your change touches** — the test files you edited plus the ones covering the code you changed (`bun test <file-or-dir>`). When you do want the whole suite locally, use `bun run test:tier0` (`scripts/run-tests.ts`): it splits the files across processes, each on its own throwaway PGlite, so it neither shares a database with other sessions nor runs on one core — a plain full `bun test` does both. CI (`.github/workflows/test.yml`) runs every tier on each PR against the merge with `main`. `bun run check` runs no tests at all.
 
 ### Test Conventions
 
