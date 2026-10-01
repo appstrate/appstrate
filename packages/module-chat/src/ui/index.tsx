@@ -165,6 +165,11 @@ export interface ChatPageProps {
   can: ChatCan;
 }
 
+/** One toast per waiting conversation, so it can be dismissed when the wait ends. */
+function awaitingToastId(sessionId: string): string {
+  return `chat-awaiting-${sessionId}`;
+}
+
 export function ChatPage({
   getHeaders,
   conversationId,
@@ -269,18 +274,25 @@ export function ChatPage({
 
   // A conversation that starts waiting on the person (a tool approval or
   // questions) while they are looking at another one gets a toast that leads
-  // there; the list badges it either way. Conversations already waiting when
-  // the page loads are left to the badge.
+  // there; the list badges it either way. The toast stays until the person
+  // closes it, opens that conversation, or the wait ends. Conversations
+  // already waiting when the page loads are left to the badge.
   const awaitingSeen = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
     const rows = sessions.data;
     if (!rows) return;
     const seen = awaitingSeen.current;
-    awaitingSeen.current = new Set(rows.filter((s) => s.awaiting_input).map((s) => s.id));
+    const awaiting = new Set(rows.filter((s) => s.awaiting_input).map((s) => s.id));
+    awaitingSeen.current = awaiting;
+    for (const id of seen ?? []) if (!awaiting.has(id)) toast.dismiss(awaitingToastId(id));
+    toast.dismiss(awaitingToastId(activeId));
     if (!seen) return;
     for (const s of rows) {
       if (!s.awaiting_input || seen.has(s.id) || s.id === activeId) continue;
       toast(t("awaiting.toast", { title: s.title ?? t("awaiting.untitled") }), {
+        id: awaitingToastId(s.id),
+        duration: Infinity,
+        closeButton: true,
         action: { label: t("awaiting.open"), onClick: () => onConversationChange?.(s.id) },
       });
     }

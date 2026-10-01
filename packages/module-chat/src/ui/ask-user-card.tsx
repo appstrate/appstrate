@@ -99,8 +99,10 @@ function Receipt({ questions, reply }: { questions: Question[]; reply: AskUserRe
             const shown = answerText(reply.answers[q.id]);
             return (
               <div key={q.id}>
-                <dt className="text-muted-foreground text-xs">{q.question}</dt>
-                <dd>{shown.length ? shown.join(", ") : t("askUser.unanswered")}</dd>
+                <dt className="font-medium">{q.question}</dt>
+                <dd className="text-muted-foreground">
+                  {shown.length ? shown.join(", ") : t("askUser.unanswered")}
+                </dd>
               </div>
             );
           })}
@@ -339,7 +341,12 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
                   {t("askUser.submit")}
                 </Button>
               ) : (
-                <Button type="button" size="sm" variant="outline" onClick={next}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={answered(q.id) ? "default" : "outline"}
+                  onClick={next}
+                >
                   {t("askUser.next")}
                 </Button>
               )}
@@ -359,8 +366,8 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
                     onClick={() => setTab(q.id)}
                     className="hover:bg-muted/50 block w-full rounded-lg px-2 py-1 text-left"
                   >
-                    <span className="text-muted-foreground block text-xs">{q.question}</span>
-                    <span className={shown.length ? "block" : "text-muted-foreground block"}>
+                    <span className="block font-medium">{q.question}</span>
+                    <span className="text-muted-foreground block">
                       {shown.length ? shown.join(", ") : t("askUser.unanswered")}
                     </span>
                   </button>
