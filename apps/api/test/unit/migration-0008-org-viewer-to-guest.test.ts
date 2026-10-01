@@ -50,8 +50,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const MIGRATIONS_DIR = `${REPO_ROOT}/packages/db/drizzle`;
@@ -138,10 +138,9 @@ async function seed(): Promise<void> {
 }
 
 beforeEach(async () => {
-  pg = new PGlite();
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
   await seed();
-  // The journal replay runs past the 15s default in `bunfig.toml` on a cold
+  // The journal replay runs past the suite's 15s per-test timeout (`--timeout`) on a cold
   // machine, and an abandoned hook does not stop — it keeps replaying into an
   // instance the next run replays into again, surfacing as
   // `type "invitation_status" already exists` rather than as a timeout.

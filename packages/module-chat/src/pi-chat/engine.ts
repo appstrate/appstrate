@@ -125,6 +125,13 @@ export interface PiChatInput {
    * test wraps the real builder and replaces `close` alone.
    */
   buildMcpTools?: typeof buildPlatformMcpTools;
+  /**
+   * Grace given to the session's and the MCP client's wind-down before the
+   * turn tears down without them. Production omits it (`SESSION_ABORT_GRACE_MS`).
+   * The tests that prove the bound hold a wind-down that never settles, so each
+   * of them would otherwise sit out the full production grace.
+   */
+  windDownGraceMs?: number;
 }
 
 /**
@@ -199,6 +206,7 @@ function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
  * Drive one admitted Pi chat turn and return the UI-message-stream `Response`.
  */
 export function runPiChat(input: PiChatInput): Response {
+  const windDownGraceMs = input.windDownGraceMs ?? SESSION_ABORT_GRACE_MS;
   const { modelBinding, platformMcp, abortSignal, onError } = input;
   const model = modelBinding.model;
   const startedAt = Date.now();
@@ -585,10 +593,10 @@ export function runPiChat(input: PiChatInput): Response {
           // on the same producer. Giving up on the wind-down is strictly better
           // than holding the slot for the life of the process.
           const winding = typedSession.abort?.();
-          if (winding && !(await settledWithin(winding, SESSION_ABORT_GRACE_MS))) {
+          if (winding && !(await settledWithin(winding, windDownGraceMs))) {
             logger.warn("Pi chat session abort did not settle — tearing the turn down anyway", {
               chatSessionId: input.chatSessionId,
-              graceMs: SESSION_ABORT_GRACE_MS,
+              graceMs: windDownGraceMs,
             });
           }
           if (!turnAbort.signal.aborted) throw err;
@@ -696,10 +704,10 @@ export function runPiChat(input: PiChatInput): Response {
         // closed either way — giving up on the wind-down costs nothing the
         // turn still needs.
         const closing = mcpTools?.close();
-        if (closing && !(await settledWithin(closing, SESSION_ABORT_GRACE_MS))) {
+        if (closing && !(await settledWithin(closing, windDownGraceMs))) {
           logger.warn("Pi chat MCP close did not settle — tearing the turn down anyway", {
             chatSessionId: input.chatSessionId,
-            graceMs: SESSION_ABORT_GRACE_MS,
+            graceMs: windDownGraceMs,
           });
         }
       }

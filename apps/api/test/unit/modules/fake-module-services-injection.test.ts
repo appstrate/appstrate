@@ -4,6 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module";
 import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 
 /**
  * End-to-end check that a module actually *receives* a populated
@@ -36,8 +37,8 @@ describe("Module loader — ctx.services injection end-to-end", () => {
     await loadModulesFromInstances([fakeModule], ctx);
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    await restoreDiscoveredModules();
   });
 
   it("receives a populated ModuleInitContext at init", () => {

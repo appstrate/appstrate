@@ -7,8 +7,14 @@ import { createEnvGetter } from "../src/env.ts";
 describe("createEnvGetter", () => {
   const originalEnv = { ...process.env };
 
+  // Restored in place. Reassigning `process.env` swaps the live environment
+  // for a plain object: later files in the same process then write variables
+  // that nothing native (`os.tmpdir()`, spawned children) ever sees.
   afterEach(() => {
-    process.env = { ...originalEnv };
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, originalEnv);
   });
 
   it("parses environment variables with a Zod schema", () => {
