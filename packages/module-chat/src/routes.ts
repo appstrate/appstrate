@@ -36,7 +36,7 @@ import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
-import { resolveReply } from "./reply-registry.ts";
+import { hasPendingReply, resolveReply } from "./reply-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -92,6 +92,10 @@ function toSessionDto(row: SessionRow) {
     // conversation the user has left, and detect when it finishes. Never leaks
     // the raw stream id.
     generating: row.activeStreamId != null,
+    // True while a live turn waits on the person (a tool approval or questions):
+    // the sidebar badges the conversation. Read from this node's pending
+    // replies, like the approval and questions routes.
+    awaiting_input: hasPendingReply(row.id),
     // Computed server-side from the two message-pointer watermarks so only a
     // boolean crosses the wire — no clock anywhere. Unread = an assistant
     // message landed past the owner's read marker.

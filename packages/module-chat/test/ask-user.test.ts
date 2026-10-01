@@ -14,7 +14,7 @@ import {
   type RequestAnswers,
 } from "../src/pi-chat/ask-user.ts";
 import type { AskUserReply } from "../src/ask-user-reply.ts";
-import { awaitReply, resolveReply } from "../src/reply-registry.ts";
+import { awaitReply, hasPendingReply, resolveReply } from "../src/reply-registry.ts";
 
 interface RegisteredTool {
   name: string;
@@ -102,6 +102,29 @@ describe("reply registry", () => {
     expect(resolveReply("approval", "call_9", "chs_1", { approved: true })).toBe(false);
     expect(resolveReply("question", "call_9", "chs_1", { status: "cancelled" })).toBe(true);
     expect(await waiting).toEqual({ status: "cancelled" });
+  });
+
+  it("says a session waits on the person, and signals when the wait starts and ends", async () => {
+    const turn = new AbortController();
+    let changes = 0;
+    const waiting = awaitReply(
+      "question",
+      "call_11",
+      "chs_wait",
+      turn.signal,
+      { status: "cancelled" },
+      () => {
+        changes++;
+      },
+    );
+    expect(hasPendingReply("chs_wait")).toBe(true);
+    expect(hasPendingReply("chs_other")).toBe(false);
+    expect(changes).toBe(1);
+
+    resolveReply("question", "call_11", "chs_wait", { status: "cancelled" });
+    await waiting;
+    expect(hasPendingReply("chs_wait")).toBe(false);
+    expect(changes).toBe(2);
   });
 
   it("settles a question as cancelled when the turn ends without an answer", async () => {

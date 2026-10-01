@@ -143,5 +143,9 @@
   "askUser.waiting": "En attente de votre réponse, ci-dessous.",
   "askUser.other": "Autre",
   "askUser.review": "Récapitulatif",
-  "askUser.escHint": "Échap pour ignorer"
+  "askUser.escHint": "Échap pour ignorer",
+  "awaiting.label": "Action requise : la conversation attend votre réponse",
+  "awaiting.toast": "« {{title}} » attend votre réponse",
+  "awaiting.untitled": "Une conversation",
+  "awaiting.open": "Y aller"
 }
