@@ -330,7 +330,7 @@ export function createIntegrationMitmListener(
       emit,
       resolveHostFn: options.resolveHostFn,
     }).catch((err: unknown) => {
-      emit({ kind: "tls-error", error: `connection handler failed: ${(err as Error).message}` });
+      emit({ kind: "tls-error", error: `connection handler failed: ${errorClass(err)}` });
       rawSocket.destroy();
     });
   });
@@ -339,6 +339,10 @@ export function createIntegrationMitmListener(
     tcpServer.once("error", rej);
     tcpServer.listen(port, host, () => {
       tcpServer.off("error", rej);
+      // A later server-level fault (EMFILE on accept, …) must not become an uncaught throw.
+      tcpServer.on("error", (err) =>
+        emit({ kind: "tls-error", error: `listener: ${errorClass(err)}` }),
+      );
       res();
     });
   });
@@ -495,7 +499,7 @@ async function handleInboundConnection(
     try {
       clientHello = await collectUntilSniParses(rawSocket, clientHello);
     } catch (err) {
-      emit({ kind: "tls-error", error: `ClientHello read failed: ${(err as Error).message}` });
+      emit({ kind: "tls-error", error: `ClientHello read failed: ${errorClass(err)}` });
       rawSocket.destroy();
       return;
     }
@@ -549,7 +553,7 @@ async function handleInboundConnection(
   try {
     tlsServer = await deps.resolveTlsServer(sniHost, result.port);
   } catch (err) {
-    emit({ kind: "tls-error", error: `tls bring-up failed: ${(err as Error).message}` });
+    emit({ kind: "tls-error", error: `tls bring-up failed: ${errorClass(err)}` });
     rawSocket.destroy();
     return;
   }
@@ -564,7 +568,7 @@ async function handleInboundConnection(
     upstream.pipe(rawSocket);
   });
   upstream.on("error", (err) => {
-    emit({ kind: "tls-error", error: `tls relay error: ${err.message}` });
+    emit({ kind: "tls-error", error: `tls relay error: ${errorClass(err)}` });
     rawSocket.destroy();
   });
   rawSocket.on("close", () => upstream.destroy());
@@ -882,8 +886,9 @@ async function forwardInnerRequest(
 
   // The Headers we forward downstream. When a connect-login is in flight we
   // replace the inbound values with their substituted counterparts so the
-  // raw login secret reaches upstream proxy-side only — never the tool code
-  // and never a tool result.
+  // raw login secret leaves the sidecar only toward the upstream. The upstream's
+  // response is relayed as is: a login endpoint that echoes its input returns
+  // it to the tool (known residual, tracked separately).
   let headersForOutbound = req.headers;
 
   // Connect-login transient-input substitution (P1). Runs BEFORE
@@ -1075,6 +1080,7 @@ async function forwardInnerRequest(
     if (refreshed) {
       const replay = await refetch();
       if (replay) {
+        await response.body?.cancel().catch(() => {});
         response = replay;
         retried = true;
       }

@@ -495,6 +495,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
 
       if (resolvedBody.kind === "bytes" && resolvedBody.contentType) {
+        // A caller's spelling of the header would survive beside ours: the boundary must be ours.
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === "content-type") delete headers[key];
+        }
         headers["Content-Type"] = resolvedBody.contentType;
       }
 

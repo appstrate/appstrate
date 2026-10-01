@@ -489,6 +489,39 @@ describe("LocalIntegrationResolver", () => {
     expect(calls).toBe(0);
   });
 
+  it("sends one multipart Content-Type, its own boundary, whatever the agent's spelling", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const [tool] = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const { ctx } = makeCtx();
+    await tool!.execute(
+      {
+        method: "POST",
+        target: "https://api.acme.com/v1/upload",
+        headers: { "content-type": "multipart/form-data; boundary=agent" },
+        body: { multipart: [{ name: "a", value: "1" }] },
+      },
+      ctx,
+    );
+    const contentType = new Headers(calls[0]!.init.headers).get("content-type")!;
+    expect(contentType).toStartWith("multipart/form-data; boundary=");
+    expect(contentType).not.toContain("boundary=agent");
+    expect(contentType).not.toContain(",");
+  });
+
   it("bounds the upstream call by the shared deadline combined with the tool signal", async () => {
     let sent: AbortSignal | undefined;
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
