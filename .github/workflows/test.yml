@@ -198,7 +198,7 @@ jobs:
         run: test "${{ needs.unit.result }}" = success
 
   integration:
-    name: Integration tests
+    name: Integration tests (${{ matrix.partition }}/2)
     # Run on every push to main (post-merge gate) + on PRs labeled
     # `integration` (opt-in pre-merge). Without the main-branch arm,
     # code could land on main via a never-labeled PR and reach production
@@ -230,7 +230,15 @@ jobs:
     # This job remains the ONLY pre-merge exercise of the integration suite, so
     # a cancellation still reads as a red gate for a suite that never ran —
     # which is exactly why the fix had to be the workload and not the budget.
+    #
+    # It now runs as two slices on two runners (`scripts/run-tests.ts
+    # --partition`, the same deal as the unit job's), and the required check is
+    # the `Integration tests` gate job below.
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -258,7 +266,7 @@ jobs:
       # at this same tier, so running it again here proved nothing and cost two
       # thirds of the budget (see `timeout-minutes` above).
       #
-      # The positional is a path SUBSTRING filter, not a glob. With the trailing
+      # The filter is a path SUBSTRING, not a glob. With the trailing
       # slash it selects exactly the files under a `test/integration/` directory
       # — the set the `unit` job ignores (`**/test/integration/**`) — wherever
       # that directory is, so a module that grows its first integration
@@ -266,7 +274,9 @@ jobs:
       # also matched the ~30 `test/integration-*.test.ts` files the `unit` job
       # already runs, and ran them twice.
       - name: Run integration tests with coverage
-        run: bun test --timeout=15000 test/integration/ --coverage --coverage-reporter=lcov --coverage-dir=coverage
+        run: |
+          bun scripts/run-tests.ts test/integration/ --partition=${{ matrix.partition }}/2 \
+            --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload integration coverage to Codecov
         if: always()
@@ -279,6 +289,24 @@ jobs:
           flags: integration
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # The required status check, as for the unit slices. The integration slices
+  # are skipped on a PR without the `integration` label, and a skipped required
+  # check reads as passed — so the gate accepts `skipped`, and only that, on
+  # top of `success`. A failed or cancelled slice fails it.
+  integration-gate:
+    name: Integration tests
+    if: always()
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every integration slice passed, or the suite was not requested
+        run: |
+          case "${{ needs.integration.result }}" in
+            success|skipped) ;;
+            *) echo "integration slices: ${{ needs.integration.result }}"; exit 1 ;;
+          esac
 
   platform-container-e2e:
     name: Platform container health e2e

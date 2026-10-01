@@ -104,7 +104,11 @@ export function parseArgs(argv: readonly string[]): Options {
       options.forwarded.push(arg);
       if (eq < 0 && VALUE_FLAGS.has(arg)) options.forwarded.push(value());
     } else {
-      options.filters.push(relative(ROOT, resolve(arg)));
+      // `resolve` drops a trailing slash, and with it the difference between
+      // `test/integration/` (that directory) and `test/integration` (also
+      // every `test/integration-*.test.ts` file).
+      const rel = relative(ROOT, resolve(arg));
+      options.filters.push(arg.endsWith("/") ? `${rel}/` : rel);
     }
   }
   return options;

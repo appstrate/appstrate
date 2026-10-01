@@ -63,6 +63,11 @@ describe("parseArgs", () => {
     expect(options.forwarded).toEqual(["-t", "some name", "--coverage"]);
   });
 
+  it("keeps a filter's trailing slash, which narrows it to a directory", () => {
+    expect(parseArgs(["test/integration/"]).filters).toEqual(["test/integration/"]);
+    expect(parseArgs(["test/integration"]).filters).toEqual(["test/integration"]);
+  });
+
   it("refuses a partition outside 1..K", () => {
     expect(() => parseArgs(["--partition=4/3"])).toThrow();
     expect(() => parseArgs(["--partition=0/3"])).toThrow();
