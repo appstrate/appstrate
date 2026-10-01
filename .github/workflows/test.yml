@@ -25,11 +25,7 @@ jobs:
     # split its slice across processes; machines are the unit of parallelism
     # here. The required check is the `Unit tests` gate job below.
     #
-    # 10 minutes bounds a hang; it is not a target. The single most expensive
-    # case is `scripts/test/lint.test.ts`'s subprocess lint, which has to lint
-    # the whole repo before `--max-warnings 0` can trip — past 120 s cold on a
-    # runner (run 34213836495 was cancelled at the wall on it), a few seconds
-    # with the `.eslintcache` restored below.
+    # 10 minutes bounds a hang; it is not a target.
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -60,20 +56,6 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
-      # `check.yml` saves `.eslintcache` for this lineage; restoring it turns the
-      # whole-repo lint inside `scripts/test/lint.test.ts` from a cold >120 s
-      # into a few seconds. Restore only — `check.yml` owns the save.
-      - name: Restore eslint cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
-        with:
-          path: .eslintcache
-          key: >-
-            check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
-            '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-${{ github.sha }}
-          restore-keys: >-
-            check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
-            '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-
-
       # Every `bun test` in this workflow names its per-test timeout: bunfig has no
       # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
       # 15 s itself (10 s for the CLI workspace, below).
@@ -86,7 +68,7 @@ jobs:
       # `test/supply-chain-barrels.test.ts` ran only in the label-gated
       # `integration` job below — i.e. never on the PR that changed them. With
       # default discovery (every test file git knows, `scripts/run-tests.ts`)
-      # plus two ignores, a new suite is on the PR gate by default and only an
+      # plus three ignores, a new suite is on the PR gate by default and only an
       # explicit opt-out takes it off.
       #
       # What is excluded, and why:
@@ -98,6 +80,10 @@ jobs:
       #  - `apps/cli/**` — a separate workspace with its own bunfig.toml (no Docker
       #    preload); run from that directory in the last step so it picks up the
       #    right config.
+      #  - `scripts/test/lint.test.ts` — it lints the whole repo before
+      #    `--max-warnings 0` can trip: ~150 s on a cold `.eslintcache`, which is
+      #    what every runner here has. It runs in `check.yml` instead, right after
+      #    `bun run check` has warmed that cache in the same job.
       #  - `e2e/**` — Playwright specs, which default discovery would otherwise
       #    collect (`*.spec.ts` matches it). Excluded by the root bunfig.toml; no
       #    flag here, because the runner ADDS `--path-ignore-patterns` to bunfig's
@@ -113,7 +99,8 @@ jobs:
           bun scripts/run-tests.ts --partition=${{ matrix.partition }}/3 \
             --coverage --coverage-reporter=lcov --coverage-dir=coverage \
             --path-ignore-patterns='**/test/integration/**' \
-            --path-ignore-patterns='apps/cli/**'
+            --path-ignore-patterns='apps/cli/**' \
+            --path-ignore-patterns='scripts/test/lint.test.ts'
 
       - name: Run public-origin regression
         if: matrix.partition == 1
