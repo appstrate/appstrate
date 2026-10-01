@@ -42,6 +42,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { MarkdownText } from "./markdown-text.tsx";
+import { AskUserToolUI } from "./ask-user-card.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -71,6 +72,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
+      <AskUserToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}

@@ -37,8 +37,10 @@ import { PanelLeftIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Thread } from "./thread.tsx";
 import {
+  AnswerQuestionProvider,
   ChatHeadersProvider,
   ChatHostProvider,
+  type AnswerQuestion,
   SelectConversationProvider,
   useChatHost,
 } from "./runtime-context.ts";
@@ -69,6 +71,7 @@ import {
   SESSIONS_QUERY_KEY,
   stopSession,
   respondToToolApproval,
+  answerQuestion,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
@@ -790,10 +793,17 @@ function ConversationInner({
     adapters: { attachments },
     onRespondToToolApproval,
   });
+  // Same reason: an `ask_user` call is held by the server-side turn.
+  const onAnswerQuestion = useCallback<AnswerQuestion>(
+    (toolCallId, reply) => answerQuestion(getHeaders, id, toolCallId, reply),
+    [getHeaders, id],
+  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} />
+      <AnswerQuestionProvider value={onAnswerQuestion}>
+        <Thread composerSlot={composerSlot} />
+      </AnswerQuestionProvider>
     </AssistantRuntimeProvider>
   );
 }

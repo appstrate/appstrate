@@ -29,6 +29,7 @@
  */
 
 import { createContext, useContext } from "react";
+import type { AskUserReply } from "../ask-user-reply.ts";
 
 export type GetHeaders = () => Record<string, string>;
 
@@ -38,6 +39,20 @@ export const ChatHeadersProvider = ChatHeadersContext.Provider;
 
 export function useChatHeaders(): GetHeaders | null {
   return useContext(ChatHeadersContext);
+}
+
+/**
+ * Answers the `ask_user` call the conversation's live turn is waiting on. Set
+ * by the conversation, which knows its own id; `null` outside one.
+ */
+export type AnswerQuestion = (toolCallId: string, reply: AskUserReply) => Promise<void>;
+
+const AnswerQuestionContext = createContext<AnswerQuestion | null>(null);
+
+export const AnswerQuestionProvider = AnswerQuestionContext.Provider;
+
+export function useAnswerQuestion(): AnswerQuestion | null {
+  return useContext(AnswerQuestionContext);
 }
 
 /**

@@ -30,6 +30,7 @@ import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module"
 import {
   approvalResponseSchema,
   createChatRouter,
+  questionReplySchema,
   createSessionSchema,
   renameSessionSchema,
 } from "./routes.ts";
@@ -167,6 +168,12 @@ const chatModule: AppstrateModule = {
         path: "/api/chat/sessions/{id}/approvals/{approvalId}",
         jsonSchema: z.toJSONSchema(approvalResponseSchema) as Record<string, unknown>,
         description: "Answer a chat tool approval",
+      },
+      {
+        method: "POST",
+        path: "/api/chat/sessions/{id}/questions/{toolCallId}",
+        jsonSchema: z.toJSONSchema(questionReplySchema) as Record<string, unknown>,
+        description: "Answer a chat question",
       },
     ];
   },

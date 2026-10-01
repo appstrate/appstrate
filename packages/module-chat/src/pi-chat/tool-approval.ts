@@ -13,11 +13,15 @@
  */
 
 import type { ExtensionFactory } from "@appstrate/runner-pi";
-import type { ApprovalDecision } from "../approval-registry.ts";
 import type { PlatformMcpSurface } from "./mcp-surface-cache.ts";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 
 const INVOKE_OPERATION_TOOL = "invoke_operation";
+
+export interface ApprovalDecision {
+  approved: boolean;
+  reason?: string;
+}
 
 export interface ApprovalRequest {
   toolCallId: string;

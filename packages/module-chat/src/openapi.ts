@@ -532,4 +532,68 @@ export const chatPaths = {
       },
     },
   },
+  "/api/chat/sessions/{id}/questions/{toolCallId}": {
+    post: {
+      operationId: "answerChatQuestion",
+      tags: ["Chat"],
+      summary: "Answer a chat question",
+      description:
+        "Answers an `ask_user` tool call the session's in-flight turn is waiting on (its tool call id), or skips it with `cancelled`. The answers are handed to the model keyed by question id. Signed-in sessions only: API keys and other bearer tokens are refused. The turn settles the question as cancelled on its own if no answer arrives before it ends.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+        { name: "toolCallId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              oneOf: [
+                {
+                  type: "object",
+                  required: ["status", "answers"],
+                  properties: {
+                    status: { type: "string", const: "answered" },
+                    answers: {
+                      type: "object",
+                      propertyNames: { type: "string", maxLength: 40 },
+                      additionalProperties: {
+                        type: "object",
+                        required: ["selected"],
+                        properties: {
+                          selected: {
+                            type: "array",
+                            maxItems: 4,
+                            items: { type: "string", maxLength: 80 },
+                          },
+                          text: { type: "string", maxLength: 2000 },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                {
+                  type: "object",
+                  required: ["status"],
+                  properties: { status: { type: "string", const: "cancelled" } },
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Answer recorded; the turn resumes" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { description: "Rate limited (60/min per caller)" },
+      },
+    },
+  },
 } as const;
