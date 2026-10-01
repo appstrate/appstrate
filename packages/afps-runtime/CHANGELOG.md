@@ -19,8 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https→http), and refuses every target when there is no allowlist and no
   `allow_all_uris`. `trustedHost` is optional: omitted, the hosts the declared
   allowlist names literally skip the SSRF gate (none under `allow_all_uris`).
+  It forwards only end-to-end caller headers: a caller's `Host`, the
+  hop-by-hop headers (and any header `Connection` names, except a credential
+  header) and `Content-Length` unless the body is a `ReadableStream` are
+  dropped.
 - New exports: `fetchApiCall` (`credentialFields` required: `{}` scrubs
-  nothing), `API_CALL_TIMEOUT_MS`, and `classifyApiCallFailure`: what
+  nothing), `API_CALL_TIMEOUT_MS`, `HOP_BY_HOP_HEADERS` (moved from
+  `@appstrate/connect/proxy-primitives`, which re-exports it), and `classifyApiCallFailure`: what
   `fetchApiCall` threw, as `not_authorized`, `ssrf`, `unresolvable`,
   `timeout` or `transport`, flagged when a redirect hop was refused. A target
   or a redirect hop with no DNS answer is `unresolvable` (a 502 on both

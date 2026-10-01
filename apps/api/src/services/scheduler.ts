@@ -191,7 +191,8 @@ async function disableScheduleForInvalidActor(scheduleId: string): Promise<void>
       nextRunAt: null,
       updatedAt: new Date(),
     })
-    .where(eq(schedules.id, scheduleId));
+    // A user who disabled it while this fire ran keeps their reason.
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
   await removeScheduleJobs([scheduleId]);
 }
 

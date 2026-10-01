@@ -85,6 +85,9 @@ exports (core raises its range to `^0.10.0`).
   (RFC 3056). The local-use NAT64 prefix `64:ff9b:1::/48` (RFC 8215) is
   blocked whole, and an IPv6 literal that does not expand to eight groups is
   blocked. (#1641)
+- **`isBlockedHost` judges the SIIT IPv4-translated form `::ffff:0:0:0/96`
+  (RFC 2765) as its IPv4, and blocks deprecated site-local `fec0::/10` and
+  multicast `ff00::/8`.** (#1641)
 
 ## [0.9.2] — 2026-09-30
 

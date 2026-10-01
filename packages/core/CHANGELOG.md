@@ -29,9 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@appstrate/afps-shared` range moves from `^0.9.2` to `^0.10.0`**, which
   carries the exports below (published first). (#1641)
-- **`integrationManifestSchema` refuses expressions the platform does not
-  evaluate** (`findUnevaluableExpressions`): in a delivery template (`http`,
-  `env`, `files`) anything but `{$credential.<field>}`, the api_call `{{…}}`
+- **BREAKING: `integrationManifestSchema` refuses expressions the platform
+  does not evaluate** (`findUnevaluableExpressions`), so a manifest that
+  parsed before can now fail: in a delivery template (`http`, `env`,
+  `files`) anything but `{$credential.<field>}`, the api_call `{{…}}`
   placeholder included; a `{$…}` other than `{$credential.<field>}` in
   `authorized_uris`; and every `connect.login` expression
   `loginBlockIssues` refuses. Needs `@appstrate/afps-shared`
@@ -39,9 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **`isBlockedHost` (`./ssrf`) judges IPv4 embedded in NAT64 and 6to4 IPv6
-  addresses** like IPv4-mapped ones, through `@appstrate/afps-shared` 0.10.0.
-  (#1641)
+- **BREAKING: `isBlockedHost` (`./ssrf`) judges IPv4 embedded in NAT64 and
+  6to4 IPv6 addresses** like IPv4-mapped ones, through
+  `@appstrate/afps-shared` 0.10.0: such an address embedding a blocked IPv4 is
+  now blocked. (#1641)
 
 ## [13.0.0] — 2026-09-30
 

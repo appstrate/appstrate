@@ -13,7 +13,6 @@ import {
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
   HOP_BY_HOP_HEADERS,
-  filterHeaders,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
@@ -134,7 +133,7 @@ describe("matchesAuthorizedUriSpec (AFPS semantics)", () => {
   });
 });
 
-describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
+describe("HOP_BY_HOP_HEADERS", () => {
   it("includes the canonical RFC 7230 hop-by-hop set", () => {
     for (const h of [
       "connection",
@@ -149,40 +148,6 @@ describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
     ]) {
       expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
     }
-  });
-
-  it("strips host and content-length", () => {
-    const out = filterHeaders({
-      host: "x",
-      "content-length": "10",
-      "x-keep": "yes",
-    });
-    expect(out).toEqual({ "x-keep": "yes" });
-  });
-
-  it("strips hop-by-hop headers regardless of casing", () => {
-    const out = filterHeaders({
-      Connection: "close",
-      "Keep-Alive": "timeout=5",
-      "X-Keep": "yes",
-    });
-    expect(out).toEqual({ "X-Keep": "yes" });
-  });
-
-  it("honours extraSkip (lowercase keys)", () => {
-    const out = filterHeaders(
-      {
-        "x-integration": "gmail",
-        "x-keep": "yes",
-      },
-      new Set(["x-integration"]),
-    );
-    expect(out).toEqual({ "x-keep": "yes" });
-  });
-
-  it("preserves original casing of kept headers", () => {
-    const out = filterHeaders({ Authorization: "Bearer abc" });
-    expect(out).toEqual({ Authorization: "Bearer abc" });
   });
 });
 

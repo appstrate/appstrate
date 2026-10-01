@@ -28,9 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1641).
 - **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
   `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
-  every ciphertext a retired kid wrote in the seven encrypted columns; its dry
-  run is the per-kid inventory and exits 0 only when nothing is left outside
-  the active kid. Procedure: `docs/ENV.md` § "Rotating
+  every live ciphertext a retired kid wrote in the seven encrypted columns (a
+  closed or expired run sink's secret is never read again and is skipped); its
+  dry run is the per-kid inventory and exits 0 only when nothing live is left
+  outside the active kid. Procedure: `docs/ENV.md` § "Rotating
   `CONNECTION_ENCRYPTION_KEY`" (#1641).
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
@@ -38,11 +39,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   platform no longer evaluates (`[expression]`: it would stop loading) and
   every auth whose injected credential runs will now refuse as exfiltration
   (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
-  or an entry that does not bound the host; `allow_all_uris` beside a bounded
-  list is dropped at run time, not refused, so it is not listed); it exits 1
-  while a draft or `latest` version of an org integration has one. A hit on an
-  older version is listed apart without failing the check, and system
-  packages are skipped: the image ships them (#1641).
+  or an entry that does not bound the host); it exits 1 while any draft or
+  published version of an org integration has one, not only `latest`: a range
+  such as `^1.0.0` still runs an older version. Replace a broken version by a
+  fixed one every range reaching it accepts, then delete it
+  (`scripts/migration/README.md` § 0035). `allow_all_uris` beside a bounded
+  list is not listed (a run drops it and serves the list), but the next draft
+  save refuses it: fix it when convenient. System packages are skipped: the
+  image ships them (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
@@ -172,21 +176,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **An upstream that keeps rejecting an API key flags it; isolated 401s no
-  longer do** (#1641). A credential that cannot refresh (api_key, basic,
-  custom, OAuth2 with no refresh client) is flagged `needs_reconnection` at
-  the `INTEGRATION_REFRESH_MAX_FAILURES`-th CONSECUTIVE upstream 401, however
-  far apart. Any successful (2xx) call through a non-OAuth2 connection ends
-  the streak; an OAuth2 connection's count is cleared only by a credential
-  write (a reconnect, or a successful refresh), never by a 2xx. Every path
-  counts and resets: the platform credential proxy (CLI, GitHub Action),
-  which counted none before and flagged an OAuth2 connection without a
-  refresh client on its first 401, and the sidecar's `api_call`, MITM egress
-  and remote-HTTP sinks, which report the first success after a counted
-  rejection to
+- **An upstream that keeps rejecting an API key flags it; 401s between
+  successful calls no longer do** (#1641). A credential that cannot refresh
+  (api_key, basic, custom, OAuth2 with no refresh client) is flagged
+  `needs_reconnection` at the `INTEGRATION_REFRESH_MAX_FAILURES`-th
+  CONSECUTIVE upstream 401, however far apart. Any successful (2xx) call
+  through a non-OAuth2 connection ends the streak; an OAuth2 connection's
+  count is cleared only by a credential write (a reconnect, or a successful
+  refresh), never by a 2xx. Two counts therefore run until a reconnect: an
+  OAuth2 connection whose refresh cannot run (no resolvable client or token
+  endpoint), and a local MCP server reporting rejections through the
+  `dev.appstrate/credential: rejected` tool-result meta (e.g. `@appstrate/ssh`),
+  which has no success signal. Every path counts and resets: the platform
+  credential proxy (CLI, GitHub Action), which counted none before and
+  flagged an OAuth2 connection without a refresh client on its first 401, and
+  the sidecar's `api_call`, MITM egress and remote-HTTP sinks, which report
+  the first success after a counted rejection to
   `POST /internal/integration-credentials/{scope}/{name}/upstream-success`
-  (the credentials payload announces a pending streak as `rejection_streak`).
-  For an API-key integration connection that replaces a count since the last
+  (the credentials GET payload announces a pending streak as
+  `rejection_streak`). For an API-key integration connection that replaces a count since the last
   reconnect; a revoked BYOK model key, never flagged before, is counted the
   same way through the LLM proxy, which a 2xx resets, and stops inference
   until it is re-entered. A BYOK rejection or success counts only against the
@@ -235,13 +243,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   too** (#1641). A request replayed after a credential refresh or a
   `connect.tool` re-login is checked like the first attempt: a credential
   whose auth leaves the host to the caller is never injected.
-- **`api_call` never forwards a caller-supplied `Host` header** (#1641). The
-  shared outbound engine drops it on every path (platform proxy, sidecar,
-  CLI), so the upstream's virtual host always follows the target URL.
+- **`api_call` forwards only end-to-end caller headers** (#1641). The shared
+  outbound engine drops, on every path (platform proxy, sidecar, CLI), a
+  caller's `Host`, the RFC 9110 connection-specific headers (`Connection`,
+  `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`,
+  `Upgrade`, and any header `Connection` names, except the credential),
+  `Proxy-Authorization`/`Proxy-Authenticate`, and `Content-Length` unless the
+  body is a stream. The upstream's virtual host follows the target URL and
+  the request framing is always the one fetch computes.
 - **The SSRF blocklist judges IPv4 addresses embedded in NAT64 and 6to4 IPv6
   addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
   IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
-  is blocked.
+  is blocked. The SIIT IPv4-translated form `::ffff:0:0:0/96` is judged as its
+  IPv4, and site-local `fec0::/10` and multicast `ff00::/8` are blocked.
 - **The credential-proxy audit of another member's connection is no longer
   lost** (#1641). A failed insert no longer suppresses the session's row: the
   next call retries it. The row names the acting principal (`principalType`,

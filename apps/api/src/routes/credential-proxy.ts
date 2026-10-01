@@ -47,7 +47,7 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
+import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
@@ -223,20 +223,11 @@ export function createCredentialProxyRouter() {
         }
       }
 
-      // Forward upstream headers — strip (a) the proxy's control headers
-      // (including the new x-stream-* transport hints — these must not
-      // reach the upstream provider), (b) `host` and `content-length`
-      // (caller's inbound Host would poison the upstream TLS SNI; fetch
-      // recomputes Content-Length), and (c) RFC 7230 hop-by-hop headers.
-      // Reuses the same `filterHeaders` helper as the in-container sidecar.
-      const fwdHeaders = filterHeaders(c.req.header(), PROXY_CONTROL_HEADERS);
-
-      // For streaming uploads, preserve the Content-Length header so the
-      // upstream can frame the request body. Without this, some providers
-      // reject the request with 411 Length Required.
-      if (streamRequest && declaredLen > 0) {
-        fwdHeaders["Content-Length"] = String(declaredLen);
-      }
+      // The proxy's control headers stay here; `fetchApiCall` drops Host, hop-by-hop and
+      // framing headers, keeping Content-Length on a streamed upload (else 411 upstream).
+      const fwdHeaders = Object.fromEntries(
+        Object.entries(c.req.header()).filter(([k]) => !PROXY_CONTROL_HEADERS.has(k.toLowerCase())),
+      );
 
       const jar = await getCookieJarStore();
 

@@ -499,15 +499,16 @@ describe("fetchApiCall — transport", () => {
     expect(finalUrl).toBe("https://api.example.com/v1");
   });
 
-  it("never forwards a caller-supplied Host, even on an unpinned hop", async () => {
+  /** The headers the upstream receives for `init`, `X-Api-Key` being the credential. */
+  async function sentHeaders(init: RequestInit): Promise<Headers> {
     let seen: Headers | null = null;
-    const fetchFn = (async (_url: string, init?: RequestInit) => {
-      seen = new Headers(init?.headers);
+    const fetchFn = (async (_url: string, sent?: RequestInit) => {
+      seen = new Headers(sent?.headers);
       return new Response("ok");
     }) as unknown as typeof fetch;
     await fetchApiCall({
       url: "https://api.example.com/v1",
-      init: { method: "GET", headers: { Host: "other.example", "X-Api-Key": "k" } },
+      init,
       authorizedUris: ["https://api.example.com/**"],
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
@@ -518,8 +519,42 @@ describe("fetchApiCall — transport", () => {
       fetchFn,
       resolveHost: publicResolver,
     });
-    expect(seen!.get("host")).toBeNull();
-    expect(seen!.get("x-api-key")).toBe("k");
+    return seen!;
+  }
+
+  it("never forwards a caller-supplied Host, even on an unpinned hop", async () => {
+    const seen = await sentHeaders({
+      method: "GET",
+      headers: { Host: "other.example", "X-Api-Key": "k" },
+    });
+    expect(seen.get("host")).toBeNull();
+    expect(seen.get("x-api-key")).toBe("k");
+  });
+
+  it("never forwards hop-by-hop, Connection-named or framing headers; the credential stays", async () => {
+    const seen = await sentHeaders({
+      method: "POST",
+      body: "hello",
+      headers: {
+        "Transfer-Encoding": "chunked",
+        "Content-Length": "3",
+        Connection: "x-foo, X-Api-Key",
+        "X-Foo": "1",
+        Upgrade: "websocket",
+        "Keep-Alive": "timeout=5",
+        TE: "trailers",
+        "Proxy-Authorization": "Basic eDp5",
+        "X-Normal": "yes",
+        "X-Api-Key": "k",
+      },
+    });
+    expect([...seen.keys()].sort()).toEqual(["x-api-key", "x-normal"]);
+  });
+
+  it("keeps the Content-Length of a streamed body, which fetch cannot measure", async () => {
+    const body = new Blob(["hello"]).stream();
+    const seen = await sentHeaders({ method: "POST", body, headers: { "Content-Length": "5" } });
+    expect(seen.get("content-length")).toBe("5");
   });
 
   it(`bounds the exchange at API_CALL_TIMEOUT_MS (${API_CALL_TIMEOUT_MS} ms) AND the caller's signal`, async () => {

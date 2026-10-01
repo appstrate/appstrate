@@ -1317,6 +1317,12 @@ describe("OAuth client CRUD", () => {
       ...snapshot,
       redirectUri: "https://example.com/cb",
     });
+    // One resource id per client, whatever the action.
+    for (const action of ["created", "updated", "deleted"]) {
+      expect(byAction(`integration.oauth_client.${action}`)?.resourceId).toBe(
+        `@myorg/gmail#google#${created.id}`,
+      );
+    }
     const serialized = JSON.stringify(rows);
     expect(serialized).not.toContain("first-secret");
     expect(serialized).not.toContain("second-secret");

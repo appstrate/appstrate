@@ -18,10 +18,14 @@
  */
 
 import {
+  HOP_BY_HOP_HEADERS,
   planHttpDeliveryInjection,
   substituteVars as substituteVarsCore,
   type HttpDeliveryInjectionDecision,
 } from "@appstrate/afps-runtime/resolvers";
+
+// Defined beside `fetchApiCall`, which drops them from every `api_call` request.
+export { HOP_BY_HOP_HEADERS };
 
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
@@ -238,23 +242,6 @@ export function normalizeAuthSchemeTemplates(
 }
 
 /**
- * RFC 7230 §6.1 hop-by-hop headers — MUST NOT be forwarded by a proxy.
- * Used by both credential-proxy entrypoints to scrub forwarded headers
- * before they travel upstream or back downstream.
- */
-export const HOP_BY_HOP_HEADERS = new Set<string>([
-  "connection",
-  "keep-alive",
-  "proxy-connection",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
-
-/**
  * Clone an UPSTREAM RESPONSE's headers for relay downstream, dropping the
  * headers a proxy must not forward: RFC 7230 hop-by-hop headers plus
  * `content-encoding`/`content-length`. Bun's `fetch` auto-decompresses the
@@ -274,34 +261,6 @@ export function stripUpstreamResponseHeaders(src: Headers, extraSkip?: Set<strin
     if (extraSkip?.has(lower)) return;
     out.set(key, value);
   });
-  return out;
-}
-
-/**
- * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
- * provides a hook for entrypoint-specific control headers (e.g.
- * `x-integration-id`, `x-target`) that must also be kept out of the upstream
- * request.
- *
- * Preserves the original header casing from the caller.
- */
-export function filterHeaders(
-  headers: Record<string, string>,
-  extraSkip?: Set<string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    const lower = key.toLowerCase();
-    if (
-      lower === "host" ||
-      lower === "content-length" ||
-      HOP_BY_HOP_HEADERS.has(lower) ||
-      extraSkip?.has(lower)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
   return out;
 }
 

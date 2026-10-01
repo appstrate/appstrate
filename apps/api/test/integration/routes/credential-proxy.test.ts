@@ -714,6 +714,28 @@ describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0"
     expect(upstreamBody).toBe('{"token":"ya29.live-token"}');
   });
 
+  it("forwards a streamed upload's Content-Length, never hop-by-hop or Connection-named headers", async () => {
+    let sent: Headers | null = null;
+    mockUpstream(async (_input, init) => {
+      sent = new Headers(init?.headers);
+      await new Response(init?.body).arrayBuffer();
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost(
+      {
+        "X-Stream-Request": "1",
+        "Content-Length": "2",
+        Connection: "x-foo",
+        "X-Foo": "1",
+        "Keep-Alive": "timeout=5",
+      },
+      "{}",
+    );
+    expect(res.status).toBe(200);
+    expect(sent!.get("content-length")).toBe("2");
+    for (const name of ["connection", "x-foo", "keep-alive"]) expect(sent!.get(name)).toBeNull();
+  });
+
   for (const [name, value] of [
     ["X-Substitute-Body", "true"],
     ["X-Stream-Request", "yes"],

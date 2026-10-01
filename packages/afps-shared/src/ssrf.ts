@@ -16,7 +16,7 @@
  * - Numeric IPs: 2130706433, 0x7f000001, 0177.0.0.1 → 127.0.0.1
  * - IPv6 variations: ::ffff:7f00:1, 0:0:0:0:0:ffff:7f00:1 → ::ffff:7f00:1
  * - IPv4-mapped IPv6: ::ffff:169.254.169.254 → ::ffff:a9fe:a9fe
- * - IPv4 embedded in IPv6 (compatible, mapped, NAT64, 6to4) is judged as that IPv4
+ * - IPv4 embedded in IPv6 (compatible, mapped, SIIT, NAT64, 6to4) is judged as that IPv4
  */
 
 /**
@@ -79,6 +79,12 @@ export function isBlockedHost(hostname: string): boolean {
     // Link-local (fe80::/10 — fe80:: through febf::)
     if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
 
+    // Deprecated site-local (fec0::/10 — fec0:: through feff::)
+    if (/^fe[c-f][0-9a-f]:/.test(h)) return true;
+
+    // Multicast (ff00::/8)
+    if (/^ff[0-9a-f]{2}:/.test(h)) return true;
+
     // Unique local address (fc00::/7 — fc00:: through fdff::)
     if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
 
@@ -111,12 +117,14 @@ function ipv6Groups(h: string): number[] | null {
 
 /**
  * The IPv4 address embedded under a prefix that routes to it: IPv4-compatible `::/96`,
- * IPv4-mapped `::ffff:0:0/96`, NAT64 `64:ff9b::/96` (RFC 6052), 6to4 `2002::/16` (RFC 3056).
+ * IPv4-mapped `::ffff:0:0/96`, SIIT IPv4-translated `::ffff:0:0:0/96` (RFC 2765),
+ * NAT64 `64:ff9b::/96` (RFC 6052), 6to4 `2002::/16` (RFC 3056).
  */
 function embeddedIpv4(g: number[]): string | null {
   const quad = (hi: number, lo: number) => `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
   const zero = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
   if (zero(0, 5) && (g[5] === 0 || g[5] === 0xffff)) return quad(g[6]!, g[7]!);
+  if (zero(0, 4) && g[4] === 0xffff && g[5] === 0) return quad(g[6]!, g[7]!);
   if (g[0] === 0x64 && g[1] === 0xff9b && zero(2, 6)) return quad(g[6]!, g[7]!);
   if (g[0] === 0x2002) return quad(g[1]!, g[2]!);
   return null;

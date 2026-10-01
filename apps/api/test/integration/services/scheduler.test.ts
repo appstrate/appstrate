@@ -771,6 +771,37 @@ describeRequiresRedis("scheduler service", () => {
       expect(row!.nextRunAt).toBeNull();
     });
 
+    it("a fire racing a user's disable keeps disabled_reason = 'user'", async () => {
+      const member = await createTestUser({ email: "racing-disable@test.com" });
+      await addOrgMember(orgId, member.id, "member");
+      const schedule = await createSchedule(
+        { orgId, spaceId: defaultSpaceId },
+        packageId,
+        { type: "user", id: member.id },
+        { cronExpression: "0 * * * *" },
+      );
+      await db
+        .delete(organizationMembers)
+        .where(
+          and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
+        );
+
+      // The user switches it off after the fire read the row enabled.
+      await triggerScheduledRun(schedule.id, async () => {
+        await db
+          .update(schedules)
+          .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+          .where(eq(schedules.id, schedule.id));
+        return true;
+      });
+
+      const [row] = await db
+        .select({ enabled: schedules.enabled, disabledReason: schedules.disabledReason })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row).toEqual({ enabled: false, disabledReason: "user" });
+    });
+
     it("a schedule whose end-user actor does not exist in the space fires into a FAILED run and is disabled", async () => {
       // The end user exists — but in a DIFFERENT space of the same org,
       // so the fire-time revalidation (end user must exist in the SCHEDULE's

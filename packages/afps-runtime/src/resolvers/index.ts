@@ -99,6 +99,7 @@ export {
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
+  HOP_BY_HOP_HEADERS,
   redactCredentialHost,
 } from "./api-call-engine.ts";
 

@@ -456,7 +456,7 @@ export function oauthClientHandlers(
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
-        resourceId: `${packageId}#${clientId}`,
+        resourceId: `${packageId}#${client.auth_key}#${clientId}`,
         before: auditedClient(client),
         after: { deletedConnections, disabledScheduleIds },
       });

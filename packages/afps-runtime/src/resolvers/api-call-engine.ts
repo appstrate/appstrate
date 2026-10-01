@@ -21,6 +21,41 @@ import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
 
+/** RFC 9110 §7.6.1 connection-specific headers plus the proxy-auth pair: never forwarded by a proxy. */
+export const HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+/** Caller headers minus Host, hop-by-hop and `Connection`-named ones (a credential excepted), and
+ * Content-Length unless the body is a stream fetch cannot measure. */
+function forwardableHeaders(init: RequestInit, credentialHeaders: readonly string[]): Headers {
+  const headers = new Headers(init.headers);
+  const credential = new Set(credentialHeaders.map((h) => h.toLowerCase()));
+  const named = new Set(
+    (headers.get("connection") ?? "").split(",").map((t) => t.trim().toLowerCase()),
+  );
+  const streamed = init.body instanceof ReadableStream;
+  for (const name of [...headers.keys()]) {
+    if (
+      name === "host" ||
+      (name === "content-length" && !streamed) ||
+      HOP_BY_HOP_HEADERS.has(name) ||
+      (named.has(name) && !credential.has(name))
+    ) {
+      headers.delete(name);
+    }
+  }
+  return headers;
+}
+
 /**
  * A redirect hop refused: off the allowlist, blocked by the SSRF gate, or with no DNS answer. The
  * message names its host, credential values scrubbed, never the URL (`?token=…`).
@@ -186,9 +221,7 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
     AbortSignal.timeout(API_CALL_TIMEOUT_MS),
     ...(callerSignal ? [callerSignal] : []),
   ]);
-  // The URL owns Host: a caller's would name another virtual host beside the credential.
-  const headers = new Headers(opts.init.headers);
-  headers.delete("host");
+  const headers = forwardableHeaders(opts.init, opts.credentialHeaders);
 
   try {
     return await guardedFetchChain(
