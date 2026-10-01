@@ -68,12 +68,12 @@ function answerText(answer: AskUserAnswers[string] | undefined): string[] {
 function Row({ children }: { children: React.ReactNode }) {
   const { t } = useChatHost();
   return (
-    <div className="bg-card text-card-foreground my-3 w-full space-y-2 rounded-lg border px-3 py-2 text-sm">
-      <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
+    <div className="bg-card text-card-foreground my-3 w-full rounded-lg border text-sm">
+      <div className="text-muted-foreground flex h-9 items-center gap-2 border-b px-3 text-xs font-medium">
         <MessageCircleQuestionIcon className="size-4" />
         {t("askUser.title")}
       </div>
-      {children}
+      <div className="space-y-2 px-3 py-2">{children}</div>
     </div>
   );
 }
@@ -296,8 +296,8 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
       }}
     >
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="flex items-center gap-2 px-3 pt-2">
-          <TabsList className="h-auto flex-wrap justify-start">
+        <div className="flex items-end gap-2 border-b px-4 pt-3">
+          <TabsList variant="line" className="flex-wrap">
             {questions.map((q) => (
               <TabsTrigger key={q.id} value={q.id} className="gap-1.5">
                 {q.header}
@@ -313,14 +313,14 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
             disabled={sending}
             onClick={skip}
             aria-label={t("askUser.skip")}
-            className="text-muted-foreground ml-auto size-8 shrink-0"
+            className="text-muted-foreground mb-1 ml-auto size-8 shrink-0"
           >
             <XIcon />
           </Button>
         </div>
 
         {questions.map((q) => (
-          <TabsContent key={q.id} value={q.id} className="space-y-3 px-3 pb-3 text-sm">
+          <TabsContent key={q.id} value={q.id} className="mt-0 space-y-4 px-4 pt-4 pb-3 text-sm">
             <p className="font-medium">{q.question}</p>
             <QuestionBody
               question={q}
@@ -348,7 +348,7 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
         ))}
 
         {single ? null : (
-          <TabsContent value={REVIEW_TAB} className="space-y-3 px-3 pb-3 text-sm">
+          <TabsContent value={REVIEW_TAB} className="mt-0 space-y-4 px-4 pt-4 pb-3 text-sm">
             <div className="space-y-1">
               {questions.map((q) => {
                 const shown = answerText(toAnswer(draftOf(q.id)));
@@ -375,7 +375,7 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
           </TabsContent>
         )}
       </Tabs>
-      <div className="text-muted-foreground flex items-center justify-between border-t px-3 py-1.5 text-xs">
+      <div className="text-muted-foreground flex items-center justify-between border-t px-4 py-1.5 text-xs">
         <span>{t("askUser.escHint")}</span>
         {failed ? <span className="text-destructive">{t("askUser.failed")}</span> : null}
       </div>
