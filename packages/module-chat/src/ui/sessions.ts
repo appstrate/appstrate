@@ -21,6 +21,8 @@ export interface SessionSummary {
   title: string | null;
   /** True while a turn is generating — drives the poll cadence + unread badge. */
   generating: boolean;
+  /** A live turn waits on the person (a tool approval or questions): badge it. */
+  awaiting_input: boolean;
   /** Server-computed: an assistant reply landed after the caller last read it. */
   unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */

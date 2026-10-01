@@ -33,6 +33,7 @@ export const chatComponentSchemas = {
       "object",
       "id",
       "generating",
+      "awaiting_input",
       "unread",
       "skill_mode",
       "pinned_skills",
@@ -46,6 +47,11 @@ export const chatComponentSchemas = {
       generating: {
         type: "boolean",
         description: "Whether a turn is currently generating in this conversation.",
+      },
+      awaiting_input: {
+        type: "boolean",
+        description:
+          "Whether a turn of this conversation waits on the caller: a tool approval or `ask_user` questions to answer.",
       },
       unread: {
         type: "boolean",

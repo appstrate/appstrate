@@ -26,7 +26,9 @@ const pending = new Map<string, PendingReply>();
 
 /**
  * Wait for the reply to `id`. The turn's `signal` (stop, deadline) settles it
- * with `onAbort`: nothing waits past the turn.
+ * with `onAbort`: nothing waits past the turn. `onChange` runs when the wait
+ * starts and when it ends, so the session list can say a conversation needs
+ * the person (`hasPendingReply`).
  */
 export function awaitReply<T>(
   kind: ReplyKind,
@@ -34,18 +36,27 @@ export function awaitReply<T>(
   chatSessionId: string,
   signal: AbortSignal,
   onAbort: T,
+  onChange?: () => void,
 ): Promise<T> {
   return new Promise((resolve) => {
     const settle = (reply: unknown) => {
       pending.delete(id);
       signal.removeEventListener("abort", onSignal);
       resolve(reply as T);
+      onChange?.();
     };
     const onSignal = () => settle(onAbort);
     if (signal.aborted) return onSignal();
     pending.set(id, { kind, chatSessionId, resolve: settle });
     signal.addEventListener("abort", onSignal, { once: true });
+    onChange?.();
   });
+}
+
+/** Whether a turn of this session waits on the person (an approval or questions). */
+export function hasPendingReply(chatSessionId: string): boolean {
+  for (const entry of pending.values()) if (entry.chatSessionId === chatSessionId) return true;
+  return false;
 }
 
 /** Hand `reply` to the turn waiting on `id`. False when none of this kind waits in this session. */

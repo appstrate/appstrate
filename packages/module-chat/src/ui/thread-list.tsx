@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon, HandIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Dialog,
@@ -213,7 +213,11 @@ function ConversationRow({
           natural widths — without w-14 the title's truncation point reflows on
           every generating↔idle transition. */}
       <div className="relative flex w-14 shrink-0 items-center justify-end">
-        {session.generating ? (
+        {session.awaiting_input ? (
+          <span title={t("awaiting.label")} aria-label={t("awaiting.label")}>
+            <HandIcon className="text-primary size-3.5" />
+          </span>
+        ) : session.generating ? (
           <Loader2Icon
             className="text-muted-foreground size-3.5 animate-spin"
             aria-label={t("threads.generating")}

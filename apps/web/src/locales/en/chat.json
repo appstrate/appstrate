@@ -206,5 +206,9 @@
   "askUser.waiting": "Waiting for your answer, below.",
   "askUser.other": "Other",
   "askUser.review": "Review",
-  "askUser.escHint": "Esc to skip"
+  "askUser.escHint": "Esc to skip",
+  "awaiting.label": "Action needed: the conversation is waiting for you",
+  "awaiting.toast": "“{{title}}” is waiting for you",
+  "awaiting.untitled": "A conversation",
+  "awaiting.open": "Go"
 }

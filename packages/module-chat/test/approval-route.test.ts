@@ -149,6 +149,24 @@ describe("POST /api/chat/sessions/:id/questions/:toolCallId", () => {
     expect(await waiting).toEqual({ status: "answered", answers });
   });
 
+  it("shows the session as awaiting input while a question waits", async () => {
+    const sessionId = await createSession();
+    const turn = new AbortController();
+    const awaiting = async () => {
+      const res = await app.request("/api/chat/sessions", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as { data: Array<{ id: string; awaiting_input: boolean }> };
+      return body.data.find((s) => s.id === sessionId)?.awaiting_input;
+    };
+    expect(await awaiting()).toBe(false);
+
+    const waiting = awaitAnswers("call_badge", sessionId, turn.signal);
+    expect(await awaiting()).toBe(true);
+
+    expect((await reply(sessionId, "call_badge", { status: "cancelled" })).status).toBe(204);
+    await waiting;
+    expect(await awaiting()).toBe(false);
+  });
+
   it("does not answer a pending approval with the same id", async () => {
     const sessionId = await createSession();
     const turn = new AbortController();

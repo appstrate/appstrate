@@ -5636,6 +5636,8 @@ export interface components {
             title?: string | null;
             /** @description Whether a turn is currently generating in this conversation. */
             generating: boolean;
+            /** @description Whether a turn of this conversation waits on the caller: a tool approval or `ask_user` questions to answer. */
+            awaiting_input: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/chat/sessions/{id}/read. */
             unread: boolean;
             /**
