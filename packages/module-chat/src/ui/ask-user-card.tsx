@@ -99,7 +99,7 @@ function Receipt({ questions, reply }: { questions: Question[]; reply: AskUserRe
             const shown = answerText(reply.answers[q.id]);
             return (
               <div key={q.id}>
-                <dt className="font-medium">{q.question}</dt>
+                <dt className="text-foreground font-medium">{q.question}</dt>
                 <dd className="text-muted-foreground">
                   {shown.length ? shown.join(", ") : t("askUser.unanswered")}
                 </dd>
@@ -156,7 +156,7 @@ function ChoiceRow({
   description?: string;
 }) {
   return (
-    <label className="hover:bg-muted/50 has-[[data-state=checked]]:bg-muted flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2">
+    <label className="hover:bg-muted/50 has-[[data-state=checked]]:bg-muted text-foreground mb-0 flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2">
       <span className="mt-0.5">{control}</span>
       <span className="flex min-w-0 flex-col">
         <span className="font-medium">{label}</span>
@@ -366,7 +366,7 @@ export function AskUserPanel({ toolCallId, questions }: PendingQuestion) {
                     onClick={() => setTab(q.id)}
                     className="hover:bg-muted/50 block w-full rounded-lg px-2 py-1 text-left"
                   >
-                    <span className="block font-medium">{q.question}</span>
+                    <span className="text-foreground block font-medium">{q.question}</span>
                     <span className="text-muted-foreground block">
                       {shown.length ? shown.join(", ") : t("askUser.unanswered")}
                     </span>
