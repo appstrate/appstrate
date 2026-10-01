@@ -382,7 +382,7 @@ beforeAll(async () => {
   afterFirstRun = await snapshot();
   secondRunCounts = await runScript(script);
   afterSecondRun = await snapshot();
-  // A journal replay runs past the 15s default the preload sets.
+  // A journal replay runs past the suite's 15s per-test timeout (`--timeout`).
 }, 300_000);
 
 afterAll(async () => {

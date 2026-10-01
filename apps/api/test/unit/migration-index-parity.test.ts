@@ -87,8 +87,8 @@ async function execMigrationFile(path: string): Promise<void> {
   await pg.exec(sql.replaceAll("--> statement-breakpoint", ""));
 }
 
-// No timing assertion here on purpose: the preload sets a 15 s default
-// timeout and bun applies it to hooks, so a replay that ever grows that slow
+// No timing assertion here on purpose: the suite runs with a 15 s per-test
+// timeout (`--timeout`) and bun applies it to hooks, so a replay that ever grows that slow
 // (the dump is rebuilt on a cold cache) kills this file outright. A softer
 // ceiling of our own could never fire.
 beforeAll(async () => {

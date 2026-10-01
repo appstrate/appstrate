@@ -147,7 +147,7 @@ async function seed(): Promise<void> {
 beforeEach(async () => {
   pg = await journalPGlite({ through: REPLAY_THROUGH });
   await seed();
-  // The journal replay runs past the 15s default the preload sets on a cold
+  // The journal replay runs past the suite's 15s per-test timeout (`--timeout`) on a cold
   // machine, and an abandoned hook keeps replaying into an instance the next
   // run replays into again.
 }, 300_000);

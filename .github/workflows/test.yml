@@ -74,6 +74,10 @@ jobs:
             check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
             '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-
 
+      # Every `bun test` in this workflow names its per-test timeout: bunfig has no
+      # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
+      # 15 s itself (10 s for the CLI workspace, below).
+      #
       # Everything is a unit test unless it is explicitly infra-heavy. This is an
       # exclusion list, not the hand-enumerated inclusion list it replaced: that
       # list silently dropped every suite landing outside it, so `scripts/test/`,
@@ -114,7 +118,7 @@ jobs:
       - name: Run public-origin regression
         if: matrix.partition == 1
         run: |
-          bun test --coverage --coverage-reporter=lcov \
+          bun test --timeout=15000 --coverage --coverage-reporter=lcov \
             --coverage-dir=coverage-public-origin \
             apps/api/src/modules/oidc/test/integration/routes/oauth-public-origin.test.ts
 
@@ -123,7 +127,7 @@ jobs:
       # this public-endpoint regression mandatory and fast on every PR.
       - name: Run health readiness regression
         if: matrix.partition == 1
-        run: bun test apps/api/test/integration/middleware/boot-gate.test.ts
+        run: bun test --timeout=15000 apps/api/test/integration/middleware/boot-gate.test.ts
 
       # Surface the figure in the job summary so humans see it without opening
       # Codecov. Sums LF/LH across the lcov report; informational only (the gate
@@ -182,7 +186,7 @@ jobs:
       - name: Run CLI unit tests
         if: matrix.partition == 1
         working-directory: apps/cli
-        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+        run: bun test --timeout=10000 --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload CLI coverage to Codecov
         if: always() && matrix.partition == 1
@@ -275,7 +279,7 @@ jobs:
       # also matched the ~30 `test/integration-*.test.ts` files the `unit` job
       # already runs, and ran them twice.
       - name: Run integration tests with coverage
-        run: bun test test/integration/ --coverage --coverage-reporter=lcov --coverage-dir=coverage
+        run: bun test --timeout=15000 test/integration/ --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload integration coverage to Codecov
         if: always()

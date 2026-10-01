@@ -181,7 +181,7 @@ beforeAll(async () => {
   pg = await journalPGlite({ through: REPLAY_THROUGH });
   await seedRollout(pg);
   // A journal replay is the expensive part of every test in this directory, and
-  // it runs past the 15s default the preload sets. An abandoned `beforeAll`
+  // it runs past the suite's 15s per-test timeout (`--timeout`). An abandoned `beforeAll`
   // does not stop — it keeps replaying into an instance the next hook run then
   // replays into AGAIN, which surfaces as
   // `type "invitation_status" already exists` rather than as a timeout, so the

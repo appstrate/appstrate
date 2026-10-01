@@ -25,6 +25,7 @@
  *   the same K slices and together they cover the list exactly once.
  * - `--path-ignore-patterns=GLOB` — ADDED to bunfig's `pathIgnorePatterns`
  *   (where `bun test` would replace them).
+ * - `--timeout` defaults to 15 000 ms (Bun's own default is 5 000).
  * - Any other flag is handed to every `bun test` unchanged. With `--coverage`
  *   and more than one process, each writes its report to `<coverage-dir>/shard-<n>/`.
  *
@@ -48,6 +49,7 @@ const ROOT = resolve(import.meta.dir, "..");
 const TIER0 = process.env.TEST_TIER === "0";
 const CACHE_DIR = join(ROOT, "node_modules/.cache/appstrate-test");
 const TIMINGS_FILE = join(CACHE_DIR, "timings.json");
+const TEST_TIMEOUT_MS = 15_000;
 /** The file names `bun test` collects. */
 const TEST_FILE = /[._](test|spec)\.(js|jsx|ts|tsx)$/;
 /** `bun test` flags whose value may come as the NEXT argument. */
@@ -254,10 +256,21 @@ async function main(): Promise<number> {
     selected,
     shardCount,
     (file) => timings[file] ?? Bun.file(join(ROOT, file)).size * secondsPerByte,
-  ).filter((shard) => shard.length > 0);
+  )
+    .filter((shard) => shard.length > 0)
+    // Each process runs its files in path order, the order a plain `bun test`
+    // uses: a file that leaves process-wide state behind then meets the same
+    // neighbours it always has, instead of whatever the weights paired it with.
+    .map((shard) => [...shard].sort());
 
   mkdirSync(CACHE_DIR, { recursive: true });
   const ownsReporter = !options.forwarded.some((arg) => arg.startsWith("--reporter"));
+  // The suite's per-test timeout. Only the command line can set it for every
+  // file: bunfig has no such key, and `setDefaultTimeout()` in a preload holds
+  // for the first file only — Bun restores its 5 s default for the next.
+  if (!options.forwarded.some((arg) => arg.startsWith("--timeout"))) {
+    options.forwarded.push(`--timeout=${TEST_TIMEOUT_MS}`);
+  }
   const live = shards.length === 1;
   const started = performance.now();
   if (!live) {

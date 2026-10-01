@@ -26,7 +26,6 @@
  */
 import { resolve, join, relative } from "path";
 import { existsSync } from "fs";
-import { setDefaultTimeout } from "bun:test";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
   TEST_DB_NAME,
@@ -41,13 +40,6 @@ import {
   type DiscoveredModule,
 } from "./modules.ts";
 import { makeTempDir, sweepOrphanedTempDirs } from "./temp-dirs.ts";
-
-// ─── Per-test timeout ───────────────────────────────────────
-// 15 s for every test the root preload serves. It lives here because bunfig has
-// no such setting: `[test] timeout` is not a key Bun reads, so the value that
-// sat there for months was silently ignored and every test ran under Bun's
-// built-in 5 s. `--timeout` on the command line still overrides this.
-setDefaultTimeout(15_000);
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),

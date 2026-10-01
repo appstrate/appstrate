@@ -155,7 +155,7 @@ beforeAll(async () => {
   skippedScriptError = await applyError();
   await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn(7)}'`);
   await applyMigration();
-  // A journal replay runs past the 15s default the preload sets.
+  // A journal replay runs past the suite's 15s per-test timeout (`--timeout`).
 }, 300_000);
 
 afterAll(async () => {

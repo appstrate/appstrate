@@ -278,7 +278,7 @@ describe("scripts/lint.ts as a process", () => {
     expect(code).not.toBe(0);
     expect(output).toMatch(/Unexpected 'SPDX' comment/);
     expect(output).toMatch(/warning|max-warnings/i);
-    // Measured 2026-08-26: 20.8 s, against the preload's 15 s default. The other
+    // Measured 2026-08-26: 20.8 s, against the suite's 15 s timeout (`--timeout`). The other
     // subprocess cases here fail before eslint is spawned and take ~1 s.
     //
     // Re-measured 2026-09-08, after backend type-aware rules and jsx-a11y
