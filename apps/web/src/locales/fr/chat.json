@@ -196,13 +196,15 @@
   "approvalMode.auto.title": "Agir sans demander",
   "approvalMode.auto.hint": "Le chat exécute ses actions directement, avec vos droits.",
   "askUser.title": "Question du chat",
-  "askUser.progress": "Question {{current}} sur {{total}}",
   "askUser.ownAnswer": "Votre réponse…",
-  "askUser.previous": "Précédent",
   "askUser.next": "Suivant",
-  "askUser.submit": "Envoyer",
+  "askUser.submit": "Envoyer les réponses",
   "askUser.skip": "Ignorer",
   "askUser.skipped": "Questions ignorées",
   "askUser.unanswered": "Sans réponse",
-  "askUser.failed": "La réponse n'a pas pu être envoyée. Le tour est peut-être terminé."
+  "askUser.failed": "La réponse n'a pas pu être envoyée. Le tour est peut-être terminé.",
+  "askUser.waiting": "En attente de votre réponse, ci-dessous.",
+  "askUser.other": "Autre",
+  "askUser.review": "Récapitulatif",
+  "askUser.escHint": "Échap pour ignorer"
 }
