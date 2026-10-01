@@ -104,6 +104,8 @@ export interface ProxyCredentialsPayload {
    * single switch that controls injection.
    */
   credentialFieldName: string;
+  /** Revision of the stored credential these fields came from: a verdict on the call names it. */
+  credentialRevision?: string;
 }
 
 /**

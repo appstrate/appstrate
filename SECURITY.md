@@ -240,7 +240,7 @@ The platform API (`/internal/integration-credentials/{scope}/{name}`) enforces a
 - **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
 - **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's space. An agent cannot reach credentials it did not declare.
 - **Access is logged** — every credential fetch is recorded with run ID, integration package ID, and the resolved auth/delivery-plan counts
-- **Connection health is a heuristic, not a control** — the consecutive-401 count that flags an unrefreshable connection `needs_reconnection` (`INTEGRATION_REFRESH_MAX_FAILURES`) moves with whatever an allowed caller sends: a member proxying through a shared connection or an agent through the sidecar can provoke 401s on an allowlisted endpoint until the owner must reconnect, and a 2xx from an allowlisted endpoint that ignores auth resets the count
+- **Connection health is a heuristic, not a control** — the consecutive-401 count that flags an unrefreshable connection `needs_reconnection` (`INTEGRATION_REFRESH_MAX_FAILURES`) moves with whatever an allowed caller sends: a member proxying through a shared connection or an agent through the sidecar can provoke 401s on an allowlisted endpoint until the owner must reconnect, and a 2xx from an allowlisted endpoint that ignores auth resets the count. The count is consecutive as reported: a run ends only the streaks it knows of, so rejections counted by other runs or by the platform proxy are not ended by this run's successes
 
 ### Credential encryption at rest
 

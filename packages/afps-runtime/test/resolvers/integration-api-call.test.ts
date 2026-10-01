@@ -463,6 +463,32 @@ describe("LocalIntegrationResolver", () => {
     expect(h["x-api-key"]).toBe("secret");
   });
 
+  it("raises RESOLVER_HEADER_INVALID, unsent, on an agent header that is no HTTP field value", async () => {
+    let calls = 0;
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: (() => {
+        calls += 1;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const [tool] = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const { ctx } = makeCtx();
+    const call = tool!.execute(
+      { method: "GET", target: "https://api.acme.com/v1/me", headers: { "X-Custom": "a\u0001b" } },
+      ctx,
+    );
+    await expect(call).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
+    expect(calls).toBe(0);
+  });
+
   it("bounds the upstream call by the shared deadline combined with the tool signal", async () => {
     let sent: AbortSignal | undefined;
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
@@ -1428,6 +1454,21 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     }
     expect(h.get("X-Custom")).toBe("kept");
     expect(h.get("Authorization")).toBe("Bearer ask_test");
+  });
+
+  it("raises RESOLVER_HEADER_INVALID, unsent, on an agent header that is no HTTP field value", async () => {
+    let calls = 0;
+    const tool = await remoteTool((() => {
+      calls += 1;
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as unknown as typeof fetch);
+    const { ctx } = makeCtx();
+    const call = tool.execute(
+      { method: "GET", target: "https://api.acme.com/v1/me", headers: { "X-Custom": "a\u0001b" } },
+      ctx,
+    );
+    await expect(call).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
+    expect(calls).toBe(0);
   });
 
   it("sends a streamed file with its real Content-Length, never the agent's", async () => {

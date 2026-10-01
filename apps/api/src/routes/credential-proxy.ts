@@ -141,9 +141,11 @@ export function createCredentialProxyRouter() {
         throw forbidden("X-Session-Id is bound to a different principal");
       }
 
-      // Optional request body cap
-      const contentLength = c.req.header("Content-Length");
-      if (contentLength && parseInt(contentLength, 10) > limits.max_request_bytes) {
+      // The request's own framing: the body cap, and what a streamed upload is sent upstream with
+      // (absent = chunked).
+      const contentLength = c.req.header("content-length") ?? "";
+      const declaredLen = /^\d+$/.test(contentLength) ? Number(contentLength) : undefined;
+      if (declaredLen !== undefined && declaredLen > limits.max_request_bytes) {
         throw invalidRequest(
           `Request body exceeds CREDENTIAL_PROXY_LIMITS.max_request_bytes (${limits.max_request_bytes})`,
         );
@@ -161,7 +163,6 @@ export function createCredentialProxyRouter() {
       // Streaming control headers from the runtime.
       const streamRequest = readFlagHeader(c, "X-Stream-Request");
       const streamResponse = readFlagHeader(c, "X-Stream-Response");
-      const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
       // Optional caller-supplied buffered-response cap. Clamped to the
       // platform `max_response_bytes` — a caller can only ask for a smaller
@@ -174,7 +175,7 @@ export function createCredentialProxyRouter() {
           : limits.max_response_bytes;
 
       // Guard: declared Content-Length already exceeds the hard cap.
-      if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
+      if (streamRequest && declaredLen !== undefined && declaredLen > MAX_STREAMED_BODY_SIZE) {
         throw payloadTooLarge("request body too large");
       }
 
@@ -223,7 +224,7 @@ export function createCredentialProxyRouter() {
       }
 
       // The proxy's control headers stay here; `fetchApiCall` drops Host, hop-by-hop and
-      // framing headers, keeping Content-Length on a streamed upload (else 411 upstream).
+      // framing headers, a streamed upload's Content-Length coming from `bodyLength`.
       const fwdHeaders = Object.fromEntries(
         Object.entries(c.req.header()).filter(([k]) => !PROXY_CONTROL_HEADERS.has(k.toLowerCase())),
       );
@@ -260,6 +261,7 @@ export function createCredentialProxyRouter() {
           target,
           headers: fwdHeaders,
           body,
+          bodyLength: streamRequest ? declaredLen : undefined,
           substituteBody,
           cookieJar: jar,
           jarSessionId: sessionId,
@@ -400,6 +402,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
+  "x-org-id",
   "x-space-id",
   "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.

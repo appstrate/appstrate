@@ -427,6 +427,23 @@ export function createInternalRouter() {
     );
   }
 
+  /** `?credential_revision`, absent only where `required` is false; anything but a revision is a 400. */
+  function credentialRevisionQuery(c: Context, required: boolean): string | undefined {
+    const raw = c.req.query("credential_revision");
+    if (raw === undefined && !required) return undefined;
+    const parsed = z
+      .string()
+      .regex(/^[0-9a-f]{16}$/)
+      .safeParse(raw);
+    if (!parsed.success) {
+      throw invalidRequest(
+        "`credential_revision` must be the revision a credentials payload carried.",
+        "credential_revision",
+      );
+    }
+    return parsed.data;
+  }
+
   /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
   function requireBoundConnection(
     c: Context,
@@ -556,7 +573,7 @@ export function createInternalRouter() {
           connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
-        { forceRefresh: true, heldRevision: c.req.query("credential_revision") },
+        { forceRefresh: true, heldRevision: credentialRevisionQuery(c, false) },
       );
     } catch (err) {
       // 410 = the connection was flagged needsReconnection (terminal). Record
@@ -584,10 +601,7 @@ export function createInternalRouter() {
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const bound = requireBoundConnection(c, packageId, run, runId);
-    const revision = c.req.query("credential_revision");
-    if (!revision) {
-      throw invalidRequest("`credential_revision` is required.", "credential_revision");
-    }
+    const revision = credentialRevisionQuery(c, true)!;
     const actor = actorFromIds(run.userId, run.endUserId);
     if (actor) {
       await clearReachableUpstreamRejections(

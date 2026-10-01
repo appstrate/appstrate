@@ -138,10 +138,13 @@ export async function resolveLiveIntegrationCredentials(
     expiresAtEpochMs: {},
   };
 
-  const connection = await loadAccessibleConnectionById(context.connectionId, integrationId, null, {
-    spaceId: context.spaceId,
-    actor: context.actor,
-  });
+  const reach = { spaceId: context.spaceId, actor: context.actor };
+  const connection = await loadAccessibleConnectionById(
+    context.connectionId,
+    integrationId,
+    null,
+    reach,
+  );
   if (!connection) {
     // STATE A — 404 and not 410: no row is left to flag `needsReconnection` on.
     logger.warn("Integration credentials unavailable — no accessible connection", {
@@ -197,11 +200,10 @@ export async function resolveLiveIntegrationCredentials(
     options.forceRefresh === true &&
     (options.heldRevision === undefined || options.heldRevision === connection.credentialRevision);
 
-  // Terminally unusable: flag for re-connect and surface 410 so the sidecar
+  // Terminally unusable, and already flagged by whoever concluded it: surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
-  const flagTerminalAndThrow = async (reason: string): Promise<never> => {
-    await markIntegrationConnectionNeedsReconnection(connection.id);
-    logger.warn("Integration credential terminally unusable — flagging needsReconnection", {
+  const throwTerminal = (reason: string): never => {
+    logger.warn("Integration credential terminally unusable — flagged needsReconnection", {
       runId: context.runId,
       integrationId,
       authKey,
@@ -224,9 +226,11 @@ export async function resolveLiveIntegrationCredentials(
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
       connection.id,
+      integrationId,
+      reach,
       connection.credentialsEncrypted,
     );
-    if (needsReconnection) return flagTerminalAndThrow(reason);
+    if (needsReconnection) return throwTerminal(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
       runId: context.runId,
       integrationId,
@@ -257,7 +261,11 @@ export async function resolveLiveIntegrationCredentials(
     // "nothing to inject, carry on".
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
-    return flagTerminalAndThrow("stored credentials could not be decrypted");
+    await markIntegrationConnectionNeedsReconnection(
+      connection.id,
+      connection.credentialsEncrypted,
+    );
+    return throwTerminal("stored credentials could not be decrypted");
   }
 
   let expiresAtEpochMs: number | null = connection.expiresAt
@@ -327,10 +335,8 @@ export async function resolveLiveIntegrationCredentials(
       );
       if (classified.status === "terminal") {
         // The connection can never be refreshed as stored (no refresh_token).
-        // Same terminal surface as every other dead credential: 410 + flagged.
-        // `markIntegrationConnectionNeedsReconnection` is idempotent, so the
-        // helper having already flagged the row costs nothing here.
-        return flagTerminalAndThrow(classified.reason);
+        // Same terminal surface as every other dead credential: 410, the helper having flagged it.
+        return throwTerminal(classified.reason);
       }
       if (classified.status === "revoked") {
         // 410 here propagates to the sidecar, which translates back

@@ -93,6 +93,35 @@ describe("executeApiCall — structured failures", () => {
     if (!result.ok) expect(result.error).toMatch(/Unresolved placeholders in URL/);
   });
 
+  // The lookup runs on the template: a `{{word}}` inside a value is no placeholder.
+  it("sends a credential whose value holds a `{{word}}`, in a header and a JSON body", async () => {
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "POST",
+        callerHeaders: { "X-Pass": "{{password}}" },
+        body: { kind: "json", value: { pass: "{{password}}" } },
+        substituteBody: true,
+      },
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok-123", password: "pa{{ss}}word" },
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer ",
+          credentialFieldName: "access_token",
+        })),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("returns 403 when the URL is not in authorizedUris", async () => {
     const result = await executeApiCall(
       {
@@ -451,6 +480,105 @@ describe("executeApiCall — 401 retry path", () => {
     await call();
     await call();
     expect(reportUpstreamSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("judges nothing once a redirect hop stripped the credential, even back on its origin", async () => {
+    let terminalStatus = 401;
+    // An allowlisted https → http downgrade strips the credential; the chain then returns to https.
+    const fetchFn = mock(async (url: string | URL) => {
+      const { pathname } = new URL(String(url));
+      if (pathname === "/x") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://api.example.com/hop" },
+        });
+      }
+      if (pathname === "/hop") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://api.example.com/back" },
+        });
+      }
+      return new Response("{}", { status: terminalStatus });
+    });
+    const refreshCredentials = mock(async () => null);
+    const reportUpstreamSuccess = mock(() => {});
+    const allowlist = ["https://api.example.com/**", "http://api.example.com/**"];
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      declaredUris: allowlist,
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: allowlist,
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+      refreshCredentials,
+      reportUpstreamSuccess,
+    });
+    const call = async () => {
+      const result = await executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl: "https://api.example.com/x",
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+      return result.ok ? result.response.status : result;
+    };
+    expect(await call()).toBe(401);
+    terminalStatus = 200;
+    expect(await call()).toBe(200);
+    expect(refreshCredentials).not.toHaveBeenCalled();
+    expect(reportUpstreamSuccess).not.toHaveBeenCalled();
+    expect(deps.reportedAuthFailures.size).toBe(0);
+  });
+
+  it("names the credentials the call carried in its verdicts", async () => {
+    const carried: CredentialsResponse = {
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer ",
+      credentialFieldName: "access_token",
+      credentialRevision: "rev-a",
+    };
+    const fresh: CredentialsResponse = {
+      ...carried,
+      credentials: { access_token: "tok-456" },
+      credentialRevision: "rev-b",
+    };
+    const statuses = [401, 200];
+    const refreshCredentials = mock(async () => fresh);
+    const reportUpstreamSuccess = mock(() => {});
+    const deps = makeDeps({
+      fetchFn: mock(
+        async () => new Response("{}", { status: statuses.shift()! }),
+      ) as unknown as typeof fetch,
+      fetchCredentials: mock(async () => carried),
+      refreshCredentials,
+      reportUpstreamSuccess,
+    });
+    await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(refreshCredentials).toHaveBeenCalledWith("gmail", carried);
+    expect(reportUpstreamSuccess).toHaveBeenCalledWith(fresh);
   });
 
   it("does NOT replay a streaming-request body on 401", async () => {

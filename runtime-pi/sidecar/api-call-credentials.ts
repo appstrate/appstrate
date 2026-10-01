@@ -37,8 +37,11 @@ interface ApiCallCredentialAdapter {
    * connection on a terminal failure, so the caller must NOT retry with a
    * stale token.
    */
-  refreshCredentials: (integrationId: string) => Promise<ProxyCredentialsPayload | null>;
-  reportUpstreamSuccess: () => void;
+  refreshCredentials: (
+    integrationId: string,
+    rejected: ProxyCredentialsPayload,
+  ) => Promise<ProxyCredentialsPayload | null>;
+  reportUpstreamSuccess: (answered: ProxyCredentialsPayload) => void;
 }
 
 /**
@@ -60,17 +63,20 @@ export function createApiCallCredentialAdapter(opts: {
     const snap = source.snapshot();
     const plan = snap.deliveryPlans[authKey] ?? null;
     const auth = snap.auths.find((a) => a.authKey === authKey);
-    return buildProxyCredentialsPayload({
+    const payload = buildProxyCredentialsPayload({
       fields: auth?.fields ?? {},
       plan,
       authorizedUris: auth?.authorizedUris ?? declaredUris,
       allowAllUris,
     });
+    return snap.credentialRevision === undefined
+      ? payload
+      : { ...payload, credentialRevision: snap.credentialRevision };
   };
 
   return {
     fetchCredentials: async () => toPayload(),
-    refreshCredentials: async () => {
+    refreshCredentials: async (_integrationId, rejected) => {
       // A connect.tool session whose `reauth_on` EXCLUDES 401 (handler
       // registered, but `shouldReauth(401)` false): the manifest declared a 401
       // is not a re-login trigger. Don't re-acquire — return null so the proxy
@@ -86,9 +92,11 @@ export function createApiCallCredentialAdapter(opts: {
       // false result (terminal 410 → connection flagged, or transient/cooldown)
       // means re-issuing would just 401 again — return null so the proxy skips
       // the retry instead of masking a dead credential as a success.
-      const rotated = await source.refreshOnUnauthorized(authKey).catch(() => false);
+      const rotated = await source
+        .refreshOnUnauthorized(authKey, rejected.credentialRevision)
+        .catch(() => false);
       return rotated ? toPayload() : null;
     },
-    reportUpstreamSuccess: () => source.reportUpstreamSuccess(),
+    reportUpstreamSuccess: (answered) => source.reportUpstreamSuccess(answered.credentialRevision),
   };
 }

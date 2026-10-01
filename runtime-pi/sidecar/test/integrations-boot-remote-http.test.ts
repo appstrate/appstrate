@@ -205,6 +205,42 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(getSuccessReports()).toBe(1);
   });
 
+  it("judges nothing once a hop stripped the credential, even back on its origin", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
+    });
+    const { deps, source, getFetch, getRefreshCalls, getSuccessReports } = makeDeps(
+      initial,
+      async () => true,
+    );
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    // A → B (strip) → A/terminal.
+    const roundTrip = (terminalStatus: number) =>
+      (async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/mcp/v1") {
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://elsewhere.example.org/bounce" },
+          });
+        }
+        if (url.pathname === "/bounce") {
+          return new Response(null, { status: 307, headers: { location: `${SERVER_URL}/back` } });
+        }
+        return new Response("{}", { status: terminalStatus });
+      }) as unknown as typeof fetch;
+
+    await withGlobalFetch(roundTrip(401), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+    });
+    await withGlobalFetch(roundTrip(200), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getRefreshCalls()).toBe(0);
+    expect(getSuccessReports()).toBe(0);
+  });
+
   it("preserves an allowed caller override and does not refresh it on 401", async () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: {

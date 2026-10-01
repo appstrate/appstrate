@@ -4981,7 +4981,7 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an active integration
-         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
+         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
         delete?: never;
@@ -10638,7 +10638,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -10793,7 +10793,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -10948,7 +10948,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11098,7 +11098,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11253,7 +11253,7 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -24933,9 +24933,9 @@ export interface operations {
     };
     refreshIntegrationCredentials: {
         parameters: {
-            query?: {
-                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
-                connection_id?: string;
+            query: {
+                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id: string;
                 /** @description The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential. */
                 credential_revision?: string;
             };
@@ -24959,7 +24959,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
                 };
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25027,7 +25027,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing `credential_revision` is an `invalid_request` too. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing or malformed `credential_revision` is an `invalid_request` too. */
             400: {
                 headers: {
                     [name: string]: unknown;

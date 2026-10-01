@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -470,6 +470,31 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(await flagged(orgId, id)).toBe(false);
     await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(true);
+  });
+
+  it("a success landing between the threshold count and the flag write flags nothing", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-success-race");
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    // The threshold increment is followed at once by a success ending the streak.
+    await db.execute(sql`
+      CREATE OR REPLACE FUNCTION test_success_after_count() RETURNS trigger AS $$
+      BEGIN
+        UPDATE model_provider_credentials SET refresh_failure_count = 0 WHERE id = NEW.id;
+        RETURN NULL;
+      END $$ LANGUAGE plpgsql`);
+    await db.execute(sql`
+      CREATE TRIGGER test_success_after_count AFTER UPDATE ON model_provider_credentials
+      FOR EACH ROW WHEN (NEW.refresh_failure_count >= ${sql.raw(String(max))}
+        AND NEW.refresh_failure_count > OLD.refresh_failure_count)
+      EXECUTE FUNCTION test_success_after_count()`);
+    try {
+      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    } finally {
+      await db.execute(sql`DROP TRIGGER test_success_after_count ON model_provider_credentials`);
+      await db.execute(sql`DROP FUNCTION test_success_after_count()`);
+    }
+    expect(await flagged(orgId, id)).toBe(false);
   });
 
   it("a successful call ends the streak, so interleaved rejections never flag the key", async () => {

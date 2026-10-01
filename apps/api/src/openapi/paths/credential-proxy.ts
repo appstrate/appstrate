@@ -203,7 +203,9 @@ const proxyResponses = {
   },
   "400": {
     description:
-      "Missing or malformed control header, a finished `X-Run-Id` run, " +
+      "Missing or malformed control header, `invalid_request` — a header the caller sent " +
+      "is no valid HTTP field value before any substitution (the detail names the header, " +
+      "never the value) —, a finished `X-Run-Id` run, " +
       "`connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run " +
       "did not bind —, `connection_not_in_org_default` — it names a connection outside the " +
       "integration's enforced org default — or `unresolved_placeholder` — the target, a " +

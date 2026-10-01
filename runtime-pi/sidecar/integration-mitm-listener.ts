@@ -131,12 +131,13 @@ export interface MitmCredentialSource {
    * needsReconnection on a terminal failure, so a false result just means
    * "don't retry" — the dead-credential bookkeeping is platform-side.
    */
-  refreshOnUnauthorized?(authKey: string): Promise<boolean>;
+  refreshOnUnauthorized?(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
   /**
    * A call carrying the injected credential got a 2xx: tells the platform, when a rejection streak
    * is pending on the connection, that the credential works (fire-and-forget).
+   * `credentialRevision` (here and above) is the one {@link current} carried when the call was built.
    */
-  reportUpstreamSuccess?(): void;
+  reportUpstreamSuccess?(credentialRevision: string | undefined): void;
   /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
@@ -939,13 +940,14 @@ async function forwardInnerRequest(
   // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
   // auth's allowlist names, never to one an entry leaves to the caller. Applied to every build,
   // the first attempt and the post-refresh replay alike; `null` = refused.
-  const buildAction = (): MitmAction | null => {
+  const buildAction = (): (MitmAction & { credentialRevision: string | undefined }) | null => {
     const ctx: MitmRequestContext = {
       url: targetUrl,
       headerNames: callerHeaderNames,
       deliveryPlans: credentials.deliveryPlans(),
     };
-    const planned = planMitmAction(ctx, credentials.current());
+    const held = credentials.current();
+    const planned = { ...planMitmAction(ctx, held), credentialRevision: held.credentialRevision };
     if (
       planned.injectedHeader &&
       planned.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)
@@ -1067,7 +1069,9 @@ async function forwardInnerRequest(
     matchedAuthKey !== null &&
     credentials.refreshOnUnauthorized
   ) {
-    const refreshed = await credentials.refreshOnUnauthorized(matchedAuthKey).catch(() => false);
+    const refreshed = await credentials
+      .refreshOnUnauthorized(matchedAuthKey, action.credentialRevision)
+      .catch(() => false);
     if (refreshed) {
       const replay = await refetch();
       if (replay) {
@@ -1077,7 +1081,9 @@ async function forwardInnerRequest(
     }
   }
 
-  if (response.ok && lastAction.injectedHeader !== null) credentials.reportUpstreamSuccess?.();
+  if (response.ok && lastAction.injectedHeader !== null) {
+    credentials.reportUpstreamSuccess?.(lastAction.credentialRevision);
+  }
   emit({
     kind: "request-forwarded",
     url,

@@ -56,6 +56,7 @@ const PROXY_PROBLEMS = {
     proxyError: "proxy_configuration_error",
   },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
+  invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {
     status: 502,
     title: "Upstream Unresolvable",

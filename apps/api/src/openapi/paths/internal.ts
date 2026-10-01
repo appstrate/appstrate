@@ -52,7 +52,7 @@ const boundConnectionIdParam = {
 const credentialRevisionParam = {
   name: "credential_revision",
   in: "query",
-  schema: { type: "string" },
+  schema: { type: "string", pattern: "^[0-9a-f]{16}$" },
 } as const;
 
 /** The two ways the `connection_id` selector is refused. Shared by every operation taking it. */
@@ -334,12 +334,12 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an active integration",
       description:
-        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
+        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        connectionIdParam,
+        boundConnectionIdParam,
         {
           ...credentialRevisionParam,
           required: false,
@@ -356,7 +356,10 @@ export const internalPaths = {
             },
           },
         },
-        "400": connectionSelector400,
+        "400": {
+          ...connectionSelector400,
+          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) is an \`invalid_request\` too.`,
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -408,7 +411,7 @@ export const internalPaths = {
         "204": { description: "Streak ended (or none to end on that credential)." },
         "400": {
           ...connectionSelector400,
-          description: `${connectionSelector400.description} A missing \`credential_revision\` is an \`invalid_request\` too.`,
+          description: `${connectionSelector400.description} A missing or malformed \`credential_revision\` is an \`invalid_request\` too.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

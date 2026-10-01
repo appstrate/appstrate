@@ -32,7 +32,6 @@ import {
   credentialCarryingHeader,
   normalizeAuthSchemeTemplates,
   substituteVars,
-  findUnresolvedPlaceholders,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
   type HostResolver,
@@ -46,6 +45,7 @@ import {
   redactionFields,
   redactCredentialHost,
   templateHost,
+  unresolvedPlaceholders,
   urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
@@ -201,9 +201,12 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
    * already flagged the connection `needsReconnection`, so the caller must NOT
    * retry with a stale token.
    */
-  refreshCredentials?: (integrationId: string) => Promise<CredentialsResponse | null>;
+  refreshCredentials?: (
+    integrationId: string,
+    rejected: CredentialsResponse,
+  ) => Promise<CredentialsResponse | null>;
   /** A 2xx on the injected credential — ends a pending rejection streak on the connection. */
-  reportUpstreamSuccess?: () => void;
+  reportUpstreamSuccess?: (answered: CredentialsResponse) => void;
 }
 
 /**
@@ -233,18 +236,6 @@ function* jsonStringLeaves(value: unknown): Generator<string> {
   else if (value && typeof value === "object") {
     for (const v of Object.values(value)) yield* jsonStringLeaves(v);
   }
-}
-
-/** Collect unresolved `{{placeholders}}` left in a JSON value's string leaves. */
-function findUnresolvedJsonPlaceholders(
-  value: unknown,
-  creds: Record<string, string>,
-): Set<string> {
-  const acc = new Set<string>();
-  for (const leaf of jsonStringLeaves(value)) {
-    for (const p of findUnresolvedPlaceholders(substituteVars(leaf, creds))) acc.add(p);
-  }
-  return acc;
 }
 
 /** Exhaustiveness guard: a new body kind without a buildBody case fails to compile here. */
@@ -322,7 +313,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   // 3. Substitute {{vars}} in target URL.
   const resolvedUrl = substituteVars(targetUrl, creds.credentials);
-  const unresolvedInUrl = findUnresolvedPlaceholders(resolvedUrl);
+  const unresolvedInUrl = unresolvedPlaceholders(targetUrl, creds.credentials);
   if (unresolvedInUrl.length) {
     return {
       ok: false,
@@ -356,16 +347,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
 
-  // 5b. Pre-substitute headers with the *initial* creds so we can
-  //     fail fast on unresolved placeholders. Re-substituted on each
-  //     `doUpstreamRequest` so a 401 retry sees the refreshed token.
+  // 5b. Fail fast on the caller's headers; each `doUpstreamRequest` substitutes them, so a 401
+  //     retry sees the refreshed token.
   for (const [key, rawValue] of Object.entries(callerHeaders)) {
     // The caller's own value; one a credential makes invalid is the engine's `invalid_header`.
     if (!isHttpFieldValue(rawValue)) {
       return { ok: false, status: 400, error: `Header "${key}" is not a valid HTTP field value` };
     }
-    const resolved = substituteVars(rawValue, creds.credentials);
-    const unresolved = findUnresolvedPlaceholders(resolved);
+    const unresolved = unresolvedPlaceholders(rawValue, creds.credentials);
     if (unresolved.length) {
       return {
         ok: false,
@@ -375,42 +364,19 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 6. Pre-check body placeholder resolution (buffered text + multipart
-  //    field-parts under substituteBody). Streaming + binary buffered
-  //    bodies are pass-through.
-  if (substituteBody && body.kind === "buffered" && body.text !== undefined) {
-    const testBody = substituteVars(body.text, creds.credentials);
-    const unresolvedInBody = findUnresolvedPlaceholders(testBody);
-    if (unresolvedInBody.length) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in body: {{${unresolvedInBody.join()}}}`,
-      };
-    }
-  }
-  if (substituteBody && body.kind === "formData" && body.fieldTemplates?.length) {
-    const unresolved = new Set<string>();
-    for (const template of body.fieldTemplates) {
-      for (const v of findUnresolvedPlaceholders(substituteVars(template, creds.credentials))) {
-        unresolved.add(v);
+  // 6. The same on every string the body substitutes (text, multipart fields, JSON leaves).
+  if (substituteBody) {
+    const unresolvedInBody = new Set<string>();
+    for (const template of substitutedBodyStrings(body)) {
+      for (const key of unresolvedPlaceholders(template, creds.credentials)) {
+        unresolvedInBody.add(key);
       }
     }
-    if (unresolved.size) {
+    if (unresolvedInBody.size) {
       return {
         ok: false,
         status: 400,
-        error: `Unresolved placeholders in body: {{${[...unresolved].join()}}}`,
-      };
-    }
-  }
-  if (substituteBody && body.kind === "json") {
-    const unresolved = findUnresolvedJsonPlaceholders(body.value, creds.credentials);
-    if (unresolved.size) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in body: {{${[...unresolved].join()}}}`,
+        error: `Unresolved placeholders in body: {{${[...unresolvedInBody].join()}}}`,
       };
     }
   }
@@ -452,6 +418,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     response: Response;
     finalUrl: string;
     hops: number;
+    credentialsForwarded: boolean;
     /**
      * Names (never values) of the headers sent on the wire after
      * credential injection — surfaced for the debug diagnostic envelope
@@ -542,6 +509,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   let upstreamHops: number;
   let requestHeaderNames: string[];
   let credentialInjection: "inject" | "caller_override" | "none";
+  // The credentials the terminal response answered; null when no hop carried them to it.
+  let answered: CredentialsResponse | null;
   try {
     const r = await doUpstreamRequest(creds);
     upstream = r.response;
@@ -549,6 +518,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     upstreamHops = r.hops;
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
+    answered = r.credentialInjection === "inject" && r.credentialsForwarded ? creds : null;
   } catch (err) {
     return wrapRequestError(err, integrationId, targetHost);
   }
@@ -566,10 +536,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     refreshCredentials &&
     config.platformApiUrl &&
     config.runToken &&
-    credentialInjection === "inject" &&
+    answered &&
     !reportedAuthFailures.has(scope)
   ) {
-    const fresh = await refreshCredentials(integrationId).catch(() => null);
+    const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
     if (fresh) {
       if (body.kind !== "streaming") {
         redactFields = redactionFields(policy, fresh.credentials);
@@ -580,6 +550,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           upstreamHops = r.hops;
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
+          answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
         } catch (err) {
           return wrapRequestError(err, integrationId, targetHost);
         }
@@ -598,11 +569,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
-  if (
-    upstream.status === 401 &&
-    credentialInjection === "inject" &&
-    !reportedAuthFailures.has(scope)
-  ) {
+  if (upstream.status === 401 && answered && !reportedAuthFailures.has(scope)) {
     reportedAuthFailures.add(scope);
     logger.warn("Upstream returned 401 after refresh attempt", {
       integrationId,
@@ -610,7 +577,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     });
   }
 
-  if (upstream.ok && credentialInjection === "inject") deps.reportUpstreamSuccess?.();
+  if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
   // 10. Success-path diagnostic envelope (#404). One structured line per
   //     completed call — resolved auth mode, hop count, status, duration,

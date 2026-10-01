@@ -561,10 +561,63 @@ describe("fetchApiCall — transport", () => {
     expect([...seen.keys()].sort()).toEqual(["x-api-key", "x-normal"]);
   });
 
-  it("keeps the Content-Length of a streamed body, which fetch cannot measure", async () => {
-    const body = new Blob(["hello"]).stream();
+  it("never forwards a caller's Content-Length, even on a stream fetch cannot measure", async () => {
+    const body = new Blob(["hello world"]).stream();
     const seen = await sentHeaders({ method: "POST", body, headers: { "Content-Length": "5" } });
-    expect(seen.get("content-length")).toBe("5");
+    expect(seen.get("content-length")).toBeNull();
+  });
+
+  it("sends a stream's trusted `bodyLength` on the wire, with exactly that many bytes", async () => {
+    const payload = "hello world";
+    const wire = Promise.withResolvers<string>();
+    let buffered = "";
+    const server = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, chunk) {
+          buffered += chunk.toString("latin1");
+          const end = buffered.indexOf("\r\n\r\n");
+          const length = /\r\ncontent-length: *(\d+)/i.exec(buffered.slice(0, end))?.[1];
+          if (end < 0 || buffered.length - end - 4 < Number(length ?? Infinity)) return;
+          socket.end("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+          wire.resolve(buffered);
+        },
+      },
+    });
+    try {
+      await fetchApiCall({
+        url: "https://api.example.com/v1",
+        init: {
+          method: "POST",
+          // Not a Blob stream, whose size Bun would know.
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(payload));
+              controller.close();
+            },
+          }),
+          headers: { "Content-Length": "5" },
+          duplex: "half",
+        } as RequestInit,
+        bodyLength: payload.length,
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaders: [],
+        integrationId: "i",
+        targetHost: "api.example.com",
+        credentialFields: {},
+        fetchFn: ((_url: string, init?: RequestInit) =>
+          fetch(`http://127.0.0.1:${server.port}/v1`, init)) as unknown as typeof fetch,
+        resolveHost: publicResolver,
+      });
+      const [head, body] = (await wire.promise).split("\r\n\r\n");
+      expect(head!.toLowerCase().split("\r\n")).toContain(`content-length: ${payload.length}`);
+      expect(body).toBe(payload);
+    } finally {
+      server.stop(true);
+    }
   });
 
   it(`bounds the exchange at API_CALL_TIMEOUT_MS (${API_CALL_TIMEOUT_MS} ms) AND the caller's signal`, async () => {
@@ -620,11 +673,11 @@ describe("classifyApiCallFailure", () => {
 
 describe("fetchApiCall — a header value that is no HTTP field value", () => {
   const secret = "SECRETKEY";
-  const send = (value: string, credentialFields: Record<string, string>) => {
+  const send = (value: string | Headers, credentialFields: Record<string, string>) => {
     const fetchFn = mock(async () => new Response("ok"));
     const sent = fetchApiCall({
       url: "https://api.example.com/v1",
-      init: { method: "GET", headers: { "X-Api-Key": value } },
+      init: { method: "GET", headers: typeof value === "string" ? { "X-Api-Key": value } : value },
       authorizedUris: ["https://api.example.com/**"],
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
@@ -658,6 +711,12 @@ describe("fetchApiCall — a header value that is no HTTP field value", () => {
       });
     }
   }
+
+  it("checks a `Headers` instance too, which accepts a control character", async () => {
+    const { sent, fetchFn } = send(new Headers({ "X-Api-Key": `${secret}\u0001` }), {});
+    expect(await sent).toBeInstanceOf(InvalidHeaderValueError);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 });
 
 describe("fetchApiCall — the target's host in a message", () => {

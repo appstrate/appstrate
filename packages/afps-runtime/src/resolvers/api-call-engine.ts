@@ -38,16 +38,16 @@ export const HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
   "upgrade",
 ]);
 
-/** Caller headers minus Host, hop-by-hop and `Connection`-named ones (a credential excepted), and
- * Content-Length unless the body is a stream fetch cannot measure. The one caller-header rule.
- * Throws {@link InvalidHeaderValueError} on a value `Headers` would quote in its own TypeError. */
+/** Caller headers minus Host, Content-Length, hop-by-hop and `Connection`-named ones (a credential
+ * excepted). The one caller-header rule. Throws {@link InvalidHeaderValueError} on a value that is
+ * no HTTP field value, before `Headers` can quote it in its own TypeError. */
 export function forwardableHeaders(
-  init: Pick<RequestInit, "headers" | "body">,
+  init: Pick<RequestInit, "headers">,
   credentialHeaders: readonly string[] = [],
 ): Headers {
   const given =
     init.headers instanceof Headers
-      ? []
+      ? [...init.headers]
       : Array.isArray(init.headers)
         ? init.headers
         : Object.entries(init.headers ?? {});
@@ -57,11 +57,10 @@ export function forwardableHeaders(
   const named = new Set(
     (headers.get("connection") ?? "").split(",").map((t) => t.trim().toLowerCase()),
   );
-  const streamed = init.body instanceof ReadableStream;
   for (const name of [...headers.keys()]) {
     if (
       name === "host" ||
-      (name === "content-length" && !streamed) ||
+      name === "content-length" ||
       HOP_BY_HOP_HEADERS.has(name) ||
       (named.has(name) && !credential.has(name))
     ) {
@@ -215,6 +214,9 @@ export interface FetchApiCallOptions {
   /** Transport override (tests): disables the address pin. Omitted = pinned global `fetch`. */
   fetchFn?: typeof fetch;
   resolveHost?: HostResolver;
+  /** Byte length of a `ReadableStream` body from a trusted source (the file size, the request's own
+   * framing), sent as its Content-Length. Omitted = chunked. A caller's Content-Length never is. */
+  bodyLength?: number;
   /** The target's host as its template names it (`templateHost`): what a message about it echoes. */
   targetHost: string;
   /** Credential values scrubbed from the redirect hosts and transport errors a message names. */
@@ -245,6 +247,10 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
   ]);
   try {
     const headers = forwardableHeaders(opts.init, opts.credentialHeaders);
+    const streamed = opts.init.body instanceof ReadableStream;
+    if (streamed && opts.bodyLength !== undefined) {
+      headers.set("content-length", String(opts.bodyLength));
+    }
     return await guardedFetchChain(
       opts.url,
       { ...opts.init, headers, signal },
@@ -274,7 +280,7 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
         sensitiveHeaders: opts.credentialHeaders,
         cookies:
           opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),
-        followRedirects: !(opts.init.body instanceof ReadableStream),
+        followRedirects: !streamed,
         // A Bun `proxy` resolves the name itself and matches its ACLs on it.
         pinToResolvedAddress: !(opts.init as { proxy?: string }).proxy,
         ...(opts.fetchFn ? { fetchImpl: opts.fetchFn } : {}),

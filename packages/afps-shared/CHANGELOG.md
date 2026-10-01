@@ -21,6 +21,10 @@ exports (core raises its range to `^0.10.0`).
 
 ### Added
 
+- **`GuardedFetchResult.credentialsForwarded`**: `false` once any hop
+  stripped the sensitive headers, and it stays false even when the chain
+  returns to the origin, so a caller can tell a response its credential never
+  reached. (#1641)
 - **`isHttpFieldValue`**, **`assertHttpFieldValue`** and
   **`InvalidHeaderValueError`** (`./delivery-http`): whether a string is an
   RFC 9110 field value (HTAB, SP, VCHAR, obs-text), and the error that names

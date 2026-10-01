@@ -257,9 +257,9 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * the platform refresh POST). Callers holding the concrete source type can
    * invoke it without a presence check.
    */
-  refreshOnUnauthorized(authKey: string): Promise<boolean>;
+  refreshOnUnauthorized(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
   /** Required here: this factory always reports ({@link MitmCredentialSource.reportUpstreamSuccess}). */
-  reportUpstreamSuccess(): void;
+  reportUpstreamSuccess(credentialRevision: string | undefined): void;
 }
 
 /**
@@ -345,10 +345,11 @@ export function createIntegrationCredentialsSource(
   // boot payload announced one, or a rejection was counted during this run (the 502 below).
   let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
 
-  const reportUpstreamSuccess = (): void => {
-    const revision = payload.credentialRevision;
+  const reportUpstreamSuccess = (revision: string | undefined): void => {
     if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
-    rejectionPending = false;
+    // A verdict on a superseded credential leaves the held one's streak pending.
+    const held = revision === payload.credentialRevision;
+    if (held) rejectionPending = false;
     // A report the platform never applied leaves the streak pending: the next success retries it.
     postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, revision, {
       ...options,
@@ -374,6 +375,9 @@ export function createIntegrationCredentialsSource(
 
   const current = (): IntegrationCredentialsPayload => ({
     auths: [...payload.auths],
+    ...(payload.credentialRevision !== undefined
+      ? { credentialRevision: payload.credentialRevision }
+      : {}),
   });
 
   const deliveryPlans = () => {
@@ -390,7 +394,10 @@ export function createIntegrationCredentialsSource(
     return rest;
   };
 
-  const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
+  const refreshOnUnauthorized = async (
+    authKey: string,
+    credentialRevision: string | undefined,
+  ): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
     // separately on the network side — the platform refreshes the named
     // connection in one call — but we DO want to suppress duplicates per
@@ -416,7 +423,9 @@ export function createIntegrationCredentialsSource(
     // platform refresh endpoint. Reuses the same cooldown + in-flight dedup so
     // a hot-looping reauth status can't hammer the login tool.
     const relogin = reloginHandlers.get(authKey);
-    const promise = relogin ? runRelogin(authKey, relogin.handler) : doRefresh(authKey);
+    const promise = relogin
+      ? runRelogin(authKey, relogin.handler)
+      : doRefresh(authKey, credentialRevision);
     inflight.set(authKey, promise);
     try {
       return await promise;
@@ -449,13 +458,16 @@ export function createIntegrationCredentialsSource(
     return ok;
   }
 
-  async function doRefresh(authKey: string): Promise<boolean> {
+  async function doRefresh(
+    authKey: string,
+    rejectedRevision: string | undefined,
+  ): Promise<boolean> {
     let res: Response;
     try {
       res = await postIntegrationCredentialsRefresh(
         options.integrationId,
         options.connectionId,
-        payload.credentialRevision,
+        rejectedRevision,
         { ...options, fetchFn },
       );
     } catch (err) {

@@ -45,6 +45,8 @@ export interface ResolvedAuthCredentials {
 export interface IntegrationCredentialsPayload {
   /** One entry per declared auth that has been connected. */
   auths: ResolvedAuthCredentials[];
+  /** {@link IntegrationCredentialsWire.credentialRevision} of the credential these auths carry. */
+  credentialRevision?: string;
 }
 
 /**

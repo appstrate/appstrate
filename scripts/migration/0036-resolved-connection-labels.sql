@@ -4,7 +4,8 @@
 -- element of `runs.resolved_connections`; a pre-`0077` run may carry `label: null`, and
 -- its reads 500. A missing or empty label (the run page shows it as the connection's name)
 -- takes the first non-empty of: the connection's label, its `account_id`, the element's
--- `accountId`, else its `connectionId` — this runs before `0077` names the unlabelled
+-- `accountId` (both skipped when the API-key placeholder `default`), else its
+-- `connectionId` — this runs before `0077` names the unlabelled
 -- connections, so their label can still be NULL or `''`. A missing `accountId` takes the
 -- connection's, else `''` (unknown: the connection is deleted). Order: `scripts/migration/README.md`.
 -- Rows: UNMEASURED — record the rehearsal counts here. Idempotent; one transaction.
@@ -62,8 +63,8 @@ SET resolved_connections = (
           'label', coalesce(
             NULLIF(CASE WHEN jsonb_typeof(a.el->'label') = 'string' THEN a.el->>'label' END, ''),
             NULLIF(c.label, ''),
-            NULLIF(c.account_id, ''),
-            NULLIF(CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END, ''),
+            NULLIF(NULLIF(c.account_id, ''), 'default'),
+            NULLIF(NULLIF(CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END, ''), 'default'),
             a.el->>'connectionId'),
           'accountId', coalesce(
             CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END,

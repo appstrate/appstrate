@@ -491,9 +491,10 @@ export async function connectRemoteHttpIntegration(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
       const send = async (): Promise<{
         response: Response;
-        credentialInjected: boolean;
         credentialAnswered: boolean;
+        credentialRevision: string | undefined;
       }> => {
+        const credentialRevision = source.snapshot().credentialRevision;
         const headers = new Headers(init?.headers);
         const injection = planInjection([...headers.keys()]);
         if (injection.kind === "inject") {
@@ -515,7 +516,7 @@ export async function connectRemoteHttpIntegration(
         // MCP server the platform-side spawn validation just allowed (internal
         // host explicitly allowlisted by the operator) would be re-blocked here
         // and fail opaquely in-run. Redirect discipline still applies.
-        const { response, finalUrl } = await guardedFetchChain(
+        const { response, credentialsForwarded } = await guardedFetchChain(
           target,
           { ...init, headers },
           {
@@ -529,25 +530,23 @@ export async function connectRemoteHttpIntegration(
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );
-        const credentialInjected = injection.kind === "inject";
         return {
           response,
-          credentialInjected,
-          // A cross-origin redirect dropped the credential: that answer says nothing about it.
-          credentialAnswered:
-            credentialInjected && new URL(finalUrl).origin === new URL(target).origin,
+          // A redirect hop that dropped the credential: that answer says nothing about it.
+          credentialAnswered: injection.kind === "inject" && credentialsForwarded,
+          credentialRevision,
         };
       };
       let attempt = await send();
-      if (
-        attempt.response.status === 401 &&
-        attempt.credentialInjected &&
-        source.refreshOnUnauthorized
-      ) {
-        const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
+      if (attempt.response.status === 401 && attempt.credentialAnswered) {
+        const refreshed = await source
+          .refreshOnUnauthorized(authKey, attempt.credentialRevision)
+          .catch(() => false);
         if (refreshed) attempt = await send();
       }
-      if (attempt.response.ok && attempt.credentialAnswered) source.reportUpstreamSuccess();
+      if (attempt.response.ok && attempt.credentialAnswered) {
+        source.reportUpstreamSuccess(attempt.credentialRevision);
+      }
       return attempt.response;
     },
     { preconnect: fetch.preconnect },

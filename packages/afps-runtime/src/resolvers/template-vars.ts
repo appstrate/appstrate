@@ -41,6 +41,20 @@ export function substituteVars(
 const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
 
 /**
+ * The keys of `template`'s `{{key}}` placeholders that `fields` does not own: what a proxy refuses
+ * to send. Read on the template, never the substituted string, where a `{{word}}` inside a
+ * credential value is no placeholder (and naming it would echo the secret).
+ */
+export function unresolvedPlaceholders(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return [...template.matchAll(VAR_PLACEHOLDER)]
+    .map((match) => match[1]!)
+    .filter((key) => !Object.hasOwn(fields, key));
+}
+
+/**
  * True when `input` contains at least one `{{key}}` placeholder whose key is
  * an own property of `fields`. Used by the credential-exfil guard
  * ({@link ./credential-guard.ts}) to detect calls that substitute a

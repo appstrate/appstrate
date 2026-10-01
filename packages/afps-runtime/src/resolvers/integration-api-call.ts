@@ -63,6 +63,7 @@ import {
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 import {
+  InvalidHeaderValueError,
   isBareAuthSchemePrefix,
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
@@ -534,13 +535,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
             { integration: meta.name },
           );
         }
-        if (failure.kind === "invalid_header") {
-          throw new ResolverError(
-            "RESOLVER_HEADER_INVALID",
-            `Integration ${meta.name}: ${failure.message}`,
-            { integration: meta.name },
-          );
-        }
+        if (failure.kind === "invalid_header") throw headerInvalid(meta.name, failure.message);
         if (failure.kind === "not_authorized") {
           throw new AuthorizedUrisError(
             "AUTHORIZED_URIS_MISMATCH",
@@ -570,6 +565,13 @@ function refusalError(refusal: UrlPolicyRefusal, integration: string, target: st
   return refusal === "exfiltration"
     ? new ResolverError("RESOLVER_CREDENTIAL_EXFIL_BLOCKED", message, { integration })
     : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
+}
+
+/** An agent header value that is no HTTP field value (the message names the header only). */
+function headerInvalid(integration: string, message: string): ResolverError {
+  return new ResolverError("RESOLVER_HEADER_INVALID", `Integration ${integration}: ${message}`, {
+    integration,
+  });
 }
 
 /**
@@ -710,9 +712,15 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
 
   private buildCall(meta: ApiCallIntegrationMeta): ApiCallFn {
     return async (req, ctx) => {
-      // The caller-header rule of `fetchApiCall` (no body here, so Content-Length goes too), then
-      // the reserved transport headers; the platform-controlled ones are set over what remains.
-      const agentHeaders = forwardableHeaders({ headers: req.headers });
+      // The caller-header rule of `fetchApiCall`, then the reserved transport headers; the
+      // platform-controlled ones are set over what remains.
+      let agentHeaders: Headers;
+      try {
+        agentHeaders = forwardableHeaders({ headers: req.headers });
+      } catch (err) {
+        if (err instanceof InvalidHeaderValueError) throw headerInvalid(meta.name, err.message);
+        throw err;
+      }
       for (const name of RESERVED_TRANSPORT_HEADERS) agentHeaders.delete(name);
       const platformHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,

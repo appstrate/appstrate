@@ -8,31 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Migration `0079` rewrites `runs` under an exclusive lock** (the
-  `model_source` column becomes the `credential_source` enum), adds
-  `package_schedules.disabled_reason` (every schedule already disabled is
-  labelled `user`) and two CHECKs. Before the deploy these must return 0:
-  `SELECT count(*) FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org');`
-  and
-  `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
-  (#1641).
-- **Run `scripts/migration/0037-schedule-disabled-reason-backfill.sql` after
-  the release boots** (#1641): it relabels `actor_left_org` the disabled
-  schedules whose member actor is no longer in the organization. The other two
-  system disables are not derivable and stay `user`: a fire that found its
-  actor could no longer run agents (`actor_invalid`), and a connection
-  deletion that emptied an override set (`connection_deleted`).
-- **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
-  deploy, this query must return no row:
-  `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
-  (#1641).
-- **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
-  `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
-  every live ciphertext a retired kid wrote in the seven encrypted columns (a
-  closed or expired run sink's secret is never read again and is skipped); its
-  dry run is the per-kid inventory and exits 0 only when nothing live is left
-  outside the active kid. Procedure: `docs/ENV.md` § "Rotating
-  `CONNECTION_ENCRYPTION_KEY`" (#1641).
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
   lists every draft or version holding a template or runtime expression the
@@ -47,14 +22,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   list is not listed (a run drops it and serves the list), but the next draft
   save refuses it: fix it when convenient. System packages are skipped: the
   image ships them (#1641).
+- **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
+  deploy, this query must return no row:
+  `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
+  (#1641).
+- **Migration `0079` rewrites `runs` under an exclusive lock** (the
+  `model_source` column becomes the `credential_source` enum), adds
+  `package_schedules.disabled_reason` (every schedule already disabled is
+  labelled `user`) and two CHECKs. Before the deploy these must return 0:
+  `SELECT count(*) FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org');`
+  and
+  `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
+  (#1641).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
   missing or empty label takes the first non-empty of the connection's label,
-  its account, the element's `accountId` and its `connectionId` (before `0077`
-  a connection's label can still be empty); a missing account takes the
+  its account, the element's `accountId` (an API-key connection's placeholder
+  account `default` skipped) and its `connectionId` (before `0077` a
+  connection's label can still be empty); a missing account takes the
   connection's, else `''` (the connection is deleted). It writes nothing while
   an element lacks a string `connectionId` or names no cascade layer in `source`.
+- **Run `scripts/migration/0037-schedule-disabled-reason-backfill.sql` after
+  the release boots** (#1641): it relabels `actor_left_org` the disabled
+  schedules whose member actor is no longer in the organization. The other two
+  system disables are not derivable and stay `user`: a fire that found its
+  actor could no longer run agents (`actor_invalid`), and a connection
+  deletion that emptied an override set (`connection_deleted`).
+- **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
+  `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
+  every live ciphertext a retired kid wrote in the seven encrypted columns (a
+  closed or expired run sink's secret is never read again and is skipped); its
+  dry run is the per-kid inventory and exits 0 only when nothing live is left
+  outside the active kid. Procedure: `docs/ENV.md` § "Rotating
+  `CONNECTION_ENCRYPTION_KEY`" (#1641).
 
 ### Changed
 
@@ -176,11 +177,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   schedule, else `Schedule refused: …`.
 - **Credential-proxy use of another member's connection is audited** (#1641).
   The first call of an `X-Session-Id` through a connection the caller does not
-  own writes one `integration.connection.proxied` row; the call log names the
-  connection used.
+  own writes one `integration.connection.proxied` row per acting principal
+  (`principalType`, `principalId` in `after`); the call log names the
+  connection used. A call that fails after the credential may have left
+  (timeout, unreachable upstream, refused redirect) is audited like one that
+  returns; one refused before sending is not. A failed insert is logged and
+  retried by the session's next call.
 
 ### Fixed
 
+- **An upstream verdict is credited to the credential that earned it**
+  (#1641). The sidecar reports a 401 or 2xx against the
+  `credential_revision` its request carried, not the one held when the
+  answer arrived. A response a redirect hop stripped the credential from
+  (including a chain that comes back to the origin) is neither counted nor
+  credited, on the sidecar and the platform proxy alike. A platform-proxy 401
+  on a superseded credential returns the current one without refreshing or
+  counting. Reaching the threshold flags only the credential that was
+  counted, for integration connections and BYOK keys alike. A count and the
+  platform proxy's reset apply only while the caller still reaches the
+  connection. `credential_revision` must be 16 hex digits (empty or malformed
+  → `400`).
 - **Credential proxy: two failures no longer end as a 500 or a spurious
   400** (#1641). A `{{word}}` inside a credential value was reported as an
   unresolved placeholder: placeholders are now looked up in the template. A
@@ -195,8 +212,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and a success on a replaced credential no longer ends the new one's streak.
   The platform credential proxy compares-and-sets on the ciphertext it
   injected. A connection already flagged keeps its count; `/upstream-success`
-  refuses a connect run (`409 connect_run_no_refresh`); a success report the
-  platform did not apply is retried on the next success; and the remote-HTTP
+  refuses a connect run (`409 connect_run_no_refresh`); a success report that
+  is refused or fails is retried on the next success; and the remote-HTTP
   transport no longer reports a success from an origin a redirect took the
   request to.
 - **An upstream that keeps rejecting an API key flags it; 401s between
@@ -297,6 +314,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `{ fromFile }` upload always carries its real size, and the transport hints
   (`X-Stream-Request`, `X-Stream-Response`, `X-Max-Response-Size`) are set by
   the CLI, never by the agent.
+- **An `api_call` tells the caller's input apart from the credential**
+  (#1641). The sidecar, like the platform proxy, looks for unresolved
+  placeholders in the template, so a `{{word}}` inside a credential value is
+  no longer named in a 400. The platform proxy answers a caller header value
+  that is no HTTP field value `400 invalid_request` (was
+  `502 credential_unusable`) and no longer forwards the caller's `X-Org-Id`
+  upstream. A streamed body's `Content-Length` never comes from a caller
+  header.
 - **The MITM listener applies the host-bound credential rule to its replay
   too** (#1641). A request replayed after a credential refresh or a
   `connect.tool` re-login is checked like the first attempt: a credential
@@ -307,22 +332,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   caller's `Host`, the RFC 9110 connection-specific headers (`Connection`,
   `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`,
   `Upgrade`, and any header `Connection` names, except the credential),
-  `Proxy-Authorization`/`Proxy-Authenticate`, and `Content-Length` unless the
-  body is a stream. The upstream's virtual host follows the target URL and
-  the request framing is always the one fetch computes.
+  `Proxy-Authorization`/`Proxy-Authenticate`, and `Content-Length`. The
+  upstream's virtual host follows the target URL; the request framing is the
+  one fetch computes, and a streamed upload is sent with the length of the
+  platform request that carries it, else chunked.
 - **The SSRF blocklist judges IPv4 addresses embedded in NAT64 and 6to4 IPv6
   addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
   IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
   is blocked. The SIIT IPv4-translated form `::ffff:0:0:0/96` is judged as its
   IPv4, and site-local `fec0::/10`, multicast `ff00::/8` and an IPv6
   literal that does not expand to eight groups are blocked.
-- **The credential-proxy audit of another member's connection is no longer
-  lost** (#1641). A failed insert no longer suppresses the session's row: the
-  next call retries it, and the failure is logged. A call that fails after the
-  credential may have left (timeout, unreachable upstream, refused redirect)
-  is audited like one that returns; one refused before sending is not. The row names the acting principal (`principalType`,
-  `principalId` in `after`), and two principals sharing one session each get
-  their own.
 - **BREAKING: an auth whose credential the proxy injects must name its
   hosts** (#1641). Manifest writes and imports refuse, on such an auth,
   `allow_all_uris`, no `authorized_uris`, or an entry that leaves the host to

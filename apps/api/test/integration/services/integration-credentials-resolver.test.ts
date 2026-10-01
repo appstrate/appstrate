@@ -33,7 +33,7 @@ import { createTestContext, createTestUser, type TestContext } from "../../helpe
 import { seedPackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
 import {
@@ -604,7 +604,12 @@ describe("resolveLiveIntegrationCredentials", () => {
 
     /** A 2xx relayed with the credential the row holds right now. */
     const succeed = async (connId: string) =>
-      clearUpstreamRejections(connId, (await storedCredential(connId)).ciphertext);
+      clearUpstreamRejections(
+        connId,
+        INTEGRATION_ID,
+        resolverContext(connId),
+        (await storedCredential(connId)).ciphertext,
+      );
 
     /** What a reconnect leaves behind: another ciphertext, here with a streak of its own. */
     const replaceCredential = (connId: string, refreshFailureCount: number) =>
@@ -622,6 +627,34 @@ describe("resolveLiveIntegrationCredentials", () => {
       for (let run = 1; run < max; run++) expect((await forced())?.status).toBe(502);
       expect((await forced())?.status).toBe(410);
       expect(await needsReconnection(connId)).toBe(true);
+    });
+
+    it("the threshold flag is the count's own: a credential written right after it is not flagged", async () => {
+      const { connId, forced } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let run = 1; run < max; run++) await forced();
+      // A reconnect landing between the counting write and anything that follows it.
+      await db.execute(sql`
+        CREATE OR REPLACE FUNCTION test_reconnect_after_flag() RETURNS trigger AS $$
+        BEGIN
+          UPDATE integration_connections
+            SET credentials_encrypted = 'reconnected', needs_reconnection = false,
+                refresh_failure_count = 0
+            WHERE id = NEW.id;
+          RETURN NULL;
+        END $$ LANGUAGE plpgsql`);
+      await db.execute(sql`
+        CREATE TRIGGER test_reconnect_after_flag AFTER UPDATE ON integration_connections
+        FOR EACH ROW WHEN (NEW.needs_reconnection AND NEW.credentials_encrypted <> 'reconnected')
+        EXECUTE FUNCTION test_reconnect_after_flag()`);
+      try {
+        expect((await forced())?.status).toBe(410);
+      } finally {
+        await db.execute(sql`DROP TRIGGER test_reconnect_after_flag ON integration_connections`);
+        await db.execute(sql`DROP FUNCTION test_reconnect_after_flag()`);
+      }
+      expect((await storedCredential(connId)).ciphertext).toBe("reconnected");
+      expect(await needsReconnection(connId)).toBe(false);
     });
 
     it("a healthy key with one provoked 401 per run, then successes, is never flagged", async () => {
@@ -679,9 +712,25 @@ describe("resolveLiveIntegrationCredentials", () => {
       const replaced = (await storedCredential(connId)).ciphertext;
       await replaceCredential(connId, 2);
 
-      await clearUpstreamRejections(connId, replaced);
+      await clearUpstreamRejections(connId, INTEGRATION_ID, resolverContext(connId), replaced);
       expect((await storedCredential(connId)).count).toBe(2);
-      await recordUnrefreshableRejection(connId, replaced);
+      await recordUnrefreshableRejection(connId, INTEGRATION_ID, resolverContext(connId), replaced);
+      expect((await storedCredential(connId)).count).toBe(2);
+    });
+
+    it("a verdict from an actor who no longer reaches the connection changes nothing", async () => {
+      const { connId } = await apiKeyConnection();
+      await replaceCredential(connId, 2);
+      const { ciphertext } = await storedCredential(connId);
+      const stranger = await createTestUser();
+      const lostReach = {
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user" as const, id: stranger.id },
+      };
+
+      await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach, ciphertext);
+      expect((await storedCredential(connId)).count).toBe(2);
+      await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach, ciphertext);
       expect((await storedCredential(connId)).count).toBe(2);
     });
 

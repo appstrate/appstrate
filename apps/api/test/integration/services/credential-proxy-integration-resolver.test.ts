@@ -419,6 +419,28 @@ describe("credential-proxy integration-resolver", () => {
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
+  it("hands back the current credential, counting nothing, when the 401 judged a superseded one", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+    const current = await rejectedWith(connId);
+
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 0; i < max; i++) {
+      const out = await forceRefreshIntegrationProxyCredentials({
+        ...current,
+        rejectedCiphertext: "a-credential-replaced-since",
+      });
+      expect(out?.connectionId).toBe(connId);
+      expect(out?.payload.credentialHeaderName).toBeDefined();
+    }
+    expect(await flaggedConnection(connId)).toBe(false);
+    // The current credential's own streak is untouched: its first 401 does not flag either.
+    expect(await forceRefreshIntegrationProxyCredentials(current)).toBeNull();
+    expect(await flaggedConnection(connId)).toBe(false);
+  });
+
   it("counts the 401s of an api_key auth, flagging at the threshold", async () => {
     await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
       manifest: {

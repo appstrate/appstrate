@@ -842,6 +842,29 @@ describe("guardedFetchChain — terminus, credential forwarding, single-hop", ()
     expect(seen[1]!.headers.get("authorization")).toBeNull();
   });
 
+  it("reports credentialsForwarded false for the rest of the chain once a hop stripped them", async () => {
+    const auth = { headers: { authorization: "Bearer t" } };
+    const kept = serve([to("https://first.example/b"), new Response("ok")]);
+    const sameOrigin = await guardedFetchChain("https://first.example/a", auth, {
+      resolve,
+      fetchImpl: kept.fetchImpl,
+    });
+    expect(sameOrigin.credentialsForwarded).toBe(true);
+    // A → B (strip) → back to A: the terminal answer still never saw the credential.
+    const stripped = serve([
+      to("https://second.example/b"),
+      to("https://first.example/c"),
+      new Response("ok"),
+    ]);
+    const roundTrip = await guardedFetchChain("https://first.example/a", auth, {
+      resolve,
+      fetchImpl: stripped.fetchImpl,
+    });
+    expect(roundTrip.finalUrl).toBe("https://first.example/c");
+    expect(stripped.seen[2]!.headers.get("authorization")).toBeNull();
+    expect(roundTrip.credentialsForwarded).toBe(false);
+  });
+
   it("returns a redirect unfollowed when followRedirects is false", async () => {
     const { seen, fetchImpl } = serve([to("https://second.example/")]);
     const { response, hops } = await guardedFetchChain("https://first.example/", undefined, {

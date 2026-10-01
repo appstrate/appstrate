@@ -183,6 +183,16 @@ export async function forceRefreshIntegrationProxyCredentials(
 
   const authDef = manifest.auths?.[connection.authKey];
   if (!authDef) return null;
+  // Superseded: the 401 judged a credential the connection no longer holds — hand back the current one.
+  if (connection.credentialsEncrypted !== input.rejectedCiphertext) {
+    return {
+      payload: buildPayload(input.integrationId, manifest, connection),
+      declaredUris: declaredUrisOf(manifest, connection.authKey),
+      connectionId: connection.id,
+      authKey: connection.authKey,
+      rejectionStreak: upstreamRejectionStreak(connection),
+    };
+  }
   if (authDef.type !== "oauth2") {
     return countUnrefreshableRejection(input, connection, `auth type '${authDef.type}'`);
   }
@@ -288,6 +298,8 @@ async function countUnrefreshableRejection(
 ): Promise<null> {
   const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
     connection.id,
+    input.integrationId,
+    input,
     input.rejectedCiphertext,
   );
   logger.warn("credential-proxy: integration credential rejected upstream and unrefreshable", {

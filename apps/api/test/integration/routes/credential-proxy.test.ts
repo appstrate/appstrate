@@ -737,6 +737,20 @@ describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0"
     for (const name of ["connection", "x-foo", "keep-alive"]) expect(sent!.get(name)).toBeNull();
   });
 
+  it("never forwards its own control headers upstream, X-Org-Id included", async () => {
+    let sent: Headers | null = null;
+    mockUpstream(async (_input, init) => {
+      sent = new Headers(init?.headers);
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost({ "X-Custom": "kept" }, "{}");
+    expect(res.status).toBe(200);
+    for (const name of ["x-org-id", "x-space-id", "x-integration-id", "x-target", "x-session-id"]) {
+      expect(sent!.get(name)).toBeNull();
+    }
+    expect(sent!.get("x-custom")).toBe("kept");
+  });
+
   for (const [name, value] of [
     ["X-Substitute-Body", "true"],
     ["X-Stream-Request", "yes"],
@@ -1298,6 +1312,16 @@ describe("POST /api/credential-proxy/proxy — a credential no header can carry"
     const res = await call({ "X-Pass": "{{password}}" });
     expect(res.status).toBe(200);
     expect(upstreamCalls).toBe(1);
+  });
+
+  it("answers a caller header value that is no HTTP field value as a 400, the credential intact", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
+    const res = await call({ "X-Custom": "a\u0001b" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("invalid_request");
+    expect(body.detail.toLowerCase()).toContain('"x-custom"');
+    expect(upstreamCalls).toBe(0);
   });
 
   it("answers a body broken off after the headers as upstream_unreachable, not a 500", async () => {

@@ -119,7 +119,7 @@ describe("createIntegrationCredentialsSource", () => {
     });
 
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
-    const ok = await source.refreshOnUnauthorized("primary");
+    const ok = await source.refreshOnUnauthorized("primary", undefined);
     expect(ok).toBe(true);
     expect(calls.length).toBe(1);
     expect(calls[0]!.method).toBe("POST");
@@ -149,9 +149,9 @@ describe("createIntegrationCredentialsSource", () => {
       minRefreshIntervalMs: 60_000,
     });
 
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     // Cooldown should suppress the second attempt without firing fetch.
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     expect(calls).toBe(1);
   });
 
@@ -168,7 +168,7 @@ describe("createIntegrationCredentialsSource", () => {
       initialPayload: initial,
       fetchFn,
     });
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     // Payload unchanged.
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-1");
   });
@@ -198,7 +198,7 @@ describe("createIntegrationCredentialsSource", () => {
       });
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+        expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
         expect(methods).toEqual(["POST"]);
         expect(warnSpy).toHaveBeenCalledTimes(warns ? 1 : 0);
       } finally {
@@ -229,9 +229,9 @@ describe("createIntegrationCredentialsSource", () => {
     });
 
     // Three concurrent refresh calls — should fire ONE network call.
-    const p1 = source.refreshOnUnauthorized("primary");
-    const p2 = source.refreshOnUnauthorized("primary");
-    const p3 = source.refreshOnUnauthorized("primary");
+    const p1 = source.refreshOnUnauthorized("primary", undefined);
+    const p2 = source.refreshOnUnauthorized("primary", undefined);
+    const p3 = source.refreshOnUnauthorized("primary", undefined);
     expect(calls).toBe(1);
     resolvePending!(new Response(JSON.stringify(makeWireJson("tok-2")), { status: 200 }));
     expect(await p1).toBe(true);
@@ -259,8 +259,8 @@ describe("createIntegrationCredentialsSource", () => {
       minRefreshIntervalMs: 0,
     });
 
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     expect(calls).toBe(2);
   });
 });
@@ -402,7 +402,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       [401],
     );
 
-    const ok = await source.refreshOnUnauthorized("primary");
+    const ok = await source.refreshOnUnauthorized("primary", undefined);
     expect(ok).toBe(true);
     expect(handlerRan).toBe(1);
     // The platform refresh endpoint must NOT have been called.
@@ -426,7 +426,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     // Handler registered for a DIFFERENT authKey — primary still uses POST.
     source.setReloginHandler("other", async () => true, [401]);
 
-    expect(await source.refreshOnUnauthorized("primary")).toBe(true);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(true);
     expect(postCalls).toBe(1);
     expect(source.current().auths[0]!.fields.apiKey).toBe("tok-2");
   });
@@ -457,8 +457,8 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
     );
 
     // In-flight dedup: two concurrent calls run the handler once.
-    const p1 = source.refreshOnUnauthorized("primary");
-    const p2 = source.refreshOnUnauthorized("primary");
+    const p1 = source.refreshOnUnauthorized("primary", undefined);
+    const p2 = source.refreshOnUnauthorized("primary", undefined);
     expect(handlerRan).toBe(1);
     resolvePending!(true);
     expect(await p1).toBe(true);
@@ -466,7 +466,7 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
     // Cooldown: a subsequent call within the interval is suppressed without
     // re-running the handler.
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     expect(handlerRan).toBe(1);
   });
 
@@ -489,9 +489,9 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
       },
       [401],
     );
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     // Cooldown armed → second attempt suppressed.
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", undefined)).toBe(false);
     expect(handlerRan).toBe(1);
   });
 });
@@ -536,14 +536,14 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
       ...held(makePayload("tok")),
       rejectionStreak: 2,
     });
-    source.reportUpstreamSuccess();
-    source.reportUpstreamSuccess();
+    source.reportUpstreamSuccess("rev-a");
+    source.reportUpstreamSuccess("rev-a");
     expect(successCalls().length).toBe(1);
   });
 
   it("reports nothing when no streak is pending", () => {
     const { source, successCalls } = sourceWith(held(makePayload("tok")));
-    source.reportUpstreamSuccess();
+    source.reportUpstreamSuccess("rev-a");
     expect(successCalls().length).toBe(0);
   });
 
@@ -555,11 +555,11 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
       );
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        source.reportUpstreamSuccess();
+        source.reportUpstreamSuccess("rev-a");
         await Bun.sleep(0);
-        source.reportUpstreamSuccess();
+        source.reportUpstreamSuccess("rev-a");
         await Bun.sleep(0);
-        source.reportUpstreamSuccess();
+        source.reportUpstreamSuccess("rev-a");
       } finally {
         warn.mockRestore();
       }
@@ -569,7 +569,7 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
 
   it("names the credential it holds on /refresh", async () => {
     const { source, refreshCalls } = sourceWith(held(makePayload("tok")));
-    await source.refreshOnUnauthorized("primary");
+    await source.refreshOnUnauthorized("primary", "rev-a");
     expect(refreshCalls()[0]!.url).toBe(
       "http://api/internal/integration-credentials/@test/integ/refresh?connection_id=conn-a&credential_revision=rev-a",
     );
@@ -577,9 +577,9 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
 
   it("reports a success that follows a rejection counted in this run", async () => {
     const { source, successCalls } = sourceWith(held(makePayload("tok")));
-    expect(await source.refreshOnUnauthorized("primary")).toBe(false);
-    source.reportUpstreamSuccess();
-    source.reportUpstreamSuccess();
+    expect(await source.refreshOnUnauthorized("primary", "rev-a")).toBe(false);
+    source.reportUpstreamSuccess("rev-a");
+    source.reportUpstreamSuccess("rev-a");
     expect(successCalls().length).toBe(1);
   });
 
@@ -589,9 +589,39 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
       ...held(payload),
       auths: [{ ...payload.auths[0]!, authType: "oauth2" }],
     });
-    await source.refreshOnUnauthorized("primary");
-    source.reportUpstreamSuccess();
+    await source.refreshOnUnauthorized("primary", "rev-a");
+    source.reportUpstreamSuccess("rev-a");
     expect(successCalls().length).toBe(0);
+  });
+
+  it("credits a late verdict to the revision its call carried, not the one held now", async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      calls.push(url);
+      if (!url.includes("/refresh")) return new Response(null, { status: 204 });
+      const body = { ...makeWireJson("tok-2"), rejection_streak: 1, credential_revision: "rev-b" };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: { ...held(makePayload("tok")), rejectionStreak: 2 },
+      fetchFn,
+      minRefreshIntervalMs: 0,
+    });
+    // Two calls built on rev-a; the first one's 401 swaps the payload to rev-b.
+    const late = source.current().credentialRevision;
+    expect(late).toBe("rev-a");
+    expect(await source.refreshOnUnauthorized("primary", late)).toBe(true);
+    expect(source.current().credentialRevision).toBe("rev-b");
+    await source.refreshOnUnauthorized("primary", late);
+    source.reportUpstreamSuccess(late);
+    // rev-b's own streak is still pending: its success is reported too.
+    source.reportUpstreamSuccess("rev-b");
+    const revisions = calls.map((u) => new URL(u).searchParams.get("credential_revision"));
+    expect(revisions).toEqual(["rev-a", "rev-a", "rev-a", "rev-b"]);
   });
 
   it("reads `rejection_streak` and `credential_revision` off the wire", async () => {

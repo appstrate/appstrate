@@ -25,7 +25,6 @@
 
 import {
   substituteVars,
-  findUnresolvedPlaceholders,
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
 } from "@appstrate/connect";
@@ -40,6 +39,7 @@ import {
   fetchApiCall,
   redactionFields,
   templateHost,
+  unresolvedPlaceholders,
   urlPolicyRefusalMessage,
   type CookieJar,
   type UrlPolicyRefusal,
@@ -47,6 +47,7 @@ import {
 import {
   assertHttpFieldValue,
   InvalidHeaderValueError,
+  isHttpFieldValue,
 } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
@@ -117,6 +118,8 @@ interface ProxyCallInput {
    * attributed to the platform credential and therefore is not refreshed.
    */
   body?: string | Uint8Array | ReadableStream<Uint8Array> | null;
+  /** A stream body's byte length from the request's own framing; omitted = sent chunked. */
+  bodyLength?: number;
   substituteBody?: boolean;
 
   /**
@@ -228,9 +231,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // mirror of the sidecar; stops the proxy from leaking `{{foo}}` to the
   // upstream when a template references a non-existent field).
   const fields = resolved.credentials;
-  // Looked up on the TEMPLATE: a `{{word}}` inside a credential value is no placeholder.
-  const unresolvedIn = (template: string) =>
-    findUnresolvedPlaceholders(template).filter((key) => !Object.hasOwn(fields, key));
+  const unresolvedIn = (template: string) => unresolvedPlaceholders(template, fields);
   const target = substituteVars(input.target, fields);
   const unresolvedInTarget = unresolvedIn(input.target);
   if (unresolvedInTarget.length > 0) {
@@ -279,6 +280,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let credentialInjection;
   try {
     for (const [k, template] of headerTemplates) {
+      // The caller's own value is a malformed request; only one the credential spoils is unusable.
+      if (!isHttpFieldValue(template)) {
+        throw new ProxyCallError("invalid_request", new InvalidHeaderValueError(k).message);
+      }
       const unresolved = unresolvedIn(template);
       if (unresolved.length > 0) {
         throw new ProxyCallError(
@@ -352,11 +357,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     fetchInit.duplex = "half";
   }
 
+  // False once the last exchange's redirect hops stripped the credential: its answer judges nothing.
+  let credentialForwarded = true;
   const performFetch = async (fetchArgs: RequestInit): Promise<Response> => {
     try {
       const sent = await fetchApiCall({
         url: target,
         init: fetchArgs,
+        bodyLength: input.bodyLength,
         authorizedUris,
         declaredUris,
         allowAllUris: policy.allowAllUris,
@@ -371,6 +379,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         targetHost: redactedHost,
         credentialFields: redactFields,
       });
+      credentialForwarded = sent.credentialsForwarded;
       return sent.response;
     } catch (err) {
       throw toProxyCallError(err, input.integrationId, redactedHost, connectionId);
@@ -400,7 +409,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // replayed safely → refresh + retry once. Streaming bodies fall through
     // to the authRefreshed escape-hatch below (caller must re-issue with a
     // fresh body stream).
-    if (res.status === 401 && !isStreamBody && credentialInjection.kind === "inject") {
+    if (
+      res.status === 401 &&
+      !isStreamBody &&
+      credentialInjection.kind === "inject" &&
+      credentialForwarded
+    ) {
       try {
         const refreshedResult = await forceRefreshIntegrationProxyCredentials(refreshSelection);
         const refreshed = refreshedResult?.payload ?? null;
@@ -438,12 +452,18 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     await persistJar();
   }
 
-  if (res.ok && credentialInjection.kind === "inject" && rejectionStreak > 0) {
-    clearUpstreamRejections(connectionId, ciphertext).catch((err: unknown) =>
-      logger.warn("credential-proxy: could not clear the connection's rejection streak", {
-        connectionId,
-        error: getErrorMessage(err),
-      }),
+  if (
+    res.ok &&
+    credentialInjection.kind === "inject" &&
+    credentialForwarded &&
+    rejectionStreak > 0
+  ) {
+    clearUpstreamRejections(connectionId, input.integrationId, selection, ciphertext).catch(
+      (err: unknown) =>
+        logger.warn("credential-proxy: could not clear the connection's rejection streak", {
+          connectionId,
+          error: getErrorMessage(err),
+        }),
     );
   }
 

@@ -29,6 +29,8 @@ const LIVE = "d0360000-0000-4000-8000-000000000001";
 const GONE = "d0360000-0000-4000-8000-000000000002";
 const BLANK = "d0360000-0000-4000-8000-000000000003";
 const UNNAMED = "d0360000-0000-4000-8000-000000000004";
+/** An API-key connection: `account_id` is the placeholder `default`, never a name. */
+const KEYED = "d0360000-0000-4000-8000-000000000005";
 
 const pg = new PGlite();
 const script = await Bun.file(SCRIPT).text();
@@ -61,7 +63,8 @@ beforeAll(async () => {
       (id, integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted, label)
       VALUES ('${LIVE}', '${GMAIL}', 'primary', 'alice@acme.test', '${SPACE}', '${ALICE}', 'x', 'Boulot'),
              ('${BLANK}', '${GMAIL}', 'primary', 'blank@acme.test', '${SPACE}', '${ALICE}', 'x', ''),
-             ('${UNNAMED}', '${GMAIL}', 'primary', 'unnamed@acme.test', '${SPACE}', '${ALICE}', 'x', NULL);
+             ('${UNNAMED}', '${GMAIL}', 'primary', 'unnamed@acme.test', '${SPACE}', '${ALICE}', 'x', NULL),
+             ('${KEYED}', '${GMAIL}', 'key', 'default', '${SPACE}', '${ALICE}', 'x', NULL);
   `);
   await insertRun("run_0036_current", {
     [GMAIL]: [
@@ -76,6 +79,7 @@ beforeAll(async () => {
       { connectionId: LIVE, source: "run_override", label: "", accountId: "alice@acme.test" },
       { connectionId: BLANK, source: "run_override", label: null, accountId: "was@acme.test" },
       { connectionId: UNNAMED, source: "run_override", label: null },
+      { connectionId: KEYED, source: "run_override", label: null, accountId: "default" },
     ],
   });
 }, 300_000);
@@ -127,6 +131,8 @@ describe("0036 — resolved connection labels", () => {
           label: "unnamed@acme.test",
           accountId: "unnamed@acme.test",
         },
+        // The placeholder account names nothing: the label falls through to the id.
+        { connectionId: KEYED, source: "run_override", label: KEYED, accountId: "default" },
       ],
     });
     expect(await snapshot("run_0036_current")).toEqual({

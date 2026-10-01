@@ -18,7 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { and, eq, gt, sql, type SQL } from "drizzle-orm";
+import { and, eq, gt, gte, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -518,7 +518,11 @@ async function updateBlob(
   orgId: string,
   id: string,
   mutate: (existing: CredentialsBlob) => CredentialsBlob | null,
-  extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
+  opts: {
+    extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>;
+    /** Writes only while the row also matches this. */
+    where?: SQL;
+  } = {},
 ): Promise<void> {
   // Optimistic concurrency (compare-and-swap). The read-modify-write below is
   // NOT atomic on its own: a refresh (rotating tokens) and a dead-marking
@@ -536,7 +540,7 @@ async function updateBlob(
       .where(
         scopedWhere(modelProviderCredentials, {
           orgId,
-          extra: [eq(modelProviderCredentials.id, id)],
+          extra: [eq(modelProviderCredentials.id, id), opts.where],
         }),
       )
       .limit(1);
@@ -545,7 +549,7 @@ async function updateBlob(
     const next = existing && mutate(existing);
     if (!existing || !next) return;
     const set: Record<string, unknown> = {
-      ...extraColumns,
+      ...opts.extraColumns,
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
       updatedAt: new Date(),
     };
@@ -570,6 +574,7 @@ async function updateBlob(
             eq(modelProviderCredentials.id, id),
             // CAS token: only write if the blob is still the one we read.
             eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted),
+            opts.where,
           ],
         }),
       )
@@ -611,7 +616,7 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { refreshFailureCount: 0 },
+    { extraColumns: { refreshFailureCount: 0 } },
   );
 }
 
@@ -727,14 +732,22 @@ export async function recordModelCredentialRejection(
     .set({ refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1` })
     .where(holding)
     .returning({ failures: modelProviderCredentials.refreshFailureCount });
-  if (!updated || updated.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
+  const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+  if (!updated || updated.failures < max) return;
 
   logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
     credentialId: id,
     failures: updated.failures,
   });
-  await updateBlob(orgId, id, (b) =>
-    b.kind === "api_key" && b.apiKey === rejectedApiKey ? { ...b, needsReconnection: true } : null,
+  // A success landing in between reset the count: the streak it ended flags nothing.
+  await updateBlob(
+    orgId,
+    id,
+    (b) =>
+      b.kind === "api_key" && b.apiKey === rejectedApiKey
+        ? { ...b, needsReconnection: true }
+        : null,
+    { where: gte(modelProviderCredentials.refreshFailureCount, max) },
   );
 }
 

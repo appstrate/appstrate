@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConnectionResolutionSource` / `ConnectionResolutionErrorCode` unions now
   derive, and `resolvedConnectionMapSchema`, the Zod schema of the persisted
   `ResolvedConnectionMap` snapshot. (#1641)
+- **`./ssrf` re-exports two new `GuardedFetchOptions` and one
+  `SsrfBlockedError` field**, through `@appstrate/afps-shared` 0.10.0:
+  `forwardCredentials(url)` keeps the credential headers, Cookie and body
+  across an origin change it approves (default: stripped);
+  `followRedirects: false` returns the first response even when it is a
+  redirect; `SsrfBlockedError.hop` is the refused hop of the chain (0 = the
+  initial URL). Additive. (#1641)
 
 ### Changed
 

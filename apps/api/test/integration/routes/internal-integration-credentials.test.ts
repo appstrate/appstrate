@@ -784,6 +784,22 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(res.status).toBe(400);
   });
 
+  it("DENY: a malformed or empty `credential_revision` is a 400 on both routes, counting nothing", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    for (const revision of ["", "not-a-revision", "ABCDEF0123456789"]) {
+      const refresh = await app.request(
+        `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${revision}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(refresh.status).toBe(400);
+      expect((await reportSuccess(connectionId, revision)).status).toBe(400);
+    }
+    expect(await streakOf(connectionId)).toBe(0);
+  });
+
   it("upstream-success resets nothing once the run's actor can no longer reach the connection", async () => {
     await seedIntegration(INTEGRATION, true);
     const colleague = await memberContext(ctx, "member");

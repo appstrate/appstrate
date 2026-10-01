@@ -174,6 +174,8 @@ export interface GuardedFetchResult {
   response: Response;
   finalUrl: string;
   hops: number;
+  /** False once a hop stripped the credential headers: the response did not answer the caller's credential. */
+  credentialsForwarded: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -309,6 +311,7 @@ export async function guardedFetchChain(
   const callerSetHost = headers.has("host");
   const cookies = opts?.cookies;
   let cookieBase = headers.get("cookie");
+  let credentialsForwarded = true;
 
   // The address pin requires owning the socket semantics: Bun's `fetch` `tls`
   // extension AND the global fetch (an injected transport seam cannot be
@@ -372,7 +375,7 @@ export async function guardedFetchChain(
       // `fetch` reports opaqueredirect / 3xx: follow manually so each hop is guarded.
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location");
       if (!isRedirect || opts?.followRedirects === false) {
-        return { response: res, finalUrl: current.href, hops: hop };
+        return { response: res, finalUrl: current.href, hops: hop, credentialsForwarded };
       }
 
       if (hop === maxRedirects) {
@@ -397,6 +400,7 @@ export async function guardedFetchChain(
       ) {
         for (const h of sensitiveHeaderNames) headers.delete(h);
         cookieBase = null;
+        credentialsForwarded = false;
         // A 307/308 preserves method+body by spec, but re-sending a
         // secret-bearing request body (OAuth `client_secret`/`refresh_token`,
         // a signed webhook payload) to a DIFFERENT HOST is the same
