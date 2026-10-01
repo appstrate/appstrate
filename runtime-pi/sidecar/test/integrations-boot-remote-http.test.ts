@@ -181,6 +181,30 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(getSuccessReports()).toBe(1);
   });
 
+  it("reports a 2xx only from the origin the credential was sent to, not past a cross-origin redirect", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
+    });
+    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    const redirectingTo = (location: string) =>
+      (async (input: string) =>
+        new URL(input).pathname === "/mcp/v1"
+          ? new Response(null, { status: 307, headers: { location } })
+          : new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+    await withGlobalFetch(redirectingTo("https://elsewhere.example.org/landing"), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getSuccessReports()).toBe(0);
+
+    await withGlobalFetch(redirectingTo("/mcp/v2"), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getSuccessReports()).toBe(1);
+  });
+
   it("preserves an allowed caller override and does not refresh it on 401", async () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: {

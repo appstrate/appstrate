@@ -196,6 +196,15 @@ describe("credential-proxy integration-resolver", () => {
     };
   }
 
+  /** The forced-refresh input after a 401 on the credential `connId` holds right now. */
+  async function rejectedWith(connId: string, actorId = ctx.user.id) {
+    const [row] = await db
+      .select({ ciphertext: integrationConnections.credentialsEncrypted })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    return { ...input(actorId), rejectedCiphertext: row!.ciphertext };
+  }
+
   it("resolves a proxy credentials payload for a seeded connection (happy path)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
 
@@ -317,7 +326,7 @@ describe("credential-proxy integration-resolver", () => {
     // Not-refreshed, like the other terminal shape: the caller (inside
     // `catch {}` either way) relays the upstream 401, and the persisted flag
     // is what makes the failure legible.
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -335,7 +344,7 @@ describe("credential-proxy integration-resolver", () => {
     // refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -371,7 +380,7 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     // `null` alone no longer discriminates transient from terminal: both
     // shapes return it since `IntegrationCredentialRevokedError` was removed,
     // so the PERSISTED flag is the only thing left that tells them apart. The
@@ -403,10 +412,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -433,10 +442,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -466,7 +475,7 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(await rejectedWith(connId))).toBeNull();
 
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
@@ -478,7 +487,7 @@ describe("credential-proxy integration-resolver", () => {
   it("does not resolve another actor's connection (actor isolation, never leaks B's credentials)", async () => {
     const other = await createTestUser();
     // Connection belongs to actor B (not shared). Actor A resolves.
-    await seedConnection({ userId: other.id });
+    const connId = await seedConnection({ userId: other.id });
 
     // Read path: A has no accessible connection → not-found, never B's payload.
     await expect(resolveIntegrationProxyCredentials(input(ctx.user.id))).rejects.toBeInstanceOf(
@@ -486,7 +495,9 @@ describe("credential-proxy integration-resolver", () => {
     );
     // Refresh path: A's force-refresh returns null (no accessible connection),
     // never touches/returns B's row.
-    const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id));
+    const refreshed = await forceRefreshIntegrationProxyCredentials(
+      await rejectedWith(connId, ctx.user.id),
+    );
     expect(refreshed).toBeNull();
   });
 

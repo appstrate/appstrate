@@ -15,6 +15,10 @@ import {
   type GuardedFetchResult,
 } from "@appstrate/afps-shared/guarded-fetch";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import {
+  assertHttpFieldValue,
+  InvalidHeaderValueError,
+} from "@appstrate/afps-shared/delivery-http";
 import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 
@@ -35,8 +39,19 @@ export const HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
 ]);
 
 /** Caller headers minus Host, hop-by-hop and `Connection`-named ones (a credential excepted), and
- * Content-Length unless the body is a stream fetch cannot measure. */
-function forwardableHeaders(init: RequestInit, credentialHeaders: readonly string[]): Headers {
+ * Content-Length unless the body is a stream fetch cannot measure. The one caller-header rule.
+ * Throws {@link InvalidHeaderValueError} on a value `Headers` would quote in its own TypeError. */
+export function forwardableHeaders(
+  init: Pick<RequestInit, "headers" | "body">,
+  credentialHeaders: readonly string[] = [],
+): Headers {
+  const given =
+    init.headers instanceof Headers
+      ? []
+      : Array.isArray(init.headers)
+        ? init.headers
+        : Object.entries(init.headers ?? {});
+  for (const [name, value] of given) assertHttpFieldValue(String(name), String(value));
   const headers = new Headers(init.headers);
   const credential = new Set(credentialHeaders.map((h) => h.toLowerCase()));
   const named = new Set(
@@ -83,7 +98,8 @@ export class PreflightError extends Error {
 
 /** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
 export interface ApiCallFailureClass {
-  kind: "not_authorized" | "ssrf" | "unresolvable" | "timeout" | "transport";
+  /** `invalid_header`: a header value is no HTTP field value; nothing was sent. */
+  kind: "not_authorized" | "ssrf" | "unresolvable" | "invalid_header" | "timeout" | "transport";
   /** A redirect hop was refused, not the initial target. */
   redirect: boolean;
   /** The refusal's message (hosts redacted); a transport error's own message. */
@@ -99,6 +115,9 @@ export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
   if (err instanceof RedirectBlockedError) {
     const kind = err.reason === "unauthorized" ? "not_authorized" : err.reason;
     return { kind, redirect: true, message: err.message };
+  }
+  if (err instanceof InvalidHeaderValueError) {
+    return { kind: "invalid_header", redirect: false, message: err.message };
   }
   const error = err instanceof Error ? err : new Error(String(err));
   if (error.name === "TimeoutError")
@@ -196,15 +215,18 @@ export interface FetchApiCallOptions {
   /** Transport override (tests): disables the address pin. Omitted = pinned global `fetch`. */
   fetchFn?: typeof fetch;
   resolveHost?: HostResolver;
-  /** Credential values scrubbed from the hosts a refusal or a log line names. */
+  /** The target's host as its template names it (`templateHost`): what a message about it echoes. */
+  targetHost: string;
+  /** Credential values scrubbed from the redirect hosts and transport errors a message names. */
   credentialFields: Readonly<Record<string, string>>;
   logger?: ApiCallLogger;
 }
 
 /**
  * Send one `api_call` upstream. Throws {@link PreflightError} (initial target refused, nothing
- * sent), {@link RedirectBlockedError} (a hop refused) or the scrubbed transport error. A
- * `ReadableStream` body cannot be replayed, so its redirect is returned unfollowed.
+ * sent), {@link InvalidHeaderValueError} (likewise), {@link RedirectBlockedError} (a hop refused)
+ * or the scrubbed transport error. A `ReadableStream` body cannot be replayed, so its redirect is
+ * returned unfollowed.
  */
 export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
   const fields = opts.credentialFields;
@@ -221,9 +243,8 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
     AbortSignal.timeout(API_CALL_TIMEOUT_MS),
     ...(callerSignal ? [callerSignal] : []),
   ]);
-  const headers = forwardableHeaders(opts.init, opts.credentialHeaders);
-
   try {
+    const headers = forwardableHeaders(opts.init, opts.credentialHeaders);
     return await guardedFetchChain(
       opts.url,
       { ...opts.init, headers, signal },
@@ -261,19 +282,28 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
       },
     );
   } catch (err) {
-    if (err instanceof PreflightError || err instanceof RedirectBlockedError) throw err;
+    if (
+      err instanceof PreflightError ||
+      err instanceof RedirectBlockedError ||
+      err instanceof InvalidHeaderValueError
+    ) {
+      throw err;
+    }
     if (!(err instanceof SsrfBlockedError)) throw scrubTransportError(err, fields);
     const host = redactCredentialHost(`http://${err.host}/`, fields);
     if (err.reason === "too-many-redirects") {
       // No `cause`: the guard's error names the unredacted host (a templated one is a secret).
       // eslint-disable-next-line preserve-caught-error
       throw new Error(
-        `Too many redirects (>${DEFAULT_MAX_REDIRECTS}) starting at ${redactCredentialHost(opts.url, fields)}`,
+        `Too many redirects (>${DEFAULT_MAX_REDIRECTS}) starting at ${opts.targetHost}`,
       );
     }
     if (err.reason === "resolution-failed") {
       if (err.hop > 0) throw new RedirectBlockedError("unresolvable", host);
-      throw new PreflightError("unresolvable", `Target host could not be resolved (${host})`);
+      throw new PreflightError(
+        "unresolvable",
+        `Target host could not be resolved (${opts.targetHost})`,
+      );
     }
     if (err.hop > 0) {
       warn("Redirect refused (SSRF)", err.hop, host);

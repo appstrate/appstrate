@@ -79,6 +79,11 @@ export interface IntegrationCredentialsWire {
    * The sidecar reports the next successful call, which ends the streak.
    */
   rejectionStreak?: number;
+  /**
+   * Opaque revision of the stored credential this payload carries; absent on a connect run's empty
+   * payload. Sent back on refresh and success reports so they act on this credential only.
+   */
+  credentialRevision?: string;
 }
 
 /**

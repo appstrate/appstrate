@@ -44,6 +44,7 @@ import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
+  readCredentialRevision,
   recordUnrefreshableRejection,
   upstreamRejectionStreak,
 } from "./integration-connections.ts";
@@ -59,11 +60,17 @@ interface MutableCredentialsWire {
   deliveryPlans: Record<string, HttpDeliveryPlan>;
   expiresAtEpochMs: Record<string, number | null>;
   rejectionStreak?: number;
+  credentialRevision?: string;
 }
 
 interface ResolveLiveCredentialsOptions {
   /** When true, refresh OAuth tokens regardless of remaining lifetime. */
   forceRefresh?: boolean;
+  /**
+   * The `credential_revision` the caller holds. A forced refresh from a caller holding a
+   * superseded credential is a plain read: its 401 says nothing about the current one.
+   */
+  heldRevision?: string;
 }
 
 /**
@@ -85,7 +92,7 @@ interface ResolveLiveCredentialsOptions {
  *     surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
  *     an unrefreshable auth rejected fewer times than the failure threshold
- *     (consecutive, see `clearUpstreamRejections`).
+ *     (consecutive, see `clearReachableUpstreamRejections`).
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
@@ -186,6 +193,10 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
+  const forceRefresh =
+    options.forceRefresh === true &&
+    (options.heldRevision === undefined || options.heldRevision === connection.credentialRevision);
+
   // Terminally unusable: flag for re-connect and surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
   const flagTerminalAndThrow = async (reason: string): Promise<never> => {
@@ -195,7 +206,7 @@ export async function resolveLiveIntegrationCredentials(
       integrationId,
       authKey,
       connectionId: connection.id,
-      forced: options.forceRefresh === true,
+      forced: forceRefresh,
       reason,
     });
     throw gone(
@@ -213,6 +224,7 @@ export async function resolveLiveIntegrationCredentials(
   const rejectUnrefreshable = async (reason: string): Promise<never> => {
     const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
       connection.id,
+      connection.credentialsEncrypted,
     );
     if (needsReconnection) return flagTerminalAndThrow(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
@@ -254,8 +266,8 @@ export async function resolveLiveIntegrationCredentials(
 
   // Decide whether to refresh.
   const needsRefresh =
-    authDef.type === "oauth2" &&
-    (options.forceRefresh === true || isWithinLeadWindow(connection.expiresAt));
+    authDef.type === "oauth2" && (forceRefresh || isWithinLeadWindow(connection.expiresAt));
+  let credentialRevision: string | null = connection.credentialRevision;
 
   if (needsRefresh) {
     let refreshContext;
@@ -271,7 +283,7 @@ export async function resolveLiveIntegrationCredentials(
       // Transient token-endpoint discovery failure on an issuer-only manifest —
       // NEVER terminal (the row stays untouched; the next run re-discovers).
       if (err instanceof RefreshError && err.kind === "transient") {
-        if (options.forceRefresh === true) {
+        if (forceRefresh) {
           // Forced = the sidecar already saw an upstream 401, so the cached
           // token is known-bad. We can't refresh right now → 502 so the sidecar
           // keeps the original 401 and backs off.
@@ -311,7 +323,7 @@ export async function resolveLiveIntegrationCredentials(
         // short-circuit must not answer it with the very token that 401'd.
         // The proactive (lead-window) branch keeps the short-circuit — there
         // the stored token is presumed good, we are merely ahead of expiry.
-        { force: options.forceRefresh === true },
+        { force: forceRefresh },
       );
       if (classified.status === "terminal") {
         // The connection can never be refreshed as stored (no refresh_token).
@@ -355,6 +367,7 @@ export async function resolveLiveIntegrationCredentials(
 
       const refreshed = classified.result;
       fields = refreshed.fields;
+      credentialRevision = await readCredentialRevision(connection.id);
       expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
 
       // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
@@ -394,13 +407,13 @@ export async function resolveLiveIntegrationCredentials(
           });
         }
       }
-    } else if (options.forceRefresh === true) {
+    } else if (forceRefresh) {
       // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
       // resolvable pinned OAuth client or no token_endpoint, so the token can
       // never be refreshed. Terminal.
       await rejectUnrefreshable("no OAuth client or token endpoint");
     }
-  } else if (options.forceRefresh === true) {
+  } else if (forceRefresh) {
     // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
     // with no connect.tool re-login handler — those route to re-login in the
     // sidecar and never reach here). There is nothing to refresh.
@@ -431,6 +444,7 @@ export async function resolveLiveIntegrationCredentials(
   out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
   const streak = upstreamRejectionStreak(connection);
   if (streak > 0) out.rejectionStreak = streak;
+  if (credentialRevision !== null) out.credentialRevision = credentialRevision;
 
   return out;
 }
@@ -506,6 +520,7 @@ function isWithinLeadWindow(expiresAt: Date | null): boolean {
  *   deliveryPlans         → delivery_plans
  *   expiresAtEpochMs      → expires_at_epoch_ms
  *   rejectionStreak       → rejection_streak
+ *   credentialRevision    → credential_revision
  *   headerName            → header_name           (per delivery plan)
  *   headerPrefix          → header_prefix         (per delivery plan)
  *   allowServerOverride   → allow_server_override (per delivery plan)
@@ -544,5 +559,8 @@ export function serializeIntegrationCredentialsWire(
     delivery_plans,
     expires_at_epoch_ms: wire.expiresAtEpochMs,
     ...(wire.rejectionStreak !== undefined ? { rejection_streak: wire.rejectionStreak } : {}),
+    ...(wire.credentialRevision !== undefined
+      ? { credential_revision: wire.credentialRevision }
+      : {}),
   };
 }

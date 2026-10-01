@@ -38,12 +38,16 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
-  redactCredentialHost,
   redactionFields,
+  templateHost,
   urlPolicyRefusalMessage,
   type CookieJar,
   type UrlPolicyRefusal,
 } from "@appstrate/afps-runtime/resolvers";
+import {
+  assertHttpFieldValue,
+  InvalidHeaderValueError,
+} from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
@@ -146,6 +150,8 @@ interface ProxyCallInput {
 interface ProxyCallResult {
   /** The `integration_connections` row whose credential the call carried. */
   connectionId: string;
+  /** The target's host as its template names it: what a message about the upstream echoes. */
+  redactedHost: string;
   status: number;
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;
@@ -163,11 +169,13 @@ interface ProxyCallResult {
 /**
  * A call the proxy answered itself. The route reflects `message` to the caller and logs it, so
  * it MUST NEVER contain a substituted credential value — build it from redacted hosts only.
+ * `connectionId` is set once the connection's credential may have left (a failure after dispatch).
  */
 export class ProxyCallError extends Error {
   constructor(
     readonly code: ProxyProblemCode,
     message: string,
+    readonly connectionId?: string,
   ) {
     super(message);
     this.name = "ProxyCallError";
@@ -200,13 +208,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let refreshSelection;
   let connectionId: string;
   let rejectionStreak: number;
+  let ciphertext: string;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
     rejectionStreak = result.rejectionStreak;
-    refreshSelection = { ...selection, connectionId };
+    ciphertext = result.ciphertext;
+    refreshSelection = { ...selection, connectionId, rejectedCiphertext: ciphertext };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCallError("credential_not_found", err.message);
@@ -218,8 +228,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // mirror of the sidecar; stops the proxy from leaking `{{foo}}` to the
   // upstream when a template references a non-existent field).
   const fields = resolved.credentials;
+  // Looked up on the TEMPLATE: a `{{word}}` inside a credential value is no placeholder.
+  const unresolvedIn = (template: string) =>
+    findUnresolvedPlaceholders(template).filter((key) => !Object.hasOwn(fields, key));
   const target = substituteVars(input.target, fields);
-  const unresolvedInTarget = findUnresolvedPlaceholders(target);
+  const unresolvedInTarget = unresolvedIn(input.target);
   if (unresolvedInTarget.length > 0) {
     throw new ProxyCallError(
       "unresolved_placeholder",
@@ -253,7 +266,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
   const redactFields = redactionFields(policy, fields);
-  const redactedHost = redactCredentialHost(target, redactFields);
+  const redactedHost = templateHost(input.target);
 
   // Resolve caller headers, then let the shared injector add the pinned
   // credential header server-side (mirror of the sidecar — single source
@@ -263,19 +276,27 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // collected at injection time: a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>();
   const headers = new Headers();
-  for (const [k, template] of headerTemplates) {
-    const substituted = substituteVars(template, fields);
-    const unresolved = findUnresolvedPlaceholders(substituted);
-    if (unresolved.length > 0) {
-      throw new ProxyCallError(
-        "unresolved_placeholder",
-        `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
-      );
+  let credentialInjection;
+  try {
+    for (const [k, template] of headerTemplates) {
+      const unresolved = unresolvedIn(template);
+      if (unresolved.length > 0) {
+        throw new ProxyCallError(
+          "unresolved_placeholder",
+          `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
+        );
+      }
+      const substituted = substituteVars(template, fields);
+      if (substituted !== template) sensitiveHeaderNames.add(k);
+      assertHttpFieldValue(k, substituted);
+      headers.set(k, substituted);
     }
-    if (substituted !== template) sensitiveHeaderNames.add(k);
-    headers.set(k, substituted);
+    credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
+  } catch (err) {
+    throw err instanceof InvalidHeaderValueError
+      ? unusableCredential(err.message, input.integrationId)
+      : err;
   }
-  let credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
   const carrier = credentialCarryingHeader(credentialInjection);
   if (carrier) sensitiveHeaderNames.add(carrier);
 
@@ -288,15 +309,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     if (isStreamBody) {
       body = input.body as ReadableStream<Uint8Array>;
     } else if (bodyTemplate !== null) {
-      const substituted = substituteVars(bodyTemplate, fields);
-      const unresolved = findUnresolvedPlaceholders(substituted);
+      const unresolved = unresolvedIn(bodyTemplate);
       if (unresolved.length > 0) {
         throw new ProxyCallError(
           "unresolved_placeholder",
           `Unresolved placeholders in body: {{${unresolved.join(",")}}}`,
         );
       }
-      body = substituted;
+      body = substituteVars(bodyTemplate, fields);
     } else {
       body = input.body as string | Uint8Array;
     }
@@ -348,11 +368,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         integrationId: input.integrationId,
         ...(input.fetch ? { fetchFn: input.fetch } : {}),
         ...(input.resolveHost ? { resolveHost: input.resolveHost } : {}),
+        targetHost: redactedHost,
         credentialFields: redactFields,
       });
       return sent.response;
     } catch (err) {
-      throw toProxyCallError(err, input.integrationId, redactedHost);
+      throw toProxyCallError(err, input.integrationId, redactedHost, connectionId);
     }
   };
 
@@ -399,7 +420,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
             headers,
           } as RequestInit);
         }
-      } catch {
+      } catch (err) {
+        // A refreshed credential no header can carry is the connection's fault, not transient.
+        if (err instanceof InvalidHeaderValueError) {
+          throw unusableCredential(err.message, input.integrationId, connectionId);
+        }
         // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
         // — surface the original 401 as-is; the caller will
         // handle re-authentication. `forceRefresh` returns `null` rather than
@@ -414,7 +439,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   if (res.ok && credentialInjection.kind === "inject" && rejectionStreak > 0) {
-    clearUpstreamRejections(connectionId).catch((err: unknown) =>
+    clearUpstreamRejections(connectionId, ciphertext).catch((err: unknown) =>
       logger.warn("credential-proxy: could not clear the connection's rejection streak", {
         connectionId,
         error: getErrorMessage(err),
@@ -438,6 +463,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     }
     return {
       connectionId,
+      redactedHost,
       status: res.status,
       headers: res.headers,
       body: res.body,
@@ -453,6 +479,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     // `const { truncated } = …`) always captured the initial `false`.
     return {
       connectionId,
+      redactedHost,
       status: res.status,
       headers: res.headers,
       body: capped.body,
@@ -464,15 +491,46 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   return {
     connectionId,
+    redactedHost,
     status: res.status,
     headers: res.headers,
     body: res.body,
   };
 }
 
+/** A header the connection's credential makes invalid (`message` names the header, no value). */
+function unusableCredential(
+  message: string,
+  integrationId: string,
+  connectionId?: string,
+): ProxyCallError {
+  return new ProxyCallError(
+    "credential_unusable",
+    `Integration ${integrationId}: the connection's credential is unusable (${message} once substituted or injected); reconnect it with a valid value.`,
+    connectionId,
+  );
+}
+
+/** A relayed body whose read failed after its headers arrived, as the proxy's typed error. */
+export function bodyReadError(err: unknown, redactedHost: string): ProxyCallError {
+  const code =
+    classifyApiCallFailure(err).kind === "timeout" ? "upstream_timeout" : "upstream_unreachable";
+  return new ProxyCallError(code, upstreamFailureDetail(redactedHost, code));
+}
+
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
-function toProxyCallError(err: unknown, integrationId: string, redactedHost: string): Error {
+function toProxyCallError(
+  err: unknown,
+  integrationId: string,
+  redactedHost: string,
+  connectionId: string,
+): Error {
   const failure = classifyApiCallFailure(err);
+  // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
+  const sent =
+    failure.redirect || failure.kind === "timeout" || failure.kind === "transport"
+      ? connectionId
+      : undefined;
   switch (failure.kind) {
     case "not_authorized":
     case "ssrf":
@@ -480,18 +538,23 @@ function toProxyCallError(err: unknown, integrationId: string, redactedHost: str
         failure.kind === "ssrf" ? "blocked_target" : "unauthorized_target",
         `Integration ${integrationId}: ${failure.message}` +
           (failure.redirect ? "" : ` (host ${redactedHost})`),
+        sent,
       );
     case "unresolvable":
-      return new ProxyCallError("upstream_unresolvable", failure.message);
+      return new ProxyCallError("upstream_unresolvable", failure.message, sent);
+    case "invalid_header":
+      return unusableCredential(failure.message, integrationId);
     case "timeout":
       return new ProxyCallError(
         "upstream_timeout",
         upstreamFailureDetail(redactedHost, "upstream_timeout"),
+        sent,
       );
     case "transport":
       return new ProxyCallError(
         "upstream_unreachable",
         upstreamFailureDetail(redactedHost, "upstream_unreachable"),
+        sent,
       );
   }
 }

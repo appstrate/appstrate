@@ -216,6 +216,39 @@ export function displayAccountId(accountId: string | null | undefined): string |
 }
 
 /**
+ * {@link loadAccessibleConnectionById}'s reach: the connection, of `integrationId`, in the
+ * space, the actor's own or shared.
+ */
+function reachableConnection(
+  connectionId: string,
+  integrationId: string,
+  context: { spaceId: string; actor: Actor },
+): SQL {
+  return and(
+    eq(integrationConnections.id, connectionId),
+    eq(integrationConnections.integrationId, integrationId),
+    eq(integrationConnections.spaceId, context.spaceId),
+    actorOrSharedFilter(context.actor, integrationConnections),
+  )!;
+}
+
+/**
+ * Short, non-reversible digest of the stored ciphertext: any credential write changes it, so a
+ * caller holding a superseded credential can say which one it holds without seeing the current one.
+ */
+const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
+
+/** The connection's current {@link credentialRevision}; `null` once the row is gone. */
+export async function readCredentialRevision(connectionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ credentialRevision })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.credentialRevision ?? null;
+}
+
+/**
  * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
  * by the spawn and live-credentials resolvers to load a run-bound connection.
@@ -235,14 +268,14 @@ export async function loadAccessibleConnectionById(
   integrationId: string,
   expectedAuthKey: string | null,
   context: { spaceId: string; actor: Actor },
-): Promise<ResolvedConnectionRow | null> {
-  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
+): Promise<(ResolvedConnectionRow & { credentialRevision: string }) | null> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      credentialRevision,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
@@ -251,11 +284,8 @@ export async function loadAccessibleConnectionById(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.integrationId, integrationId),
+        reachableConnection(connectionId, integrationId, context),
         ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
-        eq(integrationConnections.spaceId, context.spaceId),
-        accessible,
       ),
     )
     .limit(1);
@@ -2526,8 +2556,8 @@ export async function markIntegrationConnectionNeedsReconnection(
 type RefreshFailureGate =
   /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
   | { graceSeconds: number }
-  /** An upstream 401 on an unrefreshable credential; {@link clearUpstreamRejections} ends the streak. */
-  | "upstream_rejection";
+  /** An upstream 401 on the unrefreshable credential whose ciphertext is `rejected`. */
+  | { rejected: string };
 
 /**
  * Record a failure on a connection's credential: a transient OAuth refresh
@@ -2544,7 +2574,7 @@ export async function recordIntegrationRefreshFailure(
 ): Promise<{ failures: number; needsReconnection: boolean }> {
   const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
   const escalates =
-    gate === "upstream_rejection"
+    "rejected" in gate
       ? sql`${failures} >= ${maxFailures}`
       : sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
   const [row] = await db
@@ -2554,7 +2584,14 @@ export async function recordIntegrationRefreshFailure(
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
     })
-    .where(eq(integrationConnections.id, connectionId))
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        "rejected" in gate
+          ? eq(integrationConnections.credentialsEncrypted, gate.rejected)
+          : undefined,
+      ),
+    )
     .returning({
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
@@ -2562,35 +2599,67 @@ export async function recordIntegrationRefreshFailure(
   return row ?? { failures: 0, needsReconnection: false };
 }
 
-/** Count an upstream rejection of a credential nothing can refresh toward `INTEGRATION_REFRESH_MAX_FAILURES`. */
+/**
+ * Count an upstream rejection of a credential nothing can refresh toward
+ * `INTEGRATION_REFRESH_MAX_FAILURES`, against `rejectedCiphertext` only: a 401 on a credential the
+ * row no longer holds (replaced since, or re-encrypted by a re-key — an accepted miss) counts nothing.
+ */
 export async function recordUnrefreshableRejection(
   connectionId: string,
+  rejectedCiphertext: string,
 ): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
   const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-  const counted = await recordIntegrationRefreshFailure(
-    connectionId,
-    maxFailures,
-    "upstream_rejection",
-  );
+  const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
+    rejected: rejectedCiphertext,
+  });
   return { ...counted, maxFailures };
 }
 
 /**
- * A successful upstream call through a connection ends its rejection streak. Only a non-OAuth2
- * connection (`client_ref IS NULL`): an OAuth2 count tracks refreshes, which a call does not prove.
- * Writes nothing when the count is already 0.
+ * A successful upstream call ends a connection's rejection streak, on the credential that call
+ * carried (`credential`). Only a non-OAuth2 connection (`client_ref IS NULL`): an OAuth2 count
+ * tracks refreshes, which a call does not prove. A flagged connection keeps its count.
  */
-export async function clearUpstreamRejections(connectionId: string): Promise<void> {
+async function clearRejections(credential: SQL): Promise<void> {
   await db
     .update(integrationConnections)
     .set({ refreshFailureCount: 0 })
     .where(
       and(
-        eq(integrationConnections.id, connectionId),
+        credential,
         gt(integrationConnections.refreshFailureCount, 0),
         isNull(integrationConnections.clientRef),
+        eq(integrationConnections.needsReconnection, false),
       ),
     );
+}
+
+/** {@link clearRejections} after a 2xx the platform relayed with the credential `ciphertext`. */
+export function clearUpstreamRejections(connectionId: string, ciphertext: string): Promise<void> {
+  return clearRejections(
+    and(
+      eq(integrationConnections.id, connectionId),
+      eq(integrationConnections.credentialsEncrypted, ciphertext),
+    )!,
+  );
+}
+
+/**
+ * {@link clearRejections} on a run's report of a 2xx with credential `revision`, while the run's
+ * actor can still reach the connection ({@link loadAccessibleConnectionById}'s reach).
+ */
+export function clearReachableUpstreamRejections(
+  connectionId: string,
+  integrationId: string,
+  context: { spaceId: string; actor: Actor },
+  revision: string,
+): Promise<void> {
+  return clearRejections(
+    and(
+      reachableConnection(connectionId, integrationId, context),
+      eq(credentialRevision, revision),
+    )!,
+  );
 }
 
 /** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */

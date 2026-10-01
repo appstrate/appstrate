@@ -2,14 +2,16 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Tool } from "@afps-spec/types";
 import {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
+  STREAMING_THRESHOLD,
   type Bundle,
   type BundlePackage,
   type RunEvent,
@@ -1298,12 +1300,12 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     const { ctx } = makeCtx();
     await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
     expect(calls[0]!.url).toBe("https://app.appstrate.com/api/credential-proxy/proxy");
-    const h = calls[0]!.init.headers as Record<string, string>;
-    expect(h.Authorization).toBe("Bearer ask_test");
-    expect(h["X-Space-Id"]).toBe("spc_1");
-    expect(h["X-Org-Id"]).toBe("org_1");
-    expect(h["X-Integration-Id"]).toBe("@acme/api");
-    expect(h["X-Target"]).toBe("https://api.acme.com/v1/me");
+    const h = new Headers(calls[0]!.init.headers);
+    expect(h.get("Authorization")).toBe("Bearer ask_test");
+    expect(h.get("X-Space-Id")).toBe("spc_1");
+    expect(h.get("X-Org-Id")).toBe("org_1");
+    expect(h.get("X-Integration-Id")).toBe("@acme/api");
+    expect(h.get("X-Target")).toBe("https://api.acme.com/v1/me");
   });
 
   it("drops an agent-supplied X-Run-Id (any casing) but keeps X-Connection-Id", async () => {
@@ -1333,11 +1335,10 @@ describe("RemoteAppstrateIntegrationResolver", () => {
       },
       ctx,
     );
-    const h = calls[0]!.init.headers as Record<string, string>;
-    // One key only — a second casing would be merged by fetch into "run_forged, run_real".
-    expect(Object.keys(h).filter((k) => k.toLowerCase() === "x-run-id")).toEqual(["X-Run-Id"]);
-    expect(h["X-Run-Id"]).toBe("run_real");
-    expect(h["X-Connection-Id"]).toBe("conn_1");
+    const h = new Headers(calls[0]!.init.headers);
+    // Not merged into "run_forged, run_real".
+    expect(h.get("X-Run-Id")).toBe("run_real");
+    expect(h.get("X-Connection-Id")).toBe("conn_1");
   });
 
   it("does not enforce authorizedUris locally (platform gates server-side)", async () => {
@@ -1361,7 +1362,104 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     // off-allowlist target — must NOT throw locally; proxy decides.
     await tools[0]!.execute({ method: "GET", target: "https://anything.example.com/x" }, ctx);
     expect(calls).toHaveLength(1);
-    const h = calls[0]!.init.headers as Record<string, string>;
-    expect(h["X-Target"]).toBe("https://anything.example.com/x");
+    expect(new Headers(calls[0]!.init.headers).get("X-Target")).toBe(
+      "https://anything.example.com/x",
+    );
+  });
+
+  async function remoteTool(fetchImpl: typeof fetch): Promise<Tool> {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const resolver = new RemoteAppstrateIntegrationResolver({
+      instance: "https://app.appstrate.com",
+      apiKey: "ask_test",
+      spaceId: "spc_1",
+      fetch: fetchImpl,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    return tools[0]!;
+  }
+
+  it("applies the caller-header rule of fetchApiCall to the agent's headers", async () => {
+    const calls: RequestInit[] = [];
+    const tool = await remoteTool(((_url: string, init: RequestInit) => {
+      calls.push(init);
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as typeof fetch);
+    const { ctx } = makeCtx();
+    await tool.execute(
+      {
+        method: "POST",
+        target: "https://api.acme.com/v1/me",
+        headers: {
+          Host: "evil.example",
+          Connection: "x-foo",
+          "X-Foo": "bar",
+          "Transfer-Encoding": "chunked",
+          Upgrade: "websocket",
+          "Proxy-Authorization": "Basic Zm9vOmJhcg==",
+          "Content-Length": "3",
+          "X-Max-Response-Size": "999999999",
+          "X-Stream-Request": "1",
+          "X-Custom": "kept",
+        },
+        body: "hello world",
+      },
+      ctx,
+    );
+    const h = new Headers(calls[0]!.headers);
+    for (const name of [
+      "host",
+      "connection",
+      "x-foo",
+      "transfer-encoding",
+      "upgrade",
+      "proxy-authorization",
+      "content-length",
+      "x-max-response-size",
+      "x-stream-request",
+    ]) {
+      expect(h.has(name)).toBe(false);
+    }
+    expect(h.get("X-Custom")).toBe("kept");
+    expect(h.get("Authorization")).toBe("Bearer ask_test");
+  });
+
+  it("sends a streamed file with its real Content-Length, never the agent's", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "afps-remote-stream-")));
+    const size = STREAMING_THRESHOLD + 4096;
+    await writeFile(join(workspace, "upload.bin"), new Uint8Array(size));
+    const received: { contentLength: string | null; bytes: number }[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const bytes = (await request.arrayBuffer()).byteLength;
+        received.push({ contentLength: request.headers.get("content-length"), bytes });
+        return new Response("{}", { status: 200 });
+      },
+    });
+    try {
+      const tool = await remoteTool(((_url: string, init: RequestInit) =>
+        fetch(`http://127.0.0.1:${server.port}/api/credential-proxy/proxy`, init)) as typeof fetch);
+      const { ctx } = makeCtx();
+      await tool.execute(
+        {
+          method: "POST",
+          target: "https://api.acme.com/v1/upload",
+          headers: { "Content-Length": "5" },
+          body: { fromFile: "upload.bin" },
+        },
+        { ...ctx, workspace },
+      );
+      expect(received).toEqual([{ contentLength: String(size), bytes: size }]);
+    } finally {
+      server.stop(true);
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 });

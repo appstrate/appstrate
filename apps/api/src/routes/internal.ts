@@ -64,7 +64,7 @@ import {
 import { readIntegrationManifestForRun } from "../services/integration-service.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
 import {
-  clearUpstreamRejections,
+  clearReachableUpstreamRejections,
   isIntegrationActive,
 } from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -407,6 +407,26 @@ export function createInternalRouter() {
     }
   }
 
+  /**
+   * A connect run holds no stored credential: the platform has nothing for this connection yet,
+   * which is the whole reason the run exists. Refusing explicitly beats letting it fall into
+   * `verifyRunToken`'s "Run not found", which would name the wrong cause. The sidecar treats any
+   * non-2xx here as "don't retry now", so this is a fail-closed no-op for it.
+   */
+  async function refuseConnectRun(c: Context, packageId: string): Promise<void> {
+    const connect = await connectCallerOrNull(c);
+    if (!connect) return;
+    logger.warn("Stored-credential request refused for a connect run", {
+      connectId: connect.connectId,
+      packageId,
+      path: c.req.path,
+    });
+    throw conflict(
+      "connect_run_no_refresh",
+      `A connect run holds no stored credential for '${packageId}' — its session is minted in-process by the login tool.`,
+    );
+  }
+
   /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
   function requireBoundConnection(
     c: Context,
@@ -517,23 +537,7 @@ export function createInternalRouter() {
   // tells the sidecar not to retry.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    // A connect run has no stored credential to force-refresh: the platform
-    // holds nothing for this connection yet, which is the whole reason the run
-    // exists. Refusing explicitly beats letting it fall into `verifyRunToken`'s
-    // "Run not found", which would name the wrong cause. The sidecar's
-    // `doRefresh` treats any non-2xx as "don't retry now" and leaves the
-    // upstream response untouched, so this is a fail-closed no-op for it.
-    const connect = await connectCallerOrNull(c);
-    if (connect) {
-      logger.warn("Integration credential refresh refused for a connect run", {
-        connectId: connect.connectId,
-        packageId,
-      });
-      throw conflict(
-        "connect_run_no_refresh",
-        `A connect run holds no stored credential for '${packageId}' to refresh — its session is minted in-process by the login tool.`,
-      );
-    }
+    await refuseConnectRun(c, packageId);
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const bound = requireBoundConnection(c, packageId, run, runId);
@@ -552,7 +556,7 @@ export function createInternalRouter() {
           connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
-        { forceRefresh: true },
+        { forceRefresh: true, heldRevision: c.req.query("credential_revision") },
       );
     } catch (err) {
       // 410 = the connection was flagged needsReconnection (terminal). Record
@@ -571,14 +575,28 @@ export function createInternalRouter() {
   });
 
   // POST /internal/integration-credentials/:scope/:name/upstream-success
-  // Sidecar-only: a call through the bound connection succeeded upstream, ending the rejection
-  // streak the credentials payload announced (`rejection_streak`). Same guards as `/refresh`.
+  // Sidecar-only: a call with credential `credential_revision` succeeded upstream, ending the
+  // connection's rejection streak. Same run checks as the GET, and the run's actor must still
+  // reach the connection (own or shared, same space and integration) — else nothing is reset.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/upstream-success`, async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await refuseConnectRun(c, packageId);
     const { runId, run } = await verifyRunToken(c);
     await assertAgentDeclaresIntegration(packageId, run, runId);
     const bound = requireBoundConnection(c, packageId, run, runId);
-    await clearUpstreamRejections(bound.connectionId);
+    const revision = c.req.query("credential_revision");
+    if (!revision) {
+      throw invalidRequest("`credential_revision` is required.", "credential_revision");
+    }
+    const actor = actorFromIds(run.userId, run.endUserId);
+    if (actor) {
+      await clearReachableUpstreamRejections(
+        bound.connectionId,
+        packageId,
+        { spaceId: run.spaceId, actor },
+        revision,
+      );
+    }
     return c.body(null, 204);
   });
 

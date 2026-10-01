@@ -6,6 +6,7 @@
  * serialises. A missing or malformed value is a launcher bug: it fails at boot.
  */
 
+import { isIP } from "node:net";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 
 export interface SidecarEnv {
@@ -14,6 +15,8 @@ export interface SidecarEnv {
   port: number;
   /** The agent's forward proxy listener — its own port, never derived from `port`. */
   forwardProxyPort: number;
+  /** `LISTEN_HOST`: the address both listeners bind; loopback in process mode, else all. */
+  listenHost: string;
   /** Absent on a connect-run, which never serves the agent surface. */
   sidecarAuthToken?: string;
   /** Upstream egress proxy — set only when the run resolved one. */
@@ -52,6 +55,11 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
   if (port !== null && port === forwardProxyPort)
     issues.push(`FORWARD_PROXY_PORT: must differ from PORT (both "${port}")`);
 
+  const listenHost = source.LISTEN_HOST || "0.0.0.0";
+  if (isIP(listenHost) === 0) {
+    issues.push(`LISTEN_HOST: must be an IP address (got "${listenHost}")`);
+  }
+
   const runtimeTools = parseJson("RUNTIME_TOOLS_JSON", source.RUNTIME_TOOLS_JSON, issues, (v) =>
     Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : null,
   );
@@ -67,6 +75,7 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     runToken: runToken!,
     port: port!,
     forwardProxyPort: forwardProxyPort!,
+    listenHost,
     ...(source.SIDECAR_AUTH_TOKEN ? { sidecarAuthToken: source.SIDECAR_AUTH_TOKEN } : {}),
     ...(source.PROXY_URL ? { proxyUrl: source.PROXY_URL } : {}),
     runtimeToolNames: runtimeTools ?? [],

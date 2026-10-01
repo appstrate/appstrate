@@ -479,24 +479,6 @@ export interface ApiCallContext {
 export type ApiCallFn = (req: ApiCallRequest, ctx: ApiCallContext) => Promise<ApiCallResponse>;
 
 /**
- * Apply transport control headers to an outgoing credentialled call.
- *
- * Used by {@link RemoteAppstrateIntegrationResolver} for the CLI's HTTP
- * path to the platform's `/api/credential-proxy/proxy` route.
- * Container runs reach the sidecar's `executeApiCall` over MCP
- * (`{ns}__api_call`) and bypass this header layer entirely.
- *
- * Rules applied (mirrors the platform server contract):
- *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
- *    `X-Max-Response-Size` is omitted — it is redundant when streaming.
- *  - `isStreamingBody` → `X-Stream-Request: 1` + explicit `Content-Length`
- *    (so the server can enforce the 100 MB cap up-front before reading the body).
- *  - Otherwise → `X-Max-Response-Size: <cap>` when the agent requested a
- *    larger inline payload (lifts the server's default cap).
- *
- * Mutates `headers` in place and returns it for convenience.
- */
-/**
  * Returns true when the body can be re-resolved from scratch for a retry.
  * `ReadableStream` bodies are not reproducible — the caller has already
  * consumed the stream. All other variants can be re-passed to
@@ -513,40 +495,45 @@ export function isReproducibleBody(body: ApiCallRequest["body"]): boolean {
   return false; // ReadableStream or other non-serialisable value
 }
 
+/**
+ * Set the transport control headers of the CLI's call to the platform's
+ * `/api/credential-proxy/proxy` route ({@link RemoteAppstrateIntegrationResolver}).
+ * Container runs reach the sidecar's `executeApiCall` over MCP and bypass it.
+ * These headers belong to the transport: any copy already in `headers` is replaced.
+ *  - `wantsFile` → `X-Stream-Response: 1` (server pipes the response as a stream).
+ *  - otherwise → `X-Max-Response-Size: <cap>` when the agent asked for a larger inline payload.
+ *  - `isStreamingBody` → `X-Stream-Request: 1`, and `Content-Length` from `bodySize` when known
+ *    (the server enforces the 100 MB cap up-front); unknown, the body goes chunked.
+ */
 export function applyTransportHeaders(
-  headers: Record<string, string>,
+  headers: Headers,
   opts: {
     wantsFile: boolean;
     isStreamingBody: boolean;
     bodySize?: number;
     maxInlineBytes?: number;
   },
-): Record<string, string> {
+): Headers {
+  // fetch measures a buffered body itself; a stream's length is only ever `bodySize`.
+  for (const name of [
+    "content-length",
+    "x-stream-request",
+    "x-stream-response",
+    "x-max-response-size",
+  ]) {
+    headers.delete(name);
+  }
   if (opts.wantsFile) {
-    headers["X-Stream-Response"] = "1";
-    // X-Max-Response-Size is not needed on the streaming-response path —
-    // the server enforces MAX_STREAMED_BODY_SIZE via a transform stream.
-    delete headers["X-Max-Response-Size"];
-  } else {
-    const maxInline = opts.maxInlineBytes;
-    if (typeof maxInline === "number" && maxInline > 0) {
-      const cap = Math.min(maxInline, ABSOLUTE_MAX_RESPONSE_SIZE);
-      headers["X-Max-Response-Size"] = String(cap);
-    }
+    headers.set("X-Stream-Response", "1");
+  } else if (typeof opts.maxInlineBytes === "number" && opts.maxInlineBytes > 0) {
+    headers.set(
+      "X-Max-Response-Size",
+      String(Math.min(opts.maxInlineBytes, ABSOLUTE_MAX_RESPONSE_SIZE)),
+    );
   }
   if (opts.isStreamingBody) {
-    // Use a case-insensitive check so mixed-case keys (e.g. "content-Length")
-    // are detected correctly regardless of how the caller populated the object.
-    const hasXStreamRequest = Object.keys(headers).some(
-      (k) => k.toLowerCase() === "x-stream-request",
-    );
-    if (!hasXStreamRequest) {
-      headers["X-Stream-Request"] = "1";
-    }
-    const hasContentLength = Object.keys(headers).some((k) => k.toLowerCase() === "content-length");
-    if (opts.bodySize !== undefined && !hasContentLength) {
-      headers["Content-Length"] = String(opts.bodySize);
-    }
+    headers.set("X-Stream-Request", "1");
+    if (opts.bodySize !== undefined) headers.set("Content-Length", String(opts.bodySize));
   }
   return headers;
 }

@@ -21,7 +21,8 @@ type ProxyErrorType =
   | "destination_unavailable"
   | "http_response_timeout"
   | "proxy_internal_response"
-  | "proxy_internal_error";
+  | "proxy_internal_error"
+  | "proxy_configuration_error";
 
 export function relayedProxyStatus(receivedStatus: number): string {
   return `${PROXY_NAME}; received-status=${receivedStatus}`;
@@ -49,6 +50,11 @@ const PROXY_PROBLEMS = {
     proxyError: "http_request_denied",
   },
   credential_not_found: { status: 404, title: "Credential Not Found" },
+  credential_unusable: {
+    status: 502,
+    title: "Credential Unusable",
+    proxyError: "proxy_configuration_error",
+  },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   upstream_unresolvable: {
     status: 502,

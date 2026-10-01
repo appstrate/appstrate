@@ -2,9 +2,11 @@
 --
 -- `resolvedConnectionMapSchema` requires a string `label` and `accountId` on every
 -- element of `runs.resolved_connections`; a pre-`0077` run may carry `label: null`, and
--- its reads 500. A missing label takes the connection's current one, else the element's
--- non-empty `accountId`, else its `connectionId`; a missing `accountId` takes the connection's,
--- else `''` (unknown: the connection is deleted). Order: `scripts/migration/README.md`.
+-- its reads 500. A missing or empty label (the run page shows it as the connection's name)
+-- takes the first non-empty of: the connection's label, its `account_id`, the element's
+-- `accountId`, else its `connectionId` — this runs before `0077` names the unlabelled
+-- connections, so their label can still be NULL or `''`. A missing `accountId` takes the
+-- connection's, else `''` (unknown: the connection is deleted). Order: `scripts/migration/README.md`.
 -- Rows: UNMEASURED — record the rehearsal counts here. Idempotent; one transaction.
 
 BEGIN;
@@ -42,7 +44,7 @@ CREATE TEMP TABLE _0036_unlabelled ON COMMIT DROP AS
 SELECT r.id FROM runs r
 WHERE EXISTS (
   SELECT 1 FROM jsonb_each(r.resolved_connections) AS e(k, v), jsonb_array_elements(v) AS el
-  WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string'
+  WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string' OR el->>'label' = ''
      OR jsonb_typeof(el->'accountId') IS DISTINCT FROM 'string');
 
 -- ═══ VERIFY (before) ═══
@@ -53,12 +55,14 @@ SET resolved_connections = (
   SELECT jsonb_object_agg(e.k, coalesce((
     SELECT jsonb_agg(
       CASE
-        WHEN jsonb_typeof(a.el->'label') = 'string' AND jsonb_typeof(a.el->'accountId') = 'string'
+        WHEN jsonb_typeof(a.el->'label') = 'string' AND a.el->>'label' <> ''
+             AND jsonb_typeof(a.el->'accountId') = 'string'
           THEN a.el
         ELSE a.el || jsonb_build_object(
           'label', coalesce(
-            CASE WHEN jsonb_typeof(a.el->'label') = 'string' THEN a.el->>'label' END,
-            c.label,
+            NULLIF(CASE WHEN jsonb_typeof(a.el->'label') = 'string' THEN a.el->>'label' END, ''),
+            NULLIF(c.label, ''),
+            NULLIF(c.account_id, ''),
             NULLIF(CASE WHEN jsonb_typeof(a.el->'accountId') = 'string' THEN a.el->>'accountId' END, ''),
             a.el->>'connectionId'),
           'accountId', coalesce(
@@ -80,18 +84,18 @@ DECLARE
   still_short bigint := (
     SELECT count(*) FROM runs r, jsonb_each(r.resolved_connections) AS e(k, v),
            jsonb_array_elements(v) AS el
-    WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string'
+    WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string' OR el->>'label' = ''
        OR jsonb_typeof(el->'accountId') IS DISTINCT FROM 'string');
 BEGIN
   IF still_short > 0 THEN
-    RAISE EXCEPTION '0036: % snapshot element(s) still lack a string label or accountId. Nothing was written; inspect them.', still_short;
+    RAISE EXCEPTION '0036: % snapshot element(s) still lack a non-empty label or a string accountId. Nothing was written; inspect them.', still_short;
   END IF;
 END $$;
 
 SELECT count(*) AS runs_after FROM runs r
 WHERE EXISTS (
   SELECT 1 FROM jsonb_each(r.resolved_connections) AS e(k, v), jsonb_array_elements(v) AS el
-  WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string'
+  WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string' OR el->>'label' = ''
      OR jsonb_typeof(el->'accountId') IS DISTINCT FROM 'string');
 
 COMMIT;

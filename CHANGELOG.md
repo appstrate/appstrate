@@ -50,10 +50,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
   before the new image serves traffic**: run snapshots written before #1611
   can hold `label: null`, and the snapshot is now parsed on read (#1641). A
-  missing label or account takes its connection's; when that connection is
-  deleted, the label falls back to the element's non-empty `accountId`, else
-  its `connectionId`, and the account to `''`. It writes nothing while an element
-  lacks a string `connectionId` or names no cascade layer in `source`.
+  missing or empty label takes the first non-empty of the connection's label,
+  its account, the element's `accountId` and its `connectionId` (before `0077`
+  a connection's label can still be empty); a missing account takes the
+  connection's, else `''` (the connection is deleted). It writes nothing while
+  an element lacks a string `connectionId` or names no cascade layer in `source`.
 
 ### Changed
 
@@ -66,8 +67,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cannot be resolved or reached (on the credential proxy, the target or a
   redirect hop) is a 502 (`upstream_unresolvable`, `upstream_unreachable`), a
   timeout a 504 (`upstream_timeout`); was a 500.
-- **The credential and LLM proxies mark every response with RFC 9209
-  `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
+- **BREAKING (API): the credential and LLM proxies mark every response with
+  RFC 9209 `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
   upstream response, `appstrate; error=<type>` on the proxy's own. A relayed
   upstream 401 no longer carries the platform's `invalid_token` challenge.
 - **BREAKING (OpenAPI): the LLM proxies document a relayed upstream error as
@@ -79,7 +80,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Cache-Status`** (#1641): `appstrate-llm-proxy; hit` on a cached reply,
   `appstrate-llm-proxy; fwd=uri-miss; stored` on a stored miss.
   `x-llm-proxy-cache-status` is gone.
-- **The three api_call paths share one outbound implementation** (#1641).
+- **BREAKING (API): the three api_call paths share one outbound
+  implementation** (#1641).
   The platform credential proxy, the sidecar and `appstrate run` follow
   redirects under one rule: an origin the `authorized_uris` allowlist names
   keeps the credential (Dropbox `api.` to `content.`), any other origin change
@@ -137,7 +139,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   9457 problem documents** (#1641). `POST /api/billing/webhooks` answers
   `400 invalid_request` for a missing or invalid `stripe-signature` and
   `500 internal_error` instead of plain text; Stripe reads only the status.
-- **The OAuth endpoints' 429 is a standard OAuth error** (#1641):
+- **BREAKING (API): the OAuth endpoints' 429 is a standard OAuth error**
+  (#1641):
   `/api/auth/oauth2/*` answers `Retry-After` and a JSON body with
   `"error": "temporarily_unavailable"` (RFC 6749 §5.2) instead of Better
   Auth's `X-Retry-After` and untyped `{message}`.
@@ -154,8 +157,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   at boot** (#1641) instead of silently dropping the runtime tools or the
   output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
   its env validation.
-- **The retired `X-Integration` header is no longer stripped** by the
-  credential proxy or the sidecar (#1641); it reaches the upstream like any
+- **BREAKING (API): the retired `X-Integration` header is no longer
+  stripped** by the credential proxy or the sidecar (#1641); it reaches the upstream like any
   other header.
 - **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
   `@appstrate/module-chat` are private workspace packages** (#1641). None was
@@ -168,7 +171,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   writer, cleared on re-enable and `NULL` exactly while enabled (CHECK); it is
   on the schedule DTO and shown on the schedule badge and detail page.
   Deleting a connection a schedule overrides disables only an enabled
-  schedule; one already disabled keeps its reason.
+  schedule; one already disabled keeps its reason. A fire whose actor is no
+  longer valid records `Schedule disabled: …` only when it disabled the
+  schedule, else `Schedule refused: …`.
 - **Credential-proxy use of another member's connection is audited** (#1641).
   The first call of an `X-Session-Id` through a connection the caller does not
   own writes one `integration.connection.proxied` row; the call log names the
@@ -176,11 +181,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Credential proxy: two failures no longer end as a 500 or a spurious
+  400** (#1641). A `{{word}}` inside a credential value was reported as an
+  unresolved placeholder: placeholders are now looked up in the template. A
+  relayed body that breaks off after its headers answers
+  `502 upstream_unreachable` (or `504 upstream_timeout`) naming the target
+  host.
+- **A rejection or a success counts against the credential that saw it**
+  (#1641). The integration credentials payload carries `credential_revision`,
+  a short digest of the stored ciphertext, which the sidecar sends back on
+  `/refresh` and `/upstream-success`: a 401 on a credential the connection no
+  longer holds is not counted and gets the current credential back (`200`),
+  and a success on a replaced credential no longer ends the new one's streak.
+  The platform credential proxy compares-and-sets on the ciphertext it
+  injected. A connection already flagged keeps its count; `/upstream-success`
+  refuses a connect run (`409 connect_run_no_refresh`); a success report the
+  platform did not apply is retried on the next success; and the remote-HTTP
+  transport no longer reports a success from an origin a redirect took the
+  request to.
 - **An upstream that keeps rejecting an API key flags it; 401s between
   successful calls no longer do** (#1641). A credential that cannot refresh
   (api_key, basic, custom, OAuth2 with no refresh client) is flagged
   `needs_reconnection` at the `INTEGRATION_REFRESH_MAX_FAILURES`-th
-  CONSECUTIVE upstream 401, however far apart. Any successful (2xx) call
+  CONSECUTIVE upstream 401, however far apart; an OAuth2 connection holding
+  no refresh token is not counted, and its first 401 flags it (`410`), as
+  before. Any successful (2xx) call
   through a non-OAuth2 connection ends the streak; an OAuth2 connection's
   count is cleared only by a credential write (a reconnect, or a successful
   refresh), never by a 2xx. Two counts therefore run until a reconnect: an
@@ -205,8 +230,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `token_endpoint_auth_method` keeps the stored method** (#1641); it reset
   the client to the manifest's method. A public client (`none`) given a
   secret takes the manifest's method.
-- **A `connection_overrides` key the agent does not declare is a 400**
-  (#1641). It was dropped without a trace, and a schedule froze it onto its
+- **BREAKING (API): a `connection_overrides` key the agent does not declare
+  is a 400** (#1641). It was dropped without a trace, and a schedule froze it onto its
   row, so the run bound a lower cascade layer instead of the account asked
   for. It is refused on the agent run, the inline run and `/inline/validate`,
   on schedule create, and on a schedule update that changes
@@ -218,13 +243,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   placement `PATCH` writes `package.placement.updated` for `modelId`,
   `proxyId` and `generationConfig`. Pin and org-default writes record
   `before`; admin and member pin rows share one `resourceId`.
-- **`connect.login` reads the regex extractor's `source`** (#1641):
+- **BREAKING (manifests): `connect.login` reads the regex extractor's
+  `source`** (#1641):
   `$response.body` or `$response.header.<name>`; it was ignored. An
   expression, selector or criterion context the engine cannot evaluate is
   refused at import and fails the login as `invalid_config` instead of
   silently not matching.
-- **A UUID-shaped system id is refused** (#1641). Such an id would take
-  precedence over an organization's own row with the same id. A system OAuth
+- **BREAKING (config): a UUID-shaped system id is refused** (#1641). Such an
+  id would take precedence over an organization's own row with the same id.
+  A system OAuth
   client with one fails boot; a `SYSTEM_PROVIDER_KEYS` entry whose key or
   model id is UUID-shaped is skipped and logged, like any other invalid entry.
 - **Every error response in the OpenAPI document declares its body**
@@ -239,11 +266,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **A credential no HTTP header can carry is refused, never quoted** (#1641).
+  A stored or rendered credential holding CR, LF, NUL, another control
+  character or a character above U+00FF made `Headers` throw an error quoting
+  the value. Every path now checks the value first (`isHttpFieldValue`): the
+  platform proxy answers `502 credential_unusable`
+  (`Proxy-Status: …; error=proxy_configuration_error`) naming the header
+  only, the sidecar a 502 (a caller's own invalid header a 400), the CLI
+  `RESOLVER_HEADER_INVALID`, the MITM listener a fixed 403. The proxy route
+  logs an unexpected error's name only; the MITM listener answers any
+  unexpected throw with a fixed 500, never serves the runtime's development
+  error page, emits error classes instead of messages, and its events name
+  the path before login substitution, without the query.
+- **The target host an `api_call` message names is read from the target
+  template** (#1641). Messages show the template's host with `{{field}}` in
+  place of each rendered part (`<templated>` when it does not parse); a
+  literal host is shown as written. Redirect hops keep the value scrub.
+- **A process-mode sidecar binds loopback only** (#1641). Its MCP server and
+  the agent's forward proxy listened on every interface; the process
+  orchestrator now sets the sidecar env `LISTEN_HOST=127.0.0.1` and probes
+  its ports there. Container and VM sidecars keep binding all interfaces.
+- **`/upstream-success` resets a streak only while the run can still reach
+  the connection** (#1641). The reset is one UPDATE scoped by integration,
+  space and the run actor's own-or-shared access; a run with no actor, or
+  whose actor lost access, resets nothing.
+- **The CLI's `api_call` hop to the platform applies the same caller-header
+  rule as every other path** (#1641). The agent's `Host`, hop-by-hop,
+  `Connection`-named and `Content-Length` headers no longer ride on the CLI's
+  request to `/api/credential-proxy/proxy` beside its bearer token; a streamed
+  `{ fromFile }` upload always carries its real size, and the transport hints
+  (`X-Stream-Request`, `X-Stream-Response`, `X-Max-Response-Size`) are set by
+  the CLI, never by the agent.
 - **The MITM listener applies the host-bound credential rule to its replay
   too** (#1641). A request replayed after a credential refresh or a
   `connect.tool` re-login is checked like the first attempt: a credential
   whose auth leaves the host to the caller is never injected.
-- **`api_call` forwards only end-to-end caller headers** (#1641). The shared
+- **BREAKING (API): `api_call` forwards only end-to-end caller headers**
+  (#1641). The shared
   outbound engine drops, on every path (platform proxy, sidecar, CLI), a
   caller's `Host`, the RFC 9110 connection-specific headers (`Connection`,
   `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`,
@@ -255,10 +314,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
   IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
   is blocked. The SIIT IPv4-translated form `::ffff:0:0:0/96` is judged as its
-  IPv4, and site-local `fec0::/10` and multicast `ff00::/8` are blocked.
+  IPv4, and site-local `fec0::/10`, multicast `ff00::/8` and an IPv6
+  literal that does not expand to eight groups are blocked.
 - **The credential-proxy audit of another member's connection is no longer
   lost** (#1641). A failed insert no longer suppresses the session's row: the
-  next call retries it. The row names the acting principal (`principalType`,
+  next call retries it, and the failure is logged. A call that fails after the
+  credential may have left (timeout, unreachable upstream, refused redirect)
+  is audited like one that returns; one refused before sending is not. The row names the acting principal (`principalType`,
   `principalId` in `after`), and two principals sharing one session each get
   their own.
 - **BREAKING: an auth whose credential the proxy injects must name its
@@ -282,13 +344,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **An `authorized_uris` scheme glob matches scheme characters only**
   (#1641): `**://api.example.com/**` no longer matches a URL on another host
   whose query holds `://api.example.com/`.
-- **An `api_call` whose auth declares no `authorized_uris` and not
-  `allow_all_uris` is refused on every path** (#1641). The sidecar used to
+- **BREAKING (API): an `api_call` whose auth declares no `authorized_uris`
+  and not `allow_all_uris` is refused on every path** (#1641). The sidecar used to
   relay it anywhere the SSRF gate allowed; the platform proxy answers
   `403 unauthorized_target`. An empty authorized set authorizes nothing (AFPS
   §7.9).
-- **The credential proxy authorizes a call against the published integration
-  manifest** (#1641). A call naming a run (`X-Run-Id`) reads the version that
+- **BREAKING (API): the credential proxy authorizes a call against the
+  published integration manifest** (#1641). A call naming a run (`X-Run-Id`) reads the version that
   run froze at kickoff; any other call reads the `latest` published version,
   never the editable draft. An integration that was never published is
   refused: publish it before calling it through the proxy (`appstrate run`

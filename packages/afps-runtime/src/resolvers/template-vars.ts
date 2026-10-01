@@ -52,3 +52,29 @@ export function referencesField(input: string, fields: Readonly<Record<string, u
   }
   return false;
 }
+
+/**
+ * The host `template` (a URL template) names, each `{{key}}` in it written as `{{key}}`: what a
+ * message echoes for the target. Never a rendered value, and an untemplated host shown as the
+ * caller wrote it, so an echo never tells whether a literal host matches a credential value. A
+ * leading `{{key}}` stands for a whole base URL; a templated host that does not parse (a
+ * `{{port}}`) is `<templated>`.
+ */
+export function templateHost(template: string): string {
+  const keys: string[] = [];
+  const marked = template.replace(VAR_PLACEHOLDER, (_match, key: string) => {
+    keys.push(key);
+    return `xph${keys.length - 1}x`;
+  });
+  const url =
+    parseUrl(marked) ?? (/^\s*\{\{/.test(template) ? parseUrl(`https://${marked}`) : null);
+  if (!url) return keys.length > 0 ? "<templated>" : "<unparseable>";
+  return url.hostname.replace(/xph(\d+)x/g, (match, i: string) => {
+    const key = keys[Number(i)];
+    return key === undefined ? match : `{{${key}}}`;
+  });
+}
+
+function parseUrl(input: string): URL | null {
+  return URL.canParse(input) ? new URL(input) : null;
+}

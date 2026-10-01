@@ -3,8 +3,11 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  assertHttpFieldValue,
   injectsHttpCredential,
+  InvalidHeaderValueError,
   isBareAuthSchemePrefix,
+  isHttpFieldValue,
   projectHttpDeliveryConfig,
 } from "../src/delivery-http.ts";
 
@@ -80,5 +83,62 @@ describe("injectsHttpCredential", () => {
   it("follows an explicit delivery.http name, an empty one included", () => {
     expect(injectsHttpCredential("custom", { name: "X-Token" })).toBe(true);
     expect(injectsHttpCredential("api_key", { name: "" })).toBe(false);
+  });
+});
+
+describe("isHttpFieldValue", () => {
+  it("accepts HTAB, SP, VCHAR and obs-text", () => {
+    for (const v of ["", "Bearer abc.DEF-123", "a\tb c", "caf\u00e9", "\u00ff"]) {
+      expect(isHttpFieldValue(v)).toBe(true);
+    }
+  });
+
+  it("refuses CR, LF, NUL, every other control, DEL and anything above U+00FF", () => {
+    for (const v of [
+      "k\r\nX: y",
+      "k\n",
+      "k\u0000",
+      "k\u0001",
+      "k\u001f",
+      "k\u007f",
+      "k\u20ac",
+      "k\u{1F600}",
+    ]) {
+      expect(isHttpFieldValue(v)).toBe(false);
+    }
+  });
+
+  // Every value the runtime's `Headers` refuses, it refuses too: none reaches the TypeError.
+  it("is at least as strict as Bun's Headers", () => {
+    for (let c = 0; c <= 0x100; c++) {
+      const value = `a${String.fromCharCode(c)}b`;
+      let headersAccept = true;
+      try {
+        new Headers().set("x", value);
+      } catch {
+        headersAccept = false;
+      }
+      if (!headersAccept) expect(isHttpFieldValue(value)).toBe(false);
+    }
+  });
+});
+
+describe("assertHttpFieldValue", () => {
+  it("throws an error naming the header, never the value", () => {
+    const secret = "SECRETVALUE\r\nX-Evil: 1";
+    let caught: unknown;
+    try {
+      assertHttpFieldValue("X-Api-Key", secret);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(InvalidHeaderValueError);
+    expect((caught as InvalidHeaderValueError).header).toBe("X-Api-Key");
+    expect((caught as Error).message).toContain("X-Api-Key");
+    expect((caught as Error).message).not.toContain("SECRETVALUE");
+  });
+
+  it("returns for a valid value", () => {
+    expect(() => assertHttpFieldValue("Authorization", "Bearer tok")).not.toThrow();
   });
 });

@@ -476,6 +476,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
     if (!env.INTEGRATION_RUNTIME_ADAPTER) {
       env.INTEGRATION_RUNTIME_ADAPTER = "process";
     }
+    // The agent reaches the sidecar over loopback, and nothing else may: on the host every
+    // interface is reachable, and the forward proxy has no runner peers to tell apart here.
+    env.LISTEN_HOST = LOOPBACK;
 
     // Sidecar stdout goes to a FILE, not a drained pipe, for two reasons:
     //   - connect-runs capture the credential bundle by tailing it via
@@ -742,6 +745,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
  * They need not be adjacent: asking for `port + 1` failed whenever a busy host
  * had it taken, which the finder used to throw on. `null` when a probe fails.
  */
+/** The one interface a process-mode sidecar binds, and where its free ports are probed. */
+const LOOPBACK = "127.0.0.1";
+
 async function probeTwoFreePorts(): Promise<SidecarPorts | null> {
   // Raw TCP listeners, NOT `Bun.serve`: under `bun --hot` (the dev server) a
   // second `Bun.serve()` hot-reloads the first one and returns the SAME
@@ -750,7 +756,7 @@ async function probeTwoFreePorts(): Promise<SidecarPorts | null> {
   const probes: Bun.TCPSocketListener[] = [];
   try {
     for (let i = 0; i < 2; i++) {
-      probes.push(Bun.listen({ hostname: "0.0.0.0", port: 0, socket: { data() {} } }));
+      probes.push(Bun.listen({ hostname: LOOPBACK, port: 0, socket: { data() {} } }));
     }
     const [sidecar = 0, forwardProxy = 0] = probes.map((p) => p.port);
     return sidecar && forwardProxy && sidecar !== forwardProxy ? { sidecar, forwardProxy } : null;

@@ -49,6 +49,8 @@ export type ResolverErrorCode =
   // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
   | "RESOLVER_URL_BLOCKED"
   | "RESOLVER_REDIRECT_BLOCKED"
+  // A header value (a substituted or injected credential included) is no HTTP field value.
+  | "RESOLVER_HEADER_INVALID"
   | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED";
 
 /** Stable, machine-readable code for every error class in this module. */

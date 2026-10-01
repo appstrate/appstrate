@@ -52,7 +52,7 @@ export {
 // Canonical `{{var}}` credential substitution — shared by the platform
 // credential proxy (`@appstrate/connect` re-export), the delivery.http
 // renderer, and the portable integration resolver.
-export { substituteVars } from "./template-vars.ts";
+export { substituteVars, templateHost } from "./template-vars.ts";
 
 // The pre-send URL policy shared by the three `api_call` paths.
 export {

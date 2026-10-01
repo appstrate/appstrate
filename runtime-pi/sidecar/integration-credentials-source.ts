@@ -87,6 +87,7 @@ export type { IntegrationCredentialsWire };
  *   delivery_plans        → deliveryPlans
  *   expires_at_epoch_ms   → expiresAtEpochMs
  *   rejection_streak      → rejectionStreak
+ *   credential_revision   → credentialRevision
  *   header_name           → headerName           (per delivery plan)
  *   header_prefix         → headerPrefix         (per delivery plan)
  *   allow_server_override → allowServerOverride  (per delivery plan)
@@ -130,11 +131,18 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
     deliveryPlans,
     expiresAtEpochMs,
     ...(typeof r.rejection_streak === "number" ? { rejectionStreak: r.rejection_streak } : {}),
+    ...(typeof r.credential_revision === "string"
+      ? { credentialRevision: r.credential_revision }
+      : {}),
   };
 }
 
-function connectionQuery(connectionId: string | undefined): string {
-  return connectionId === undefined ? "" : `?connection_id=${encodeURIComponent(connectionId)}`;
+function credentialsQuery(connectionId: string | undefined, credentialRevision?: string): string {
+  const query = new URLSearchParams();
+  if (connectionId !== undefined) query.set("connection_id", connectionId);
+  if (credentialRevision !== undefined) query.set("credential_revision", credentialRevision);
+  const qs = query.toString();
+  return qs ? `?${qs}` : "";
 }
 
 interface CreateIntegrationCredentialsSourceOptions {
@@ -338,24 +346,29 @@ export function createIntegrationCredentialsSource(
   let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
 
   const reportUpstreamSuccess = (): void => {
-    if (!rejectionPending || options.connectionId === undefined) return;
+    const revision = payload.credentialRevision;
+    if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
     rejectionPending = false;
-    postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, {
+    // A report the platform never applied leaves the streak pending: the next success retries it.
+    postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, revision, {
       ...options,
       fetchFn,
     }).then(
       (res) => {
-        if (!res.ok)
-          logger.warn("integration upstream success report refused", {
-            ...logCtx,
-            status: res.status,
-          });
+        if (res.ok) return;
+        rejectionPending = true;
+        logger.warn("integration upstream success report refused", {
+          ...logCtx,
+          status: res.status,
+        });
       },
-      (err: unknown) =>
+      (err: unknown) => {
+        rejectionPending = true;
         logger.warn("integration upstream success report failed", {
           ...logCtx,
           error: err instanceof Error ? err.message : String(err),
-        }),
+        });
+      },
     );
   };
 
@@ -439,10 +452,12 @@ export function createIntegrationCredentialsSource(
   async function doRefresh(authKey: string): Promise<boolean> {
     let res: Response;
     try {
-      res = await postIntegrationCredentialsRefresh(options.integrationId, options.connectionId, {
-        ...options,
-        fetchFn,
-      });
+      res = await postIntegrationCredentialsRefresh(
+        options.integrationId,
+        options.connectionId,
+        payload.credentialRevision,
+        { ...options, fetchFn },
+      );
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
         ...logCtx,
@@ -498,8 +513,10 @@ export function createIntegrationCredentialsSource(
     }
     // Replace the payload in place — the listener reads `current()` /
     // `deliveryPlans()` on every request, so the next inbound request
-    // automatically sees the new credentials.
+    // automatically sees the new credentials. A 200 can also hand back a
+    // credential that replaced the one held: its own streak is what is pending.
     payload = next;
+    rejectionPending = (next.rejectionStreak ?? 0) > 0;
     lastRefreshAt.set(authKey, Date.now());
     logger.info("integration credentials refreshed", {
       ...logCtx,
@@ -519,6 +536,7 @@ export function createIntegrationCredentialsSource(
     // captured auth's delivery plan + expiry are keyed by authKey so the
     // planner / listener / api_call adapter pick them up on the next request.
     payload = {
+      ...payload,
       auths: [...payload.auths.filter((a) => a.authKey !== auth.authKey), auth],
       deliveryPlans: { ...payload.deliveryPlans, [auth.authKey]: plan },
       expiresAtEpochMs: {
@@ -585,15 +603,19 @@ export function createIntegrationCredentialsSource(
 /**
  * The single report path for "the upstream rejected this credential": the
  * platform refreshes what it can, else counts it toward a reconnect flag (410).
+ * `credentialRevision` names the rejected credential; a superseded one gets the
+ * current credential back (200) and counts nothing. Without it (a local server
+ * with no credentials source) the rejection is counted against the current one.
  */
 export function postIntegrationCredentialsRefresh(
   integrationId: string,
   connectionId: string | undefined,
+  credentialRevision: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${connectionQuery(connectionId)}`,
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${credentialsQuery(connectionId, credentialRevision)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
@@ -601,15 +623,16 @@ export function postIntegrationCredentialsRefresh(
   );
 }
 
-/** Tell the platform a call through the connection succeeded upstream, ending its rejection streak. */
+/** A call with `credentialRevision` succeeded upstream: end the connection's rejection streak. */
 function postIntegrationUpstreamSuccess(
   integrationId: string,
   connectionId: string,
+  credentialRevision: string,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/upstream-success${connectionQuery(connectionId)}`,
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/upstream-success${credentialsQuery(connectionId, credentialRevision)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
@@ -659,7 +682,7 @@ export async function fetchInitialIntegrationCredentials(
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${connectionQuery(connectionId)}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${credentialsQuery(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

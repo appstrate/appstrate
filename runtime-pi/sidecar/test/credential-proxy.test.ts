@@ -670,8 +670,8 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(observed[1]!.body).toBeDefined();
   });
 
-  it("caps redirect chains at MAX_REDIRECTS hops", async () => {
-    // MAX_REDIRECTS = 10 → exactly 11 fetch attempts before the throw
+  it("caps redirect chains at DEFAULT_MAX_REDIRECTS hops", async () => {
+    // DEFAULT_MAX_REDIRECTS = 10 → exactly 11 fetch attempts before the throw
     // (hops 0..10 inclusive). Asserting the call count proves the cap
     // is doing the work — `wrapFetchError` masks the thrown message.
     const fetchFn = mock(
@@ -2745,5 +2745,81 @@ describe("executeApiCall — two connections of one integration", () => {
     // CONTROL — A itself is not refreshed a second time.
     await executeApiCall(call("conn-a"), depsA);
     expect(refreshA).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("executeApiCall — a header value that is no HTTP field value", () => {
+  const SECRET = "SECRETKEY";
+  const callWith = (token: string, callerHeaders: Record<string, string> = {}) => {
+    const fetchFn = mock(async () => new Response("ok"));
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: token, password: token },
+        authorizedUris: ["https://api.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+    });
+    const args = {
+      integrationId: "x",
+      connectionId: "conn-1",
+      targetUrl: "https://api.example.com/v1",
+      method: "GET",
+      callerHeaders,
+      body: { kind: "none" as const },
+    };
+    return { result: executeApiCall(args, deps), fetchFn };
+  };
+
+  for (const token of [`${SECRET}\r\nX-Evil: 1`, `${SECRET}€`]) {
+    it(`answers an unusable injected credential with a 502 naming the header only`, async () => {
+      const { result, fetchFn } = callWith(token);
+      const out = await result;
+      expect(out.ok).toBe(false);
+      if (!out.ok) {
+        expect(out.status).toBe(502);
+        expect(out.error).toContain(`"Authorization"`);
+        expect(out.error).not.toContain(SECRET);
+      }
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("answers a caller's own invalid header value with a 400", async () => {
+    const { result, fetchFn } = callWith("ok", { "X-Note": "a\nb" });
+    const out = await result;
+    expect(out).toMatchObject({ ok: false, status: 400 });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("names a templated target host by its placeholder", async () => {
+    const out = await executeApiCall(
+      {
+        integrationId: "x",
+        connectionId: "conn-1",
+        targetUrl: "https://{{sub}}.nx.invalid/",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        declaredUris: ["https://{$credential.sub}.nx.invalid/**"],
+        resolveHost: async () => Promise.reject(new Error("ENOTFOUND")),
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { sub: "bücher" },
+          credentialFieldName: "sub",
+          authorizedUris: ["https://xn--bcher-kva.nx.invalid/**"],
+          allowAllUris: false,
+        })),
+      }),
+    );
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.error).toContain("({{sub}}.nx.invalid)");
+      expect(out.error).not.toContain("bcher");
+    }
   });
 });

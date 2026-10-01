@@ -279,15 +279,19 @@ const proxyResponses = {
   "502": {
     description:
       "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error " +
-      "`dns_error`); `upstream_unreachable` — the connection to it failed " +
-      "(`destination_unavailable`).",
+      "`dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed " +
+      "body broke off after its headers (`destination_unavailable`); `credential_unusable` — " +
+      "a header the connection's credential is substituted or injected into would not be a " +
+      "valid HTTP field value (CR, LF, NUL, another control character or a character above " +
+      "U+00FF); nothing was sent, the detail names the header, never the value " +
+      "(`proxy_configuration_error`).",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },
   "504": {
     description:
-      "`upstream_timeout` — the upstream did not answer within the 30 s deadline " +
-      "(`Proxy-Status` error `http_response_timeout`).",
+      "`upstream_timeout` — the upstream did not answer, or did not finish a buffered body, " +
+      "within the 30 s deadline (`Proxy-Status` error `http_response_timeout`).",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

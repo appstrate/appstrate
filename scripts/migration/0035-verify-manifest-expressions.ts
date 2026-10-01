@@ -78,7 +78,7 @@ export function manifestIssues(rows: readonly StoredManifest[]): {
 if (import.meta.main) {
   const url = process.env.DATABASE_URL;
   if (!url) {
-    process.stdout.write("DATABASE_URL is required — the platform database to read\n");
+    process.stderr.write("DATABASE_URL is required — the platform database to read\n");
     process.exit(2);
   }
   const sql = new SQL(url, { max: 1 });

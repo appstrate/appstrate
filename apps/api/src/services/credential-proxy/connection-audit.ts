@@ -10,22 +10,38 @@ import type { Context } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { getCache } from "../../infra/index.ts";
 import { actorFromIds, type Actor } from "../../lib/actor.ts";
+import { logger } from "../../lib/logger.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { tryRecordAuditFromContext } from "../audit.ts";
 
+interface ConnectionUse {
+  actor: Actor;
+  connectionId: string;
+  integrationId: string;
+  sessionId: string;
+  runId: string | null;
+  sessionTtlSeconds: number;
+}
+
+/** Never throws: a cache or database fault is logged, and the session's next call retries. */
 export async function auditForeignConnectionUse(
   c: Context<AppEnv>,
-  input: {
-    actor: Actor;
-    connectionId: string;
-    integrationId: string;
-    sessionId: string;
-    runId: string | null;
-    sessionTtlSeconds: number;
-  },
+  input: ConnectionUse,
 ): Promise<void> {
+  try {
+    await recordForeignConnectionUse(c, input);
+  } catch (err) {
+    logger.warn("credential-proxy: connection-use audit failed", {
+      connectionId: input.connectionId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
+async function recordForeignConnectionUse(c: Context<AppEnv>, input: ConnectionUse): Promise<void> {
   const cache = await getCache();
   const key = `cp:audited:${input.sessionId}:${input.actor.type}:${input.actor.id}:${input.connectionId}`;
   if (!(await cache.set(key, "1", { ttlSeconds: input.sessionTtlSeconds, nx: true }))) return;

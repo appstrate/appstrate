@@ -6,7 +6,7 @@ import {
   credentialUrlPolicy,
   urlPolicyRefusalMessage,
 } from "../../src/resolvers/credential-guard.ts";
-import { substituteVars } from "../../src/resolvers/template-vars.ts";
+import { substituteVars, templateHost } from "../../src/resolvers/template-vars.ts";
 
 const fields = { api_key: "SECRET" };
 const allowAll = {
@@ -159,5 +159,30 @@ describe("credentialUrlPolicy — an allowlist that authorizes nothing", () => {
     expect(
       credentialUrlPolicy({ ...bare, allowAllUris: true, injectsCredential: true }).refuse,
     ).toBe("exfiltration");
+  });
+});
+
+describe("templateHost — the target host a message echoes", () => {
+  // The oracle: scrubbing values from a host the caller wrote literally told it whether a
+  // guessed host held a field value (here one only injected in a header).
+  it("shows a literal host as written, whatever the credential values", () => {
+    expect(templateHost("https://us1-eu2-eu3.invalid/x")).toBe("us1-eu2-eu3.invalid");
+    expect(templateHost("https://api.example.com/v1?key=abc")).toBe("api.example.com");
+  });
+
+  it("names a templated label by its placeholder, not its value", () => {
+    expect(templateHost("https://{{ sub }}.example.com/x")).toBe("{{sub}}.example.com");
+    // An IDN value would be punycoded on the wire and missed by a value scrub.
+    expect(templateHost("https://{{idn}}.example.com/")).toBe("{{idn}}.example.com");
+  });
+
+  it("names a whole-host or whole-base-URL field by its placeholder", () => {
+    expect(templateHost("https://{{sub}}/x")).toBe("{{sub}}");
+    expect(templateHost("{{base_url}}/api/v1")).toBe("{{base_url}}");
+  });
+
+  it("is <templated> when the templated host does not parse, <unparseable> otherwise", () => {
+    expect(templateHost("https://{{host}}:{{port}}/x")).toBe("<templated>");
+    expect(templateHost("not a url")).toBe("<unparseable>");
   });
 });

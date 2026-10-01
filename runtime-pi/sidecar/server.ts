@@ -182,6 +182,7 @@ let peerAttribution: PeerAttribution = noRunnerPeers;
 const proxy = createForwardProxy({
   config,
   listenPort: env.forwardProxyPort,
+  listenHost: env.listenHost,
   isPeerAllowed: (peer) => admitsAgentProxyPeer(peerAttribution, peer),
 });
 // The platform notices a sidecar that EXITS (#1561), not one alive without its
@@ -316,4 +317,9 @@ logger.info("Sidecar proxy listening", {
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
 // without booting this entry point (which has port-binding side effects).
 // See issue #426.
-export default { port: env.port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };
+export default {
+  port: env.port,
+  hostname: env.listenHost,
+  fetch: app.fetch,
+  idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS,
+};

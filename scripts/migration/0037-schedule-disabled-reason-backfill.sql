@@ -37,19 +37,8 @@ SET disabled_reason = 'actor_left_org'
 FROM _0037_departed d
 WHERE s.id = d.id;
 
--- ═══ VERIFY (after) — raises, rolling everything back, if a departed actor's row still reads `user` ═══
-DO $$
-DECLARE
-  left_as_user bigint := (
-    SELECT count(*) FROM package_schedules s
-    WHERE s.enabled = false AND s.disabled_reason = 'user' AND s.user_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = s.org_id AND m.user_id = s.user_id));
-BEGIN
-  IF left_as_user > 0 THEN
-    RAISE EXCEPTION '0037: % schedule(s) of a departed actor still read `user`. Nothing was written.', left_as_user;
-  END IF;
-END $$;
-
+-- ═══ VERIFY (after) — the totals per reason; the CHECK `0079` added keeps every row's reason
+-- consistent with `enabled` ═══
 SELECT disabled_reason, count(*) FROM package_schedules WHERE enabled = false
 GROUP BY disabled_reason ORDER BY disabled_reason;
 

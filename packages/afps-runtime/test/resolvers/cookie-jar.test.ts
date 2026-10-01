@@ -180,6 +180,7 @@ describe("fetchApiCall — a caller's cookie scope", () => {
       fetchFn,
       cookies: cookieScope(jar, "i", null),
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       credentialHeaders: ["cookie"],
       authorizedUris: policy.authorizedUris ?? [],
@@ -288,6 +289,7 @@ describe("fetchApiCall — the per-call cookie scope", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       resolveHost: async () => ["203.0.113.7"],
     });

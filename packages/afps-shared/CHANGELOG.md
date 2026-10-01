@@ -21,6 +21,10 @@ exports (core raises its range to `^0.10.0`).
 
 ### Added
 
+- **`isHttpFieldValue`**, **`assertHttpFieldValue`** and
+  **`InvalidHeaderValueError`** (`./delivery-http`): whether a string is an
+  RFC 9110 field value (HTAB, SP, VCHAR, obs-text), and the error that names
+  the header, never the value, when it is not. (#1641)
 - **`parseAuthorizedUriPattern`**, **`AuthorizedUriPattern`** and
   **`canonicalUrl`** (`./credential-template`): the one reading of an
   `authorized_uris` entry, shared by the host-bound rule and the afps-runtime

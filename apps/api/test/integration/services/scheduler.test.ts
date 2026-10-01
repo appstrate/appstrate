@@ -753,6 +753,7 @@ describeRequiresRedis("scheduler service", () => {
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
       expect(fired[0]!.status).toBe("failed");
+      expect(fired[0]!.error ?? "").toStartWith("Schedule disabled: ");
       expect((fired[0]!.error ?? "").toLowerCase()).toContain(
         "is not a member of this organization",
       );
@@ -800,6 +801,11 @@ describeRequiresRedis("scheduler service", () => {
         .from(schedules)
         .where(eq(schedules.id, schedule.id));
       expect(row).toEqual({ enabled: false, disabledReason: "user" });
+      // The fire is still a visible failure, but this fire did not disable it.
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired.map((r) => r.error)).toEqual([
+        expect.stringMatching(/^Schedule refused: .*is not a member of this organization/),
+      ]);
     });
 
     it("a schedule whose end-user actor does not exist in the space fires into a FAILED run and is disabled", async () => {

@@ -25,7 +25,7 @@
  * device-flow JWTs.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { getTestApp } from "../../helpers/app.ts";
@@ -48,6 +48,7 @@ import {
 import { drainAudits } from "../../../src/services/audit.ts";
 import { auditForeignConnectionUse } from "../../../src/services/credential-proxy/connection-audit.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -877,6 +878,23 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     ]);
   });
 
+  it("audits a colleague's connection whose upstream fails, not a call refused before sending", async () => {
+    mockUpstream(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const runId = await runBinding([shared]);
+    expect((await call({ "X-Run-Id": runId })).status).toBe(502);
+    const offList = await call({ "X-Run-Id": runId, "X-Target": "https://evil.example.com/x" });
+    expect(offList.status).toBe(403);
+    await drainAudits(5_000);
+
+    const rows = await db
+      .select({ resourceId: auditEvents.resourceId })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.connection.proxied"));
+    expect(rows).toEqual([{ resourceId: shared }]);
+  });
+
   describe("auditForeignConnectionUse", () => {
     /** One audit call through a bare Hono context, as the route hands it an API-key request. */
     async function audit(actorId: string, session: string, orgId = ctx.orgId): Promise<void> {
@@ -1180,5 +1198,123 @@ describe("POST /api/credential-proxy/proxy — upstream Set-Cookie is never rela
         .map((p) => p.trim())
         .sort(),
     ).toEqual(["SID=sid-rotated", "pref=1"]);
+  });
+});
+
+describe("POST /api/credential-proxy/proxy — a credential no header can carry", () => {
+  const KEY_INTEGRATION = "@cporg/keyed";
+  const SECRET = "SECRETKEY";
+  let ctx: TestContext;
+  let apiKey: string;
+  let upstreamCalls: number;
+  let logged: unknown[][];
+  const spies: Array<{ mockRestore(): void }> = [];
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: KEY_INTEGRATION,
+        displayName: "Keyed",
+        description: "Keyed integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", prefix: "", field: "api_key" }),
+          },
+        },
+      }),
+    );
+    apiKey = await mintProxyKey(ctx);
+    upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("{}", { status: 200 });
+    });
+    logged = [];
+    for (const level of ["error", "warn", "info"] as const) {
+      spies.push(
+        spyOn(logger, level).mockImplementation(((...args: unknown[]) => {
+          logged.push(args);
+        }) as never),
+      );
+    }
+  });
+  afterEach(() => {
+    restoreFetch();
+    for (const spy of spies.splice(0)) spy.mockRestore();
+  });
+
+  const call = (headers: Record<string, string> = {}) =>
+    app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": KEY_INTEGRATION,
+        "X-Target": "https://1.1.1.1/v1",
+        "X-Session-Id": uuidV4(),
+        ...headers,
+      },
+    });
+
+  /** The problem the proxy answered, asserted to quote no value anywhere it can reach. */
+  async function expectUnusable(res: Response, header: string): Promise<void> {
+    const text = await res.text();
+    expect(res.status).toBe(502);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
+    const body = JSON.parse(text) as { code: string; detail: string };
+    expect(body.code).toBe("credential_unusable");
+    expect(body.detail.toLowerCase()).toContain(`"${header.toLowerCase()}"`);
+    expect(text).not.toContain(SECRET);
+    expect(JSON.stringify(logged)).not.toContain(SECRET);
+    expect(upstreamCalls).toBe(0);
+  }
+
+  // Bun's `Headers` TypeError quotes the value; it reached the 500 log line in full.
+  for (const value of [`${SECRET}\r\nX-Evil: 1`, `${SECRET}\u20ac`]) {
+    it(`refuses the injected credential ${JSON.stringify(value.slice(SECRET.length))}`, async () => {
+      await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: value });
+      await expectUnusable(await call(), "X-Api-Key");
+    });
+
+    it(`refuses a caller template rendering ${JSON.stringify(value.slice(SECRET.length))}`, async () => {
+      await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok", password: value });
+      await expectUnusable(await call({ "X-Pass": "{{password}}" }), "X-Pass");
+    });
+  }
+
+  // The lookup runs on the template: a `{{word}}` inside a value is no placeholder.
+  it("sends a credential whose value holds a `{{word}}`", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", {
+      api_key: "ok",
+      password: "pa{{ss}}word",
+    });
+    const res = await call({ "X-Pass": "{{password}}" });
+    expect(res.status).toBe(200);
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("answers a body broken off after the headers as upstream_unreachable, not a 500", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
+    mockUpstream(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("hel"));
+          controller.error(new Error("socket closed"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const res = await call();
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("upstream_unreachable");
+    expect(body.detail).toBe("1.1.1.1 could not be reached");
   });
 });

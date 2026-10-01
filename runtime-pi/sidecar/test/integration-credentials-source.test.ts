@@ -498,15 +498,24 @@ describe("createIntegrationCredentialsSource — connect.tool re-login (P3)", ()
 
 describe("createIntegrationCredentialsSource — upstream success report", () => {
   const SUCCESS_URL =
-    "http://api/internal/integration-credentials/@test/integ/upstream-success?connection_id=conn-a";
+    "http://api/internal/integration-credentials/@test/integ/upstream-success?connection_id=conn-a&credential_revision=rev-a";
 
-  function sourceWith(initialPayload: IntegrationCredentialsWire) {
+  const held = (payload: IntegrationCredentialsWire): IntegrationCredentialsWire => ({
+    ...payload,
+    credentialRevision: "rev-a",
+  });
+
+  function sourceWith(
+    initialPayload: IntegrationCredentialsWire,
+    reportOutcomes: Array<number | Error> = [],
+  ) {
     const calls: Array<{ url: string; method: string }> = [];
     const fetchFn = (async (url: string, init: RequestInit) => {
       calls.push({ url, method: init.method ?? "GET" });
-      return new Response(null, {
-        status: url.includes("/refresh") ? 502 : 204,
-      });
+      if (url.includes("/refresh")) return new Response(null, { status: 502 });
+      const outcome = reportOutcomes.shift() ?? 204;
+      if (outcome instanceof Error) throw outcome;
+      return new Response(null, { status: outcome });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
       connectionId: "conn-a",
@@ -518,24 +527,56 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
       minRefreshIntervalMs: 0,
     });
     const successCalls = () => calls.filter((c) => c.url === SUCCESS_URL && c.method === "POST");
-    return { source, successCalls };
+    const refreshCalls = () => calls.filter((c) => c.url.includes("/refresh"));
+    return { source, successCalls, refreshCalls };
   }
 
   it("reports the first success once when the payload announced a streak", () => {
-    const { source, successCalls } = sourceWith({ ...makePayload("tok"), rejectionStreak: 2 });
+    const { source, successCalls } = sourceWith({
+      ...held(makePayload("tok")),
+      rejectionStreak: 2,
+    });
     source.reportUpstreamSuccess();
     source.reportUpstreamSuccess();
     expect(successCalls().length).toBe(1);
   });
 
   it("reports nothing when no streak is pending", () => {
-    const { source, successCalls } = sourceWith(makePayload("tok"));
+    const { source, successCalls } = sourceWith(held(makePayload("tok")));
     source.reportUpstreamSuccess();
     expect(successCalls().length).toBe(0);
   });
 
+  for (const outcome of [500, new Error("network down")]) {
+    it(`re-arms a report the platform did not apply (${String(outcome)})`, async () => {
+      const { source, successCalls } = sourceWith(
+        { ...held(makePayload("tok")), rejectionStreak: 2 },
+        [outcome],
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        source.reportUpstreamSuccess();
+        await Bun.sleep(0);
+        source.reportUpstreamSuccess();
+        await Bun.sleep(0);
+        source.reportUpstreamSuccess();
+      } finally {
+        warn.mockRestore();
+      }
+      expect(successCalls().length).toBe(2);
+    });
+  }
+
+  it("names the credential it holds on /refresh", async () => {
+    const { source, refreshCalls } = sourceWith(held(makePayload("tok")));
+    await source.refreshOnUnauthorized("primary");
+    expect(refreshCalls()[0]!.url).toBe(
+      "http://api/internal/integration-credentials/@test/integ/refresh?connection_id=conn-a&credential_revision=rev-a",
+    );
+  });
+
   it("reports a success that follows a rejection counted in this run", async () => {
-    const { source, successCalls } = sourceWith(makePayload("tok"));
+    const { source, successCalls } = sourceWith(held(makePayload("tok")));
     expect(await source.refreshOnUnauthorized("primary")).toBe(false);
     source.reportUpstreamSuccess();
     source.reportUpstreamSuccess();
@@ -545,7 +586,7 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
   it("an OAuth2 refresh failure is not a rejection streak", async () => {
     const payload = makePayload("tok");
     const { source, successCalls } = sourceWith({
-      ...payload,
+      ...held(payload),
       auths: [{ ...payload.auths[0]!, authType: "oauth2" }],
     });
     await source.refreshOnUnauthorized("primary");
@@ -553,17 +594,23 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     expect(successCalls().length).toBe(0);
   });
 
-  it("reads `rejection_streak` off the wire", async () => {
+  it("reads `rejection_streak` and `credential_revision` off the wire", async () => {
     const fetchFn = (async () =>
-      new Response(JSON.stringify({ ...makeWireJson("tok"), rejection_streak: 3 }), {
-        status: 200,
-      })) as unknown as typeof fetch;
+      new Response(
+        JSON.stringify({
+          ...makeWireJson("tok"),
+          rejection_streak: 3,
+          credential_revision: "rev-a",
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
     const wire = await fetchInitialIntegrationCredentials("@test/integ", "conn-a", {
       platformApiUrl: "http://api",
       runToken: "run-tok",
       fetchFn,
     });
     expect(wire.rejectionStreak).toBe(3);
+    expect(wire.credentialRevision).toBe("rev-a");
   });
 });
 

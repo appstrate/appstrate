@@ -1286,7 +1286,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         expect(calls.length).toBe(0);
         expect(events).toContainEqual({
           kind: "request-refused",
-          url: "https://api.test.local/denied?x=1",
+          url: "https://api.test.local/denied",
           reason: "not-authorized",
         });
 

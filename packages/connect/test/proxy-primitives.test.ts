@@ -12,7 +12,6 @@ import {
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
-  HOP_BY_HOP_HEADERS,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
@@ -20,6 +19,7 @@ import {
   normalizeAuthSchemeTemplate,
   normalizeAuthSchemeTemplates,
 } from "../src/proxy-primitives.ts";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 describe("substituteVars", () => {
   it("replaces known placeholders", () => {
@@ -130,24 +130,6 @@ describe("matchesAuthorizedUriSpec (AFPS semantics)", () => {
     expect(
       matchesAuthorizedUriSpec("https://api.example.com/v1", "https://api.example.com/v1/foo"),
     ).toBe(false);
-  });
-});
-
-describe("HOP_BY_HOP_HEADERS", () => {
-  it("includes the canonical RFC 7230 hop-by-hop set", () => {
-    for (const h of [
-      "connection",
-      "keep-alive",
-      "proxy-connection",
-      "proxy-authenticate",
-      "proxy-authorization",
-      "te",
-      "trailer",
-      "transfer-encoding",
-      "upgrade",
-    ]) {
-      expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
-    }
   });
 });
 
@@ -303,6 +285,35 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     });
     expect(headers.get("authorization")).toBe("Bearer caller");
     expect(decision).toEqual({ kind: "caller_override", headerName: "Authorization" });
+  });
+});
+
+describe("injecting a credential that is no HTTP field value", () => {
+  const secret = "SECRETKEY";
+  const creds = (value: string) => ({
+    credentials: { api_key: value },
+    credentialHeaderName: "X-Api-Key",
+    credentialHeaderPrefix: "",
+    credentialFieldName: "api_key",
+  });
+
+  // Bun's `Headers` TypeError quotes the value: the injector refuses before it can be raised.
+  it("throws an error naming the header, never the value", () => {
+    for (const value of [`${secret}\r\nX-Evil: 1`, `${secret}\u20ac`, `${secret}\u0000`]) {
+      for (const inject of [
+        () => applyInjectedCredentialHeaderToHeaders(new Headers(), creds(value)),
+        () => applyInjectedCredentialHeader({}, creds(value)),
+      ]) {
+        let caught: unknown;
+        try {
+          inject();
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(InvalidHeaderValueError);
+        expect((caught as Error).message).not.toContain(secret);
+      }
+    }
   });
 });
 

@@ -358,7 +358,6 @@ export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/
 export {
   substituteVars,
   findUnresolvedPlaceholders,
-  HOP_BY_HOP_HEADERS,
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
   normalizeAuthSchemeTemplates,

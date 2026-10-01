@@ -2,8 +2,9 @@
 
 /**
  * `scripts/migration/0036-resolved-connection-labels.sql` on a private PGlite
- * replayed to the current schema: every legacy snapshot element ends with a
- * string `label` and `accountId` — the one shape `resolvedConnectionMapSchema`
+ * replayed to `0076` — where the runbook runs it, before `0077` names the
+ * unlabelled connections: every legacy snapshot element ends with a non-empty
+ * `label` and a string `accountId` — the one shape `resolvedConnectionMapSchema`
  * reads back — a rerun is a no-op, an element whose connection is gone and that
  * names no account is still filled, and one without a `connectionId` refuses the batch.
  */
@@ -26,6 +27,8 @@ const AGENT = "@acme0036/agent";
 const GMAIL = "@acme0036/gmail";
 const LIVE = "d0360000-0000-4000-8000-000000000001";
 const GONE = "d0360000-0000-4000-8000-000000000002";
+const BLANK = "d0360000-0000-4000-8000-000000000003";
+const UNNAMED = "d0360000-0000-4000-8000-000000000004";
 
 const pg = new PGlite();
 const script = await Bun.file(SCRIPT).text();
@@ -47,7 +50,7 @@ async function snapshot(id: string): Promise<unknown> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg);
+  await replayJournal(pg, "0076_space_packages_chat_enforced");
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero36', 'zero-36');
     INSERT INTO spaces (id, org_id, name, is_default) VALUES ('${SPACE}', '${ORG}', 'Default', true);
@@ -56,7 +59,9 @@ beforeAll(async () => {
     INSERT INTO packages (id, type) VALUES ('${AGENT}', 'agent'), ('${GMAIL}', 'integration');
     INSERT INTO integration_connections
       (id, integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted, label)
-      VALUES ('${LIVE}', '${GMAIL}', 'primary', 'alice@acme.test', '${SPACE}', '${ALICE}', 'x', 'Boulot');
+      VALUES ('${LIVE}', '${GMAIL}', 'primary', 'alice@acme.test', '${SPACE}', '${ALICE}', 'x', 'Boulot'),
+             ('${BLANK}', '${GMAIL}', 'primary', 'blank@acme.test', '${SPACE}', '${ALICE}', 'x', ''),
+             ('${UNNAMED}', '${GMAIL}', 'primary', 'unnamed@acme.test', '${SPACE}', '${ALICE}', 'x', NULL);
   `);
   await insertRun("run_0036_current", {
     [GMAIL]: [
@@ -68,6 +73,9 @@ beforeAll(async () => {
       { connectionId: LIVE, source: "run_override", label: null, accountId: "alice@acme.test" },
       { connectionId: GONE, source: "run_override", label: null, accountId: "gone@acme.test" },
       { connectionId: LIVE, source: "run_override" },
+      { connectionId: LIVE, source: "run_override", label: "", accountId: "alice@acme.test" },
+      { connectionId: BLANK, source: "run_override", label: null, accountId: "was@acme.test" },
+      { connectionId: UNNAMED, source: "run_override", label: null },
     ],
   });
 }, 300_000);
@@ -77,7 +85,7 @@ afterAll(async () => {
 });
 
 describe("0036 — resolved connection labels", () => {
-  it("fills every short element from its connection, else its account, and keeps the rest", async () => {
+  it("fills every short element from its connection's label, else its account, and keeps the rest", async () => {
     await pg.exec(script);
 
     expect(await snapshot("run_0036_legacy")).toEqual({
@@ -99,6 +107,25 @@ describe("0036 — resolved connection labels", () => {
           source: "run_override",
           label: "Boulot",
           accountId: "alice@acme.test",
+        },
+        {
+          connectionId: LIVE,
+          source: "run_override",
+          label: "Boulot",
+          accountId: "alice@acme.test",
+        },
+        // The connection's label is '' and its account wins over the element's.
+        {
+          connectionId: BLANK,
+          source: "run_override",
+          label: "blank@acme.test",
+          accountId: "was@acme.test",
+        },
+        {
+          connectionId: UNNAMED,
+          source: "run_override",
+          label: "unnamed@acme.test",
+          accountId: "unnamed@acme.test",
         },
       ],
     });

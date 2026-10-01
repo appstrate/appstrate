@@ -295,7 +295,7 @@ router.put(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
+    const input = await readJsonBody(c, upsertMemberPinSchema);
     const { previous, pin } = await upsertMemberPin(scope, {
       agentPackageId,
       integrationId: integrationPackageId,

@@ -45,9 +45,11 @@ import {
   fetchApiCall,
   redactionFields,
   redactCredentialHost,
+  templateHost,
   urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
+import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
@@ -348,6 +350,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   }
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
+  const targetHost = templateHost(targetUrl);
 
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
@@ -357,6 +360,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     fail fast on unresolved placeholders. Re-substituted on each
   //     `doUpstreamRequest` so a 401 retry sees the refreshed token.
   for (const [key, rawValue] of Object.entries(callerHeaders)) {
+    // The caller's own value; one a credential makes invalid is the engine's `invalid_header`.
+    if (!isHttpFieldValue(rawValue)) {
+      return { ok: false, status: 400, error: `Header "${key}" is not a valid HTTP field value` };
+    }
     const resolved = substituteVars(rawValue, creds.credentials);
     const unresolved = findUnresolvedPlaceholders(resolved);
     if (unresolved.length) {
@@ -515,6 +522,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       ...(fetchFn ? { fetchFn } : {}),
       ...(deps.resolveHost ? { resolveHost: deps.resolveHost } : {}),
       logger,
+      targetHost,
       credentialFields: redactionFields(policy, activeCreds.credentials),
     });
     return {
@@ -542,7 +550,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     requestHeaderNames = r.requestHeaderNames;
     credentialInjection = r.credentialInjection;
   } catch (err) {
-    return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
+    return wrapRequestError(err, integrationId, targetHost);
   }
 
   let authRefreshed = false;
@@ -573,7 +581,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           requestHeaderNames = r.requestHeaderNames;
           credentialInjection = r.credentialInjection;
         } catch (err) {
-          return wrapRequestError(err, integrationId, resolvedUrl, redactFields);
+          return wrapRequestError(err, integrationId, targetHost);
         }
       } else {
         // Body already consumed — surface the rotated-but-still-401 signal to
@@ -637,17 +645,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
 /**
  * Outbound refusals and faults as structured failures: a refused target or hop is a policy
- * 403, an unresolvable target or a network fault a 502, a silent upstream a 504 — the
- * platform proxy's statuses. Hosts only, redacted: a redirect target may encode capabilities.
+ * 403, an unresolvable target, an unusable credential or a network fault a 502, a silent
+ * upstream a 504 — the platform proxy's statuses. Hosts only, as the target template names them:
+ * a redirect target may encode capabilities.
  */
-function wrapRequestError(
-  err: unknown,
-  integrationId: string,
-  resolvedUrl: string,
-  fields: Readonly<Record<string, string>>,
-): ApiCallFailure {
+function wrapRequestError(err: unknown, integrationId: string, host: string): ApiCallFailure {
   const failure = classifyApiCallFailure(err);
-  const host = redactCredentialHost(resolvedUrl, fields);
   switch (failure.kind) {
     case "not_authorized":
     case "ssrf":
@@ -663,6 +666,12 @@ function wrapRequestError(
         ok: false,
         status: 502,
         error: `Integration "${integrationId}": ${failure.message}`,
+      };
+    case "invalid_header":
+      return {
+        ok: false,
+        status: 502,
+        error: `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`,
       };
     case "timeout":
       return { ok: false, status: 504, error: `Upstream timeout: ${host} did not answer in time` };

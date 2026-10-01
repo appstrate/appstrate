@@ -405,6 +405,8 @@ describe("ProcessOrchestrator", () => {
         (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
       }
       expect(capturedEnv?.INTEGRATION_RUNTIME_ADAPTER).toBe("process");
+      // The host's every interface is reachable: the sidecar and its forward proxy bind loopback.
+      expect(capturedEnv?.LISTEN_HOST).toBe("127.0.0.1");
       await orchestrator.stopByRunId(runId);
     }, 10_000);
   });
@@ -448,6 +450,9 @@ describe("ProcessOrchestrator", () => {
         orchestrator = new ProcessOrchestrator();
         const ports = await (orchestrator as unknown as PortFinder).findAvailablePorts();
         expect(listen).toHaveBeenCalled();
+        for (const [options] of listen.mock.calls) {
+          expect((options as { hostname?: string }).hostname).toBe("127.0.0.1");
+        }
         expect(ports.forwardProxy).not.toBe(ports.sidecar);
       } finally {
         listen.mockRestore();

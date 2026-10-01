@@ -182,8 +182,9 @@ export async function assertScheduleActorValid(
   }
 }
 
-async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
-  await db
+/** Whether this call disabled it (false: someone already had). */
+async function disableScheduleForInvalidActor(scheduleId: string): Promise<boolean> {
+  const disabled = await db
     .update(schedules)
     .set({
       enabled: false,
@@ -192,8 +193,10 @@ async function disableScheduleForInvalidActor(scheduleId: string): Promise<void>
       updatedAt: new Date(),
     })
     // A user who disabled it while this fire ran keeps their reason.
-    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)))
+    .returning({ id: schedules.id });
   await removeScheduleJobs([scheduleId]);
+  return disabled.length > 0;
 }
 
 /**
@@ -421,8 +424,10 @@ export async function triggerScheduledRun(
         actorType: actor.type,
         actorId: actor.id,
       });
-      await disableScheduleForInvalidActor(scheduleId);
-      await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
+      const disabled = await disableScheduleForInvalidActor(scheduleId);
+      await failSchedule(
+        `Schedule ${disabled ? "disabled" : "refused"}: ${invalidScheduleActorReason(actor)}`,
+      );
       return row;
     }
 

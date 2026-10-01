@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — one outbound engine for every api_call path (#1641)
 
+- **BREAKING:** `fetchApiCall` requires `targetHost` — the target's host as
+  its template names it (`templateHost`, new export) — for the messages about
+  the initial target; `credentialFields` scrubs only redirect hosts and
+  transport errors. It throws `InvalidHeaderValueError`
+  (`@appstrate/afps-shared`) on a header value that is no HTTP field value,
+  before anything is sent; `classifyApiCallFailure` names it
+  `invalid_header`, and the CLI resolver raises `RESOLVER_HEADER_INVALID`.
 - **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,
   `MAX_REDIRECTS`, `matchesAuthorizedUri`, `stripUserInfoAndFragment`,
   `scrubTransportError`, `redactHost` and `RedirectBlockedError` are no longer
@@ -24,8 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header) and `Content-Length` unless the body is a `ReadableStream` are
   dropped.
 - New exports: `fetchApiCall` (`credentialFields` required: `{}` scrubs
-  nothing), `API_CALL_TIMEOUT_MS`, `HOP_BY_HOP_HEADERS` (moved from
-  `@appstrate/connect/proxy-primitives`, which re-exports it), and `classifyApiCallFailure`: what
+  nothing), `API_CALL_TIMEOUT_MS`, `HOP_BY_HOP_HEADERS` (its one home: the
+  `@appstrate/connect/proxy-primitives` and sidecar re-exports are gone),
+  `forwardableHeaders` (the caller-header rule, which
+  `RemoteAppstrateIntegrationResolver` also applies to the agent's headers,
+  its transport headers and `Content-Length` always its own), and `classifyApiCallFailure`: what
   `fetchApiCall` threw, as `not_authorized`, `ssrf`, `unresolvable`,
   `timeout` or `transport`, flagged when a redirect hop was refused. A target
   or a redirect hop with no DNS answer is `unresolvable` (a 502 on both

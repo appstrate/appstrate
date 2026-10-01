@@ -27,6 +27,7 @@ describe("parseSidecarEnv", () => {
       runToken: "run-token",
       port: 8080,
       forwardProxyPort: 8081,
+      listenHost: "0.0.0.0",
       runtimeToolNames: [],
     });
   });
@@ -96,6 +97,14 @@ describe("parseSidecarEnv", () => {
       expect(issuesOf({ ...VALID, PORT: bad })[0]).toStartWith("PORT:");
       expect(issuesOf({ ...VALID, FORWARD_PROXY_PORT: bad })[0]).toStartWith("FORWARD_PROXY_PORT:");
     }
+  });
+
+  it("binds every interface unless LISTEN_HOST names one IP address", () => {
+    expect(parseSidecarEnv(VALID).listenHost).toBe("0.0.0.0");
+    expect(parseSidecarEnv({ ...VALID, LISTEN_HOST: "127.0.0.1" }).listenHost).toBe("127.0.0.1");
+    expect(issuesOf({ ...VALID, LISTEN_HOST: "localhost" })).toEqual([
+      'LISTEN_HOST: must be an IP address (got "localhost")',
+    ]);
   });
 
   it("takes the forward proxy port as given — not adjacent to PORT, but never equal", () => {

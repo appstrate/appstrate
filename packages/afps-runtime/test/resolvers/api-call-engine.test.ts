@@ -12,11 +12,13 @@ import {
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
+  HOP_BY_HOP_HEADERS,
   PreflightError,
   RedirectBlockedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 const publicResolver = async () => ["203.0.113.7"];
 const internalResolver = async () => ["10.0.0.5"];
@@ -41,6 +43,7 @@ async function gate(
       fetchFn,
       ...opts,
       credentialFields: opts.credentialFields ?? {},
+      targetHost: opts.targetHost ?? new URL(url).hostname,
     });
     return null;
   } catch (err) {
@@ -71,6 +74,7 @@ describe("fetchApiCall — a transport error", () => {
         throw thrown;
       }) as unknown as typeof fetch,
       resolveHost: publicResolver,
+      targetHost: "api.example.com",
       credentialFields,
     }).then(
       () => null,
@@ -114,6 +118,7 @@ describe("redirect loop error", () => {
       trustedHost: () => false,
       integrationId: "i",
       resolveHost: publicResolver,
+      targetHost: "api.acme.com",
       credentialFields: { api_key: secret },
     }).then(
       () => null,
@@ -387,6 +392,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       credentialHeaders: ["Authorization", "X-Api-Key"],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
@@ -436,6 +442,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       fetchFn,
       resolveHost: async (host) => {
@@ -460,6 +467,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
@@ -491,6 +499,7 @@ describe("fetchApiCall — transport", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       resolveHost: publicResolver,
     });
@@ -515,6 +524,7 @@ describe("fetchApiCall — transport", () => {
       credentialHeaders: ["X-Api-Key"],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
@@ -573,6 +583,7 @@ describe("fetchApiCall — transport", () => {
       credentialHeaders: [],
       trustedHost: () => false,
       integrationId: "i",
+      targetHost: "api.example.com",
       credentialFields: {},
       fetchFn,
       resolveHost: publicResolver,
@@ -604,5 +615,78 @@ describe("classifyApiCallFailure", () => {
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
     ).toEqual({ kind: "transport", redirect: false, message: "refused", code: "ECONNREFUSED" });
+  });
+});
+
+describe("fetchApiCall — a header value that is no HTTP field value", () => {
+  const secret = "SECRETKEY";
+  const send = (value: string, credentialFields: Record<string, string>) => {
+    const fetchFn = mock(async () => new Response("ok"));
+    const sent = fetchApiCall({
+      url: "https://api.example.com/v1",
+      init: { method: "GET", headers: { "X-Api-Key": value } },
+      authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaders: ["X-Api-Key"],
+      integrationId: "i",
+      fetchFn: fetchFn as unknown as typeof fetch,
+      resolveHost: publicResolver,
+      targetHost: "api.example.com",
+      credentialFields,
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    return { sent, fetchFn };
+  };
+
+  // Bun's `Headers` TypeError quotes the value in full; it used to escape before the scrub.
+  for (const value of [`${secret}\r\nX-Evil: 1`, `${secret}\u20ac`, `${secret}\u0000`]) {
+    for (const fields of [{}, { api_key: value }] as Record<string, string>[]) {
+      it(`refuses ${JSON.stringify(value.slice(secret.length))} unsent, naming the header only (${Object.keys(fields).length ? "templated" : "untemplated"})`, async () => {
+        const { sent, fetchFn } = send(value, fields);
+        const err = (await sent) as Error;
+        expect(err).toBeInstanceOf(InvalidHeaderValueError);
+        expect(err.message).toContain("X-Api-Key");
+        expect(JSON.stringify([err.message, { ...err }])).not.toContain(secret);
+        expect(fetchFn).not.toHaveBeenCalled();
+        expect(classifyApiCallFailure(err)).toMatchObject({
+          kind: "invalid_header",
+          redirect: false,
+        });
+      });
+    }
+  }
+});
+
+describe("fetchApiCall — the target's host in a message", () => {
+  it("is the caller's `targetHost`, never the rendered host", async () => {
+    const err = await gate("https://tenant-secret.example.com/v1", {
+      authorizedUris: ["https://tenant-secret.example.com/**"],
+      declaredUris: ["https://{$credential.sub}.example.com/**"],
+      resolveHost: async () => [],
+      targetHost: "{{sub}}.example.com",
+    });
+    expect(err?.reason).toBe("unresolvable");
+    expect(err?.message).toBe("Target host could not be resolved ({{sub}}.example.com)");
+  });
+});
+
+describe("HOP_BY_HOP_HEADERS", () => {
+  it("includes the canonical RFC 7230 hop-by-hop set", () => {
+    for (const h of [
+      "connection",
+      "keep-alive",
+      "proxy-connection",
+      "proxy-authenticate",
+      "proxy-authorization",
+      "te",
+      "trailer",
+      "transfer-encoding",
+      "upgrade",
+    ]) {
+      expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
+    }
   });
 });

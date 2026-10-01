@@ -23,9 +23,7 @@ import {
   substituteVars as substituteVarsCore,
   type HttpDeliveryInjectionDecision,
 } from "@appstrate/afps-runtime/resolvers";
-
-// Defined beside `fetchApiCall`, which drops them from every `api_call` request.
-export { HOP_BY_HOP_HEADERS };
+import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
@@ -158,7 +156,8 @@ export function buildInjectedCredentialHeader(
  * Apply {@link buildInjectedCredentialHeader} onto an existing header
  * map in-place. The platform credential replaces a case-insensitive caller
  * match by default. A caller header is preserved only when the manifest
- * explicitly declares `allowServerOverride: true`.
+ * explicitly declares `allowServerOverride: true`. A credential that is no HTTP
+ * field value throws `InvalidHeaderValueError` (`@appstrate/afps-shared/delivery-http`).
  */
 export function applyInjectedCredentialHeader(
   headers: Record<string, string>,
@@ -166,6 +165,7 @@ export function applyInjectedCredentialHeader(
 ): HttpDeliveryInjectionDecision {
   const decision = planInjectedCredentialHeader(creds, Object.keys(headers));
   if (decision.kind !== "inject") return decision;
+  assertHttpFieldValue(decision.header.name, decision.header.value);
   const lower = decision.header.name.toLowerCase();
   for (const key of Object.keys(headers)) {
     if (key.toLowerCase() === lower) delete headers[key];
@@ -185,6 +185,7 @@ export function applyInjectedCredentialHeaderToHeaders(
 ): HttpDeliveryInjectionDecision {
   const decision = planInjectedCredentialHeader(creds, [...headers.keys()]);
   if (decision.kind !== "inject") return decision;
+  assertHttpFieldValue(decision.header.name, decision.header.value);
   headers.set(decision.header.name, decision.header.value);
   return decision;
 }

@@ -40,10 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **BREAKING: `isBlockedHost` (`./ssrf`) judges IPv4 embedded in NAT64 and
-  6to4 IPv6 addresses** like IPv4-mapped ones, through
-  `@appstrate/afps-shared` 0.10.0: such an address embedding a blocked IPv4 is
-  now blocked. (#1641)
+- **BREAKING: `isBlockedHost` (`./ssrf`) blocks more IPv6**, through
+  `@appstrate/afps-shared` 0.10.0. An IPv4 embedded in NAT64 `64:ff9b::/96`
+  (RFC 6052), 6to4 `2002::/16` (RFC 3056) or the SIIT IPv4-translated form
+  `::ffff:0:0:0/96` (RFC 2765) is judged as that IPv4, like an IPv4-mapped
+  one; the local-use NAT64 prefix `64:ff9b:1::/48` (RFC 8215), site-local
+  `fec0::/10`, multicast `ff00::/8`, and an IPv6 literal that does not expand
+  to eight groups are blocked. (#1641)
 
 ## [13.0.0] — 2026-09-30
 

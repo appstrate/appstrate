@@ -147,3 +147,27 @@ const BARE_AUTH_SCHEME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 export function isBareAuthSchemePrefix(headerName: string, prefix: string): boolean {
   return AUTH_SCHEME_HEADERS.has(headerName.toLowerCase()) && BARE_AUTH_SCHEME.test(prefix);
 }
+
+/** RFC 9110 §5.5 `field-value`: HTAB, SP, VCHAR and obs-text (0x80-0xFF), nothing else. */
+const HTTP_FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
+/** Whether `value` can be sent as an HTTP header value (no CR, LF, NUL, other control, > U+00FF). */
+export function isHttpFieldValue(value: string): boolean {
+  return HTTP_FIELD_VALUE.test(value);
+}
+
+/**
+ * A header value that is not an HTTP field value. Names the header, never the value: the
+ * runtime's own `Headers` TypeError quotes the value in full, and a header value is often a secret.
+ */
+export class InvalidHeaderValueError extends Error {
+  constructor(readonly header: string) {
+    super(`Header "${header}" is not a valid HTTP field value`);
+    this.name = "InvalidHeaderValueError";
+  }
+}
+
+/** Throws {@link InvalidHeaderValueError} unless `value` is an HTTP field value. */
+export function assertHttpFieldValue(header: string, value: string): void {
+  if (!isHttpFieldValue(value)) throw new InvalidHeaderValueError(header);
+}

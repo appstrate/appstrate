@@ -38,6 +38,7 @@ import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connec
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
 import {
   clearUpstreamRejections,
+  recordUnrefreshableRejection,
   saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";
 import { getEnv } from "@appstrate/env";
@@ -590,6 +591,31 @@ describe("resolveLiveIntegrationCredentials", () => {
       return { connId, forced };
     }
 
+    async function storedCredential(connId: string) {
+      const [row] = await db
+        .select({
+          ciphertext: integrationConnections.credentialsEncrypted,
+          count: integrationConnections.refreshFailureCount,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      return row!;
+    }
+
+    /** A 2xx relayed with the credential the row holds right now. */
+    const succeed = async (connId: string) =>
+      clearUpstreamRejections(connId, (await storedCredential(connId)).ciphertext);
+
+    /** What a reconnect leaves behind: another ciphertext, here with a streak of its own. */
+    const replaceCredential = (connId: string, refreshFailureCount: number) =>
+      db
+        .update(integrationConnections)
+        .set({
+          credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "key-b" } }),
+          refreshFailureCount,
+        })
+        .where(eq(integrationConnections.id, connId));
+
     it("a dead key rejected once per run, however far apart, is flagged on the threshold run", async () => {
       const { connId, forced } = await apiKeyConnection();
       const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
@@ -605,7 +631,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         const rejected = await forced();
         expect(rejected?.status).toBe(502);
         expect(rejected?.message).toContain(`1/${max} consecutive upstream rejections`);
-        await clearUpstreamRejections(connId);
+        await succeed(connId);
       }
       expect(await needsReconnection(connId)).toBe(false);
     });
@@ -617,8 +643,56 @@ describe("resolveLiveIntegrationCredentials", () => {
       await forced();
       await forced();
       expect((await read()).rejectionStreak).toBe(2);
-      await clearUpstreamRejections(connId);
+      await succeed(connId);
       expect((await read()).rejectionStreak).toBeUndefined();
+    });
+
+    it("the payload names its credential revision, and a credential write changes it", async () => {
+      const { connId } = await apiKeyConnection();
+      const read = () => resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId));
+      const before = (await read()).credentialRevision;
+      expect(before).toMatch(/^[0-9a-f]{16}$/);
+      expect((await read()).credentialRevision).toBe(before!);
+      await replaceCredential(connId, 0);
+      expect((await read()).credentialRevision).not.toBe(before!);
+    });
+
+    it("a 401 on a superseded credential counts nothing and hands back the current one", async () => {
+      const { connId } = await apiKeyConnection();
+      const held = (
+        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId))
+      ).credentialRevision!;
+      await replaceCredential(connId, 1);
+
+      const current = await resolveLiveIntegrationCredentials(
+        INTEGRATION_ID,
+        resolverContext(connId),
+        { forceRefresh: true, heldRevision: held },
+      );
+      expect(current.auths[0]!.fields.api_key).toBe("key-b");
+      expect(current.credentialRevision).not.toBe(held);
+      expect((await storedCredential(connId)).count).toBe(1);
+    });
+
+    it("a success or a rejection on a replaced credential leaves the new one's streak alone", async () => {
+      const { connId } = await apiKeyConnection();
+      const replaced = (await storedCredential(connId)).ciphertext;
+      await replaceCredential(connId, 2);
+
+      await clearUpstreamRejections(connId, replaced);
+      expect((await storedCredential(connId)).count).toBe(2);
+      await recordUnrefreshableRejection(connId, replaced);
+      expect((await storedCredential(connId)).count).toBe(2);
+    });
+
+    it("a success leaves a flagged connection's count alone", async () => {
+      const { connId } = await apiKeyConnection();
+      await db
+        .update(integrationConnections)
+        .set({ refreshFailureCount: 3, needsReconnection: true })
+        .where(eq(integrationConnections.id, connId));
+      await succeed(connId);
+      expect((await storedCredential(connId)).count).toBe(3);
     });
 
     it("a success leaves an OAuth2 connection's refresh-failure count alone", async () => {
@@ -627,7 +701,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         .update(integrationConnections)
         .set({ clientRef: "system-client", refreshFailureCount: 3 })
         .where(eq(integrationConnections.id, connId));
-      await clearUpstreamRejections(connId);
+      await succeed(connId);
       const [row] = await db
         .select({ count: integrationConnections.refreshFailureCount })
         .from(integrationConnections)

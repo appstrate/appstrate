@@ -12,7 +12,6 @@ import {
   isBlockedHost,
   resolveAndCheckHost,
   API_CALL_TIMEOUT_MS,
-  HOP_BY_HOP_HEADERS,
   peerAddress,
   peerAdmitted,
   type HostResolver,
@@ -26,6 +25,7 @@ import {
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
+import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;

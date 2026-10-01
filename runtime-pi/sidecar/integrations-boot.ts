@@ -34,7 +34,7 @@ import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { guardedFetch } from "@appstrate/core/ssrf";
+import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
 import { isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 
@@ -489,7 +489,11 @@ export async function connectRemoteHttpIntegration(
   // away — the override stays a faithful drop-in for `fetch`.
   const customFetch: typeof fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const send = async (): Promise<{ response: Response; credentialInjected: boolean }> => {
+      const send = async (): Promise<{
+        response: Response;
+        credentialInjected: boolean;
+        credentialAnswered: boolean;
+      }> => {
         const headers = new Headers(init?.headers);
         const injection = planInjection([...headers.keys()]);
         if (injection.kind === "inject") {
@@ -511,7 +515,7 @@ export async function connectRemoteHttpIntegration(
         // MCP server the platform-side spawn validation just allowed (internal
         // host explicitly allowlisted by the operator) would be re-blocked here
         // and fail opaquely in-run. Redirect discipline still applies.
-        const response = await guardedFetch(
+        const { response, finalUrl } = await guardedFetchChain(
           target,
           { ...init, headers },
           {
@@ -525,7 +529,14 @@ export async function connectRemoteHttpIntegration(
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );
-        return { response, credentialInjected: injection.kind === "inject" };
+        const credentialInjected = injection.kind === "inject";
+        return {
+          response,
+          credentialInjected,
+          // A cross-origin redirect dropped the credential: that answer says nothing about it.
+          credentialAnswered:
+            credentialInjected && new URL(finalUrl).origin === new URL(target).origin,
+        };
       };
       let attempt = await send();
       if (
@@ -536,7 +547,7 @@ export async function connectRemoteHttpIntegration(
         const refreshed = await source.refreshOnUnauthorized(authKey).catch(() => false);
         if (refreshed) attempt = await send();
       }
-      if (attempt.response.ok && attempt.credentialInjected) source.reportUpstreamSuccess();
+      if (attempt.response.ok && attempt.credentialAnswered) source.reportUpstreamSuccess();
       return attempt.response;
     },
     { preconnect: fetch.preconnect },
@@ -1055,10 +1066,14 @@ export function reportCredentialRejections(
 }
 
 /** Report a rejection like the MITM does on a 401 (forced refresh); fire-and-forget. */
-function reportRejectedCredential(spec: IntegrationSpawnSpec, opts: BundleFetchOptions): void {
+function reportRejectedCredential(
+  spec: IntegrationSpawnSpec,
+  opts: BundleFetchOptions,
+  credentialRevision: string | undefined,
+): void {
   const { integrationId } = spec;
   const connectionId = spec.connection?.id;
-  postIntegrationCredentialsRefresh(integrationId, connectionId, opts).then(
+  postIntegrationCredentialsRefresh(integrationId, connectionId, credentialRevision, opts).then(
     (res) =>
       logger.warn("integration credential rejected by the target — reported", {
         integrationId,
@@ -1630,7 +1645,8 @@ export async function bootIntegrations(
         // runtime, regardless of whether install-time validation removed them.
         ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         logLabel: "integration",
-        onCredentialRejected: () => reportRejectedCredential(spec, bundleFetchOpts),
+        onCredentialRejected: () =>
+          reportRejectedCredential(spec, bundleFetchOpts, source?.snapshot().credentialRevision),
         clients,
         mitmListeners,
         stderrTail,

@@ -642,7 +642,10 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     connId = conn!.id;
   });
 
-  async function callReturning(status: number): Promise<number> {
+  async function callReturning(
+    status: number,
+    duringCall?: () => Promise<unknown>,
+  ): Promise<number> {
     const res = await proxyCall({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
@@ -651,10 +654,23 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
       method: "GET",
       target: "https://api.example.com/v1/items",
       headers: {},
-      fetch: (async () => new Response("{}", { status })) as unknown as typeof fetch,
+      fetch: (async () => {
+        await duringCall?.();
+        return new Response("{}", { status });
+      }) as unknown as typeof fetch,
     });
     return res.status;
   }
+
+  /** A reconnect while the call is in flight: another credential, with `streak` of its own. */
+  const reconnectWithStreak = (streak: number) => () =>
+    db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k2" } }),
+        refreshFailureCount: streak,
+      })
+      .where(eq(integrationConnections.id, connId));
 
   async function failures(): Promise<number> {
     const [row] = await db
@@ -675,5 +691,16 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     expect(await callReturning(403)).toBe(403);
     await Bun.sleep(50);
     expect(await failures()).toBe(3);
+  });
+
+  it("a 2xx on a credential replaced during the call leaves the new one's streak", async () => {
+    expect(await callReturning(200, reconnectWithStreak(2))).toBe(200);
+    await Bun.sleep(50);
+    expect(await failures()).toBe(2);
+  });
+
+  it("a 401 on a credential replaced during the call is not counted against the new one", async () => {
+    expect(await callReturning(401, reconnectWithStreak(0))).toBe(401);
+    expect(await failures()).toBe(0);
   });
 });
