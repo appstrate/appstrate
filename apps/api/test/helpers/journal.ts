@@ -41,28 +41,16 @@ async function replayJournal(db: PGlite, lastTag?: string): Promise<void> {
 export interface JournalDumpOptions {
   /** Stop after this journal tag. Default: the whole journal. */
   through?: string;
-  /**
-   * Build with the platform's own runner (`applyCorePGliteMigrations`), which
-   * also records every tag in `__drizzle_migrations` — what a booted tier-0
-   * database holds. Without it the journal is replayed bare (`replayJournal`),
-   * the state the per-migration tests seed. Whole journal only.
-   */
+  /** Apply with `applyCorePGliteMigrations` (ledger included), as boot does. Whole journal only. */
   ledger?: boolean;
 }
 
 /**
- * Path of a `dumpDataDir` tarball of a fresh cluster with the journal applied,
- * built on first use and cached on disk.
- *
- * A fresh cluster (initdb) plus a full replay costs ~6 s, and it used to be
- * paid by every `bun test` (the tier-0 preload) and by every migration test
- * that builds its own database. Loading the dump costs well under a second.
- *
- * The cache key hashes everything the dump is made from — the PGlite build,
- * the code that builds it, the options, and the name and bytes of every
- * migration it applies — so editing a migration rebuilds it and a stale dump
- * is never served. Concurrent builders (parallel test processes) each write a
- * private file and `rename` it into place, which is atomic.
+ * A `dumpDataDir` tarball of a fresh cluster with the journal applied, cached
+ * on disk: a replay costs ~6 s, loading the dump well under one. The key hashes
+ * everything the dump is made from (PGlite build, builder code, options, every
+ * migration applied), so a stale dump is never served; concurrent builders
+ * `rename` a private file into place.
  */
 async function journalDump(options: JournalDumpOptions = {}): Promise<string> {
   const { through, ledger = false } = options;
@@ -90,8 +78,12 @@ async function journalDump(options: JournalDumpOptions = {}): Promise<string> {
   const path = join(DUMP_CACHE_DIR, `${hasher.digest("hex")}.tar`);
   const now = new Date();
   if (await Bun.file(path).exists()) {
-    utimesSync(path, now, now);
-    return path;
+    try {
+      utimesSync(path, now, now);
+      return path;
+    } catch {
+      // Pruned by a concurrent run between the two calls — rebuild it.
+    }
   }
 
   mkdirSync(DUMP_CACHE_DIR, { recursive: true });
@@ -120,22 +112,14 @@ function pruneUnusedDumps(now: number): void {
   }
 }
 
-/**
- * A new in-memory PGlite in exactly the state `replayJournal` (or, with
- * `ledger`, `applyCorePGliteMigrations`) leaves a fresh `new PGlite()` in —
- * loaded from the cached dump instead of replayed.
- */
+/** A fresh in-memory PGlite holding the journal as `journalDump(options)` describes it. */
 export async function journalPGlite(options: JournalDumpOptions = {}): Promise<PGlite> {
   const pg = new PGlite({ loadDataDir: Bun.file(await journalDump(options)) });
   await pg.waitReady;
   return pg;
 }
 
-/**
- * Fill an empty PGlite data directory with the whole journal applied the way
- * boot applies it, ledger included — what the tier-0 preload hands the
- * platform's db client before it opens the directory.
- */
+/** Fill an empty PGlite data directory with the journal applied as boot applies it. */
 export async function seedMigratedDataDir(dataDir: string): Promise<void> {
   const pg = new PGlite(dataDir, { loadDataDir: Bun.file(await journalDump({ ledger: true })) });
   await pg.waitReady;

@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-process scratch directories for the test harness.
- *
- * A test process removes its own directories on exit, but `exit` never fires
- * for a process that is killed or crashes, and a tier-0 run leaves a PGlite
- * cluster behind every time that happens. So each directory name carries the
- * pid that created it, and every new process sweeps the ones whose owner is
- * gone — which also makes the sweep safe while other test processes run.
+ * Per-process scratch directories. Each name carries its owner's pid, so a
+ * process that was killed (and never ran its exit hook) is swept by the next
+ * one, without touching the directories of processes still running.
  */
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

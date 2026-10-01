@@ -23,7 +23,7 @@ Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — star
 
 **Fixed cost per process.** The tier-0 preload seeds its PGlite directory from a cached dump of the migrated database (`apps/api/test/helpers/journal.ts` → `journalDump`, keyed on the migration files, the PGlite build and the builder code), so a process starts in ~4 s instead of ~10 s; the first run after a migration change rebuilds the dump. Migration tests that need the journal replayed up to a tag get a fresh in-memory database from the same cache with `journalPGlite({ through })` — never `new PGlite()` + a replay.
 
-**Per-test timeout: 15 s** under `scripts/run-tests.ts` and in CI (10 s for `apps/cli`), passed as `--timeout` — the only setting that holds for every file: bunfig has no timeout key (a `[test] timeout` there is silently ignored), and `setDefaultTimeout()` in a preload holds for the first file only. A plain `bun test` runs under Bun's own 5 s; a test that needs more than that states its own.
+**Per-test timeout: 15 s** under `scripts/run-tests.ts` and in `.github/workflows/test.yml` (10 s for `apps/cli` there), passed as `--timeout` — the only setting that holds for every file: bunfig has no timeout key (a `[test] timeout` there is silently ignored), and `setDefaultTimeout()` in a preload holds for the first file only. A plain `bun test` runs under Bun's own 5 s; a test that needs more than that states its own.
 
 ## Configuration
 

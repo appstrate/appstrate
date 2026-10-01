@@ -231,7 +231,7 @@ jobs:
     # a cancellation still reads as a red gate for a suite that never ran —
     # which is exactly why the fix had to be the workload and not the budget.
     #
-    # It now runs as two slices on two runners (`scripts/run-tests.ts
+    # It runs as two slices on two runners (`scripts/run-tests.ts
     # --partition`, the same deal as the unit job's), and the required check is
     # the `Integration tests` gate job below.
     timeout-minutes: 20
@@ -431,7 +431,7 @@ jobs:
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
       - name: Run runtime container e2e suites
-        run: bun test runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
+        run: bun test --timeout=15000 runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
 
   e2e:
     name: E2E tests

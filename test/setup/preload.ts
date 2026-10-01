@@ -169,14 +169,11 @@ Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: tru
 
 if (TIER0) {
   // ─── tier0 core migrations ─────────────────────────────────
-  // The throwaway data directory starts as a copy of a cached, already-migrated
-  // cluster (`journalDump`, keyed on the migration files): a fresh initdb plus
-  // the full replay cost ~6 s per test process, the copy well under one.
-  // Importing the db client then opens it, and the core Drizzle migrations are
-  // applied in-process exactly as before — against a seeded directory every
-  // ledger entry is already recorded, so the walker applies nothing, and it
-  // still applies whatever the dump did not hold. Shares the same migration
-  // walker as the embedded boot path (no drift).
+  // The throwaway data directory is seeded from a cached, already-migrated
+  // cluster (`journalDump`, keyed on the migration files). Importing the db
+  // client then opens it and the core Drizzle migrations run in-process — a
+  // no-op on the seeded ledger — through the same walker as the embedded boot
+  // path (no drift).
   const { seedMigratedDataDir } = await import("../../apps/api/test/helpers/journal.ts");
   await seedMigratedDataDir(process.env.PGLITE_DATA_DIR!);
   // migrate.ts lives under apps/api where the @appstrate/db/client alias
@@ -459,9 +456,9 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
 });
 
 // ─── Global auto-reset for process-wide singletons ────────────
-// Both resets below cover state that is process-wide, and `bun test` runs the
-// whole suite as a single process (see the "Testing" header in AGENTS.md), so
-// leaving either to individual files means every file has to remember it.
+// Both resets below cover state that is process-wide, and many test files share
+// one process, so leaving either to individual files means every file has to
+// remember it.
 //
 // `setPermissionDenialHandler` writes a module-level singleton inside
 // `@appstrate/core/permissions`. A test that installs a custom handler and

@@ -420,9 +420,9 @@ describe("RemoteFirecrackerOrchestrator boot-phase heartbeat", () => {
       const url = String(input);
       if (url.includes(RUNNER_ROUTES.workloadStatus)) return json({ running: true });
       if (url.includes(RUNNER_ROUTES.waitForExit)) {
-        // Exit only once the guest-active tick happened, then give the pump
-        // several intervals to (wrongly) beat again. A fixed delay here raced
-        // the 5 ms ticks on a loaded machine and exited before the third one.
+        // Exit only once the guest-active tick happened — however slow the
+        // timers run — then give the pump several intervals to (wrongly) beat
+        // again.
         await guestActiveTick;
         await sleep(30);
         return json({ done: true, code: 0 });

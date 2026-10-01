@@ -5,10 +5,10 @@
  * The test suite, split across processes. `bun run test:tier0` is this script
  * with `TEST_TIER=0`.
  *
- * `bun test` runs every file in ONE process, so the suite used one core however
- * many the machine has. Measured on `apps/api/test/integration` in tier 0:
- * 412 s in one process, 63 s over six, with identical pass/skip counts. Tier 0
- * needs nothing else to allow it — each process owns its database (a private
+ * `bun test` runs every file in one process, on one core. Measured on
+ * `apps/api/test/integration` in tier 0: 412 s in one process, 63 s over six,
+ * same pass/skip counts. Tier 0 needs nothing else to allow it — each process
+ * owns its database (a private
  * PGlite directory), its storage directory and in-memory infra (see
  * `test/setup/preload.ts`). Tier 3 shares one PostgreSQL, Redis, MinIO and DinD,
  * so it runs as a single process here; CI spreads it across machines instead,
@@ -34,6 +34,9 @@
  * run. Modules the current tier cannot load are excluded the way the preload
  * declines them (`test/setup/modules.ts`).
  *
+ * A file marked `@run-tests exclusive` (it changes the shared checkout) runs in
+ * a process of its own after the others.
+ *
  * The files are dealt to the processes by their measured duration, kept in
  * `node_modules/.cache/appstrate-test/timings.json` and refreshed by every run;
  * a file never measured is weighed by its size. Each process's output is
@@ -50,6 +53,12 @@ const TIER0 = process.env.TEST_TIER === "0";
 const CACHE_DIR = join(ROOT, "node_modules/.cache/appstrate-test");
 const TIMINGS_FILE = join(CACHE_DIR, "timings.json");
 const TEST_TIMEOUT_MS = 15_000;
+/**
+ * A test file carrying this marker changes the shared checkout (deletes or
+ * rewrites a tracked file and restores it), so with several processes it runs
+ * alone, after the others — never while another process may read that file.
+ */
+const EXCLUSIVE_MARKER = "@run-tests exclusive";
 /** The file names `bun test` collects. */
 const TEST_FILE = /[._](test|spec)\.(js|jsx|ts|tsx)$/;
 /** `bun test` flags whose value may come as the NEXT argument. */
@@ -256,8 +265,15 @@ async function main(): Promise<number> {
     measuredBytes += Bun.file(join(ROOT, file)).size;
   }
   const secondsPerByte = measuredBytes > 0 ? measuredSeconds / measuredBytes : 1 / 2000;
+  const exclusive: string[] = [];
+  if (shardCount > 1) {
+    for (const file of selected) {
+      if ((await Bun.file(join(ROOT, file)).text()).includes(EXCLUSIVE_MARKER))
+        exclusive.push(file);
+    }
+  }
   const shards = deal(
-    selected,
+    selected.filter((file) => !exclusive.includes(file)),
     shardCount,
     (file) => timings[file] ?? Bun.file(join(ROOT, file)).size * secondsPerByte,
   )
@@ -275,60 +291,62 @@ async function main(): Promise<number> {
   if (!options.forwarded.some((arg) => arg.startsWith("--timeout"))) {
     options.forwarded.push(`--timeout=${TEST_TIMEOUT_MS}`);
   }
-  const live = shards.length === 1;
+  const processes = shards.length + (exclusive.length > 0 ? 1 : 0);
+  const live = processes === 1;
   const started = performance.now();
   if (!live) {
-    console.log(
-      `${selected.length} test files in ${shards.length} processes (tier ${TIER0 ? 0 : 3})…`,
-    );
+    console.log(`${selected.length} test files in ${processes} processes (tier ${TIER0 ? 0 : 3})…`);
   }
 
-  const results = await Promise.all(
-    shards.map(async (shardFiles, i): Promise<ShardResult & { junit: string }> => {
-      const index = i + 1;
-      const junit = join(CACHE_DIR, `junit-${process.pid}-${index}.xml`);
-      const cmd = [
-        // The runner's own binary, so a run started under a pinned Bun
-        // (`bunx bun@<version> scripts/run-tests.ts`) tests under that Bun.
-        process.execPath,
-        "test",
-        ...(live ? options.forwarded : withCoverageDir(options.forwarded, index)),
-        ...(ownsReporter ? ["--reporter=junit", `--reporter-outfile=${junit}`] : []),
-        ...shardFiles.map((file) => `./${file}`),
-      ];
-      const proc = Bun.spawn(cmd, {
-        cwd: ROOT,
-        env: process.env,
-        stdin: "ignore",
-        stdout: live ? "inherit" : "pipe",
-        stderr: live ? "inherit" : "pipe",
-      });
-      const output = live
-        ? ""
-        : (
-            await Promise.all([
-              new Response(proc.stdout as ReadableStream).text(),
-              new Response(proc.stderr as ReadableStream).text(),
-            ])
-          )
-            .join("\n")
-            .replace(ANSI, "");
-      const exitCode = await proc.exited;
-      const seconds = (performance.now() - started) / 1000;
-      if (!live) {
-        const c = counts(output);
-        console.log(
-          `\n════ process ${index}/${shards.length} — ${shardFiles.length} files, ${seconds.toFixed(0)} s, ` +
-            `exit ${exitCode} ════\n${output.trimEnd()}`,
-        );
-        console.error(
-          `${exitCode === 0 ? "✓" : "✗"} process ${index}/${shards.length} done: ` +
-            `${c.pass ?? 0} pass, ${c.fail ?? 0} fail (${seconds.toFixed(0)} s)`,
-        );
-      }
-      return { index, files: shardFiles.length, exitCode, seconds, output, junit };
-    }),
-  );
+  const runShard = async (
+    shardFiles: readonly string[],
+    index: number,
+  ): Promise<ShardResult & { junit: string }> => {
+    const junit = join(CACHE_DIR, `junit-${process.pid}-${index}.xml`);
+    const cmd = [
+      // The runner's own binary, so a run started under a pinned Bun
+      // (`bunx bun@<version> scripts/run-tests.ts`) tests under that Bun.
+      process.execPath,
+      "test",
+      ...(live ? options.forwarded : withCoverageDir(options.forwarded, index)),
+      ...(ownsReporter ? ["--reporter=junit", `--reporter-outfile=${junit}`] : []),
+      ...shardFiles.map((file) => `./${file}`),
+    ];
+    const proc = Bun.spawn(cmd, {
+      cwd: ROOT,
+      env: process.env,
+      stdin: "ignore",
+      stdout: live ? "inherit" : "pipe",
+      stderr: live ? "inherit" : "pipe",
+    });
+    const output = live
+      ? ""
+      : (
+          await Promise.all([
+            new Response(proc.stdout as ReadableStream).text(),
+            new Response(proc.stderr as ReadableStream).text(),
+          ])
+        )
+          .join("\n")
+          .replace(ANSI, "");
+    const exitCode = await proc.exited;
+    const seconds = (performance.now() - started) / 1000;
+    if (!live) {
+      const c = counts(output);
+      console.log(
+        `\n════ process ${index}/${processes} — ${shardFiles.length} files, ${seconds.toFixed(0)} s, ` +
+          `exit ${exitCode} ════\n${output.trimEnd()}`,
+      );
+      console.error(
+        `${exitCode === 0 ? "✓" : "✗"} process ${index}/${processes} done: ` +
+          `${c.pass ?? 0} pass, ${c.fail ?? 0} fail (${seconds.toFixed(0)} s)`,
+      );
+    }
+    return { index, files: shardFiles.length, exitCode, seconds, output, junit };
+  };
+
+  const results = await Promise.all(shards.map((shardFiles, i) => runShard(shardFiles, i + 1)));
+  if (exclusive.length > 0) results.push(await runShard(exclusive, processes));
 
   if (ownsReporter) {
     for (const { junit } of results) {
@@ -346,7 +364,7 @@ async function main(): Promise<number> {
     );
     const wall = ((performance.now() - started) / 1000).toFixed(0);
     console.log(
-      `\n════ ${selected.length} files, ${shards.length} processes, ${wall} s ════\n` +
+      `\n════ ${selected.length} files, ${processes} processes, ${wall} s ════\n` +
         ` ${total.pass ?? 0} pass\n ${total.skip ?? 0} skip\n ${total.fail ?? 0} fail\n` +
         (total.errors ? ` ${total.errors} errors\n` : "") +
         (failures.length ? `\n${failures.join("\n")}\n` : "") +
