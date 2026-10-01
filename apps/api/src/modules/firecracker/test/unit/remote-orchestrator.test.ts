@@ -407,16 +407,24 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 describe("RemoteFirecrackerOrchestrator boot-phase heartbeat", () => {
   it("synthesises heartbeats while the guest is silent, and stops once it becomes active", async () => {
     let hbCalls = 0;
+    let guestActive!: () => void;
+    const guestActiveTick = new Promise<void>((resolve) => (guestActive = resolve));
     const recordBootHeartbeat = () => {
       hbCalls += 1;
       // First two ticks: still booting. Third: guest is now reporting.
-      return Promise.resolve(hbCalls < 3 ? ("bumped" as const) : ("guest-active" as const));
+      if (hbCalls < 3) return Promise.resolve("bumped" as const);
+      guestActive();
+      return Promise.resolve("guest-active" as const);
     };
     const fn = (async (input: string | URL) => {
       const url = String(input);
       if (url.includes(RUNNER_ROUTES.workloadStatus)) return json({ running: true });
       if (url.includes(RUNNER_ROUTES.waitForExit)) {
-        await sleep(80); // outlives the pump so the "stop on guest-active" is observed
+        // Exit only once the guest-active tick happened, then give the pump
+        // several intervals to (wrongly) beat again. A fixed delay here raced
+        // the 5 ms ticks on a loaded machine and exited before the third one.
+        await guestActiveTick;
+        await sleep(30);
         return json({ done: true, code: 0 });
       }
       return json({});

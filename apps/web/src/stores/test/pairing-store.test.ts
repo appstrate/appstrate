@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 
 /**
  * The store feature-detects `globalThis.localStorage`, so a Map-backed fake
@@ -28,6 +28,14 @@ class FakeStorage {
     return [...this.m.keys()][i] ?? null;
   }
 }
+
+// `localStorage` is process-wide and `bun test` runs many files in one
+// process: put back whatever was there once this file is done.
+const originalStorage = (globalThis as { localStorage?: Storage }).localStorage;
+afterAll(() => {
+  if (originalStorage === undefined) delete (globalThis as { localStorage?: Storage }).localStorage;
+  else (globalThis as { localStorage?: Storage }).localStorage = originalStorage;
+});
 
 const fakeStorage = new FakeStorage();
 (globalThis as { localStorage?: Storage }).localStorage = fakeStorage;
