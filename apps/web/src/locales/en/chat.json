@@ -131,5 +131,15 @@
   "approvalMode.ask.hint": "The assistant waits for your approval before any action that changes something.",
   "approvalMode.auto.short": "Direct",
   "approvalMode.auto.title": "Act without asking",
-  "approvalMode.auto.hint": "The assistant runs its actions straight away, with your permissions."
+  "approvalMode.auto.hint": "The assistant runs its actions straight away, with your permissions.",
+  "askUser.title": "Question from the assistant",
+  "askUser.progress": "Question {{current}} of {{total}}",
+  "askUser.ownAnswer": "Your answer…",
+  "askUser.previous": "Previous",
+  "askUser.next": "Next",
+  "askUser.submit": "Send",
+  "askUser.skip": "Skip",
+  "askUser.skipped": "Questions skipped",
+  "askUser.unanswered": "No answer",
+  "askUser.failed": "The answer could not be sent. The turn may have ended."
 }

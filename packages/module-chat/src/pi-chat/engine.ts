@@ -56,8 +56,10 @@ import {
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
-import type { RequestApproval } from "./tool-approval.ts";
-import { awaitApproval } from "../approval-registry.ts";
+import type { ApprovalDecision, RequestApproval } from "./tool-approval.ts";
+import { createAskUserExtension } from "./ask-user.ts";
+import type { AskUserReply } from "../ask-user-reply.ts";
+import { awaitReply } from "../reply-registry.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -488,7 +490,15 @@ export function runPiChat(input: PiChatInput): Response {
           const approvalId = crypto.randomUUID();
           write({ type: "tool-approval-request", approvalId, toolCallId, reason });
           const decision = input.chatSessionId
-            ? await awaitApproval(approvalId, input.chatSessionId, turnAbort.signal)
+            ? await awaitReply<ApprovalDecision>(
+                "approval",
+                approvalId,
+                input.chatSessionId,
+                turnAbort.signal,
+                {
+                  approved: false,
+                },
+              )
             : { approved: false };
           write({
             type: "tool-approval-response",
@@ -507,6 +517,22 @@ export function runPiChat(input: PiChatInput): Response {
               extensionFactories: [
                 ...tools.extensionFactories,
                 ...(input.toolApproval ? [tools.approvalExtension(requestApproval)] : []),
+                // Always on, whatever the approval mode: it is the model asking,
+                // not an action running. An ephemeral turn has no session to
+                // answer through, so its questions come back cancelled.
+                createAskUserExtension((toolCallId) =>
+                  input.chatSessionId
+                    ? awaitReply<AskUserReply>(
+                        "question",
+                        toolCallId,
+                        input.chatSessionId,
+                        turnAbort.signal,
+                        {
+                          status: "cancelled",
+                        },
+                      )
+                    : Promise.resolve({ status: "cancelled" }),
+                ),
                 ...authExtensions,
                 ...generationExtensions,
               ],

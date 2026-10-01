@@ -1111,6 +1111,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat/sessions/{id}/questions/{toolCallId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a chat question
+         * @description Answers an `ask_user` tool call the session's in-flight turn is waiting on (its tool call id), or skips it with `cancelled`. The answers are handed to the model keyed by question id. Signed-in sessions only: API keys and other bearer tokens are refused. The turn settles the question as cancelled on its own if no answer arrives before it ends.
+         */
+        post: operations["answerChatQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/sessions/{id}/read": {
         parameters: {
             query?: never;
@@ -10385,6 +10405,58 @@ export interface operations {
                 "application/json": {
                     approved: boolean;
                     reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Answer recorded; the turn resumes */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    answerChatQuestion: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+                toolCallId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @constant */
+                    status: "answered";
+                    answers: {
+                        [key: string]: {
+                            selected: string[];
+                            text?: string;
+                        };
+                    };
+                } | {
+                    /** @constant */
+                    status: "cancelled";
                 };
             };
         };
