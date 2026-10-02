@@ -17,7 +17,14 @@ import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/
 import { render } from "../../test/render.tsx";
 
 function conversation(id: string, title: string, unread: boolean): SessionSummary {
-  return { id, title, unread, generating: false, updatedAt: "2026-09-05T10:00:00Z" };
+  return {
+    id,
+    title,
+    unread,
+    generating: false,
+    awaiting_input: false,
+    updatedAt: "2026-09-05T10:00:00Z",
+  };
 }
 
 /** One loaded page, as the session-list infinite query caches it. */

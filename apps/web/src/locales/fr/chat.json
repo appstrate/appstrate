@@ -131,5 +131,21 @@
   "approvalMode.ask.hint": "Le chat attend votre accord avant chaque action qui modifie quelque chose.",
   "approvalMode.auto.short": "Direct",
   "approvalMode.auto.title": "Agir sans demander",
-  "approvalMode.auto.hint": "Le chat exécute ses actions directement, avec vos droits."
+  "approvalMode.auto.hint": "Le chat exécute ses actions directement, avec vos droits.",
+  "askUser.title": "Question du chat",
+  "askUser.ownAnswer": "Votre réponse…",
+  "askUser.next": "Suivant",
+  "askUser.submit": "Envoyer les réponses",
+  "askUser.skip": "Ignorer",
+  "askUser.skipped": "Questions ignorées",
+  "askUser.unanswered": "Sans réponse",
+  "askUser.failed": "La réponse n'a pas pu être envoyée. Le tour est peut-être terminé.",
+  "askUser.waiting": "En attente de votre réponse, ci-dessous.",
+  "askUser.other": "Autre",
+  "askUser.review": "Récapitulatif",
+  "askUser.escHint": "Échap pour ignorer",
+  "awaiting.label": "Action requise : la conversation attend votre réponse",
+  "awaiting.toast": "« {{title}} » attend votre réponse",
+  "awaiting.untitled": "Une conversation",
+  "awaiting.open": "Y aller"
 }

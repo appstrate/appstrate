@@ -3,13 +3,19 @@
 /**
  * The chat's human-approval gate (`tool-approval.ts`): reads pass, writes wait
  * for the host's answer, a refusal blocks with its reason, and the turn ending
- * without an answer refuses (`approval-registry.ts`).
+ * without an answer refuses (`reply-registry.ts`).
  */
 
 import { describe, it, expect } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { createToolApprovalExtension, type RequestApproval } from "../src/pi-chat/tool-approval.ts";
-import { awaitApproval, resolveApproval, type ApprovalDecision } from "../src/approval-registry.ts";
+import { awaitReply, resolveReply } from "../src/reply-registry.ts";
+import type { ApprovalDecision } from "../src/pi-chat/tool-approval.ts";
+
+const awaitApproval = (id: string, sessionId: string, signal: AbortSignal) =>
+  awaitReply<ApprovalDecision>("approval", id, sessionId, signal, { approved: false });
+const resolveApproval = (id: string, sessionId: string, decision: ApprovalDecision) =>
+  resolveReply("approval", id, sessionId, decision);
 
 type ToolCallHandler = (event: {
   type: "tool_call";

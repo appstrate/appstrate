@@ -12,6 +12,7 @@ const row = (id: string): SessionSummary => ({
   id,
   title: null,
   generating: false,
+  awaiting_input: false,
   unread: false,
   updatedAt: "2026-09-02T10:00:00.000Z",
 });

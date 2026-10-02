@@ -65,6 +65,12 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("connected ones first");
   });
 
+  it("sends questions through ask_user rather than a prose question ending the turn", () => {
+    expect(FULL).toContain(
+      "ask with `ask_user` rather than ending your turn with a question in prose",
+    );
+  });
+
   it("keeps the run_and_wait grounding (result is the deliverable)", () => {
     expect(FULL).toContain("run_and_wait");
     expect(FULL).toMatch(/prefer calling `run_and_wait` directly/);

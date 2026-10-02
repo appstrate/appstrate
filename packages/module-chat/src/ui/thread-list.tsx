@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon, HandIcon } from "lucide-react";
 import { useChatHeaders, useChatHost, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
@@ -152,7 +152,8 @@ function ConversationRow({
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
-  const canWrite = useChatHost().can("chat:write");
+  const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
 
   const onDelete = async () => {
     await deleteSession(getHeaders, session.id);
@@ -194,7 +195,11 @@ function ConversationRow({
           natural widths — without w-14 the title's truncation point reflows on
           every generating↔idle transition. */}
       <div className="relative flex w-14 shrink-0 items-center justify-end">
-        {session.generating ? (
+        {session.awaiting_input ? (
+          <span title={t("awaiting.label")} aria-label={t("awaiting.label")}>
+            <HandIcon className="text-primary size-3.5" />
+          </span>
+        ) : session.generating ? (
           <Loader2Icon
             className="text-muted-foreground size-3.5 animate-spin"
             aria-label="Opération en cours"

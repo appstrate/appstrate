@@ -6,6 +6,7 @@
  * no client message-write helper — only session list/CRUD + history load.
  */
 
+import type { AskUserReply } from "../ask-user-reply.ts";
 import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
@@ -20,6 +21,8 @@ export interface SessionSummary {
   title: string | null;
   /** True while a turn is generating — drives the poll cadence + unread badge. */
   generating: boolean;
+  /** A live turn waits on the person (a tool approval or questions): badge it. */
+  awaiting_input: boolean;
   /** Server-computed: an assistant reply landed after the caller last read it. */
   unread: boolean;
   /** ISO timestamp of the last activity — surfaced as a relative time in the list. */
@@ -165,6 +168,22 @@ export async function respondToToolApproval(
     body: JSON.stringify(decision),
   });
   if (!res.ok) throw new Error(`Failed to answer the approval (HTTP ${res.status})`);
+}
+
+/** Answer (or skip) the `ask_user` call the session's live turn is waiting on. */
+export async function answerQuestion(
+  getHeaders: GetHeaders | null | undefined,
+  id: string,
+  toolCallId: string,
+  reply: AskUserReply,
+): Promise<void> {
+  const res = await fetch(`/api/chat/sessions/${id}/questions/${toolCallId}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { ...headers(getHeaders), "Content-Type": "application/json" },
+    body: JSON.stringify(reply),
+  });
+  if (!res.ok) throw new Error(`Failed to answer the question (HTTP ${res.status})`);
 }
 
 /** A stored message node as returned by `GET /sessions/:id`. */
