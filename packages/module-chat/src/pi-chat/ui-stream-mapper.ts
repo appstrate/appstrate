@@ -139,6 +139,17 @@ export class PiChatUiStreamMapper {
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
+  /** Tool calls the person refused (see `tool-approval.ts`). */
+  private readonly denied = new Set<string>();
+
+  /**
+   * Record a refused tool call: Pi still ends it as an errored execution (the
+   * block reason is what the model reads), but the UI part closes in the AI
+   * SDK's own `output-denied` state instead of `output-error`.
+   */
+  markDenied(toolCallId: string): void {
+    this.denied.add(toolCallId);
+  }
 
   /** The opening `start` chunk (engine writes this before iterating). */
   startChunk(messageId: string): UIMessageChunk {
@@ -288,6 +299,9 @@ export class PiChatUiStreamMapper {
     result: unknown;
     isError: boolean;
   }): UIMessageChunk[] {
+    if (ev.isError && this.denied.has(ev.toolCallId)) {
+      return [{ type: "tool-output-denied", toolCallId: ev.toolCallId }];
+    }
     if (ev.isError) {
       return [
         {

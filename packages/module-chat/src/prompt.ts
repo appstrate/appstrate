@@ -56,6 +56,11 @@ export type ChatEnv = {
      */
     principalKind: PrincipalKind;
     /**
+     * How the caller authenticated (`"session"` for a signed-in person). The
+     * tool-approval route reads it: only a person answers an approval.
+     */
+    authMethod: string;
+    /**
      * Space the router entered (`enterSpaceContext`, mounted on every
      * `/api/chat/*` route). Always set: entering is what makes the space-level
      * `chat:*` guards satisfiable, and a caller that names no space is refused

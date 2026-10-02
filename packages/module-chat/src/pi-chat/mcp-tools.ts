@@ -31,6 +31,7 @@ import {
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
 import { logger } from "../logger.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
+import { createToolApprovalExtension, type RequestApproval } from "./tool-approval.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 
@@ -119,6 +120,8 @@ interface PlatformMcpTools {
   /** Server usage guidance (MCP `instructions`), to append to the system prompt. */
   instructions?: string;
   surfaceCached: boolean;
+  /** The `tool_call` gate that asks before any writing tool runs (see `tool-approval.ts`). */
+  approvalExtension(requestApproval: RequestApproval): ExtensionFactory;
   /** Idempotent teardown of the MCP client. */
   close(): Promise<void>;
 }
@@ -307,6 +310,16 @@ export async function buildPlatformMcpTools(
     extensionFactories,
     ...(surface.instructions ? { instructions: surface.instructions } : {}),
     surfaceCached: cached !== undefined,
+    approvalExtension: (requestApproval) =>
+      createToolApprovalExtension({
+        tools: surface.tools,
+        describeOperation: async (operationId) =>
+          (await untilAborted(getClient(), opts.signal)).callTool(
+            { name: "describe_operation", arguments: { operation_id: operationId } },
+            { signal: opts.signal },
+          ),
+        requestApproval,
+      }),
     close,
   };
 }
