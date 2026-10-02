@@ -8,13 +8,12 @@ import {
   isBlockedUrl,
   substituteVars,
   findUnresolvedPlaceholders,
-  matchesAuthorizedUri,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   INTEGRATION_ID_RE,
   MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   readPositiveByteEnv,
   readPositiveIntEnv,
   readRequestBodyBounded,
@@ -31,8 +30,8 @@ describe("constants", () => {
     expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(32 * 1024 * 1024);
   });
 
-  it("OUTBOUND_TIMEOUT_MS is 30_000", () => {
-    expect(OUTBOUND_TIMEOUT_MS).toBe(30_000);
+  it("API_CALL_TIMEOUT_MS is 30_000", () => {
+    expect(API_CALL_TIMEOUT_MS).toBe(30_000);
   });
 
   it("MAX_REQUEST_BODY_SIZE defaults to 10 MB", () => {
@@ -272,47 +271,6 @@ describe("findUnresolvedPlaceholders", () => {
 
   it("handles empty string", () => {
     expect(findUnresolvedPlaceholders("")).toEqual([]);
-  });
-});
-
-// --- matchesAuthorizedUri ---
-
-describe("matchesAuthorizedUri", () => {
-  it("matches exact URL", () => {
-    expect(matchesAuthorizedUri("https://api.example.com/v1", ["https://api.example.com/v1"])).toBe(
-      true,
-    );
-  });
-
-  it("`**` matches any substring including path separators", () => {
-    expect(
-      matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("`*` matches a single path segment only", () => {
-    expect(
-      matchesAuthorizedUri("https://api.example.com/v1/users", ["https://api.example.com/*"]),
-    ).toBe(false);
-    expect(
-      matchesAuthorizedUri("https://api.example.com/users", ["https://api.example.com/*"]),
-    ).toBe(true);
-  });
-
-  it("rejects non-matching URL", () => {
-    expect(matchesAuthorizedUri("https://evil.com/api", ["https://api.example.com/**"])).toBe(
-      false,
-    );
-  });
-
-  it("rejects when patterns is empty", () => {
-    expect(matchesAuthorizedUri("https://api.example.com/v1", [])).toBe(false);
-  });
-
-  it("matches with multiple patterns", () => {
-    expect(
-      matchesAuthorizedUri("https://b.com/data", ["https://a.com/**", "https://b.com/**"]),
-    ).toBe(true);
   });
 });
 

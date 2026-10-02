@@ -66,6 +66,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
+    disabled_reason: row.disabledReason,
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
@@ -181,12 +182,21 @@ export async function assertScheduleActorValid(
   }
 }
 
-async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
-  await db
+/** Whether this call disabled it (false: someone already had). */
+async function disableScheduleForInvalidActor(scheduleId: string): Promise<boolean> {
+  const disabled = await db
     .update(schedules)
-    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
-    .where(eq(schedules.id, scheduleId));
+    .set({
+      enabled: false,
+      disabledReason: "actor_invalid",
+      nextRunAt: null,
+      updatedAt: new Date(),
+    })
+    // A user who disabled it while this fire ran keeps their reason.
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)))
+    .returning({ id: schedules.id });
   await removeScheduleJobs([scheduleId]);
+  return disabled.length > 0;
 }
 
 /**
@@ -414,8 +424,10 @@ export async function triggerScheduledRun(
         actorType: actor.type,
         actorId: actor.id,
       });
-      await disableScheduleForInvalidActor(scheduleId);
-      await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
+      const disabled = await disableScheduleForInvalidActor(scheduleId);
+      await failSchedule(
+        `Schedule ${disabled ? "disabled" : "refused"}: ${invalidScheduleActorReason(actor)}`,
+      );
       return row;
     }
 
@@ -990,6 +1002,9 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
+  // Only a switch this write makes is the user's: re-sending the current state
+  // (the edit form always does) keeps a system disable's reason.
+  if (enabled !== expected.enabled) payload.disabledReason = enabled ? null : "user";
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.

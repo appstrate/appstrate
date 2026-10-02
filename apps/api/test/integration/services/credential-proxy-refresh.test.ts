@@ -14,7 +14,12 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedRun } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedRun,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
@@ -80,6 +85,7 @@ async function setup(
     source: "local",
     draftManifest: oauthManifest(packageId, delivery),
   });
+  await seedPublishedVersion(packageId, "1.0.0");
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
@@ -137,6 +143,7 @@ async function setupSystemPinned(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
+  await seedPublishedVersion(packageId, "1.0.0");
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
@@ -212,6 +219,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -269,6 +277,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -311,6 +320,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     const jar = new LocalCookieJarStore();
     const call = () =>
       proxyCall({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
@@ -348,6 +358,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -375,6 +386,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -417,6 +429,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     });
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -468,6 +481,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -526,7 +540,11 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
       userId: ctx.user.id,
       status: "running",
       runOrigin: "remote",
-      resolvedConnections: { [packageId]: [{ connectionId: conn!.id, source: "member_pin" }] },
+      resolvedConnections: {
+        [packageId]: [
+          { connectionId: conn!.id, source: "member_pin", label: "conn", accountId: "acct" },
+        ],
+      },
     });
     runId = run.id;
   });
@@ -545,6 +563,7 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
     }) as unknown as typeof fetch;
     const actor = { type: "user" as const, id: ctx.user.id };
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor,
       integrationId: packageId,
@@ -577,5 +596,111 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
       await db.update(runs).set({ status: "success" }).where(eq(runs.id, runId));
     };
     expect(await callThroughRun(finish)).toEqual({ status: 401, upstreamCalls: 1, refreshes: 0 });
+  });
+});
+
+describe("proxyCall — an api_key connection's rejection streak", () => {
+  const packageId = "@cprefreshorg/apikey";
+  let ctx: TestContext;
+  let connId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: packageId,
+        auths: {
+          key: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+          },
+        },
+      }),
+    });
+    await seedPublishedVersion(packageId, "1.0.0");
+    await seedPackageShare(ctx.defaultSpaceId, packageId);
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId });
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: packageId,
+        authKey: "key",
+        accountId: "acct-1",
+        label: "acct-1",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        refreshFailureCount: 3,
+      })
+      .returning({ id: integrationConnections.id });
+    connId = conn!.id;
+  });
+
+  async function callReturning(
+    status: number,
+    duringCall?: () => Promise<unknown>,
+  ): Promise<number> {
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/v1/items",
+      headers: {},
+      fetch: (async () => {
+        await duringCall?.();
+        return new Response("{}", { status });
+      }) as unknown as typeof fetch,
+    });
+    return res.status;
+  }
+
+  /** A reconnect while the call is in flight: another credential, with `streak` of its own. */
+  const reconnectWithStreak = (streak: number) => () =>
+    db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k2" } }),
+        refreshFailureCount: streak,
+      })
+      .where(eq(integrationConnections.id, connId));
+
+  async function failures(): Promise<number> {
+    const [row] = await db
+      .select({ count: integrationConnections.refreshFailureCount })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    return row!.count;
+  }
+
+  it("a 2xx ends the streak", async () => {
+    expect(await callReturning(200)).toBe(200);
+    const deadline = Date.now() + 1000;
+    while ((await failures()) !== 0 && Date.now() < deadline) await Bun.sleep(10);
+    expect(await failures()).toBe(0);
+  });
+
+  it("a non-2xx leaves it", async () => {
+    expect(await callReturning(403)).toBe(403);
+    await Bun.sleep(50);
+    expect(await failures()).toBe(3);
+  });
+
+  it("a 2xx on a credential replaced during the call leaves the new one's streak", async () => {
+    expect(await callReturning(200, reconnectWithStreak(2))).toBe(200);
+    await Bun.sleep(50);
+    expect(await failures()).toBe(2);
+  });
+
+  it("a 401 on a credential replaced during the call is not counted against the new one", async () => {
+    expect(await callReturning(401, reconnectWithStreak(0))).toBe(401);
+    expect(await failures()).toBe(0);
   });
 });

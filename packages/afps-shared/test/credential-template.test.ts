@@ -4,10 +4,56 @@
 import { describe, it, expect } from "bun:test";
 import {
   credentialTemplateRefs,
+  isHostUnboundedUriPattern,
+  parseAuthorizedUriPattern,
+  parseCredentialRef,
   parseUrlFormPattern,
   renderAuthorizedUris,
+  renderCredentialTemplate,
+  templateExpressions,
   unrenderableAuthorizedUriFields,
+  unsupportedTemplateExpressions,
 } from "../src/credential-template.ts";
+
+describe("renderCredentialTemplate", () => {
+  it("renders {$credential.<field>} refs, never a value's own braces", () => {
+    expect(renderCredentialTemplate("x {$credential.a}", { a: "{{b}}" })).toBe("x {{b}}");
+  });
+
+  it("renders a missing or inherited field empty", () => {
+    expect(renderCredentialTemplate("[{$credential.x}{$credential.constructor}]", {})).toBe("[]");
+  });
+
+  for (const expr of [
+    "{$outputs.token}",
+    "{$credential.a-b}",
+    "{$inputs.password}",
+    "{$}",
+    "{{access_token}}",
+    "{{ token }}",
+  ]) {
+    it(`throws on ${expr} rather than rendering it literally`, () => {
+      expect(() => renderCredentialTemplate(`Bearer ${expr}`, { token: "t" })).toThrow(
+        `unsupported template expression '${expr}'`,
+      );
+    });
+  }
+});
+
+describe("template expressions", () => {
+  it("parseCredentialRef accepts exactly one whole reference", () => {
+    expect(parseCredentialRef("{$credential.access_token}")).toBe("access_token");
+    expect(parseCredentialRef("x{$credential.a}")).toBeNull();
+    expect(parseCredentialRef("{$outputs.a}")).toBeNull();
+    expect(parseCredentialRef("access_token")).toBeNull();
+  });
+
+  it("lists every {$…} expression, and those that are not credential refs", () => {
+    const t = "{$credential.a}:{$outputs.b}/{$credential.a}{{c}}";
+    expect(templateExpressions(t)).toEqual(["{$credential.a}", "{$outputs.b}"]);
+    expect(unsupportedTemplateExpressions(t)).toEqual(["{$outputs.b}"]);
+  });
+});
 
 describe("credentialTemplateRefs", () => {
   it("returns referenced fields in order, deduplicated", () => {
@@ -24,8 +70,8 @@ describe("credentialTemplateRefs", () => {
 describe("renderAuthorizedUris", () => {
   const ssh = "ssh://{$credential.host}:{$credential.port}";
 
-  it("passes untemplated patterns unchanged", () => {
-    const patterns = ["https://api.example.com/**", "ssh://**"];
+  it("passes untemplated patterns unchanged, braces a delivery template refuses included", () => {
+    const patterns = ["https://api.example.com/**", "ssh://**", "https://a.com/v1/{{id}}"];
     expect(renderAuthorizedUris(patterns, {})).toEqual(patterns);
   });
 
@@ -245,5 +291,122 @@ describe("unrenderableAuthorizedUriFields", () => {
 
   it("ignores untemplated patterns", () => {
     expect(unrenderableAuthorizedUriFields(["https://api.example.com/**"], {})).toEqual([]);
+  });
+});
+
+describe("isHostUnboundedUriPattern", () => {
+  it("is false when the entry names its host, a subdomain glob included", () => {
+    for (const pattern of [
+      "https://api.example.com/**",
+      "https://*.example.com/**",
+      "https://api-*.example.com:*/v1/*",
+      "https://*.example.com./**",
+      "http://[::1]:8080/**",
+      "https://10.0.0.1/**",
+      "https://*.example.0xg/**",
+      "https://{$credential.subdomain}.zendesk.com/**",
+      "https://{$credential.host}/**",
+      "{$credential.site_url}/**",
+      "{$credential.webhook_url}",
+      "api.example.com/path",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+  });
+
+  it("is true when the caller picks the registrable host", () => {
+    for (const pattern of [
+      "https://**",
+      "https://**/health",
+      "*://**",
+      "https://*",
+      "https://*.com/**",
+      "https://api*.io/**",
+      "https://example.*/**",
+      "https://*.*/**",
+      "https://user@*/**",
+      "https://*:443/",
+      "https://{$credential.name}.*/**",
+      "**",
+      "*/**",
+      "**://api.example.com/**",
+      "*://api.example.com/**",
+      "https:///**",
+      "https://user@/**",
+      "https://*.com./**",
+      "https://*.com../**",
+      "https://[::**/**",
+      "https://[2001:db8::*]/**",
+      "https://[::ffff:*.2.3.4]/**",
+      "https://*.0.1/**",
+      "https://*.168.1.1/**",
+      "https://*.example.0x1/**",
+      "https://*.example.0x/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
+    }
+  });
+
+  it("is true for a malformed entry, whose authority WHATWG would rewrite", () => {
+    for (const pattern of [
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://u@x:1@**/**",
+      "https://api.example.com@evil.test/**",
+      "https://api%2Eexample.com/**",
+      "https://api.example.com\\@evil.test/**",
+      "https://api.exa mple.com/**",
+      "https://api.example.com\t/**",
+      "https://ａpi.example.com/**",
+      "https://api.example.com?x/**",
+      "https:///api.example.com/x",
+      "https://127.1/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
+    }
+  });
+});
+
+describe("parseAuthorizedUriPattern", () => {
+  it("canonicalises scheme, host case and a default port, keeping the wildcards", () => {
+    expect(parseAuthorizedUriPattern("HTTPS://*.Example.COM:443/v1/**")).toEqual({
+      kind: "url",
+      scheme: "https://",
+      authority: "*.example.com",
+      host: "*.example.com",
+      rest: "/v1/**",
+    });
+  });
+
+  it("keeps the raw authority of a pattern WHATWG cannot parse", () => {
+    expect(parseAuthorizedUriPattern("https://h.example.com:*/**")).toEqual({
+      kind: "url",
+      scheme: "https://",
+      authority: "h.example.com:*",
+      host: "h.example.com",
+      rest: "/**",
+    });
+    expect(parseAuthorizedUriPattern("http://[::1]:8080/x").kind).toBe("url");
+  });
+
+  it("tells a catch-all and a scheme-less pattern apart", () => {
+    expect(parseAuthorizedUriPattern("*://**")).toEqual({ kind: "any", scheme: "*://" });
+    expect(parseAuthorizedUriPattern("api.example.com/**")).toEqual({
+      kind: "path",
+      pattern: "api.example.com/**",
+    });
+  });
+
+  it("refuses an authority that is empty, not canonical, or holds userinfo or escapes", () => {
+    for (const pattern of [
+      "https:///**",
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://a.com%2f.evil.test/**",
+      "https://a.com#.b.com/**",
+      "https://0x7f.1/**",
+    ]) {
+      expect([pattern, parseAuthorizedUriPattern(pattern).kind]).toEqual([pattern, "malformed"]);
+    }
   });
 });

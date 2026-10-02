@@ -24,6 +24,29 @@
 
 export const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
 
+const SINGLE_CREDENTIAL_REF = new RegExp(`^${CREDENTIAL_REF.source}$`);
+
+/** Any `{$…}` runtime expression embedded in a template (AFPS §7.7). */
+const EMBEDDED_EXPRESSION = /\{\$[^{}]*\}/g;
+
+/** The `{{…}}` placeholder of the api_call grammar, which a credential template never renders. */
+export const API_CALL_PLACEHOLDER = /\{\{[^{}]*\}\}/g;
+
+/** The field `expression` names when it is exactly one `{$credential.<field>}`, else `null`. */
+export function parseCredentialRef(expression: string): string | null {
+  return SINGLE_CREDENTIAL_REF.exec(expression)?.[1] ?? null;
+}
+
+/** The distinct `{$…}` expressions embedded in `template`, in order. */
+export function templateExpressions(template: string): string[] {
+  return [...new Set(template.match(EMBEDDED_EXPRESSION) ?? [])];
+}
+
+/** The embedded `{$…}` expressions of `template` that are not `{$credential.<field>}` references. */
+export function unsupportedTemplateExpressions(template: string): string[] {
+  return templateExpressions(template).filter((e) => parseCredentialRef(e) === null);
+}
+
 export interface RenderCredentialTemplateOptions {
   /**
    * What an all-empty render resolves to. `"string"` returns `""`; `"null"`
@@ -47,9 +70,26 @@ export function renderCredentialTemplate(
   credential: Readonly<Record<string, string>>,
   opts: RenderCredentialTemplateOptions = {},
 ): string | null {
-  const rendered = template.replace(CREDENTIAL_REF, (_m, field: string) => credential[field] ?? "");
+  const unsupported =
+    template.match(API_CALL_PLACEHOLDER)?.[0] ?? unsupportedTemplateExpressions(template)[0];
+  if (unsupported !== undefined) {
+    throw new Error(
+      `unsupported template expression '${unsupported}' — only {$credential.<field>} renders`,
+    );
+  }
+  const rendered = substituteCredentialRefs(template, credential);
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
+}
+
+/** Each `{$credential.<field>}` → its value; a missing or inherited field renders empty. */
+function substituteCredentialRefs(
+  template: string,
+  credential: Readonly<Record<string, unknown>>,
+): string {
+  return template.replace(CREDENTIAL_REF, (_m, field: string) =>
+    Object.prototype.hasOwnProperty.call(credential, field) ? String(credential[field]) : "",
+  );
 }
 
 /** Field names referenced by `{$credential.<name>}` placeholders, in order, deduplicated. */
@@ -60,7 +100,7 @@ export function credentialTemplateRefs(template: string): string[] {
 /** A rendered value may only be a literal host label run or port digits, never dots alone. */
 const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
 
-const URL_FORM_HEAD = /^\{\$credential\.([A-Za-z0-9_]+)\}/;
+const URL_FORM_HEAD = new RegExp(`^${CREDENTIAL_REF.source}`);
 
 /**
  * Split a URL-form pattern (#1627): exactly one placeholder at index 0, followed by nothing or
@@ -74,6 +114,126 @@ export function parseUrlFormPattern(pattern: string): { field: string; suffix: s
     return null;
   }
   return { field: head[1]!, suffix };
+}
+
+/** `scheme://`, the scheme possibly globbed (`**://`). */
+const URI_PATTERN_SCHEME = /^[a-zA-Z*][a-zA-Z0-9+.*-]*:\/\//;
+
+/** Nothing an authority may hold that WHATWG would decode, fold, re-split or strip as userinfo. */
+const MALFORMED_AUTHORITY = /[^\x21-\x7e]|[%\\@?#]/;
+
+/**
+ * An `authorized_uris` entry as both the host-bound rule and the matcher read it: `path` has no
+ * `scheme://`, `any` is `scheme://**`, `malformed` matches nothing and bounds no host.
+ */
+export type AuthorizedUriPattern =
+  | { kind: "path"; pattern: string }
+  | { kind: "any"; scheme: string }
+  | { kind: "url"; scheme: string; authority: string; host: string; rest: string }
+  | { kind: "malformed" };
+
+/** `url` re-serialised by WHATWG without userinfo or fragment; `undefined` if unparseable. */
+export function canonicalUrl(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    u.username = "";
+    u.password = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function splitAuthority(afterScheme: string): { authority: string; rest: string } {
+  const slash = afterScheme.indexOf("/");
+  return slash === -1
+    ? { authority: afterScheme, rest: "" }
+    : { authority: afterScheme.slice(0, slash), rest: afterScheme.slice(slash) };
+}
+
+/** A bracketed IPv6 literal, or what precedes the first `:` (a port, possibly globbed). */
+function authorityHost(authority: string): string {
+  if (!authority.startsWith("[")) return authority.split(":")[0]!;
+  const close = authority.indexOf("]");
+  return close === -1 ? authority : authority.slice(0, close + 1);
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+/** {@link canonicalUrl} of a pattern, its wildcards masked through WHATWG; `undefined` if lost. */
+function canonicalPattern(pattern: string): string | undefined {
+  let n = 0;
+  let single = "zzurisinglezz";
+  let double = "zzuridoublezz";
+  while (pattern.includes(single) || pattern.includes(double)) {
+    n += 1;
+    single = `zzurisingle${n}zz`;
+    double = `zzuridouble${n}zz`;
+  }
+  const masked = pattern.replace(/\*\*|\*/g, (m) => (m === "**" ? double : single));
+  const canonical = canonicalUrl(masked);
+  if (
+    canonical === undefined ||
+    countOccurrences(canonical, single) !== countOccurrences(masked, single) ||
+    countOccurrences(canonical, double) !== countOccurrences(masked, double)
+  ) {
+    return undefined;
+  }
+  return canonical.split(double).join("**").split(single).join("*");
+}
+
+/**
+ * Parse an `authorized_uris` entry. Its authority (up to the first `/`) must be spelled as WHATWG
+ * serialises it, case and a default port aside, else `malformed`; a pattern WHATWG cannot parse
+ * (`host:*`) keeps its raw authority and path, which then match less, never more.
+ */
+export function parseAuthorizedUriPattern(pattern: string): AuthorizedUriPattern {
+  const schemeMatch = URI_PATTERN_SCHEME.exec(pattern);
+  if (!schemeMatch) return { kind: "path", pattern };
+  const scheme = schemeMatch[0].toLowerCase();
+  const raw = splitAuthority(pattern.slice(scheme.length));
+  if (raw.authority === "**" && raw.rest === "") return { kind: "any", scheme };
+  if (raw.authority === "" || MALFORMED_AUTHORITY.test(raw.authority)) return { kind: "malformed" };
+  const canonical = canonicalPattern(pattern);
+  if (canonical === undefined) {
+    return { kind: "url", scheme, ...raw, host: authorityHost(raw.authority) };
+  }
+  const parts = splitAuthority(canonical.slice(scheme.length));
+  const authority = parts.authority.toLowerCase();
+  const rawAuthority = raw.authority.toLowerCase();
+  if (authority !== rawAuthority && authority !== rawAuthority.replace(/:\d+$/, "")) {
+    return { kind: "malformed" };
+  }
+  return { kind: "url", scheme, ...parts, host: authorityHost(parts.authority) };
+}
+
+/** A last label that makes WHATWG parse the host as IPv4 (its "ends in a number" check). */
+const WHATWG_IPV4_NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
+
+/**
+ * Whether an `authorized_uris` entry lets the caller pick the host, judged on its
+ * {@link parseAuthorizedUriPattern} reading: malformed, no literal `scheme://`, an empty host, or
+ * a wildcard in one of its last two labels (`https://*.com./**`) or anywhere in an IP literal or
+ * IPv4-shaped host (last label numeric: `https://*.0.1/**` matches `0x2d210001`). `*.co.uk` is not
+ * detected.
+ */
+export function isHostUnboundedUriPattern(pattern: string): boolean {
+  if (parseUrlFormPattern(pattern)) return false;
+  const parsed = parseAuthorizedUriPattern(pattern.replace(CREDENTIAL_REF, "x"));
+  if (parsed.kind === "path") return parsed.pattern.includes("*");
+  if (parsed.kind !== "url" || parsed.scheme.includes("*")) return true;
+  const host = parsed.host.replace(/\.+$/, "");
+  if (!host.includes("*")) return host === "";
+  const labels = host.split(".");
+  return (
+    host.startsWith("[") ||
+    WHATWG_IPV4_NUMBER.test(labels[labels.length - 1]!) ||
+    labels.length < 3 ||
+    labels.slice(-2).some((label) => label.includes("*"))
+  );
 }
 
 /**
@@ -128,8 +288,8 @@ function renderPattern(
     return typeof value !== "string" || !AUTHORITY_VALUE.test(value);
   });
   if (bad !== undefined) return { field: bad, expected: EXPECTED_AUTHORITY };
-  // Every referenced value was just checked to be a string.
-  return { uri: renderCredentialTemplate(pattern, fields as Readonly<Record<string, string>>) };
+  // A pattern is not a delivery template: anything but a checked field stays literal, narrowing it.
+  return { uri: substituteCredentialRefs(pattern, fields) };
 }
 
 /**

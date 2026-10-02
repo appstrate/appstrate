@@ -11,6 +11,8 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { RunStatus } from "@appstrate/core/run-status";
+import type { PackageType } from "./enums.ts";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import { runs } from "./runs.ts";
@@ -43,10 +45,21 @@ import { runs } from "./runs.ts";
  * the recipient as an opaque external id, not a joined row.
  *
  * `type` + `runId` play the standard `entity_type` / `entity_id` roles so
- * the table extends to non-run notifications (invitations, billing) later
- * without a schema change. `payload` carries the few fields the bell needs
- * to render without a join back to `runs` (`packageId`, `status`).
+ * the table extends to non-run notifications (invitations, billing): a new
+ * kind is one entry in `notificationTypeValues` + `NotificationPayloads` and
+ * a migration re-stating the `notifications_type_valid` CHECK. `payload`
+ * carries the few fields the bell needs to render without a join.
  */
+/** The notification kinds — `notifications.type`, held by the CHECK below. */
+export const notificationTypeValues = ["run_completed", "package_shared"] as const;
+export type NotificationType = (typeof notificationTypeValues)[number];
+
+/** The render-without-join payload of each kind. */
+export interface NotificationPayloads {
+  run_completed: { packageId: string | null; status: RunStatus };
+  package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
+}
+
 export const notifications = pgTable(
   "notifications",
   {
@@ -73,14 +86,14 @@ export const notifications = pgTable(
     // cleanup is explicit at the deletion sites.
     recipientType: text("recipient_type").notNull().$type<"user" | "end_user">(),
     recipientId: text("recipient_id").notNull(),
-    // Notification kind. "run_completed" today; extensible.
-    type: text("type").notNull(),
+    // text + CHECK, not a pgEnum: a kind is added without an ALTER TYPE.
+    type: text("type").notNull().$type<NotificationType>(),
     // Originating entity (the run, for "run_completed"). Null for types
     // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this
     // is text too. ON DELETE CASCADE: deleting a run drops its notifications.
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),
-    // Render-without-join payload: { packageId, status }.
-    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    // Render-without-join payload, shaped by `type` (`NotificationPayloads`).
+    payload: jsonb("payload").$type<NotificationPayloads[NotificationType]>(),
     readAt: timestamp("read_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -162,5 +175,9 @@ export const notifications = pgTable(
     // an unknown recipient kind is rejected (the TS union only guards the ORM
     // path).
     check("notifications_recipient_type_valid", sql`recipient_type IN ('user', 'end_user')`),
+    check(
+      "notifications_type_valid",
+      sql`type IN (${sql.raw(notificationTypeValues.map((v) => `'${v}'`).join(", "))})`,
+    ),
   ],
 );

@@ -81,7 +81,9 @@ function renderPicker(res: Resolution, runBlocking: boolean, persistence?: Persi
   qc.setQueryData(queryKey, {
     blocks_run: runBlocking,
     errors: [],
-    integrations: [{ integration_id: INTEGRATION, run_blocking: runBlocking, resolution: res }],
+    integrations: [
+      { integration_package_id: INTEGRATION, run_blocking: runBlocking, resolution: res },
+    ],
   });
   return render(
     <IntegrationConnectionPicker
@@ -173,7 +175,11 @@ describe("IntegrationConnectionPicker — a stored member is gone", () => {
             blocks_run: false,
             errors: [],
             integrations: [
-              { integration_id: INTEGRATION, run_blocking: false, resolution: resolution({}) },
+              {
+                integration_package_id: INTEGRATION,
+                run_blocking: false,
+                resolution: resolution({}),
+              },
             ],
           });
           return qc;

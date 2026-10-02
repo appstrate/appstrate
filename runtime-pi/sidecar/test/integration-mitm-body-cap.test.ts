@@ -174,7 +174,7 @@ describe("MITM listener — inner-request egress allowlist (#1458)", () => {
     expect(events).toEqual([
       {
         kind: "request-refused",
-        url: "https://api.test.local/admin/export?all=1",
+        url: "https://api.test.local/admin/export",
         reason: "not-authorized",
       },
     ]);

@@ -129,7 +129,8 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       canConfigureIntegrations: true,
       version: "draft",
     });
-    return readiness.integrations.find((i) => i.integration_id === integrationId)!.resolution;
+    return readiness.integrations.find((i) => i.integration_package_id === integrationId)!
+      .resolution;
   }
 
   const TOOLS = { tools: ["search"] };

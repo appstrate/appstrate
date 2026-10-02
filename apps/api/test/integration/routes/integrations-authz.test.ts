@@ -508,7 +508,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     // connections list, not the previous hand-built {id,label,…} stub.
     const body = (await res.json()) as {
       id: string;
-      packageId: string;
+      integration_package_id: string;
       auth_key: string;
       label: string;
       shared_with_org: boolean;
@@ -518,7 +518,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     };
     expect(body.label).toBe("My Gmail");
     expect(body.id).toBe(connId);
-    expect(body.packageId).toBe("@myorg/gmail");
+    expect(body.integration_package_id).toBe("@myorg/gmail");
     expect(body.auth_key).toBe("google");
     expect(body.owner_type).toBe("user");
     expect(typeof body.createdAt).toBe("string");
@@ -790,9 +790,9 @@ describe("integrations:configure is never grantable to an API key", () => {
     const clientId = ((await registered.json()) as { id: string }).id;
 
     const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: asKey,
-      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+      body: JSON.stringify({ client_secret: "shh2" }),
     });
     expect(rotated.status).toBe(403);
 
@@ -825,9 +825,9 @@ describe("integrations:configure is never grantable to an API key", () => {
     const client = (await created.json()) as { id: string };
 
     const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+      body: JSON.stringify({ client_secret: "shh2" }),
     });
     expect(rotated.status).toBe(200);
 

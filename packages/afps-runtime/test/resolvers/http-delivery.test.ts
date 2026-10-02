@@ -53,7 +53,11 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     const plan = resolveHttpDelivery(
       "oauth2",
       { access_token: "tok" },
-      { headerName: "X-Token", headerPrefix: "Token ", valueFrom: "access_token" },
+      {
+        headerName: "X-Token",
+        headerPrefix: "Token ",
+        valueFrom: { template: "{$credential.access_token}" },
+      },
     );
     expect(plan).toEqual({
       headerName: "X-Token",
@@ -63,12 +67,15 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     });
   });
 
-  it("renders template valueFrom with {{var}} substitution and base64 encoding", () => {
+  it("renders a {$credential.<field>} template valueFrom with base64 encoding", () => {
     const plan = resolveHttpDelivery(
       "api_key",
       { email: "pierre@example.com", api_token: "abc123" },
       {
-        valueFrom: { template: "{{email}}/token:{{api_token}}", encoding: "base64" },
+        valueFrom: {
+          template: "{$credential.email}/token:{$credential.api_token}",
+          encoding: "base64",
+        },
       },
     );
     expect(plan!.value).toBe(
@@ -80,9 +87,29 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     const plan = resolveHttpDelivery(
       "api_key",
       { email: "pierre@example.com" },
-      { valueFrom: { template: "{{email}}/{{api_token}}" } },
+      { valueFrom: { template: "{$credential.email}/{$credential.api_token}" } },
     );
     expect(plan!.value).toBe("pierre@example.com/");
+  });
+
+  it("refuses a {{field}} placeholder instead of sending it upstream as a literal", () => {
+    expect(() =>
+      resolveHttpDelivery(
+        "api_key",
+        { api_key: "k" },
+        { valueFrom: { template: "Bearer {{api_key}}" } },
+      ),
+    ).toThrow("unsupported template expression '{{api_key}}'");
+  });
+
+  it("refuses a {$…} expression it cannot render instead of sending it upstream", () => {
+    expect(() =>
+      resolveHttpDelivery(
+        "custom",
+        { token: "t" },
+        { headerName: "Authorization", valueFrom: { template: "Bearer {$outputs.token}" } },
+      ),
+    ).toThrow("unsupported template expression '{$outputs.token}'");
   });
 
   it("allowServerOverride flag is reflected in the plan", () => {

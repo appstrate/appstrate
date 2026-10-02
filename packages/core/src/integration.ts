@@ -36,12 +36,21 @@ import {
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
+  API_CALL_PLACEHOLDER,
   credentialTemplateRefs,
+  isHostUnboundedUriPattern,
   parseUrlFormPattern,
+  unsupportedTemplateExpressions,
 } from "@appstrate/afps-shared/credential-template";
-import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
+import {
+  injectsHttpCredential,
+  isBareAuthSchemePrefix,
+  type AfpsHttpDelivery,
+} from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
+import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
+import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
 /** RFC 3986 `scheme://` prefix a templated authorized_uris entry must start with. */
@@ -182,9 +191,68 @@ export function findNonSnakeCaseIdentityClaimKeys(manifest: unknown): IdentityCl
   return found;
 }
 
+type IssuePath = (string | number)[];
+
+/** One write-path refusal of an auth, located in the manifest. */
+export interface AuthManifestIssue {
+  authKey: string;
+  path: IssuePath;
+  message: string;
+}
+
+/**
+ * List the auths that inject a credential over HTTP without an `authorized_uris` allowlist that
+ * names their hosts — the write-path twin of the run-time `credentialUrlPolicy`.
+ */
+export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifestIssue[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: AuthManifestIssue[] = [];
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const a = (auth ?? {}) as {
+      type?: unknown;
+      allow_all_uris?: unknown;
+      authorized_uris?: unknown;
+      delivery?: { http?: AfpsHttpDelivery };
+    };
+    if (!injectsHttpCredential(typeof a.type === "string" ? a.type : "", a.delivery?.http)) {
+      continue;
+    }
+    const uris: unknown[] = Array.isArray(a.authorized_uris) ? a.authorized_uris : [];
+    if (a.allow_all_uris === true) {
+      found.push({
+        authKey,
+        path: ["auths", authKey, "allow_all_uris"],
+        message: `auth '${authKey}' injects a credential, so it cannot set allow_all_uris; list its hosts in authorized_uris`,
+      });
+    } else if (uris.length === 0) {
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris"],
+        message: `auth '${authKey}' injects a credential, so it must list its hosts in authorized_uris`,
+      });
+    }
+    uris.forEach((pattern, index) => {
+      if (typeof pattern !== "string" || !isHostUnboundedUriPattern(pattern)) return;
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris", index],
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**, https://*.example.com/**) or use "{$credential.<field>}/**"`,
+      });
+    });
+  }
+  return found;
+}
+
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
+
+  // §7.6 + §7.7 install gate: no template or runtime expression reaches an upstream as literal text.
+  for (const { message, path } of findUnevaluableExpressions(manifest)) {
+    ctx.addIssue({ code: "custom", message, path });
+  }
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -601,6 +669,66 @@ interface DeliveryView {
   http?: { value?: string };
   env?: Record<string, { value?: string }>;
   files?: Record<string, { value?: string }>;
+}
+
+/**
+ * List the templates and runtime expressions the platform cannot evaluate: in a delivery template
+ * (http, env, files) anything but `{$credential.<field>}`, `{$…}` other than that in
+ * `authorized_uris`, and a `connect.login` expression outside {@link loginBlockIssues}.
+ */
+export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
+  const auths = (manifest as { auths?: unknown } | null)?.auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: AuthManifestIssue[] = [];
+  for (const [authKey, raw] of Object.entries(auths)) {
+    const auth = (raw ?? {}) as {
+      delivery?: DeliveryView;
+      authorized_uris?: unknown;
+      connect?: { login?: LoginBlockView };
+    };
+    const push = (message: string, at: IssuePath) =>
+      found.push({
+        authKey,
+        path: ["auths", authKey, ...at],
+        message: `${message} — the platform does not evaluate it (AFPS §7.6/§7.7)`,
+      });
+    const delivery = auth.delivery;
+    const deliveryTemplates: [string | undefined, IssuePath][] = [
+      [delivery?.http?.value, ["delivery", "http", "value"]],
+      ...(["env", "files"] as const).flatMap((kind) =>
+        Object.entries(delivery?.[kind] ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
+          e?.value,
+          ["delivery", kind, k],
+        ]),
+      ),
+    ];
+    const uris = Array.isArray(auth.authorized_uris) ? auth.authorized_uris : [];
+    const templates: [string | undefined, IssuePath][] = [
+      ...deliveryTemplates,
+      ...uris.map((u, i): [string | undefined, IssuePath] => [
+        typeof u === "string" ? u : undefined,
+        ["authorized_uris", i],
+      ]),
+    ];
+    for (const [template, at] of templates) {
+      for (const expr of unsupportedTemplateExpressions(template ?? "")) {
+        push(`'${expr}' is not a {$credential.<field>} reference`, at);
+      }
+    }
+    for (const [template, at] of deliveryTemplates) {
+      for (const placeholder of new Set((template ?? "").match(API_CALL_PLACEHOLDER))) {
+        push(
+          `'${placeholder}' is not a delivery template expression; delivery templates reference credential fields as {$credential.<field>}`,
+          at,
+        );
+      }
+    }
+    const login = auth.connect?.login;
+    for (const issue of login ? loginBlockIssues(login) : []) {
+      push(issue.message, ["connect", "login", ...issue.path]);
+    }
+  }
+  return found;
 }
 
 /**
@@ -1327,15 +1455,19 @@ export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
  */
 export type ConnectionOverrides = Record<string, string[]>;
 
+/** The cascade layers, in precedence order — the runtime tuple the wire enums derive from. */
+export const CONNECTION_RESOLUTION_SOURCES = [
+  "admin_pin",
+  "org_default_enforced",
+  "run_override",
+  "schedule_override",
+  "member_pin",
+  "org_default",
+  "fallback_auto",
+] as const;
+
 /** The cascade layer that bound a set — drives the audit + UI badge. */
-export type ConnectionResolutionSource =
-  | "admin_pin"
-  | "org_default_enforced"
-  | "run_override"
-  | "schedule_override"
-  | "member_pin"
-  | "org_default"
-  | "fallback_auto";
+export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
 
 /** Per-integration resolution result. */
 export interface ResolvedConnection {
@@ -1356,18 +1488,38 @@ export interface ResolvedConnection {
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
+/**
+ * Parsed wherever `runs.resolved_connections` is read back: a jsonb `$type` is only
+ * an assertion, so a drifted row fails here, loudly, not in a caller.
+ */
+export const resolvedConnectionMapSchema: z.ZodType<ResolvedConnectionMap> = z.record(
+  z.string(),
+  z.array(
+    z.object({
+      connectionId: z.string(),
+      source: z.enum(CONNECTION_RESOLUTION_SOURCES),
+      label: z.string(),
+      accountId: z.string(),
+    }),
+  ),
+);
+
+/** The error codes the resolver emits per integration — the runtime tuple the wire enums derive from. */
+export const CONNECTION_RESOLUTION_ERROR_CODES = [
+  "not_connected",
+  "needs_reconnection",
+  "pinned_connection_unavailable",
+  "override_connection_unavailable",
+  "override_outranked",
+  "must_choose_connection",
+  "insufficient_scopes",
+  "auth_key_mismatch",
+  "auth_serves_no_selected_tool",
+  "auth_key_serves_no_selected_tool",
+] as const;
+
 /** Error codes the resolver emits per integration. */
-export type ConnectionResolutionErrorCode =
-  | "not_connected"
-  | "needs_reconnection"
-  | "pinned_connection_unavailable"
-  | "override_connection_unavailable"
-  | "override_outranked"
-  | "must_choose_connection"
-  | "insufficient_scopes"
-  | "auth_key_mismatch"
-  | "auth_serves_no_selected_tool"
-  | "auth_key_serves_no_selected_tool";
+export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.

@@ -11,8 +11,7 @@ import type {
 import {
   isBlockedHost,
   resolveAndCheckHost,
-  OUTBOUND_TIMEOUT_MS,
-  HOP_BY_HOP_HEADERS,
+  API_CALL_TIMEOUT_MS,
   peerAddress,
   peerAdmitted,
   type HostResolver,
@@ -26,6 +25,7 @@ import {
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
+import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -205,8 +205,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       });
 
       // Timeout — abort if the target or upstream proxy hangs
-      proxyReq.setTimeout(OUTBOUND_TIMEOUT_MS, () => {
-        proxyReq.destroy(new Error(`Request timeout after ${OUTBOUND_TIMEOUT_MS}ms`));
+      proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
+        proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
       });
 
       // Clean up if either side breaks

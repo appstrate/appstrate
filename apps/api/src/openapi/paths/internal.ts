@@ -3,7 +3,7 @@
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 
 /**
- * The `409` shared by BOTH `/internal/integration-credentials/{scope}/{name}`
+ * The `409` shared by the `/internal/integration-credentials/{scope}/{name}`
  * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
  * object is serialized at both sites. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
@@ -40,7 +40,22 @@ const connectionIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
-/** The two ways the `connection_id` selector is refused. Shared by both operations. */
+/** `connection_id` where only an agent run's token is accepted: no connect-run exemption. */
+const boundConnectionIdParam = {
+  ...connectionIdParam,
+  required: true,
+  description:
+    "The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`.",
+} as const;
+
+/** `credential_revision`: which stored credential a sidecar report is about. */
+const credentialRevisionParam = {
+  name: "credential_revision",
+  in: "query",
+  schema: { type: "string", pattern: "^[0-9a-f]{16}$" },
+} as const;
+
+/** The two ways the `connection_id` selector is refused. Shared by every operation taking it. */
 const connectionSelector400 = {
   description:
     "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only.",
@@ -319,12 +334,18 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an active integration",
       description:
-        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
+        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
-        connectionIdParam,
+        boundConnectionIdParam,
+        {
+          ...credentialRevisionParam,
+          required: false,
+          description:
+            "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential.",
+        },
       ],
       responses: {
         "200": {
@@ -335,7 +356,10 @@ export const internalPaths = {
             },
           },
         },
-        "400": connectionSelector400,
+        "400": {
+          ...connectionSelector400,
+          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) is an \`invalid_request\` too.`,
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -354,12 +378,48 @@ export const internalPaths = {
         },
         "502": {
           description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count.",
+            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
+        },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
+  "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+    post: {
+      operationId: "reportIntegrationUpstreamSuccess",
+      tags: ["Internal"],
+      summary: "End a connection's upstream-rejection streak",
+      description:
+        "Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        boundConnectionIdParam,
+        {
+          ...credentialRevisionParam,
+          required: true,
+          description: "The `credential_revision` of the credential the successful call carried.",
+        },
+      ],
+      responses: {
+        "204": { description: "Streak ended (or none to end on that credential)." },
+        "400": {
+          ...connectionSelector400,
+          description: `${connectionSelector400.description} A missing or malformed \`credential_revision\` is an \`invalid_request\` too.`,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          ...integrationCredentialsConflict409,
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential.",
         },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },

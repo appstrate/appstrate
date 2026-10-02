@@ -279,7 +279,7 @@ describe("org-level integration OAuth clients", () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
       await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a", isDefault: true });
       expect(rows(await listIntegrationClients(org, INTEGRATION, AUTH_KEY))).toEqual([
-        [SYSTEM_ID, "built-in", true],
+        [SYSTEM_ID, "system", true],
         [orgRow, "org", false],
       ]);
     });
@@ -295,7 +295,7 @@ describe("org-level integration OAuth clients", () => {
       });
       expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
         [orgDefault, "org", false],
-        [own, "custom", true],
+        [own, "space", true],
       ]);
       expect(rows(await listIntegrationClients(spaceB, INTEGRATION, AUTH_KEY))).toEqual([
         [orgDefault, "org", true],
@@ -306,7 +306,7 @@ describe("org-level integration OAuth clients", () => {
       const own = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
       await seedClient({ spaceId: null, clientId: "org-o" });
       expect(rows(await listIntegrationClients(spaceA, INTEGRATION, AUTH_KEY))).toEqual([
-        [own, "custom", true],
+        [own, "space", true],
       ]);
     });
   });
@@ -444,7 +444,7 @@ describe("org-level integration OAuth clients", () => {
   });
 
   describe("update / delete by id", () => {
-    const input = { clientId: "rotated", clientSecret: "new" };
+    const input = { clientSecret: "new", redirectUri: "https://example.com/cb" };
 
     it("update matches the tier and the integration (404 otherwise)", async () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client" });
@@ -459,8 +459,18 @@ describe("org-level integration OAuth clients", () => {
           status: 404,
         });
       }
-      const rotated = await updateIntegrationOAuthClient(org, INTEGRATION, orgRow, input);
-      expect(rotated).toMatchObject({ client_id: "rotated", spaceId: null });
+      const { previous, client } = await updateIntegrationOAuthClient(
+        org,
+        INTEGRATION,
+        orgRow,
+        input,
+      );
+      expect(previous).toMatchObject({ client_id: "org-client", redirect_uri: null });
+      expect(client).toMatchObject({
+        client_id: "org-client",
+        redirect_uri: "https://example.com/cb",
+        spaceId: null,
+      });
     });
 
     it("delete matches the tier and the integration (404 otherwise)", async () => {
@@ -475,7 +485,8 @@ describe("org-level integration OAuth clients", () => {
           status: 404,
         });
       }
-      expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toEqual({
+      expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toMatchObject({
+        client: { id: spaceRow, client_id: "space-a" },
         deletedConnections: 0,
         disabledScheduleIds: [],
       });
@@ -486,7 +497,7 @@ describe("org-level integration OAuth clients", () => {
       await seedConnection(spaceA.spaceId, ctx.user.id, orgRow);
       await seedConnection(spaceB.spaceId, ctx.user.id, orgRow);
       await seedConnection(otherSpace.spaceId, other.user.id, orgRow);
-      expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toEqual({
+      expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toMatchObject({
         deletedConnections: 2,
         disabledScheduleIds: [],
       });

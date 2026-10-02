@@ -22,7 +22,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -79,6 +79,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -90,6 +91,62 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     expect(res.status).toBe(200);
     expect(captured?.authorization).toBe("Bearer ya29.live-token");
+  });
+
+  it("keeps the credential on a cross-origin redirect the allowlist names (Dropbox api. -> content.)", async () => {
+    const packageId = "@cpinjectorg/dropbox";
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Dropbox",
+        description: "Dropbox integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+            }),
+          },
+        },
+      }),
+    );
+    const connectionId = await seedProxyConnection(ctx, packageId, "api", { api_key: "sl.tok" });
+
+    const hops: Array<{ url: string; authorization: string | null }> = [];
+    const fakeFetch = ((url: string, init: RequestInit) => {
+      hops.push({ url, authorization: new Headers(init.headers).get("authorization") });
+      return Promise.resolve(
+        hops.length === 1
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "https://content.dropboxapi.com/2/files/download" },
+            })
+          : new Response("bytes", { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "POST",
+      target: "https://api.dropboxapi.com/2/files/download",
+      headers: {},
+      fetch: fakeFetch,
+      resolveHost: async () => ["162.125.1.1"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.connectionId).toBe(connectionId);
+    expect(hops).toEqual([
+      { url: "https://api.dropboxapi.com/2/files/download", authorization: "Bearer sl.tok" },
+      { url: "https://content.dropboxapi.com/2/files/download", authorization: "Bearer sl.tok" },
+    ]);
   });
 
   it("injects X-Api-Key without prefix when the plan declares it", async () => {
@@ -121,6 +178,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -165,6 +223,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -206,6 +265,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -261,6 +321,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -279,7 +340,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(connection?.needsReconnection).toBe(false);
   });
 
-  it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
+  it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
     await seedProxyIntegration(
       ctx,
@@ -310,6 +371,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await expect(
       proxyCall({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
@@ -318,7 +380,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         headers: {},
         fetch: fakeFetch,
       }),
-    ).rejects.toBeInstanceOf(ProxySubstitutionError);
+    ).rejects.toMatchObject({ code: "unresolved_placeholder" });
 
     // Fail-closed: the upstream fetch must never be issued.
     expect(upstreamHit).toBe(false);

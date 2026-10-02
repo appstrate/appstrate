@@ -93,6 +93,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
       scopesGranted: [],
       scopesRequested: [],
       tokenResponse: { access_token: "at-1", expires_in: 3600 },
+      clientRef: "probe-system",
       ...over,
     };
   }

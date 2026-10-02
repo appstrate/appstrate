@@ -2,6 +2,11 @@
 
 import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 
+/** The `content` of an error response: an RFC 9457 `ProblemDetail`. */
+export const problemContent = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
@@ -10,9 +15,7 @@ export const responses = {
     description:
       "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When the version is about to run (a run or schedule) and `AFPS_SIGNATURE_POLICY` is `required`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
     headers: REQUEST_ID_ONLY_HEADERS,
-    content: {
-      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-    },
+    content: problemContent,
   },
   Unauthorized: {
     description: "Missing or invalid authentication",

@@ -21,8 +21,10 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
-import { eq, and } from "drizzle-orm";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { asc, eq, and } from "drizzle-orm";
 import {
+  auditEvents,
   integrationConnections,
   integrationOauthClients,
   spacePackages,
@@ -974,18 +976,18 @@ describe("OAuth client CRUD", () => {
 
     // List — the custom client is present and is the default.
     let clients = await listClients();
-    const custom = clients.find((c) => c.source === "custom");
+    const custom = clients.find((c) => c.source === "space");
     expect(custom).toMatchObject({ client_id: "abc", is_default: true });
 
-    // Rotate by id
+    // Rotate the secret by id
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc2", client_secret: "different" }),
+      body: JSON.stringify({ client_secret: "different" }),
     });
     expect(rotate.status).toBe(200);
     clients = await listClients();
-    expect(clients.find((c) => c.source === "custom")?.client_id).toBe("abc2");
+    expect(clients.find((c) => c.source === "space")?.client_id).toBe("abc");
 
     // Delete by id
     const del = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
@@ -1061,7 +1063,7 @@ describe("OAuth client CRUD", () => {
     expect(b.status).toBe(201);
 
     let clients = await listClients();
-    const customs = clients.filter((c) => c.source === "custom");
+    const customs = clients.filter((c) => c.source === "space");
     expect(customs).toHaveLength(2);
     // First registered wins the default; exactly one is default.
     expect(customs.filter((c) => c.is_default)).toHaveLength(1);
@@ -1080,7 +1082,7 @@ describe("OAuth client CRUD", () => {
     clients = await listClients();
     expect(clients.find((c) => c.is_default)?.client_ref).toBe(b.id);
     // Still exactly one default (the one-default invariant holds).
-    expect(clients.filter((c) => c.source === "custom" && c.is_default)).toHaveLength(1);
+    expect(clients.filter((c) => c.source === "space" && c.is_default)).toHaveLength(1);
   });
 
   it("rejects setting an unknown client_ref as default (400, no silent fallback)", async () => {
@@ -1137,7 +1139,7 @@ describe("OAuth client CRUD", () => {
     expect(del.status).toBe(204);
     // No auto-promotion — the remaining custom is NOT silently made default.
     const clients = await listClients();
-    const customs = clients.filter((c) => c.source === "custom");
+    const customs = clients.filter((c) => c.source === "space");
     expect(customs).toHaveLength(1);
     // With no system client and no flagged default, the list still surfaces a
     // default (first custom as connectable fallback) — but no row carries the
@@ -1222,9 +1224,9 @@ describe("OAuth client CRUD", () => {
       .where(eq(integrationOauthClients.id, created.id));
 
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", redirect_uri: "https://example.com/cb" }),
+      body: JSON.stringify({ redirect_uri: "https://example.com/cb" }),
     });
     expect(rotate.status).toBe(200);
 
@@ -1237,12 +1239,101 @@ describe("OAuth client CRUD", () => {
     expect(after!.redirectUri).toBe("https://example.com/cb");
   });
 
+  it("PATCH keeps an absent redirect_uri and clears a null one; PUT is gone", async () => {
+    const created = await createClient("abc", "shh");
+    const patch = (body: Record<string, unknown>, method = "PATCH") =>
+      app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+        method,
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const redirectUri = async () =>
+      (
+        await db
+          .select({ redirectUri: integrationOauthClients.redirectUri })
+          .from(integrationOauthClients)
+          .where(eq(integrationOauthClients.id, created.id))
+      )[0]!.redirectUri;
+
+    expect((await patch({ redirect_uri: "https://example.com/cb" })).status).toBe(200);
+    expect((await patch({ client_secret: "rotated" })).status).toBe(200);
+    expect(await redirectUri()).toBe("https://example.com/cb");
+    expect((await patch({ redirect_uri: null })).status).toBe(200);
+    expect(await redirectUri()).toBeNull();
+    expect((await patch({ client_secret: "again" }, "PUT")).status).toBe(404);
+  });
+
+  it("refuses any client_id in the update body as an unknown key", async () => {
+    const created = await createClient("abc", "shh");
+    const patch = (body: Record<string, unknown>) =>
+      app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    await expectRejectedField(
+      await patch({ client_id: "abc2", client_secret: "new" }),
+      "client_id",
+    );
+    await expectRejectedField(await patch({ client_id: "abc", client_secret: "new" }), "client_id");
+    const [row] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, created.id));
+    expect(row!.clientId).toBe("abc");
+  });
+
+  it("audits create, update and delete with before/after and never the secret", async () => {
+    const created = await createClient("abc", "first-secret");
+    await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_secret: "second-secret",
+        redirect_uri: "https://example.com/cb",
+      }),
+    });
+    await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+
+    const rows = await db.select().from(auditEvents).where(eq(auditEvents.orgId, ctx.orgId));
+    const byAction = (action: string) => rows.find((r) => r.action === action);
+    const snapshot = { clientId: "abc", tokenEndpointAuthMethod: null, hasClientSecret: true };
+    expect(byAction("integration.oauth_client.created")?.after).toEqual({
+      ...snapshot,
+      redirectUri: null,
+    });
+    const updated = byAction("integration.oauth_client.updated");
+    expect(updated?.before).toEqual({ ...snapshot, redirectUri: null });
+    expect(updated?.after).toEqual({
+      ...snapshot,
+      redirectUri: "https://example.com/cb",
+      clientSecretReplaced: true,
+    });
+    expect(byAction("integration.oauth_client.deleted")?.before).toEqual({
+      ...snapshot,
+      redirectUri: "https://example.com/cb",
+    });
+    // One resource id per client, whatever the action.
+    for (const action of ["created", "updated", "deleted"]) {
+      expect(byAction(`integration.oauth_client.${action}`)?.resourceId).toBe(
+        `@myorg/gmail#google#${created.id}`,
+      );
+    }
+    const serialized = JSON.stringify(rows);
+    expect(serialized).not.toContain("first-secret");
+    expect(serialized).not.toContain("second-secret");
+  });
+
   it("rotation with an empty client_secret and no public declaration is refused (400)", async () => {
     const created = await createClient("abc", "shh");
     const rotate = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: "abc", client_secret: "" }),
+      body: JSON.stringify({ client_secret: "" }),
     });
     expect(rotate.status).toBe(400);
     const problem = (await rotate.json()) as { detail?: string };
@@ -1259,9 +1350,9 @@ describe("OAuth client CRUD", () => {
     const res = await app.request(
       "/api/integrations/@myorg/gmail/oauth-clients/11111111-1111-4111-8111-111111111111",
       {
-        method: "PUT",
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: "x", client_secret: "y" }),
+        body: JSON.stringify({ client_secret: "y" }),
       },
     );
     expect(res.status).toBe(404);
@@ -1583,6 +1674,43 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     expect(body.enforce).toBe(true);
   });
 
+  it("audits each default write with the set before and after", async () => {
+    const a = await seedConn(true);
+    const b = await seedConn(true);
+    const write = (method: "PUT" | "DELETE", body?: unknown) =>
+      app.request("/api/integrations/@myorg/gmail/default", {
+        method,
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    expect((await write("PUT", { connection_ids: [a] })).status).toBe(200);
+    expect((await write("PUT", { connection_ids: [b], enforce: true })).status).toBe(200);
+    expect((await write("DELETE")).status).toBe(204);
+
+    const rows = await db
+      .select({ action: auditEvents.action, before: auditEvents.before, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceType, "integration_org_default"))
+      .orderBy(asc(auditEvents.id));
+    expect(rows).toEqual([
+      {
+        action: "integration.org_default.upserted",
+        before: null,
+        after: { connectionIds: [a], enforce: false },
+      },
+      {
+        action: "integration.org_default.upserted",
+        before: { connectionIds: [a], enforce: false },
+        after: { connectionIds: [b], enforce: true },
+      },
+      {
+        action: "integration.org_default.deleted",
+        before: { connectionIds: [b], enforce: true },
+        after: null,
+      },
+    ]);
+  });
+
   it("refuses a connection that is not sharedWithOrg (404)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
@@ -1683,7 +1811,7 @@ describe("multi-client: list + system-client connect", () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
       client_ref: "gmail-system",
-      source: "built-in",
+      source: "system",
       is_default: true,
     });
     expect(JSON.stringify(body.data)).not.toContain("sys-secret");
@@ -1706,12 +1834,12 @@ describe("multi-client: list + system-client connect", () => {
       data: Array<{ client_ref: string; source: string; is_default: boolean }>;
     };
     expect(body.data).toHaveLength(2);
-    const custom = body.data.find((c) => c.source === "custom")!;
+    const custom = body.data.find((c) => c.source === "space")!;
     // The custom client_ref is the per-space row id (a UUID), not a sentinel.
     expect(custom.is_default).toBe(true);
     expect(custom.client_ref).not.toBe("gmail-system");
     expect(custom.client_ref.length).toBeGreaterThan(0);
-    expect(body.data.find((c) => c.source === "built-in")).toMatchObject({
+    expect(body.data.find((c) => c.source === "system")).toMatchObject({
       client_ref: "gmail-system",
       is_default: false,
     });

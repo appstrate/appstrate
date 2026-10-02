@@ -975,8 +975,9 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
 /**
  * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
  * null because the model is missing/disabled, or because its stored credential
- * can no longer serve inference — an OAuth credential flagged
- * `needsReconnection`, or (either auth mode) a blob that no longer decrypts?
+ * can no longer serve inference — a credential flagged `needsReconnection` (a
+ * revoked OAuth grant, or a BYOK API key rejected upstream too often), or
+ * (either auth mode) a blob that no longer decrypts?
  *
  * Returns `true` only for that second case, so a caller can surface an
  * actionable "reconnect" instead of a misleading "not found / not enabled".

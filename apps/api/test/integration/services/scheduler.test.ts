@@ -497,6 +497,7 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       expect(created.enabled).toBe(true);
+      expect(created.disabled_reason).toBeNull();
       expect(created.next_run_at).not.toBeNull();
 
       const updated = await updateSchedule(
@@ -511,6 +512,7 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
+      expect(updated!.disabled_reason).toBe("user");
       expect(updated!.next_run_at).toBeNull();
     });
 
@@ -546,6 +548,7 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
+      expect(updated!.disabled_reason).toBeNull();
       expect(typeof updated!.next_run_at).toBe("string");
       expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
@@ -750,17 +753,59 @@ describeRequiresRedis("scheduler service", () => {
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
       expect(fired[0]!.status).toBe("failed");
+      expect(fired[0]!.error ?? "").toStartWith("Schedule disabled: ");
       expect((fired[0]!.error ?? "").toLowerCase()).toContain(
         "is not a member of this organization",
       );
 
       // The schedule is disabled so the revoked identity never fires again.
       const [row] = await db
-        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .select({
+          enabled: schedules.enabled,
+          disabledReason: schedules.disabledReason,
+          nextRunAt: schedules.nextRunAt,
+        })
         .from(schedules)
         .where(eq(schedules.id, schedule.id));
       expect(row!.enabled).toBe(false);
+      expect(row!.disabledReason).toBe("actor_invalid");
       expect(row!.nextRunAt).toBeNull();
+    });
+
+    it("a fire racing a user's disable keeps disabled_reason = 'user'", async () => {
+      const member = await createTestUser({ email: "racing-disable@test.com" });
+      await addOrgMember(orgId, member.id, "member");
+      const schedule = await createSchedule(
+        { orgId, spaceId: defaultSpaceId },
+        packageId,
+        { type: "user", id: member.id },
+        { cronExpression: "0 * * * *" },
+      );
+      await db
+        .delete(organizationMembers)
+        .where(
+          and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
+        );
+
+      // The user switches it off after the fire read the row enabled.
+      await triggerScheduledRun(schedule.id, async () => {
+        await db
+          .update(schedules)
+          .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+          .where(eq(schedules.id, schedule.id));
+        return true;
+      });
+
+      const [row] = await db
+        .select({ enabled: schedules.enabled, disabledReason: schedules.disabledReason })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row).toEqual({ enabled: false, disabledReason: "user" });
+      // The fire is still a visible failure, but this fire did not disable it.
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired.map((r) => r.error)).toEqual([
+        expect.stringMatching(/^Schedule refused: .*is not a member of this organization/),
+      ]);
     });
 
     it("a schedule whose end-user actor does not exist in the space fires into a FAILED run and is disabled", async () => {
@@ -786,10 +831,15 @@ describeRequiresRedis("scheduler service", () => {
       expect((fired[0]!.error ?? "").toLowerCase()).toContain("end-user");
 
       const [row] = await db
-        .select({ enabled: schedules.enabled, nextRunAt: schedules.nextRunAt })
+        .select({
+          enabled: schedules.enabled,
+          disabledReason: schedules.disabledReason,
+          nextRunAt: schedules.nextRunAt,
+        })
         .from(schedules)
         .where(eq(schedules.id, schedule.id));
       expect(row!.enabled).toBe(false);
+      expect(row!.disabledReason).toBe("actor_invalid");
       expect(row!.nextRunAt).toBeNull();
     });
 
@@ -845,7 +895,10 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
       expect((await jobOf(schedule.id))?.template?.data).toEqual({ scheduleId: schedule.id });
-      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, schedule.id));
+      await db
+        .update(schedules)
+        .set({ enabled: false, disabledReason: "user" })
+        .where(eq(schedules.id, schedule.id));
 
       expect(await triggerScheduledRun(schedule.id)).toBeNull();
       expect(await db.select().from(runs).where(eq(runs.scheduleId, schedule.id))).toHaveLength(0);
@@ -1079,7 +1132,12 @@ describeRequiresRedis("scheduler service", () => {
       await removeScheduleJobs(disabledScheduleIds);
 
       const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
-      expect(after).toMatchObject({ enabled: false, nextRunAt: null, connectionOverrides: null });
+      expect(after).toMatchObject({
+        enabled: false,
+        disabledReason: "connection_deleted",
+        nextRunAt: null,
+        connectionOverrides: null,
+      });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
       });
@@ -1124,7 +1182,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     const created = await read();
     await db
       .update(schedules)
-      .set({ enabled: false, updatedAt: bumped })
+      .set({ enabled: false, disabledReason: "user", updatedAt: bumped })
       .where(eq(schedules.id, created.id));
 
     await expect(
@@ -1211,6 +1269,128 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
       updateSchedule(scope, created, { name: "renamed" }, null, undefined),
     ).rejects.toMatchObject(refusedAsStale);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
-    expect(row).toMatchObject({ enabled: false, name: null });
+    expect(row).toMatchObject({ enabled: false, disabledReason: "actor_left_org", name: null });
+  });
+});
+
+// Plain `describe`: pure SQL on the row, so every tier runs it.
+describe("schedule disabled_reason", () => {
+  let scope: SpaceScope;
+  let actor: Actor;
+  let packageId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "reasonorg" });
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    actor = { type: "user", id: ctx.user.id };
+    packageId = (await seedPackage({ orgId: ctx.orgId, id: "@reasonorg/agent" })).id;
+  });
+
+  const create = () => createSchedule(scope, packageId, actor, { cronExpression: "0 * * * *" });
+
+  it("a user switch records `user`, and switching it back on clears it", async () => {
+    const created = await create();
+    expect(created.disabled_reason).toBeNull();
+    const paused = await updateSchedule(scope, created, { enabled: false }, null, undefined);
+    expect(paused.disabled_reason).toBe("user");
+    const resumed = await updateSchedule(scope, paused, { enabled: true }, null, undefined);
+    expect(resumed.disabled_reason).toBeNull();
+  });
+
+  it("keeps a system disable's reason when a write re-sends enabled: false", async () => {
+    const created = await create();
+    const [row] = await db
+      .update(schedules)
+      .set({ enabled: false, disabledReason: "connection_deleted", nextRunAt: null })
+      .where(eq(schedules.id, created.id))
+      .returning();
+
+    const renamed = await updateSchedule(
+      scope,
+      { ...created, enabled: false, updatedAt: row!.updatedAt.toISOString() },
+      { name: "renamed", enabled: false },
+      null,
+      undefined,
+    );
+    expect(renamed.disabled_reason).toBe("connection_deleted");
+  });
+
+  it("a connection delete emptying the schedule's set records `connection_deleted`", async () => {
+    const integrationId = "@reasonorg/svc";
+    await seedPackage({ orgId: scope.orgId, id: integrationId, type: "integration" });
+    const [gone] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId,
+        authKey: "primary",
+        accountId: "gone",
+        spaceId: scope.spaceId,
+        userId: actor.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "gone",
+      })
+      .returning({ id: integrationConnections.id });
+    const created = await createSchedule(scope, packageId, actor, {
+      cronExpression: "0 * * * *",
+      connectionOverrides: { [integrationId]: [gone!.id] },
+    });
+
+    await deleteIntegrationConnection(scope, gone!.id, actor);
+
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
+  });
+
+  it("a connection delete on an ALREADY disabled schedule drops the key, keeping its reason", async () => {
+    const integrationId = "@reasonorg/svc";
+    await seedPackage({ orgId: scope.orgId, id: integrationId, type: "integration" });
+    const [gone] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId,
+        authKey: "primary",
+        accountId: "gone",
+        spaceId: scope.spaceId,
+        userId: actor.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "gone",
+      })
+      .returning({ id: integrationConnections.id });
+    const created = await createSchedule(scope, packageId, actor, {
+      cronExpression: "0 * * * *",
+      connectionOverrides: { [integrationId]: [gone!.id] },
+    });
+    await db
+      .update(schedules)
+      .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+      .where(eq(schedules.id, created.id));
+
+    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, gone!.id, actor);
+
+    expect(disabledScheduleIds).toEqual([]);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row).toMatchObject({
+      enabled: false,
+      disabledReason: "user",
+      connectionOverrides: null,
+    });
+  });
+
+  it("refuses a disabled row without a reason, and an enabled row with one", async () => {
+    const created = await create();
+    for (const set of [{ enabled: false }, { disabledReason: "user" as const }]) {
+      const caught = await db
+        .update(schedules)
+        .set(set)
+        .where(eq(schedules.id, created.id))
+        .catch((err: unknown) => err);
+      const cause = (caught as { cause?: { message?: string } }).cause;
+      expect(String(cause?.message ?? caught)).toContain(
+        "package_schedules_disabled_reason_matches",
+      );
+    }
   });
 });

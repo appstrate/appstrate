@@ -5,6 +5,7 @@
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
+import type { CredentialSource } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
@@ -485,7 +486,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   let versionRef: string;
   let proxyLabel: string | null;
   let modelLabel: string;
-  let modelSource: string | null;
+  let modelSource: CredentialSource;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
   // Declared integrations this run will start WITHOUT. Persisted as run logs
@@ -602,7 +603,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         versionRef,
         proxyLabel: proxyLabel ?? undefined,
         modelLabel,
-        modelSource: modelSource ?? undefined,
+        modelSource,
         modelId: plan.llmConfig.aliasId,
         inferenceRoute: inferenceRouteOf(plan.llmConfig),
         // Kickoff pricing snapshot — see `run-context-builder.ts`. Persisted on

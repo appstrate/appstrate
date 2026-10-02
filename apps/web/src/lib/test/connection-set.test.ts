@@ -18,6 +18,7 @@ import {
   unavailableConnectionIds,
   withConnectionOverride,
   withConnectionPick,
+  withDeclaredConnections,
 } from "../connection-set";
 
 describe("toggleCapped", () => {
@@ -253,5 +254,27 @@ describe("withConnectionOverride", () => {
     expect(withConnectionOverride({}, "@acme/a", ["1"])).toEqual({
       connection_overrides: { "@acme/a": ["1"] },
     });
+  });
+});
+
+describe("withDeclaredConnections", () => {
+  const overrides = {
+    model_id_override: "m",
+    connection_overrides: { "@acme/a": ["1"], "@acme/gone": ["2"] },
+  };
+
+  it("drops a key the definition no longer declares, keeping the declared ones as they are", () => {
+    expect(withDeclaredConnections(overrides, ["@acme/a", "@acme/b"])).toEqual({
+      model_id_override: "m",
+      connection_overrides: { "@acme/a": ["1"] },
+    });
+  });
+
+  it("drops `connection_overrides` when no key is declared any more", () => {
+    expect(withDeclaredConnections(overrides, [])).toEqual({ model_id_override: "m" });
+  });
+
+  it("keeps every key while the declared set is unknown", () => {
+    expect(withDeclaredConnections(overrides, undefined)).toBe(overrides);
   });
 });

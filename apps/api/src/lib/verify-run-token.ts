@@ -7,7 +7,7 @@ import { runs, type InferenceRoute } from "@appstrate/db/schema";
 import { parseBearer } from "@appstrate/core/bearer";
 import { parseSignedToken } from "./run-token.ts";
 import { forbidden, notFound, unauthorized } from "./errors.ts";
-import { runAgentIdentity } from "../services/state/runs.ts";
+import { readResolvedConnections, runAgentIdentity } from "../services/state/runs.ts";
 
 type RunConnectionSnapshot = typeof runs.$inferSelect.resolvedConnections;
 
@@ -119,7 +119,7 @@ export async function verifyRunToken(c: Context): Promise<{
       inferenceRoute: run.inferenceRoute,
       runOrigin: run.runOrigin,
       versionRef: run.versionRef ?? null,
-      resolvedConnections: run.resolvedConnections ?? null,
+      resolvedConnections: readResolvedConnections(run.resolvedConnections),
       resolvedIntegrationVersions: run.resolvedIntegrationVersions ?? null,
     },
   };

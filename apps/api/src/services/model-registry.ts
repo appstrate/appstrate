@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../lib/logger.ts";
-import { loadSystemRegistry } from "../lib/system-registry.ts";
+import { loadSystemRegistry, systemIdSchema } from "../lib/system-registry.ts";
 import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import { checkAliasInvariants } from "@appstrate/core/model-swap";
 import type { ModelMetadata } from "@appstrate/shared-types";
@@ -73,7 +73,7 @@ let systemModels: Map<string, ModelDefinition> | null = null;
 // --- Parsing ---
 
 const rawModelSchema = z.object({
-  id: z.string().optional(),
+  id: systemIdSchema.optional(),
   modelId: z.string().min(1),
   /** Optional — falls back to the catalog label at resolve time. */
   label: z.string().min(1).optional(),
@@ -103,7 +103,7 @@ const rawModelSchema = z.object({
 });
 
 const rawModelProviderCredentialSchema = z.object({
-  id: z.string().min(1),
+  id: systemIdSchema.min(1),
   /** Optional — falls back to the registry's `displayName` for this providerId. */
   label: z.string().min(1).optional(),
   /**

@@ -14,6 +14,89 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-30
+
+Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new
+exports (core raises its range to `^0.10.0`).
+
+### Added
+
+- **`GuardedFetchResult.credentialsForwarded`**: `false` once any hop
+  stripped the sensitive headers, and it stays false even when the chain
+  returns to the origin, so a caller can tell a response its credential never
+  reached. (#1641)
+- **`isHttpFieldValue`**, **`assertHttpFieldValue`** and
+  **`InvalidHeaderValueError`** (`./delivery-http`): whether a string is an
+  RFC 9110 field value (HTAB, SP, VCHAR, obs-text), and the error that names
+  the header, never the value, when it is not. (#1641)
+- **`parseAuthorizedUriPattern`**, **`AuthorizedUriPattern`** and
+  **`canonicalUrl`** (`./credential-template`): the one reading of an
+  `authorized_uris` entry, shared by the host-bound rule and the afps-runtime
+  matcher, egress policy and literal-host pin. An entry is `path` (no
+  `scheme://`), `any` (`scheme://**`), `url` (`scheme`, `authority` up to the
+  first `/`, `host`, `rest`) or `malformed`: an authority that is empty, is
+  not spelled as WHATWG serialises it (only case and a default port may
+  differ), or holds `%`, `\`, `@`, `?`, `#`, whitespace, a control or
+  non-ASCII character. The host is a bracketed IPv6 literal, else what
+  precedes the first `:`. `canonicalUrl` re-serialises a URL through WHATWG
+  without userinfo or fragment (`undefined` when it does not parse). (#1641)
+- **`isHostUnboundedUriPattern`** (`./credential-template`): whether an
+  `authorized_uris` entry leaves the host to the caller, on its
+  `parseAuthorizedUriPattern` reading — malformed, no literal `scheme://`
+  (`**://api.example.com/**`), an empty host, or a wildcard in either of the
+  host's last two labels (`https://**`, `https://*.com./**`). A public suffix
+  (`https://*.co.uk/**`) is not detected. (#1641)
+- **`API_CALL_PLACEHOLDER`** (`./credential-template`): the global regex of
+  the api_call `{{…}}` placeholder, which a credential template never renders.
+  (#1641)
+- **`parseCredentialRef`**, **`templateExpressions`** and
+  **`unsupportedTemplateExpressions`** (`./credential-template`): the field a
+  lone `{$credential.<field>}` names, and a template's (unsupported) `{$…}`
+  expressions. (#1641)
+- **`injectsHttpCredential`** and **`AUTH_TYPE_HTTP_DEFAULTS`**
+  (`./delivery-http`): whether an auth's HTTP delivery names a header the proxy
+  fills with a credential, and the per-auth-type default table it reads, in
+  the template grammar. It has `oauth2` (`Authorization`, `Bearer ` +
+  `{$credential.access_token}`), `api_key` (`X-Api-Key`,
+  `{$credential.api_key}`) and `basic` (`Authorization`, `Basic ` + base64 of
+  `{$credential.username}:{$credential.password}`) only. (#1641)
+- **`./runtime-expression`**: `parseResponseExpression` — the Arazzo response
+  expressions a `connect.login` block may use — and `simpleCriterionOperands`
+  and `loginBlockIssues` (with `LoginBlockView`, `LoginBlockIssue`): the one rule
+  of which `connect.login` expressions are evaluable, shared by the login
+  engine and import validation. (#1641)
+- **`guardedFetchChain`** and **`GuardedFetchResult`** (`./guarded-fetch`):
+  `guardedFetch` that also returns the terminal logical URL and the number of
+  redirects followed. `GuardedFetchOptions` gains `forwardCredentials` (a
+  cross-origin hop it approves keeps the credential headers, Cookie and body;
+  never an https→http hop) and `followRedirects: false`;
+  `SsrfBlockedError.hop` names the refused hop. (#1641)
+
+### Changed
+
+- **BREAKING: `renderCredentialTemplate` throws on anything but
+  `{$credential.<field>}`**: an api_call `{{…}}` placeholder or any other
+  `{$…}` expression in the template is an `Error`, never sent as text. It no
+  longer reads inherited properties. (#1641)
+- **BREAKING: `projectHttpDeliveryConfig` carries `value` verbatim** as
+  `valueFrom: { template, encoding? }` in the `{$credential.<field>}`
+  grammar; no bare-field lowering, no `{{field}}` rewrite. (#1641)
+- **BREAKING: `HttpDeliveryConfig.valueFrom` is `{ template, encoding? }`
+  only**. (#1641)
+- The guarded-fetch transport receives the URL as a string. (#1641)
+
+### Security
+
+- **`isBlockedHost` judges an IPv4 address embedded in IPv6 as that IPv4 for
+  every translation prefix**: IPv4-compatible `::/96`, IPv4-mapped
+  `::ffff:0:0/96`, NAT64 `64:ff9b::/96` (RFC 6052) and 6to4 `2002::/16`
+  (RFC 3056). The local-use NAT64 prefix `64:ff9b:1::/48` (RFC 8215) is
+  blocked whole, and an IPv6 literal that does not expand to eight groups is
+  blocked. (#1641)
+- **`isBlockedHost` judges the SIIT IPv4-translated form `::ffff:0:0:0/96`
+  (RFC 2765) as its IPv4, and blocks deprecated site-local `fec0::/10` and
+  multicast `ff00::/8`.** (#1641)
+
 ## [0.9.2] — 2026-09-30
 
 Additive only. Publish before any `@appstrate/core` that imports

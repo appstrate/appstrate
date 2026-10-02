@@ -142,16 +142,16 @@ describe("recordAudit", () => {
   });
 
   it("is best-effort: a bad input never throws (caller's mutation is unaffected)", async () => {
-    // orgId is required (FK NOT NULL). A non-existent org id violates the
-    // FK; the helper catches and swallows the error so callers don't see it.
+    // `org_id` is a uuid column: a malformed one fails the insert, which the helper catches and
+    // reports as `false` instead of throwing.
     await expect(
       recordAudit({
-        orgId: "00000000-0000-0000-0000-000000000000",
+        orgId: "not-a-uuid",
         actorType: "system",
         action: "x",
         resourceType: "y",
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
   });
 
   it("supports lookups by (resourceType, resourceId) — index-backed query path", async () => {

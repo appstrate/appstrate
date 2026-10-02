@@ -6,6 +6,7 @@ import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { ConnectionResolutionSource } from "@appstrate/core/integration";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -40,7 +41,11 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type {
+  CredentialSource,
+  RunArtifactsSummary,
+  ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -117,7 +122,7 @@ export interface RunWireDto {
   version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
-  model_source: string | null;
+  model_source: CredentialSource | null;
   /** Effective generation controls frozen at kickoff and raw override layer. */
   generation: ModelGenerationSettings | null;
   generation_override: ModelGenerationSettings | null;
@@ -141,18 +146,18 @@ export interface RunWireDto {
 /**
  * One integration connection resolved for a run, projected from the internal
  * `runs.resolved_connections` snapshot for display — one entry per bound
- * connection, so several may share an `integration_id`. The raw `connectionId`
+ * connection, so several may share an `integration_package_id`. The raw `connectionId`
  * is deliberately omitted — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */
-  integration_id: string;
-  /** Connection label, denormalized at kickoff. Null on pre-snapshot runs. */
-  label: string | null;
+  integration_package_id: string;
+  /** Connection label, denormalized at kickoff. */
+  label: string;
   /** Account identifier (email, sub), denormalized at kickoff. */
-  account_id: string | null;
-  /** Resolution mechanism (`admin_pin` | `run_override` | `fallback_auto` | …). */
-  source: string;
+  account_id: string;
+  /** The cascade layer that bound the connection. */
+  source: ConnectionResolutionSource;
 }
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
@@ -321,6 +326,8 @@ export interface ScheduleWireDto {
   spaceId: string;
   name: string | null;
   enabled: boolean;
+  /** Why the schedule is disabled — `null` exactly while it is enabled. */
+  disabled_reason: ScheduleDisabledReason | null;
   cron_expression: string;
   timezone: string;
   input: Record<string, unknown> | null;
@@ -936,9 +943,8 @@ export interface OrgModelInfo extends ModelMetadata {
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — an OAuth credential flagged `needsReconnection` (revoked
-   * refresh token), or, for either auth mode, a stored blob that no longer
-   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * inference — flagged `needsReconnection` (revoked OAuth grant, BYOK key
+   * rejected upstream repeatedly) or a stored blob that no longer decrypts. The model
    * is listed (so it can be inspected/detached/deleted) but must never be
    * selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
@@ -10,7 +11,7 @@ const inlineDependencyAuthorization =
 
 const runConnectionOverrides = {
   type: "object",
-  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
+  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`), and so is a key that names no integration the agent declares (400 \`invalid_request\`, \`param: connection_overrides\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
   additionalProperties: connectionIdSetJsonSchema,
 } as const;
 
@@ -37,6 +38,21 @@ const runFileManifestEntry = {
     },
     size: { type: "integer" },
   },
+} as const;
+
+/** Refusals of the run-sink HMAC guard (`middleware/verify-run-signature.ts`), one per route behind it. */
+const runSinkUnauthorized = {
+  description:
+    "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+  content: problemContent,
+} as const;
+const runSinkNotFound = {
+  description: "`not_found` — no run with this id.",
+  content: problemContent,
+} as const;
+const runSinkGone = {
+  description: "`run_sink_closed` | `run_sink_expired`",
+  content: problemContent,
 } as const;
 
 const canonicalRunsPaths = {
@@ -1412,12 +1428,9 @@ const canonicalRunsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "401": {
-          description:
-            "missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance",
-        },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired | sink_not_configured" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1519,9 +1532,9 @@ const canonicalRunsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1564,9 +1577,9 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": runSinkNotFound,
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1594,9 +1607,12 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | no workspace provisioned" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or no workspace was provisioned for it.",
+          content: problemContent,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1634,11 +1650,15 @@ const canonicalRunsPaths = {
           },
         },
         "400": {
-          description: "duplicate_file_name — the stored manifest has colliding workspace names",
+          description: "`duplicate_file_name` — the stored manifest has colliding workspace names",
+          content: problemContent,
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | no input files" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or it carries no input files.",
+          content: problemContent,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1721,10 +1741,15 @@ const canonicalRunsPaths = {
         "400": {
           description:
             "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+          content: problemContent,
         },
-        "401": { description: "Signature verification failed" },
-        "403": { description: "storage_limit_exceeded" },
-        "404": { description: "run_not_found" },
+        "401": runSinkUnauthorized,
+        "403": {
+          description:
+            "`storage_limit_exceeded` — the write would overrun the organization's storage limit.",
+          content: problemContent,
+        },
+        "404": runSinkNotFound,
         "409": {
           description:
             "`run_not_running` — the run is not in `running` state. Or `message_replayed` — this " +
@@ -1734,8 +1759,9 @@ const canonicalRunsPaths = {
             "the (run, sha256, name) dedup), each spending the org quota and the run's file " +
             "budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. " +
             "The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
+          content: problemContent,
         },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "410": runSinkGone,
         "413": {
           description:
             "`payload_too_large` — the file exceeds the per-file cap " +
@@ -1743,6 +1769,7 @@ const canonicalRunsPaths = {
             "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
             "already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
+          content: problemContent,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -1772,9 +1799,12 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | file not found" },
-        "410": { description: "run_sink_closed | run_sink_expired" },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or no input file of that name.",
+          content: problemContent,
+        },
+        "410": runSinkGone,
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

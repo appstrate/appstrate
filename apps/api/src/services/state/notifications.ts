@@ -2,7 +2,15 @@
 
 import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
+import {
+  runs,
+  notifications,
+  organizationMembers,
+  packages,
+  type NotificationPayloads,
+  type NotificationType,
+  type PackageType,
+} from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -30,9 +38,9 @@ function recipientFilter(actor: Actor): SQL {
 /** Shape returned to the notifications list endpoint. */
 interface NotificationDto {
   id: string;
-  type: string;
+  type: NotificationType;
   runId: string | null;
-  payload: Record<string, unknown> | null;
+  payload: NotificationPayloads[NotificationType] | null;
   read_at: string | null;
   createdAt: string;
 }
@@ -86,11 +94,14 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
   // bell entry is suppressed.
   if (run.packageEphemeral === true) return 0;
 
-  const payload = { packageId: run.packageId, status: run.status };
+  const payload: NotificationPayloads["run_completed"] = {
+    packageId: run.packageId,
+    status: run.status,
+  };
   const base = {
     orgId: scope.orgId,
     spaceId: scope.spaceId,
-    type: "run_completed",
+    type: "run_completed" as const,
     runId,
     payload,
   };
@@ -155,7 +166,7 @@ export async function createPackageShareNotification(params: {
   spaceId: string;
   recipientUserId: string;
   packageId: string;
-  packageType: string;
+  packageType: PackageType;
   sharedByName: string;
 }): Promise<void> {
   await db.insert(notifications).values({

@@ -15,6 +15,7 @@
  */
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -133,9 +134,19 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
+/** A pin's audit `resourceId`: one format for admin and member rows; `action` tells them apart. */
+export function pinAuditResourceId(agentPackageId: string, integrationPackageId: string): string {
+  return `${integrationPackageId}#${agentPackageId}`;
+}
+
+/** A pin's audited `before`/`after`: its set, or `null` for no row. */
+export function pinAudit(connectionIds: string[] | null): AuditPayload | null {
+  return connectionIds ? { connectionIds } : null;
+}
+
 function toPinSummary(pin: PinRow): PinSummary {
   return {
-    packageId: pin.packageId,
+    agent_package_id: pin.packageId,
     integration_package_id: pin.integrationId,
     connection_ids: pin.connectionIds,
     createdAt: pin.createdAt.toISOString(),
@@ -201,7 +212,7 @@ export async function listAgentsConsumingIntegration(
     .orderBy(packages.id);
 
   return rows.map((r) => ({
-    packageId: r.id,
+    agent_package_id: r.id,
     display_name: getPackageDisplayName(r),
   }));
 }
@@ -223,7 +234,7 @@ export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -235,9 +246,31 @@ export async function upsertIntegrationPin(
   });
 }
 
+/** A pin write: the set it replaced (`null` when there was none) and the stored pin. */
+interface PinWrite {
+  previous: string[] | null;
+  pin: PinSummary;
+}
+
+/** The one pin row of (space, agent, integration, owner) — `userId: null` is the admin pin. */
+function pinKey(
+  scope: SpaceScope,
+  agentPackageId: string,
+  integrationId: string,
+  userId: string | null,
+) {
+  return and(
+    eq(integrationPins.spaceId, scope.spaceId),
+    eq(integrationPins.packageId, agentPackageId),
+    eq(integrationPins.integrationId, integrationId),
+    userId === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userId),
+  );
+}
+
 /**
- * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. One
- * statement writes and returns, mapped by drizzle's column mappers (drivers differ).
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. The
+ * replaced set is read under a row lock in the same transaction, mapped by
+ * drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -247,7 +280,7 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { allowOwnedBy?: string };
   createdBy: string | null;
-}): Promise<PinSummary> {
+}): Promise<PinWrite> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
   await assertAgentActiveHere(scope, agentPackageId);
 
@@ -256,55 +289,67 @@ async function upsertPin(args: {
     sql`, `,
   )}]::uuid[]`;
   await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
-  const [row] = toRows<{
-    connection_ids: string | unknown[];
-    created_at: string | Date;
-    updated_at: string | Date;
-  }>(
-    await db.execute(sql`
-    INSERT INTO ${integrationPins}
-      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
-    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
-    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
-    DO UPDATE SET
-      connection_ids = EXCLUDED.connection_ids,
-      created_by = EXCLUDED.created_by,
-      updated_at = now()
-    RETURNING connection_ids, created_at, updated_at
-  `),
-  );
-  return {
-    packageId: agentPackageId,
-    integration_package_id: integrationId,
-    connection_ids: integrationPins.connectionIds.mapFromDriverValue(
-      row!.connection_ids,
-    ) as string[],
-    createdAt: (
-      integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
-    ).toISOString(),
-    updatedAt: (
-      integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
-    ).toISOString(),
-  };
+  return db.transaction(async (tx) => {
+    // The row lock below locks nothing on a FIRST write: two of them would each read "no pin"
+    // and the later upsert would audit `before: null` over the other's set.
+    const key = `integration-pin:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
+    const [previous] = await tx
+      .select({ connectionIds: integrationPins.connectionIds })
+      .from(integrationPins)
+      .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
+      .for("update");
+    const [row] = toRows<{
+      connection_ids: string | unknown[];
+      created_at: string | Date;
+      updated_at: string | Date;
+    }>(
+      await tx.execute(sql`
+      INSERT INTO ${integrationPins}
+        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+      DO UPDATE SET
+        connection_ids = EXCLUDED.connection_ids,
+        created_by = EXCLUDED.created_by,
+        updated_at = now()
+      RETURNING connection_ids, created_at, updated_at
+    `),
+    );
+    return {
+      previous: previous?.connectionIds ?? null,
+      pin: {
+        agent_package_id: agentPackageId,
+        integration_package_id: integrationId,
+        connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+          row!.connection_ids,
+        ) as string[],
+        createdAt: (
+          integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+        ).toISOString(),
+        updatedAt: (
+          integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+        ).toISOString(),
+      },
+    };
+  });
 }
 
-export async function deleteIntegrationPin(
+/**
+ * Delete one pin row — the admin pin for `userId: null`, else that member's; `previous` is the
+ * set it held, `null` when there was none.
+ */
+export async function deletePin(
   scope: SpaceScope,
-  integrationId: string,
   agentPackageId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
+  integrationId: string,
+  userId: string | null,
+): Promise<{ previous: string[] | null }> {
+  const [row] = await db
     .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.packageId, agentPackageId),
-        isNull(integrationPins.userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
+    .where(pinKey(scope, agentPackageId, integrationId, userId))
+    .returning({ connectionIds: integrationPins.connectionIds });
+  return { previous: row?.connectionIds ?? null };
 }
 
 /**
@@ -376,7 +421,7 @@ interface UpsertMemberPinInput {
 export async function upsertMemberPin(
   scope: SpaceScope,
   input: UpsertMemberPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -386,26 +431,6 @@ export async function upsertMemberPin(
     validateOpts: { allowOwnedBy: input.userId },
     createdBy: input.userId,
   });
-}
-
-export async function deleteMemberPin(
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationId: string,
-  userId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
-    .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.userId, userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
 }
 
 /**
@@ -649,7 +674,7 @@ async function resolveAgentIntegrationPick(args: {
   ]);
 
   const adminPinnedConnectionIds =
-    adminPins.find((p) => p.packageId === agentPackageId)?.connection_ids ?? [];
+    adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? [];
   const memberPinnedConnectionIds =
     memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? [];
   const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
@@ -713,7 +738,7 @@ interface AgentConnectionReadiness {
   errors: ValidationFieldError[];
   /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
-    integration_id: string;
+    integration_package_id: string;
     run_blocking: boolean;
     resolution: IntegrationAgentResolution;
   }>;
@@ -858,7 +883,7 @@ export async function resolveAgentConnectionReadiness(args: {
     blocks_run: errors.length > 0,
     errors,
     integrations: declared.map((e, i) => ({
-      integration_id: e.id,
+      integration_package_id: e.id,
       run_blocking: blockingIds.has(e.id),
       resolution: resolutions[i]!,
     })),

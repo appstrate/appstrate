@@ -2,21 +2,15 @@
 // Copyright 2025-2026 Appstrate
 
 /**
- * Canonical `{{var}}` credential substitution, shared by every layer that
- * injects credentials into headers / URLs / bodies:
- *
- *   - the platform credential proxy + sidecar MITM (`@appstrate/connect`'s
- *     `substituteVars` re-export — fail-closed, `keepUnresolved: true`),
- *   - the `delivery.http` plan renderer ({@link ./http-delivery.ts}),
- *   - the portable `appstrate run` integration resolver
- *     ({@link ./integration-api-call.ts}).
+ * Canonical `{{var}}` substitution for the AGENT-facing grammar: an `api_call`'s
+ * `{{field}}` placeholders (credential proxy, sidecar MITM, CLI resolver) and the
+ * `{{name}}` login inputs. Manifest value templates use `{$credential.<field>}`
+ * (`@appstrate/afps-shared/credential-template`).
  *
  * Whitespace inside `{{ … }}` is tolerated so hand-written templates can
  * keep `{{ field }}`. Two missing-key policies, picked per call site:
  *
  *   - default (`keepUnresolved: false`) → unknown placeholders render empty.
- *     Used by `delivery.http` rendering, where a missing field means "no
- *     value to inject".
  *   - `keepUnresolved: true` → unknown placeholders are left intact so the
  *     caller can fail closed by scanning for survivors (the credential-proxy
  *     pattern — never silently blank a credential into a request).
@@ -47,6 +41,20 @@ export function substituteVars(
 const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
 
 /**
+ * The keys of `template`'s `{{key}}` placeholders that `fields` does not own: what a proxy refuses
+ * to send. Read on the template, never the substituted string, where a `{{word}}` inside a
+ * credential value is no placeholder (and naming it would echo the secret).
+ */
+export function unresolvedPlaceholders(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+): string[] {
+  return [...template.matchAll(VAR_PLACEHOLDER)]
+    .map((match) => match[1]!)
+    .filter((key) => !Object.hasOwn(fields, key));
+}
+
+/**
  * True when `input` contains at least one `{{key}}` placeholder whose key is
  * an own property of `fields`. Used by the credential-exfil guard
  * ({@link ./credential-guard.ts}) to detect calls that substitute a
@@ -57,4 +65,30 @@ export function referencesField(input: string, fields: Readonly<Record<string, u
     if (Object.hasOwn(fields, match[1]!)) return true;
   }
   return false;
+}
+
+/**
+ * The host `template` (a URL template) names, each `{{key}}` in it written as `{{key}}`: what a
+ * message echoes for the target. Never a rendered value, and an untemplated host shown as the
+ * caller wrote it, so an echo never tells whether a literal host matches a credential value. A
+ * leading `{{key}}` stands for a whole base URL; a templated host that does not parse (a
+ * `{{port}}`) is `<templated>`.
+ */
+export function templateHost(template: string): string {
+  const keys: string[] = [];
+  const marked = template.replace(VAR_PLACEHOLDER, (_match, key: string) => {
+    keys.push(key);
+    return `xph${keys.length - 1}x`;
+  });
+  const url =
+    parseUrl(marked) ?? (/^\s*\{\{/.test(template) ? parseUrl(`https://${marked}`) : null);
+  if (!url) return keys.length > 0 ? "<templated>" : "<unparseable>";
+  return url.hostname.replace(/xph(\d+)x/g, (match, i: string) => {
+    const key = keys[Number(i)];
+    return key === undefined ? match : `{{${key}}}`;
+  });
+}
+
+function parseUrl(input: string): URL | null {
+  return URL.canParse(input) ? new URL(input) : null;
 }

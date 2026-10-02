@@ -1,0 +1,1 @@
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_completed', 'package_shared'));

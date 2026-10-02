@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import {
   LLM_PROXY_MOUNT,
   RUN_LLM_PROXY_MOUNT,
   llmProxyUrlPath,
   type ProxiedApiShape,
 } from "@appstrate/runner-pi";
+import { PROXY_STATUS_HEADER } from "./credential-proxy.ts";
 
 /**
  * LLM proxy endpoints — server-side model injection and per-call metering for
@@ -45,9 +47,22 @@ const baseParameters = [
   // are served from the stored response for 24h" — was a promise the runtime
   // never kept. It now reads as one: `idempotencyGuard` answers
   // `400 idempotency_not_supported` here like on any other unsupported
-  // mutating route. The `x-llm-proxy-cache-status` header below documents the
+  // mutating route. The `Cache-Status` header below documents the
   // separate, content-addressed response cache these routes *do* have.
 ] as const;
+
+/** A 401 is the caller's credential refused, or the provider's refusal relayed. */
+const unauthorized = {
+  description:
+    "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, " +
+    "`Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the " +
+    "model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge).",
+  headers: {
+    ...PROXY_STATUS_HEADER,
+    "WWW-Authenticate": { $ref: "#/components/headers/WWWAuthenticate" },
+  },
+  content: { ...problemContent, "application/json": { schema: { type: "object" } } },
+} as const;
 
 const baseResponses = {
   "200": {
@@ -56,12 +71,16 @@ const baseResponses = {
       "(`stream: true`), the response is `text/event-stream`; otherwise " +
       "`application/json`.",
     headers: {
-      "x-llm-proxy-cache-status": {
+      ...PROXY_STATUS_HEADER,
+      "Cache-Status": {
         description:
-          "Present only when the response cache is enabled (non-streaming " +
-          "2xx responses). `MISS` when the upstream was hit and the result " +
-          "stored; `HIT` when served from cache.",
-        schema: { type: "string", enum: ["HIT", "MISS"] },
+          "RFC 9211. This proxy's member is present only when the response " +
+          "cache is enabled (non-streaming 2xx responses): " +
+          "`appstrate-llm-proxy; hit` when served from cache, " +
+          "`appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was " +
+          "called and the result stored — appended after any member an " +
+          "upstream cache set.",
+        schema: { type: "string" },
       },
     },
     content: {
@@ -81,36 +100,72 @@ const baseResponses = {
       "endpoint for its protocol instead), the preset's provider is an " +
       "OAuth subscription with no proxyable gateway (connect an API-key " +
       "provider instead), or request body exceeds " +
-      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB).",
+      "the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). " +
+      "`usage_context_required` — a platform-provided model " +
+      "called without a valid `X-Run-Id` or the first-party chat loopback while a metering " +
+      "module is loaded.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
-  "401": { $ref: "#/components/responses/Unauthorized" },
+  "401": unauthorized,
+  "402": {
+    description:
+      "A metering module's `beforeUsage` hook refused the call for payment (e.g. credits " +
+      "exhausted); `code` is the module's. RFC 9457 problem+json.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
   "403": {
     description:
-      "Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth " +
+      "Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth " +
       "method was used (cookie sessions and any unknown/unrecognized auth " +
-      "strategy are rejected; bearer only).",
+      "strategy are rejected; bearer only), or a metering module's `beforeUsage` hook " +
+      "refused the call on another ground (`code` is the module's). `blocked_target` — the " +
+      "model's upstream resolves into a blocked network range (`Proxy-Status` error " +
+      "`destination_ip_prohibited`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "409": {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
       "metered usage is admitted. RFC 9457 problem+json.",
-    content: {
-      "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
-      },
-    },
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "413": {
     description:
       "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +
       "by the body-limit middleware).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
+  "500": { $ref: "#/components/responses/InternalServerError" },
   "502": {
     description:
-      "Upstream provider error — the upstream's status and body are " +
-      "forwarded verbatim (the documented status may be any non-2xx the " +
-      "upstream returns, e.g. 400/401/404/429/500/503). No usage recorded.",
+      "`upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` " +
+      "error `dns_error`); `upstream_unreachable` — the connection to it failed " +
+      "(`destination_unavailable`). Names neither the host nor the cause. No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
+  "504": {
+    description:
+      "`upstream_timeout` — the upstream sent no response headers in time: " +
+      "`LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min " +
+      "otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
+  default: {
+    description:
+      "An upstream provider error, relayed verbatim at the upstream's own status (any " +
+      "non-2xx, a status listed above included) with its body, marked " +
+      "`Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it " +
+      "from the proxy's own problem document. No usage recorded.",
+    headers: PROXY_STATUS_HEADER,
+    content: { "application/json": { schema: { type: "object" } } },
   },
 } as const;
 
@@ -371,18 +426,29 @@ export const runLlmProxyPaths = Object.fromEntries(
             description:
               "Validation error — malformed or empty body, a field the proxy cannot " +
               "meter, or the run's model is not served by this endpoint.",
+            headers: PROXY_STATUS_HEADER,
+            content: problemContent,
           },
-          "401": { $ref: "#/components/responses/Unauthorized" },
+          "401": unauthorized,
           "403": {
             description:
               "The run is not running, is remote-origin, or its model is not a " +
               "platform-provided model pinned at launch.",
+            headers: PROXY_STATUS_HEADER,
+            content: problemContent,
           },
           "404": { $ref: "#/components/responses/NotFound" },
           "409": baseResponses["409"],
-          "413": { description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`." },
+          "413": {
+            description: "Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`.",
+            headers: PROXY_STATUS_HEADER,
+            content: problemContent,
+          },
           "429": { $ref: "#/components/responses/RateLimited" },
+          "500": baseResponses["500"],
           "502": baseResponses["502"],
+          "504": baseResponses["504"],
+          default: baseResponses.default,
         },
       },
     },

@@ -10,7 +10,7 @@
  * here. `@appstrate/connect`'s `afps-delivery.ts` is a thin adapter that maps
  * the AFPS snake_case `delivery.http` block onto {@link HttpDeliveryConfig}
  * and delegates to {@link resolveHttpDelivery} — the per-auth-type default
- * table, the `basic` fallback, and the base64 branch are NOT duplicated there.
+ * table and the base64 branch are NOT duplicated there.
  *
  * The resolver is credential-source agnostic: it takes the auth type, the
  * decrypted credential fields, and the manifest's `delivery.http` block, and
@@ -18,13 +18,16 @@
  * nothing should be injected).
  */
 
-import { substituteVars } from "./template-vars.ts";
+import { renderCredentialTemplate } from "@appstrate/afps-shared/credential-template";
 
 // The resolver config shape lives once in the zero-dep `@appstrate/afps-shared`
 // (the canonical `delivery.http` projection target). Re-export it here so
 // consumers importing from `@appstrate/afps-runtime/resolvers` keep their path.
 export type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
-import type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
+import {
+  AUTH_TYPE_HTTP_DEFAULTS,
+  type HttpDeliveryConfig,
+} from "@appstrate/afps-shared/delivery-http";
 
 /**
  * Plan returned by {@link resolveHttpDelivery}. The proxy uses this to decide
@@ -95,76 +98,31 @@ export function planHttpDeliveryInjection(
 }
 
 /**
- * Auth-type defaults for `delivery.http`. `valueFrom` names the credential
- * field to inject, using the **canonical snake_case storage keys** — the same
- * convention the OAuth2 strategy persists (`access_token`) and the AFPS spec
- * documents (`{{api_key}}`). Manifest `valueFrom` / template `{{var}}` refs
- * must match the stored field name exactly; there is no casing aliasing.
- *
- * Source: AFPS spec §4.1.3 (fields exposed implicitly by auth type).
- */
-const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
-  Record<string, { headerName: string; headerPrefix: string; valueFrom: string }>
-> = {
-  oauth2: { headerName: "Authorization", headerPrefix: "Bearer ", valueFrom: "access_token" },
-  api_key: { headerName: "X-Api-Key", headerPrefix: "", valueFrom: "api_key" },
-  basic: { headerName: "Authorization", headerPrefix: "Basic ", valueFrom: "" },
-  custom: { headerName: "", headerPrefix: "", valueFrom: "" },
-};
-
-function renderTemplate(
-  template: string,
-  fields: Readonly<Record<string, string>>,
-  encoding: "base64" | undefined,
-): string {
-  const rendered = substituteVars(template, fields);
-  if (encoding === "base64") return Buffer.from(rendered, "utf8").toString("base64");
-  return rendered;
-}
-
-/**
  * Resolve a `delivery.http` plan for a single auth. Returns `null` when no
  * header can be injected (e.g. `custom` auth without explicit `delivery.http`)
  * — callers treat that as "the proxy injects nothing for this auth".
  *
  * Defaults are derived from the auth type per AFPS spec §4.1.4 — `oauth2` sends
  * `Authorization: Bearer <access_token>`, `api_key` sends `X-Api-Key: <api_key>`,
- * etc. Explicit manifest values always win.
+ * `basic` sends `Authorization: Basic base64(username:password)`. Explicit
+ * manifest values always win.
  */
 export function resolveHttpDelivery(
   authType: string,
   fields: Readonly<Record<string, string>>,
   http: HttpDeliveryConfig | undefined,
 ): HttpDeliveryPlan | null {
-  const defaults = AUTH_TYPE_HTTP_DEFAULTS[authType] ?? {
-    headerName: "",
-    headerPrefix: "",
-    valueFrom: "",
-  };
-  const headerName = http?.headerName ?? defaults.headerName;
+  const defaults = AUTH_TYPE_HTTP_DEFAULTS[authType];
+  const headerName = http?.headerName ?? defaults?.headerName ?? "";
   if (!headerName) return null;
 
-  const headerPrefix = http?.headerPrefix ?? defaults.headerPrefix;
-
-  let value: string;
-  const valueFrom = http?.valueFrom ?? defaults.valueFrom;
-  if (typeof valueFrom === "string") {
-    // basic / custom with no explicit valueFrom — value is empty; the proxy
-    // builds the value itself (e.g. basic auth base64s username:password).
-    value = valueFrom.length === 0 ? "" : (fields[valueFrom] ?? "");
-  } else {
-    value = renderTemplate(valueFrom.template, fields, valueFrom.encoding);
-  }
-
-  if (value.length === 0 && authType === "basic" && !http?.valueFrom) {
-    const username = fields["username"] ?? "";
-    const password = fields["password"] ?? "";
-    value = Buffer.from(`${username}:${password}`, "utf8").toString("base64");
-  }
+  const valueFrom = http?.valueFrom ?? defaults?.valueFrom;
+  let value = valueFrom ? renderCredentialTemplate(valueFrom.template, fields) : "";
+  if (valueFrom?.encoding === "base64") value = Buffer.from(value, "utf8").toString("base64");
 
   return {
     headerName,
-    headerPrefix,
+    headerPrefix: http?.headerPrefix ?? defaults?.headerPrefix ?? "",
     value,
     allowServerOverride: http?.allowServerOverride === true,
   };

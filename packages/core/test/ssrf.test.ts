@@ -105,6 +105,35 @@ describe("isBlockedHost", () => {
     expect(isBlockedHost("::ffff:0808:0808")).toBe(false); // 8.8.8.8
   });
 
+  it("judges an IPv4 embedded in IPv6 as that IPv4 (compatible, NAT64, 6to4)", () => {
+    expect(isBlockedHost("::7f00:1")).toBe(true); // 127.0.0.1
+    expect(isBlockedHost("[64:ff9b::7f00:1]")).toBe(true); // 127.0.0.1
+    expect(isBlockedHost("[64:ff9b::a00:1]")).toBe(true); // 10.0.0.1
+    expect(isBlockedHost("[64:ff9b::127.0.0.1]")).toBe(true);
+    expect(isBlockedHost("[2002:7f00:1::]")).toBe(true); // 127.0.0.1
+    expect(isBlockedHost("[2002:a9fe:a9fe::]")).toBe(true); // 169.254.169.254
+    expect(isBlockedHost("[64:ff9b::808:808]")).toBe(false); // 8.8.8.8
+    expect(isBlockedHost("[2002:808:808::]")).toBe(false); // 8.8.8.8
+  });
+
+  it("blocks the local-use NAT64 prefix 64:ff9b:1::/48 whole", () => {
+    expect(isBlockedHost("[64:ff9b:1::808:808]")).toBe(true);
+    expect(isBlockedHost("[64:ff9b:1:7f00:1::]")).toBe(true);
+  });
+
+  it("judges the SIIT IPv4-translated form ::ffff:0:0:0/96 as its IPv4", () => {
+    expect(isBlockedHost("[::ffff:0:7f00:1]")).toBe(true); // 127.0.0.1
+    expect(isBlockedHost("[::ffff:0:808:808]")).toBe(false); // 8.8.8.8
+    expect(isBlockedHost("[64:ff9b::1:7f00:1]")).toBe(false); // outside the NAT64 /96
+  });
+
+  it("blocks IPv6 site-local fec0::/10 and multicast ff00::/8", () => {
+    expect(isBlockedHost("[fec0::1]")).toBe(true);
+    expect(isBlockedHost("[feff::1]")).toBe(true);
+    expect(isBlockedHost("[ff02::1]")).toBe(true);
+    expect(isBlockedHost("[ff0e::1]")).toBe(true);
+  });
+
   it("blocks trailing-dot FQDN bypass", () => {
     // A trailing dot resolves identically in DNS but used to slip past the
     // exact-string and dotted-IP checks.

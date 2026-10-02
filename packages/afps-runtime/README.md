@@ -1,6 +1,6 @@
 # @appstrate/afps-runtime
 
-> **Status:** pre-1.0 — stable interfaces, library surface, and CLI. First published release targets `1.0.0-alpha.1`.
+> **Status:** pre-1.0, not published — a private workspace package (`"private": true`) consumed inside the Appstrate monorepo.
 
 Portable, open-source runtime for loading, validating, signing, and executing
 [AFPS](https://github.com/appstrate/afps-spec) (Agent Format Packaging
@@ -21,9 +21,8 @@ locally.
 
 ## Install
 
-```sh
-bun add @appstrate/afps-runtime
-```
+Not on npm: depend on it from another monorepo workspace with
+`"@appstrate/afps-runtime": "workspace:*"`.
 
 The package is Bun-first; Node ≥ 20 works for library usage but the `afps`
 CLI shebang assumes `bun`.

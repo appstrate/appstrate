@@ -572,10 +572,10 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Register a custom integration OAuth client",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/integrations/{packageId}/oauth-clients/{clientId}",
     jsonSchema: toJsonSchema(oauthClientUpdateSchema),
-    description: "Rotate a custom integration OAuth client",
+    description: "Update a custom integration OAuth client",
   },
   {
     method: "POST",
@@ -638,10 +638,10 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Register an org-level integration OAuth client",
   },
   {
-    method: "PUT",
+    method: "PATCH",
     path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
     jsonSchema: toJsonSchema(oauthClientUpdateSchema),
-    description: "Rotate an org-level integration OAuth client",
+    description: "Update an org-level integration OAuth client",
   },
   {
     method: "PUT",
@@ -653,7 +653,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Member integration pins (routes/me.ts) ─────────────────────────────
   {
     method: "PUT",
-    path: "/api/me/integration-pins",
+    path: "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
     jsonSchema: toJsonSchema(upsertMemberPinSchema),
     description: "Upsert the caller's integration connection pin",
   },

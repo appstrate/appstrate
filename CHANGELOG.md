@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Pre-flight the stored integration manifests before the deploy**:
+  `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
+  lists every draft or version holding a template or runtime expression the
+  platform no longer evaluates (`[expression]`: it would stop loading) and
+  every auth whose injected credential runs will now refuse as exfiltration
+  (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
+  or an entry that does not bound the host); it exits 1 while any draft or
+  published version of an org integration has one, not only `latest`: a range
+  such as `^1.0.0` still runs an older version. Replace a broken version by a
+  fixed one every range reaching it accepts, then delete it
+  (`scripts/migration/README.md` § 0035). `allow_all_uris` beside a bounded
+  list is not listed (a run drops it and serves the list), but the next draft
+  save refuses it: fix it when convenient. System packages are skipped: the
+  image ships them (#1641).
+- **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
+  deploy, this query must return no row:
+  `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
+  (#1641).
+- **Migration `0079` rewrites `runs` under an exclusive lock** (the
+  `model_source` column becomes the `credential_source` enum), adds
+  `package_schedules.disabled_reason` (every schedule already disabled is
+  labelled `user`) and two CHECKs. Before the deploy these must return 0:
+  `SELECT count(*) FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org');`
+  and
+  `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
+  (#1641).
+- **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
+  before the new image serves traffic**: run snapshots written before #1611
+  can hold `label: null`, and the snapshot is now parsed on read (#1641). A
+  missing or empty label takes the first non-empty of the connection's label,
+  its account, the element's `accountId` (an API-key connection's placeholder
+  account `default` skipped) and its `connectionId` (before `0077` a
+  connection's label can still be empty); a missing account takes the
+  connection's, else `''` (the connection is deleted). It writes nothing while
+  an element lacks a string `connectionId` or names no cascade layer in `source`.
+- **Run `scripts/migration/0037-schedule-disabled-reason-backfill.sql` after
+  the release boots** (#1641): it relabels `actor_left_org` the disabled
+  schedules whose member actor is no longer in the organization. The other two
+  system disables are not derivable and stay `user`: a fire that found its
+  actor could no longer run agents (`actor_invalid`), and a connection
+  deletion that emptied an override set (`connection_deleted`).
+- **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
+  `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
+  every live ciphertext a retired kid wrote in the seven encrypted columns (a
+  closed or expired run sink's secret is never read again and is skipped); its
+  dry run is the per-kid inventory and exits 0 only when nothing live is left
+  outside the active kid. Procedure: `docs/ENV.md` § "Rotating
+  `CONNECTION_ENCRYPTION_KEY`" (#1641).
+
 ### Changed
 
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
@@ -15,6 +66,327 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becoming the default of an org that has none, so a first Claude Code
   connection now defaults to Opus 5.5. Existing `org_models` rows are untouched; `claude-opus-5` stays in
   the offer.
+- **BREAKING (API): the credential and LLM proxies answer their own failures
+  with stable problem codes** (#1641). Credential proxy:
+  `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`
+  (403), `credential_not_found` (404), `unresolved_placeholder` (400). LLM
+  proxy: a model whose upstream resolves into a blocked range is
+  `403 blocked_target` (was `400 invalid_request`). Both: an upstream that
+  cannot be resolved or reached (on the credential proxy, the target or a
+  redirect hop) is a 502 (`upstream_unresolvable`, `upstream_unreachable`), a
+  timeout a 504 (`upstream_timeout`); was a 500.
+- **BREAKING (API): the credential and LLM proxies mark every response with
+  RFC 9209 `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
+  upstream response, `appstrate; error=<type>` on the proxy's own. A relayed
+  upstream 401 no longer carries the platform's `invalid_token` challenge.
+- **BREAKING (OpenAPI): the LLM proxies document a relayed upstream error as
+  `default`, not `502`** (#1641). They relay a provider error at the
+  provider's own status, told apart from the proxy's own problem document by
+  `Proxy-Status: appstrate; received-status=<n>`, and document the 402 a
+  metering module's `beforeUsage` hook can answer.
+- **BREAKING (API): the LLM proxy reports its cache outcome as RFC 9211
+  `Cache-Status`** (#1641): `appstrate-llm-proxy; hit` on a cached reply,
+  `appstrate-llm-proxy; fwd=uri-miss; stored` on a stored miss.
+  `x-llm-proxy-cache-status` is gone.
+- **BREAKING (API): the three api_call paths share one outbound
+  implementation** (#1641).
+  The platform credential proxy, the sidecar and `appstrate run` follow
+  redirects under one rule: an origin the `authorized_uris` allowlist names
+  keeps the credential (Dropbox `api.` to `content.`), any other origin change
+  strips it, and an https→http hop never carries it. Every hop is SSRF-checked
+  and connected to its DNS-validated address, except a trusted host: on the
+  sidecar and `appstrate run`, one the manifest's `authorized_uris` names
+  literally (by design); on the platform proxy, one
+  `EGRESS_ALLOW_INTERNAL_HOSTS` lists. One 30 s deadline bounds every
+  call (`appstrate run` had none), and the sidecar answers a timeout 504 like
+  the platform proxy (was 502). A streaming upload's redirect is returned
+  unfollowed.
+- **BREAKING (manifests): one template grammar per concept, and nothing
+  unrendered reaches an upstream** (#1641). Every delivery template (`http`,
+  `env`, `files`) renders `{$credential.<field>}` and nothing else: the
+  api_call `{{…}}` placeholder, `{$outputs.*}` or any other `{$…}` there is
+  refused at import and throws at render, so `appstrate run` on a bundle that
+  skipped validation fails instead of sending `{{field}}`. `authorized_uris`
+  likewise refuses at import any `{$…}` but `{$credential.<field>}`. A
+  connect output is referenced as `{$credential.<name>}`, the jwt extractor's
+  `token` included; login inputs are `{{name}}`.
+- **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
+  its `client_id` can no longer change** (#1641). `PATCH` replaces the `PUT`
+  of `/api/integrations/{packageId}/oauth-clients/{clientId}` and of
+  `/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}`
+  (`updateIntegrationOAuthClient`, `updateOrgIntegrationOAuthClient`); an
+  absent field is left unchanged (`null` clears `redirect_uri`), a `client_id`
+  is a 400. The audit action `integration.oauth_client.rotated` is now
+  `integration.oauth_client.updated`; create/update/delete rows record the
+  client before and after (never its secret).
+- **BREAKING (API): OAuth clients name their owning tier** (#1641).
+  `GET …/auths/{authKey}/clients` returns `source: "system" | "org" | "space"`
+  instead of `"built-in" | "org" | "custom"`, where `custom` meant the space.
+- **BREAKING (API): member pins are addressed by path, like admin pins**
+  (#1641). `PUT` and `DELETE`
+  `/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`
+  take both ids in the path; the PUT body is `{ connection_ids }` alone.
+  `GET /api/me/integration-pins?agent_package_id=` is unchanged. A member-pin
+  write by an end-user, which has no member pins, is a 403 `forbidden`, not a
+  401 with an `invalid_token` challenge: its key is valid.
+- **BREAKING (API): one name per role across the pin and connection family**
+  (#1641). The agent is `agent_package_id` and the integration
+  `integration_package_id` on `IntegrationPin`, `IntegrationConnection`,
+  consuming agents, connection readiness, the `connections[]` of
+  `GET /api/me/context` (was `integration_id`) and the run's
+  `connections_used`, whose `label` and `account_id` are always strings and
+  `source` the cascade layer enum.
+- **BREAKING (MCP): `read_skill` returns a binary file as an embedded
+  resource** (#1641). The `content_base64` field is gone; the bytes arrive as
+  a `resource` content block with `blob`, whose `uri` is the file's REST
+  content URL.
+- **Platform MCP tools return structured output** (#1641). Every JSON result
+  carries `structuredContent` beside its text block (MCP 2025-06-18); an error
+  carries the text only.
+- **BREAKING (API): the Stripe webhook receiver answers its refusals as RFC
+  9457 problem documents** (#1641). `POST /api/billing/webhooks` answers
+  `400 invalid_request` for a missing or invalid `stripe-signature` and
+  `500 internal_error` instead of plain text; Stripe reads only the status.
+- **BREAKING (API): the OAuth endpoints' 429 is a standard OAuth error**
+  (#1641):
+  `/api/auth/oauth2/*` answers `Retry-After` and a JSON body with
+  `"error": "temporarily_unavailable"` (RFC 6749 §5.2) instead of Better
+  Auth's `X-Retry-After` and untyped `{message}`.
+- **Notification kinds are a declared union** (#1641). `GET /api/notifications`
+  items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
+  typed payload each, and the database refuses any other kind.
+- **`runs.model_source` is the `credential_source` enum** (#1641): the
+  column, the run DTO and OpenAPI accept only `system`, `org` or `null`, and
+  the CHECK `runs_remote_has_no_platform_model` forbids a model source, model
+  id or inference route on a remote-origin run. The runner ledger no longer
+  coerces an unknown source to `null`, which silently switched a run to
+  pass-through pricing.
+- **The sidecar refuses a malformed `RUNTIME_TOOLS_JSON` or `OUTPUT_SCHEMA`
+  at boot** (#1641) instead of silently dropping the runtime tools or the
+  output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
+  its env validation.
+- **BREAKING (API): the retired `X-Integration` header is no longer
+  stripped** by the credential proxy or the sidecar (#1641); it reaches the upstream like any
+  other header.
+- **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
+  `@appstrate/module-chat` are private workspace packages** (#1641). None was
+  ever published; the dead `publishConfig` is removed.
+
+### Added
+
+- **A disabled schedule says why** (#1641). `disabled_reason` (`user`,
+  `actor_invalid`, `actor_left_org`, `connection_deleted`) is set by every
+  writer, cleared on re-enable and `NULL` exactly while enabled (CHECK); it is
+  on the schedule DTO and shown on the schedule badge and detail page.
+  Deleting a connection a schedule overrides disables only an enabled
+  schedule; one already disabled keeps its reason. A fire whose actor is no
+  longer valid records `Schedule disabled: …` only when it disabled the
+  schedule, else `Schedule refused: …`.
+- **Credential-proxy use of another member's connection is audited** (#1641).
+  The first call of an `X-Session-Id` through a connection the caller does not
+  own writes one `integration.connection.proxied` row per acting principal
+  (`principalType`, `principalId` in `after`); the call log names the
+  connection used. A call that fails after the credential may have left
+  (timeout, unreachable upstream, refused redirect) is audited like one that
+  returns; one refused before sending is not. A failed insert is logged and
+  retried by the session's next call.
+
+### Fixed
+
+- **An upstream verdict is credited to the credential that earned it**
+  (#1641). The sidecar reports a 401 or 2xx against the
+  `credential_revision` its request carried, not the one held when the
+  answer arrived. A response a redirect hop stripped the credential from
+  (including a chain that comes back to the origin) is neither counted nor
+  credited, on the sidecar and the platform proxy alike. A platform-proxy 401
+  on a superseded credential returns the current one without refreshing or
+  counting. Reaching the threshold flags only the credential that was
+  counted, for integration connections and BYOK keys alike. A count and the
+  platform proxy's reset apply only while the caller still reaches the
+  connection. `credential_revision` must be 16 hex digits (empty or malformed
+  → `400`).
+- **Credential proxy: two failures no longer end as a 500 or a spurious
+  400** (#1641). A `{{word}}` inside a credential value was reported as an
+  unresolved placeholder: placeholders are now looked up in the template. A
+  relayed body that breaks off after its headers answers
+  `502 upstream_unreachable` (or `504 upstream_timeout`) naming the target
+  host.
+- **A rejection or a success counts against the credential that saw it**
+  (#1641). The integration credentials payload carries `credential_revision`,
+  a short digest of the stored ciphertext, which the sidecar sends back on
+  `/refresh` and `/upstream-success`: a 401 on a credential the connection no
+  longer holds is not counted and gets the current credential back (`200`),
+  and a success on a replaced credential no longer ends the new one's streak.
+  The platform credential proxy compares-and-sets on the ciphertext it
+  injected. A connection already flagged keeps its count; `/upstream-success`
+  refuses a connect run (`409 connect_run_no_refresh`); a success report that
+  is refused or fails is retried on the next success; and the remote-HTTP
+  transport no longer reports a success from an origin a redirect took the
+  request to.
+- **An upstream that keeps rejecting an API key flags it; 401s between
+  successful calls no longer do** (#1641). A credential that cannot refresh
+  (api_key, basic, custom, OAuth2 with no refresh client) is flagged
+  `needs_reconnection` at the `INTEGRATION_REFRESH_MAX_FAILURES`-th
+  CONSECUTIVE upstream 401, however far apart; an OAuth2 connection holding
+  no refresh token is not counted, and its first 401 flags it (`410`), as
+  before. Any successful (2xx) call
+  through a non-OAuth2 connection ends the streak; an OAuth2 connection's
+  count is cleared only by a credential write (a reconnect, or a successful
+  refresh), never by a 2xx. Two counts therefore run until a reconnect: an
+  OAuth2 connection whose refresh cannot run (no resolvable client or token
+  endpoint), and a local MCP server reporting rejections through the
+  `dev.appstrate/credential: rejected` tool-result meta (e.g. `@appstrate/ssh`),
+  which has no success signal. Every path counts and resets: the platform
+  credential proxy (CLI, GitHub Action), which counted none before and
+  flagged an OAuth2 connection without a refresh client on its first 401, and
+  the sidecar's `api_call`, MITM egress and remote-HTTP sinks, which report
+  the first success after a counted rejection to
+  `POST /internal/integration-credentials/{scope}/{name}/upstream-success`
+  (the credentials GET payload announces a pending streak as
+  `rejection_streak`). For an API-key integration connection that replaces a count since the last
+  reconnect; a revoked BYOK model key, never flagged before, is counted the
+  same way through the LLM proxy, which a 2xx resets, and stops inference
+  until it is re-entered. A BYOK rejection or success counts only against the
+  key the request sent; an OAuth2 subscription keeps its own counter, the
+  refresh streak, which a successful refresh resets. The refresh `502` now
+  reads `N/M consecutive upstream rejections before it is flagged`.
+- **An OAuth client update that sends a new `client_secret` without
+  `token_endpoint_auth_method` keeps the stored method** (#1641); it reset
+  the client to the manifest's method. A public client (`none`) given a
+  secret takes the manifest's method.
+- **BREAKING (API): a `connection_overrides` key the agent does not declare
+  is a 400** (#1641). It was dropped without a trace, and a schedule froze it onto its
+  row, so the run bound a lower cascade layer instead of the account asked
+  for. It is refused on the agent run, the inline run and `/inline/validate`,
+  on schedule create, and on a schedule update that changes
+  `connection_overrides` or `version_override`.
+- **Audit rows record the whole change** (#1641). `schedule.created` records
+  every override; `schedule.updated` records before and after of only the
+  fields the write changed, including the connection-override reset an actor
+  change implies, and a write that changes nothing records no row. A
+  placement `PATCH` writes `package.placement.updated` for `modelId`,
+  `proxyId` and `generationConfig`. Pin and org-default writes record
+  `before`; admin and member pin rows share one `resourceId`.
+- **BREAKING (manifests): `connect.login` reads the regex extractor's
+  `source`** (#1641):
+  `$response.body` or `$response.header.<name>`; it was ignored. An
+  expression, selector or criterion context the engine cannot evaluate is
+  refused at import and fails the login as `invalid_config` instead of
+  silently not matching.
+- **BREAKING (config): a UUID-shaped system id is refused** (#1641). Such an
+  id would take precedence over an organization's own row with the same id.
+  A system OAuth
+  client with one fails boot; a `SYSTEM_PROVIDER_KEYS` entry whose key or
+  model id is UUID-shaped is skipped and logged, like any other invalid entry.
+- **Every error response in the OpenAPI document declares its body**
+  (#1641), and `verify:openapi` §6b enforces it: `application/problem+json`
+  (`ProblemDetail`), or the media type a reviewed exemption names (Better
+  Auth's OAuth endpoints, HTML pages, the health report, proxied upstream
+  responses).
+- **The root `zod` override no longer pins below the declared floor** (#1641).
+  `overrides.zod` moves from 4.5.4 to 4.6.5, the version every workspace
+  declares; `verify:overrides` (in `bun run check`) fails when an override
+  does not satisfy a declared range.
+
+### Security
+
+- **A credential no HTTP header can carry is refused, never quoted** (#1641).
+  A stored or rendered credential holding CR, LF, NUL, another control
+  character or a character above U+00FF made `Headers` throw an error quoting
+  the value. Every path now checks the value first (`isHttpFieldValue`): the
+  platform proxy answers `502 credential_unusable`
+  (`Proxy-Status: …; error=proxy_configuration_error`) naming the header
+  only, the sidecar a 502 (a caller's own invalid header a 400), the CLI
+  `RESOLVER_HEADER_INVALID`, the MITM listener a fixed 403. The proxy route
+  logs an unexpected error's name only; the MITM listener answers any
+  unexpected throw with a fixed 500, never serves the runtime's development
+  error page, emits error classes instead of messages, and its events name
+  the path before login substitution, without the query.
+- **The target host an `api_call` message names is read from the target
+  template** (#1641). Messages show the template's host with `{{field}}` in
+  place of each rendered part (`<templated>` when it does not parse); a
+  literal host is shown as written. Redirect hops keep the value scrub.
+- **A process-mode sidecar binds loopback only** (#1641). Its MCP server and
+  the agent's forward proxy listened on every interface; the process
+  orchestrator now sets the sidecar env `LISTEN_HOST=127.0.0.1` and probes
+  its ports there. Container and VM sidecars keep binding all interfaces.
+- **`/upstream-success` resets a streak only while the run can still reach
+  the connection** (#1641). The reset is one UPDATE scoped by integration,
+  space and the run actor's own-or-shared access; a run with no actor, or
+  whose actor lost access, resets nothing.
+- **The CLI's `api_call` hop to the platform applies the same caller-header
+  rule as every other path** (#1641). The agent's `Host`, hop-by-hop,
+  `Connection`-named and `Content-Length` headers no longer ride on the CLI's
+  request to `/api/credential-proxy/proxy` beside its bearer token; a streamed
+  `{ fromFile }` upload always carries its real size, and the transport hints
+  (`X-Stream-Request`, `X-Stream-Response`, `X-Max-Response-Size`) are set by
+  the CLI, never by the agent.
+- **An `api_call` tells the caller's input apart from the credential**
+  (#1641). The sidecar, like the platform proxy, looks for unresolved
+  placeholders in the template, so a `{{word}}` inside a credential value is
+  no longer named in a 400. The platform proxy answers a caller header value
+  that is no HTTP field value `400 invalid_request` (was
+  `502 credential_unusable`) and no longer forwards the caller's `X-Org-Id`
+  upstream. A streamed body's `Content-Length` never comes from a caller
+  header.
+- **The MITM listener applies the host-bound credential rule to its replay
+  too** (#1641). A request replayed after a credential refresh or a
+  `connect.tool` re-login is checked like the first attempt: a credential
+  whose auth leaves the host to the caller is never injected.
+- **BREAKING (API): `api_call` forwards only end-to-end caller headers**
+  (#1641). The shared
+  outbound engine drops, on every path (platform proxy, sidecar, CLI), a
+  caller's `Host`, the RFC 9110 connection-specific headers (`Connection`,
+  `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`,
+  `Upgrade`, and any header `Connection` names, except the credential),
+  `Proxy-Authorization`/`Proxy-Authenticate`, and `Content-Length`. The
+  upstream's virtual host follows the target URL; the request framing is the
+  one fetch computes, and a streamed upload is sent with the length of the
+  platform request that carries it, else chunked.
+- **The SSRF blocklist judges IPv4 addresses embedded in NAT64 and 6to4 IPv6
+  addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
+  IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
+  is blocked. The SIIT IPv4-translated form `::ffff:0:0:0/96` is judged as its
+  IPv4, and site-local `fec0::/10`, multicast `ff00::/8` and an IPv6
+  literal that does not expand to eight groups are blocked.
+- **BREAKING: an auth whose credential the proxy injects must name its
+  hosts** (#1641). Manifest writes and imports refuse, on such an auth,
+  `allow_all_uris`, no `authorized_uris`, or an entry that leaves the host to
+  the caller; the platform proxy, the sidecar, its MITM egress and
+  `appstrate run` refuse the same calls. One parser
+  (`parseAuthorizedUriPattern`) reads an entry for this rule, the URL matcher,
+  the runner egress policy and the literal-host pin that skips the SSRF gate.
+  An entry is malformed when its authority (after `scheme://`, up to the
+  first `/`) is empty, is not spelled as WHATWG serialises it (only case and
+  a default port may differ), or holds `%`, `\`, `@`, `?`, `#`, whitespace, a
+  control or non-ASCII character (`https://%2A%2A\**`, `https://@x:y@**/**`):
+  it matches, grants and pins nothing, and counts as leaving the host to the
+  caller. Otherwise an entry names its host only with a literal scheme, a
+  non-empty host and no wildcard in its last two labels (not `https://**`,
+  `https://*.com./**`, `**://…`), nor anywhere in an IP literal or an
+  IPv4-shaped host, whose last label is numeric (not `https://[::**/**`,
+  `https://*.0.1/**`, which matches `https://0x2d210001/`); a public suffix
+  (`https://*.co.uk/**`) is not detected. List the hosts instead.
+- **An `authorized_uris` scheme glob matches scheme characters only**
+  (#1641): `**://api.example.com/**` no longer matches a URL on another host
+  whose query holds `://api.example.com/`.
+- **BREAKING (API): an `api_call` whose auth declares no `authorized_uris`
+  and not `allow_all_uris` is refused on every path** (#1641). The sidecar used to
+  relay it anywhere the SSRF gate allowed; the platform proxy answers
+  `403 unauthorized_target`. An empty authorized set authorizes nothing (AFPS
+  §7.9).
+- **BREAKING (API): the credential proxy authorizes a call against the
+  published integration manifest** (#1641). A call naming a run (`X-Run-Id`) reads the version that
+  run froze at kickoff; any other call reads the `latest` published version,
+  never the editable draft. An integration that was never published is
+  refused: publish it before calling it through the proxy (`appstrate run`
+  without `--report` included).
+- **OAuth client secrets and upstream session cookies no longer sit in
+  plaintext in Redis** (#1641). The OAuth connect state stores only the client
+  reference, re-resolved at the callback like token refresh does; the
+  credential-proxy cookie jar is encrypted with the connection-credential
+  keyring. A connect started before the deploy fails at its callback and must
+  be retried; a cookie jar written before it reads as empty.
 
 ## [1.0.0-beta.64] - 2026-09-30
 

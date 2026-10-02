@@ -93,16 +93,14 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
                 value={
                   <span className="flex flex-col gap-1.5">
                     {bound.map((c, i) => (
-                      <span key={`${c.label ?? c.account_id ?? ""}-${i}`} className="flex flex-col">
+                      <span key={`${c.label}-${i}`} className="flex flex-col">
                         <span className="flex items-center gap-1.5">
-                          <span>{c.label ?? c.account_id ?? "—"}</span>
+                          <span>{c.label}</span>
                           <Badge variant="secondary" className="text-[0.6rem]">
                             {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
                           </Badge>
                         </span>
-                        {c.label && c.account_id && (
-                          <span className="text-muted-foreground text-xs">{c.account_id}</span>
-                        )}
+                        <span className="text-muted-foreground text-xs">{c.account_id}</span>
                       </span>
                     ))}
                   </span>

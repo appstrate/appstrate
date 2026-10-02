@@ -327,11 +327,9 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     // filter regex must not match).
     let capturedContentType: string | null = null;
     const fetchFn = mock(async (_url: string, init?: RequestInit) => {
-      // Read directly off the init.headers map — this lets us observe
-      // whether the sidecar's strip filter touched it, independent of
+      // Read off init.headers — whether the sidecar's strip filter touched it, independent of
       // whatever fetch() does at Request construction time.
-      const rawHeaders = init?.headers as Record<string, string> | undefined;
-      capturedContentType = rawHeaders?.["Content-Type"] ?? rawHeaders?.["content-type"] ?? null;
+      capturedContentType = new Headers(init?.headers).get("content-type");
       return new Response("{}", { status: 200 });
     });
     const app = await makeMultipartApp({ fetchFn: fetchFn as unknown as typeof fetch });

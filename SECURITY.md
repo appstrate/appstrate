@@ -240,6 +240,7 @@ The platform API (`/internal/integration-credentials/{scope}/{name}`) enforces a
 - **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
 - **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's space. An agent cannot reach credentials it did not declare.
 - **Access is logged** — every credential fetch is recorded with run ID, integration package ID, and the resolved auth/delivery-plan counts
+- **Connection health is a heuristic, not a control** — the consecutive-401 count that flags an unrefreshable connection `needs_reconnection` (`INTEGRATION_REFRESH_MAX_FAILURES`) moves with whatever an allowed caller sends: a member proxying through a shared connection or an agent through the sidecar can provoke 401s on an allowlisted endpoint until the owner must reconnect, and a 2xx from an allowlisted endpoint that ignores auth resets the count. The count is consecutive as reported: a run ends only the streaks it knows of, so rejections counted by other runs or by the platform proxy are not ended by this run's successes
 
 ### Credential encryption at rest
 
@@ -289,25 +290,18 @@ Each integration auth declares `authorized_uris` — either explicitly in the ag
 }
 ```
 
-The sidecar validates the fully-resolved URL (after `{{variable}}` substitution) against these patterns **before** making the request:
+Every `api_call` path (the sidecar, the platform credential proxy, `appstrate run`) validates the fully-resolved URL (after `{{variable}}` substitution) against the patterns rendered for the connection **before** making the request, and again on every redirect hop (`fetchApiCall`, `packages/afps-runtime/src/resolvers/api-call-engine.ts`):
 
 ```typescript
-function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    if (pattern.endsWith("*")) {
-      return url.startsWith(pattern.slice(0, -1));
-    }
-    return url === pattern;
-  });
-}
+const inAllowlist = (url: URL) => authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
 ```
 
-**Unauthorized requests return 403:**
+`matchesAuthorizedUriSpec` (`packages/afps-runtime/src/resolvers/http-call-core.ts`) compares the target with its userinfo and fragment stripped and fails closed on a target that does not parse. In a pattern, `*` matches within one path segment and `**` any substring, except in the host, where no wildcard crosses the `/` that ends it; a scheme glob matches scheme characters only. A redirect to an origin the allowlist does not name loses the credential, and an https→http hop always does.
 
-```json
-{
-  "error": "URL not authorized for provider \"gmail\". Allowed: https://gmail.googleapis.com/*, https://www.googleapis.com/upload/*"
-}
+**Unauthorized requests are refused with a 403-class error that names the declared entries** (never a rendered one, which may be a secret). The platform proxy answers `403 unauthorized_target`; the sidecar's `api_call` tool error carries:
+
+```text
+Integration "gmail": URL not in authorized_uris allowlist. Allowed: https://gmail.googleapis.com/*, https://www.googleapis.com/upload/*
 ```
 
 ### Defense against credential misuse

@@ -18,7 +18,7 @@ export function createOrgIntegrationsRouter() {
   router.get("/:scope{@[^/]+}/:name/auths/:authKey/clients", configure, clients.list);
   router.put("/:scope{@[^/]+}/:name/auths/:authKey/default-client", configure, clients.setDefault);
   router.post("/:scope{@[^/]+}/:name/auths/:authKey/oauth-clients", configure, clients.create);
-  router.put("/:scope{@[^/]+}/:name/oauth-clients/:clientId", configure, clients.rotate);
+  router.patch("/:scope{@[^/]+}/:name/oauth-clients/:clientId", configure, clients.update);
   // Also deletes every connection the client minted in any space of the org.
   router.delete("/:scope{@[^/]+}/:name/oauth-clients/:clientId", configure, clients.remove);
   return router;

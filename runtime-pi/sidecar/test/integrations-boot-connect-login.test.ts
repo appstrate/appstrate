@@ -244,7 +244,7 @@ describe("runConnectLoginHook", () => {
 
       // Simulate the listener's reauth path: refreshOnUnauthorized routes to
       // the registered re-login handler, which re-runs the login tool.
-      const ok = await source.refreshOnUnauthorized("session");
+      const ok = await source.refreshOnUnauthorized("session", undefined);
       expect(ok).toBe(true);
       expect(rotating.loginCalls()).toBe(2);
       // The fresh session is now injectable — a retried request gets sess-2.
@@ -312,7 +312,7 @@ describe("runConnectLoginHook", () => {
 
       // Re-login fails → false, and the previously-captured session is left
       // untouched (the listener returns the original failed response).
-      const ok = await source.refreshOnUnauthorized("session");
+      const ok = await source.refreshOnUnauthorized("session", undefined);
       expect(ok).toBe(false);
       expect(calls).toBe(2);
       expect(source.deliveryPlans().session!.value).toBe("boot");
@@ -354,7 +354,7 @@ describe("runConnectLoginHook", () => {
         nsB,
       );
 
-      expect(await sourceA.refreshOnUnauthorized("session")).toBe(true);
+      expect(await sourceA.refreshOnUnauthorized("session", undefined)).toBe(true);
       expect(a.loginCalls()).toBe(2);
       expect(b.loginCalls()).toBe(1);
       expect(sourceA.deliveryPlans().session!.value).toBe("a-2");

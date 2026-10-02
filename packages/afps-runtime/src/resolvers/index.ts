@@ -52,16 +52,15 @@ export {
 // Canonical `{{var}}` credential substitution — shared by the platform
 // credential proxy (`@appstrate/connect` re-export), the delivery.http
 // renderer, and the portable integration resolver.
-export { substituteVars } from "./template-vars.ts";
+export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
-// Credential-exfiltration guard shared by the three `api_call` paths.
+// The pre-send URL policy shared by the three `api_call` paths.
 export {
-  allowlistUnrendered,
   credentialUrlPolicy,
-  exfiltrationRefusal,
   redactionFields,
-  UNRENDERED_ALLOWLIST_REFUSAL,
+  urlPolicyRefusalMessage,
   type CredentialUrlPolicy,
+  type UrlPolicyRefusal,
 } from "./credential-guard.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
@@ -93,20 +92,15 @@ export {
   type SerializeFetchResponseContext,
 } from "./http-call-core.ts";
 
-// Shared, credential-source-agnostic outbound-HTTP engine: authorized_uris
-// + SSRF preflight and the manual redirect-follower (per-hop SSRF + per-hop
-// allowlist + hybrid credential-strip + cookie capture). Consumed by the
-// sidecar's `executeApiCall` (platform path) AND the local CLI resolver.
+// The outbound half of every api_call path (platform proxy, sidecar, local CLI):
+// allowlist + SSRF gate per hop, pinned transport, credential rule across
+// redirects, cookie capture, deadline.
 export {
-  MAX_REDIRECTS,
-  matchesAuthorizedUri,
-  stripUserInfoAndFragment,
-  redactHost,
+  API_CALL_TIMEOUT_MS,
+  classifyApiCallFailure,
+  fetchApiCall,
+  HOP_BY_HOP_HEADERS,
   redactCredentialHost,
-  scrubTransportError,
-  fetchFollowingRedirectsCapturingCookies,
-  guardedFetch,
-  RedirectBlockedError,
 } from "./api-call-engine.ts";
 
 // Sticky-cookie jar shared by both credential proxies and the redirect follower.

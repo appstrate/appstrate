@@ -10,6 +10,7 @@ import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import {
   initSystemModelProviderKeys,
   getSystemModels,
+  getSystemModelProviderCredentials,
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
@@ -54,5 +55,18 @@ describe("initSystemModelProviderKeys — offer check", () => {
     ]);
     expect(getSystemModels().has("m-openrouter")).toBe(true);
     expect(getSystemModels().has("m-openai-compatible")).toBe(true);
+  });
+
+  it("skips an entry with a UUID-shaped model or credential id, which would shadow an org row", () => {
+    const uuid = "0b9d6f0e-3a51-4c1e-9f55-2f6d8c1a7e42";
+    initSystemModelProviderKeys([
+      { ...key("anthropic", "claude-opus-5"), models: [{ id: uuid, modelId: "claude-opus-5" }] },
+    ]);
+    expect(getSystemModels().has(uuid)).toBe(false);
+    expect(getSystemModelProviderCredentials().has("sys-anthropic")).toBe(false);
+
+    initSystemModelProviderKeys([{ ...key("anthropic", "claude-opus-5"), id: uuid }]);
+    expect(getSystemModelProviderCredentials().has(uuid)).toBe(false);
+    expect(getSystemModels().has("m-anthropic")).toBe(false);
   });
 });

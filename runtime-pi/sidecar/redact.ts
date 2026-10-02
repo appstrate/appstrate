@@ -18,7 +18,7 @@
  * operator on redirect-loop diagnosis, but logging it verbatim leaks a
  * presigned/`?access_token=` redirect target into the debug envelope.
  * It is redacted to origin + path (query string, fragment, and userinfo
- * stripped) — same philosophy as `redactHost` in the api-call engine.
+ * stripped) — same philosophy as `redactCredentialHost` in the api-call engine.
  */
 
 /**

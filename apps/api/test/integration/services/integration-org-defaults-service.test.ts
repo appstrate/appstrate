@@ -90,11 +90,12 @@ describe("integration-org-defaults-service", () => {
     const connId = await seedSharedConnection();
 
     // upsert
-    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { previous, orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connId],
       enforce: true,
       createdBy: ctx.user.id,
     });
+    expect(previous).toBeNull();
     expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(true);
 
@@ -110,12 +111,12 @@ describe("integration-org-defaults-service", () => {
 
     // delete
     const del = await deleteOrgDefault(scope, INTEGRATION_ID);
-    expect(del.deleted).toBe(true);
+    expect(del.previous).toMatchObject({ connection_ids: [connId], enforce: true });
     expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
 
     // delete is idempotent — second delete reports nothing removed.
     const del2 = await deleteOrgDefault(scope, INTEGRATION_ID);
-    expect(del2.deleted).toBe(false);
+    expect(del2.previous).toBeNull();
   });
 
   it("upsert replaces the existing default on the (app, integration) unique index", async () => {
@@ -127,11 +128,12 @@ describe("integration-org-defaults-service", () => {
       enforce: false,
       createdBy: ctx.user.id,
     });
-    const replaced = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { previous, orgDefault: replaced } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connB],
       enforce: true,
       createdBy: ctx.user.id,
     });
+    expect(previous).toMatchObject({ connection_ids: [connA], enforce: false });
     expect(replaced.connection_ids).toEqual([connB]);
     expect(replaced.enforce).toBe(true);
 
@@ -140,13 +142,29 @@ describe("integration-org-defaults-service", () => {
     expect(fetched!.enforce).toBe(true);
   });
 
+  it("two concurrent first writes: the second reports the first as `previous`", async () => {
+    const connA = await seedSharedConnection();
+    const connB = await seedSharedConnection();
+    const write = (id: string) =>
+      upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: [id],
+        enforce: false,
+        createdBy: ctx.user.id,
+      });
+    const results = await Promise.all([write(connA), write(connB)]);
+    const first = results.find((r) => r.previous === null);
+    const second = results.find((r) => r !== first);
+    expect(first).toBeDefined();
+    expect(second!.previous?.connection_ids).toEqual(first!.orgDefault.connection_ids);
+  });
+
   it("a default is a SET: N connections in the caller's order, replaced wholesale", async () => {
     const a = await seedSharedConnection(ctx.defaultSpaceId, "a");
     const b = await seedSharedConnection(ctx.defaultSpaceId, "b");
     const c = await seedSharedConnection(ctx.defaultSpaceId, "c");
     const expected = [c, a, b];
 
-    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: expected,
       enforce: true,
       createdBy: ctx.user.id,

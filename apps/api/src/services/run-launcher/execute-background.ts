@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CredentialSource } from "@appstrate/db/schema";
 import { logger } from "../../lib/logger.ts";
 import type { LoadedPackage } from "../../types/index.ts";
 import { updateRun, appendRunLog } from "../state/runs.ts";
@@ -26,7 +27,7 @@ export interface ExecuteAgentInBackgroundInput {
   context: ExecutionContext;
   plan: AppstrateRunPlan;
   agentPackage?: Buffer | null;
-  modelSource?: string | null;
+  modelSource?: CredentialSource;
   /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
   sinkCredentials: SinkCredentials;
   /**
