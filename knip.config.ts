@@ -387,6 +387,10 @@ const config: KnipConfig = {
         // a string literal and not an import edge. Listed as an entry so its
         // subprocess surface is judged as reachable, which is what it is.
         "scripts/system-packages/**/server/proxy-connect.ts",
+        // Browser-side instrumentation of the chat bench's `ui` scenario:
+        // `scripts/bench/chat/ui.ts` reads it off disk and injects its text
+        // into the page (Playwright `addInitScript`), so nothing imports it.
+        "scripts/bench/chat/ui-instrument.js",
         // Documentation examples, compiled by their own README instructions.
         "examples/**/*.ts",
       ],

@@ -182,9 +182,11 @@ describe("Pi registry accessors", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-6-astra",
+      "gpt-6-luna",
+      "gpt-6-sol",
     ]);
     expect(listPiModels("xai", "openai-completions")).toEqual([]);
-    expect(listPiModels("xai", "openai-responses")).toHaveLength(3);
+    expect(listPiModels("xai", "openai-responses")).toHaveLength(4);
     expect(listPiModels("not-a-pi-provider", "openai-completions")).toEqual([]);
   });
 

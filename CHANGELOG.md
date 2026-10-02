@@ -59,6 +59,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
+  the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
+  registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
+  seeded into `org_models` on a provider's first connection, the first one
+  becoming the default of an org that has none, so a first Claude Code
+  connection now defaults to Opus 5.5. Existing `org_models` rows are untouched; `claude-opus-5` stays in
+  the offer.
 - **BREAKING (API): the credential and LLM proxies answer their own failures
   with stable problem codes** (#1641). Credential proxy:
   `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`

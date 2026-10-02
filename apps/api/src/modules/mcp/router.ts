@@ -31,6 +31,7 @@
 
 import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import { getEnv } from "@appstrate/env";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -568,6 +569,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
       // or a SameSite session cookie), so a cross-site page cannot drive it.
       enableDnsRebindingProtection: false,
+      // The global `bodyLimit` already bounds this request; match it so the
+      // SDK's own 4 MB default does not become a second, lower, hidden cap.
+      maxRequestBodySize: getEnv().API_BODY_LIMIT_BYTES,
     });
 
     // Reconstruct the request so the SDK transport can read the body once.

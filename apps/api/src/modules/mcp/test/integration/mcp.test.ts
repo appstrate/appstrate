@@ -291,6 +291,22 @@ describe("mcp discovery + auth gate", () => {
     expect(await res.text()).toBe("");
   });
 
+  it("accepts an envelope over the SDK's 4 MB default, up to API_BODY_LIMIT_BYTES", async () => {
+    const size = 4 * 1024 * 1024 + 1024;
+    expect(getEnv().API_BODY_LIMIT_BYTES).toBeGreaterThan(size);
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const res = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: { pad: "x".repeat(size) },
+      }),
+    });
+    expect(res.status).toBe(202);
+  });
+
   it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), { method: "DELETE", headers });
