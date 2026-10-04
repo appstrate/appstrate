@@ -10,8 +10,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 import {
   STORED_MANIFESTS_QUERY,
   manifestIssues,
@@ -30,10 +30,10 @@ const apiKeyAuth = (extra: Record<string, unknown>) => ({
   ...extra,
 });
 
-const pg = new PGlite();
+let pg: PGlite;
 
 beforeAll(async () => {
-  await replayJournal(pg);
+  pg = await journalPGlite();
   const clean = { auths: { k: apiKeyAuth({ authorized_uris: ["https://api.acme.test/**"] }) } };
   const draft = {
     auths: {

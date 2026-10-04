@@ -9,7 +9,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { decrypt, encrypt } from "@appstrate/connect";
 import { _resetKeyringForTesting } from "../../../../packages/connect/src/encryption.ts";
@@ -20,7 +20,7 @@ import {
   reportCounts,
   type Query,
 } from "../../../../scripts/rekey-encrypted-columns.ts";
-import { replayJournal } from "../helpers/journal.ts";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const ORG = "e0000000-0000-4000-8000-00000000d037";
 const SPACE = "spc_d0370000-0000-4000-8000-000000000001";
@@ -36,7 +36,7 @@ const ENV_KEYS = [
   "CONNECTION_ENCRYPTION_KEYS",
 ] as const;
 
-const pg = new PGlite();
+let pg: PGlite;
 const query: Query = async (text, params) => (await pg.query(text, params)).rows as never;
 const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
@@ -56,7 +56,7 @@ async function column(table: string, col: string, where: string): Promise<string
 const OLD: Record<string, string> = {};
 
 beforeAll(async () => {
-  await replayJournal(pg);
+  pg = await journalPGlite();
   useKeyring({
     CONNECTION_ENCRYPTION_KEY: OLD_KEY,
     CONNECTION_ENCRYPTION_KEY_ID: "k1",
