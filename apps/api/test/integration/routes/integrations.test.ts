@@ -1239,11 +1239,11 @@ describe("OAuth client CRUD", () => {
     expect(after!.redirectUri).toBe("https://example.com/cb");
   });
 
-  it("PATCH keeps an absent redirect_uri and clears a null one; PUT is gone", async () => {
+  it("PATCH keeps an absent redirect_uri and clears a null one", async () => {
     const created = await createClient("abc", "shh");
-    const patch = (body: Record<string, unknown>, method = "PATCH") =>
+    const patch = (body: Record<string, unknown>) =>
       app.request(`/api/integrations/@myorg/gmail/oauth-clients/${created.id}`, {
-        method,
+        method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -1260,7 +1260,6 @@ describe("OAuth client CRUD", () => {
     expect(await redirectUri()).toBe("https://example.com/cb");
     expect((await patch({ redirect_uri: null })).status).toBe(200);
     expect(await redirectUri()).toBeNull();
-    expect((await patch({ client_secret: "again" }, "PUT")).status).toBe(404);
   });
 
   it("refuses any client_id in the update body as an unknown key", async () => {

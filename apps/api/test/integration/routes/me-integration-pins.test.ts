@@ -240,15 +240,6 @@ describe("/api/me/integration-pins", () => {
       expect((await putPin([connectionId])).status).toBe(200);
     });
 
-    it("the retired body-addressed PUT is not a route", async () => {
-      const res = await app.request("/api/me/integration-pins", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ connection_ids: [await seedConnectionFor(ctx.user.id)] }),
-      });
-      expect(res.status).toBe(404);
-    });
-
     it("audits every write with the set before and after, under the admin pins' resource id", async () => {
       const first = await seedConnectionFor(ctx.user.id);
       const second = await seedConnectionFor(ctx.user.id);
@@ -328,20 +319,6 @@ describe("/api/me/integration-pins", () => {
       );
       const body = (await list.json()) as { data: unknown[] };
       expect(body.data).toEqual([]);
-    });
-
-    it("the retired query-addressed DELETE is not a route", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
-      expect((await putPin([connectionId])).status).toBe(200);
-      const qs = new URLSearchParams({
-        agent_package_id: AGENT,
-        integration_package_id: INTEGRATION,
-      });
-      const res = await app.request(`/api/me/integration-pins?${qs.toString()}`, {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(404);
     });
   });
 

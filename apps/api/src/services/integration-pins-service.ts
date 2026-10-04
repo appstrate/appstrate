@@ -268,9 +268,8 @@ function pinKey(
 }
 
 /**
- * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. The
- * replaced set is read under a row lock in the same transaction, mapped by
- * drizzle's column mappers (drivers differ).
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`; the
+ * returned row goes through drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -289,50 +288,44 @@ async function upsertPin(args: {
     sql`, `,
   )}]::uuid[]`;
   await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
-  return db.transaction(async (tx) => {
-    // The row lock below locks nothing on a FIRST write: two of them would each read "no pin"
-    // and the later upsert would audit `before: null` over the other's set.
-    const key = `integration-pin:${scope.spaceId}:${agentPackageId}:${integrationId}:${userIdValue ?? ""}`;
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
-    const [previous] = await tx
-      .select({ connectionIds: integrationPins.connectionIds })
-      .from(integrationPins)
-      .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
-      .for("update");
-    const [row] = toRows<{
-      connection_ids: string | unknown[];
-      created_at: string | Date;
-      updated_at: string | Date;
-    }>(
-      await tx.execute(sql`
-      INSERT INTO ${integrationPins}
-        (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
-      VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
-      ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
-      DO UPDATE SET
-        connection_ids = EXCLUDED.connection_ids,
-        created_by = EXCLUDED.created_by,
-        updated_at = now()
-      RETURNING connection_ids, created_at, updated_at
-    `),
-    );
-    return {
-      previous: previous?.connectionIds ?? null,
-      pin: {
-        agent_package_id: agentPackageId,
-        integration_package_id: integrationId,
-        connection_ids: integrationPins.connectionIds.mapFromDriverValue(
-          row!.connection_ids,
-        ) as string[],
-        createdAt: (
-          integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
-        ).toISOString(),
-        updatedAt: (
-          integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
-        ).toISOString(),
-      },
-    };
-  });
+  const [previous] = await db
+    .select({ connectionIds: integrationPins.connectionIds })
+    .from(integrationPins)
+    .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
+    .limit(1);
+  const [row] = toRows<{
+    connection_ids: string | unknown[];
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    await db.execute(sql`
+    INSERT INTO ${integrationPins}
+      (space_id, package_id, integration_package_id, user_id, connection_ids, created_by)
+    VALUES (${scope.spaceId}, ${agentPackageId}, ${integrationId}, ${userIdValue}, ${ids}, ${createdBy})
+    ON CONFLICT (space_id, package_id, integration_package_id, (coalesce(user_id, '')))
+    DO UPDATE SET
+      connection_ids = EXCLUDED.connection_ids,
+      created_by = EXCLUDED.created_by,
+      updated_at = now()
+    RETURNING connection_ids, created_at, updated_at
+  `),
+  );
+  return {
+    previous: previous?.connectionIds ?? null,
+    pin: {
+      agent_package_id: agentPackageId,
+      integration_package_id: integrationId,
+      connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+        row!.connection_ids,
+      ) as string[],
+      createdAt: (
+        integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+      ).toISOString(),
+      updatedAt: (
+        integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+      ).toISOString(),
+    },
+  };
 }
 
 /**

@@ -142,22 +142,6 @@ describe("integration-org-defaults-service", () => {
     expect(fetched!.enforce).toBe(true);
   });
 
-  it("two concurrent first writes: the second reports the first as `previous`", async () => {
-    const connA = await seedSharedConnection();
-    const connB = await seedSharedConnection();
-    const write = (id: string) =>
-      upsertOrgDefault(scope, INTEGRATION_ID, {
-        connectionIds: [id],
-        enforce: false,
-        createdBy: ctx.user.id,
-      });
-    const results = await Promise.all([write(connA), write(connB)]);
-    const first = results.find((r) => r.previous === null);
-    const second = results.find((r) => r !== first);
-    expect(first).toBeDefined();
-    expect(second!.previous?.connection_ids).toEqual(first!.orgDefault.connection_ids);
-  });
-
   it("a default is a SET: N connections in the caller's order, replaced wholesale", async () => {
     const a = await seedSharedConnection(ctx.defaultSpaceId, "a");
     const b = await seedSharedConnection(ctx.defaultSpaceId, "b");

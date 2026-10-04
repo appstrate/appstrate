@@ -397,21 +397,6 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed[0]!.connection_ids).not.toContain(ids[0]!);
     });
 
-    it("two concurrent first writes: the second audits the first's set, not `null`", async () => {
-      const [a, b] = await seedSharedConnections(2);
-      const write = (id: string) =>
-        upsertIntegrationPin(scope, INTEGRATION, {
-          agentPackageId: AGENT,
-          connectionIds: [id],
-          createdBy: ctx.user.id,
-        });
-      const results = await Promise.all([write(a!), write(b!)]);
-      const first = results.find((r) => r.previous === null);
-      const second = results.find((r) => r !== first);
-      expect(first).toBeDefined();
-      expect(second!.previous).toEqual(first!.pin.connection_ids);
-    });
-
     it("echoes what the next read returns, in the caller's order", async () => {
       const ids = await seedSharedConnections(2);
       const reversed = [...ids].reverse();

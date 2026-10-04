@@ -142,8 +142,7 @@ describe("recordAudit", () => {
   });
 
   it("is best-effort: a bad input never throws (caller's mutation is unaffected)", async () => {
-    // `org_id` is a uuid column: a malformed one fails the insert, which the helper catches and
-    // reports as `false` instead of throwing.
+    // `org_id` is a uuid column: a malformed one fails the insert, which the helper catches.
     await expect(
       recordAudit({
         orgId: "not-a-uuid",
@@ -151,7 +150,7 @@ describe("recordAudit", () => {
         action: "x",
         resourceType: "y",
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBeUndefined();
   });
 
   it("supports lookups by (resourceType, resourceId) — index-backed query path", async () => {

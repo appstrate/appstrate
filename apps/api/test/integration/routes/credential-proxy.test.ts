@@ -911,10 +911,10 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
 
   describe("auditForeignConnectionUse", () => {
     /** One audit call through a bare Hono context, as the route hands it an API-key request. */
-    async function audit(actorId: string, session: string, orgId = ctx.orgId): Promise<void> {
+    async function audit(actorId: string, session: string): Promise<void> {
       const probe = new Hono<AppEnv>();
       probe.get("/", async (c) => {
-        c.set("orgId", orgId);
+        c.set("orgId", ctx.orgId);
         c.set("apiKeyId", "key-1");
         await auditForeignConnectionUse(c, {
           actor: { type: "end_user", id: actorId },
@@ -935,15 +935,6 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         .from(auditEvents)
         .where(eq(auditEvents.action, "integration.connection.proxied"));
     }
-
-    it("retries on the session's next call when the audit insert failed", async () => {
-      const session = uuidV4();
-      await audit("eu_a", session, "not-a-uuid");
-      expect(await proxiedRows()).toEqual([]);
-      await audit("eu_a", session);
-      await audit("eu_a", session);
-      expect((await proxiedRows()).map((r) => r.resourceId)).toEqual([shared]);
-    });
 
     it("writes one row per acting principal in a shared session", async () => {
       const session = uuidV4();

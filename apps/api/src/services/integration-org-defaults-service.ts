@@ -16,7 +16,7 @@
  * can't coerce a member's personal connection.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
@@ -87,11 +87,7 @@ function orgDefaultKey(scope: SpaceScope, integrationId: string) {
   );
 }
 
-/**
- * Set or replace the org default for (space, integration). `previous` is the
- * default it replaced, read in the same transaction under a lock on the key —
- * the row lock alone locks nothing while no default exists yet.
- */
+/** Set or replace the org default for (space, integration); `previous` is the one it replaced. */
 export async function upsertOrgDefault(
   scope: SpaceScope,
   integrationId: string,
@@ -99,39 +95,35 @@ export async function upsertOrgDefault(
 ): Promise<{ previous: OrgDefaultSummary | null; orgDefault: OrgDefaultSummary }> {
   await validatePinTargets(scope, integrationId, input.connectionIds);
   const now = new Date();
-  return db.transaction(async (tx) => {
-    const key = `integration-org-default:${scope.spaceId}:${integrationId}`;
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
-    const [previous] = await tx
-      .select()
-      .from(integrationOrgDefaults)
-      .where(orgDefaultKey(scope, integrationId))
-      .for("update");
-    // Atomic upsert on the (space, integration) unique index: two concurrent first writers cannot
-    // both miss the SELECT and have the loser's INSERT throw a raw unique violation.
-    const [row] = await tx
-      .insert(integrationOrgDefaults)
-      .values({
-        spaceId: scope.spaceId,
-        integrationId,
+  const [previous] = await db
+    .select()
+    .from(integrationOrgDefaults)
+    .where(orgDefaultKey(scope, integrationId))
+    .limit(1);
+  // Atomic upsert on the (space, integration) unique index: two concurrent first writers cannot
+  // have the loser's INSERT throw a raw unique violation.
+  const [row] = await db
+    .insert(integrationOrgDefaults)
+    .values({
+      spaceId: scope.spaceId,
+      integrationId,
+      connectionIds: input.connectionIds,
+      enforce: input.enforce,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [integrationOrgDefaults.spaceId, integrationOrgDefaults.integrationId],
+      set: {
         connectionIds: input.connectionIds,
         enforce: input.enforce,
         createdBy: input.createdBy,
-        createdAt: now,
         updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [integrationOrgDefaults.spaceId, integrationOrgDefaults.integrationId],
-        set: {
-          connectionIds: input.connectionIds,
-          enforce: input.enforce,
-          createdBy: input.createdBy,
-          updatedAt: now,
-        },
-      })
-      .returning();
-    return { previous: previous ? toSummary(previous) : null, orgDefault: toSummary(row!) };
-  });
+      },
+    })
+    .returning();
+  return { previous: previous ? toSummary(previous) : null, orgDefault: toSummary(row!) };
 }
 
 /** Delete the org default; `previous` is the one removed, `null` when none was set. */
