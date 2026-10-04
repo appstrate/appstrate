@@ -497,7 +497,6 @@ describeRequiresRedis("scheduler service", () => {
       );
 
       expect(created.enabled).toBe(true);
-      expect(created.disabled_reason).toBeNull();
       expect(created.next_run_at).not.toBeNull();
 
       const updated = await updateSchedule(
@@ -512,7 +511,6 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
-      expect(updated!.disabled_reason).toBe("user");
       expect(updated!.next_run_at).toBeNull();
     });
 
@@ -548,7 +546,6 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(true);
-      expect(updated!.disabled_reason).toBeNull();
       expect(typeof updated!.next_run_at).toBe("string");
       expect(new Date(updated!.next_run_at!).getTime()).toBeGreaterThan(Date.now());
     });
@@ -772,7 +769,7 @@ describeRequiresRedis("scheduler service", () => {
       expect(row!.nextRunAt).toBeNull();
     });
 
-    it("a fire racing a user's disable keeps disabled_reason = 'user'", async () => {
+    it("a fire racing a person's pause records no reason", async () => {
       const member = await createTestUser({ email: "racing-disable@test.com" });
       await addOrgMember(orgId, member.id, "member");
       const schedule = await createSchedule(
@@ -787,11 +784,11 @@ describeRequiresRedis("scheduler service", () => {
           and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
         );
 
-      // The user switches it off after the fire read the row enabled.
+      // The pause lands after the fire read the row enabled.
       await triggerScheduledRun(schedule.id, async () => {
         await db
           .update(schedules)
-          .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+          .set({ enabled: false, nextRunAt: null })
           .where(eq(schedules.id, schedule.id));
         return true;
       });
@@ -800,12 +797,7 @@ describeRequiresRedis("scheduler service", () => {
         .select({ enabled: schedules.enabled, disabledReason: schedules.disabledReason })
         .from(schedules)
         .where(eq(schedules.id, schedule.id));
-      expect(row).toEqual({ enabled: false, disabledReason: "user" });
-      // The fire is still a visible failure, but this fire did not disable it.
-      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
-      expect(fired.map((r) => r.error)).toEqual([
-        expect.stringMatching(/^Schedule refused: .*is not a member of this organization/),
-      ]);
+      expect(row).toEqual({ enabled: false, disabledReason: null });
     });
 
     it("a schedule whose end-user actor does not exist in the space fires into a FAILED run and is disabled", async () => {
@@ -895,10 +887,7 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "0 * * * *",
       });
       expect((await jobOf(schedule.id))?.template?.data).toEqual({ scheduleId: schedule.id });
-      await db
-        .update(schedules)
-        .set({ enabled: false, disabledReason: "user" })
-        .where(eq(schedules.id, schedule.id));
+      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, schedule.id));
 
       expect(await triggerScheduledRun(schedule.id)).toBeNull();
       expect(await db.select().from(runs).where(eq(runs.scheduleId, schedule.id))).toHaveLength(0);
@@ -1182,7 +1171,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     const created = await read();
     await db
       .update(schedules)
-      .set({ enabled: false, disabledReason: "user", updatedAt: bumped })
+      .set({ enabled: false, updatedAt: bumped })
       .where(eq(schedules.id, created.id));
 
     await expect(
@@ -1289,16 +1278,12 @@ describe("schedule disabled_reason", () => {
 
   const create = () => createSchedule(scope, packageId, actor, { cronExpression: "0 * * * *" });
 
-  it("a user switch records `user`, and switching it back on clears it", async () => {
-    const created = await create();
-    expect(created.disabled_reason).toBeNull();
-    const paused = await updateSchedule(scope, created, { enabled: false }, null, undefined);
-    expect(paused.disabled_reason).toBe("user");
-    const resumed = await updateSchedule(scope, paused, { enabled: true }, null, undefined);
-    expect(resumed.disabled_reason).toBeNull();
+  it("a person's pause records no reason", async () => {
+    const paused = await updateSchedule(scope, await create(), { enabled: false }, null, undefined);
+    expect(paused).toMatchObject({ enabled: false, disabled_reason: null });
   });
 
-  it("keeps a system disable's reason when a write re-sends enabled: false", async () => {
+  it("keeps a system disable's reason until a write re-enables the schedule", async () => {
     const created = await create();
     const [row] = await db
       .update(schedules)
@@ -1314,6 +1299,8 @@ describe("schedule disabled_reason", () => {
       undefined,
     );
     expect(renamed.disabled_reason).toBe("connection_deleted");
+    const resumed = await updateSchedule(scope, renamed, { enabled: true }, null, undefined);
+    expect(resumed).toMatchObject({ enabled: true, disabled_reason: null });
   });
 
   it("a connection delete emptying the schedule's set records `connection_deleted`", async () => {
@@ -1343,7 +1330,7 @@ describe("schedule disabled_reason", () => {
     expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
   });
 
-  it("a connection delete on an ALREADY disabled schedule drops the key, keeping its reason", async () => {
+  it("a connection delete on an ALREADY disabled schedule drops the key and records no reason", async () => {
     const integrationId = "@reasonorg/svc";
     await seedPackage({ orgId: scope.orgId, id: integrationId, type: "integration" });
     const [gone] = await db
@@ -1365,7 +1352,7 @@ describe("schedule disabled_reason", () => {
     });
     await db
       .update(schedules)
-      .set({ enabled: false, disabledReason: "user", nextRunAt: null })
+      .set({ enabled: false, nextRunAt: null })
       .where(eq(schedules.id, created.id));
 
     const { disabledScheduleIds } = await deleteIntegrationConnection(scope, gone!.id, actor);
@@ -1374,23 +1361,21 @@ describe("schedule disabled_reason", () => {
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
     expect(row).toMatchObject({
       enabled: false,
-      disabledReason: "user",
+      disabledReason: null,
       connectionOverrides: null,
     });
   });
 
-  it("refuses a disabled row without a reason, and an enabled row with one", async () => {
+  it("refuses an enabled row with a reason", async () => {
     const created = await create();
-    for (const set of [{ enabled: false }, { disabledReason: "user" as const }]) {
-      const caught = await db
-        .update(schedules)
-        .set(set)
-        .where(eq(schedules.id, created.id))
-        .catch((err: unknown) => err);
-      const cause = (caught as { cause?: { message?: string } }).cause;
-      expect(String(cause?.message ?? caught)).toContain(
-        "package_schedules_disabled_reason_matches",
-      );
-    }
+    const caught = await db
+      .update(schedules)
+      .set({ disabledReason: "actor_invalid" })
+      .where(eq(schedules.id, created.id))
+      .catch((err: unknown) => err);
+    const cause = (caught as { cause?: { message?: string } }).cause;
+    expect(String(cause?.message ?? caught)).toContain(
+      "package_schedules_enabled_has_no_disabled_reason",
+    );
   });
 });

@@ -781,7 +781,7 @@ export const schedules = pgTable(
       .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
-    // Why the row is disabled; NULL exactly while enabled.
+    // Set only when the system disabled the row.
     disabledReason: scheduleDisabledReasonEnum("disabled_reason"),
     cronExpression: text("cron_expression").notNull(),
     // NOT NULL (migration 0051): the column always had `DEFAULT 'UTC'`, so a
@@ -824,6 +824,9 @@ export const schedules = pgTable(
       "package_schedules_exactly_one_actor",
       sql`(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)`,
     ),
-    check("package_schedules_disabled_reason_matches", sql`enabled = (disabled_reason IS NULL)`),
+    check(
+      "package_schedules_enabled_has_no_disabled_reason",
+      sql`NOT enabled OR disabled_reason IS NULL`,
+    ),
   ],
 );

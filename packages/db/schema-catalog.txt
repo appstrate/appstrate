@@ -799,7 +799,7 @@ constraint package_persistence package_persistence_run_id_runs_id_fk FOREIGN KEY
 constraint package_persistence package_persistence_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint package_persistence pkp_actor_id_shape CHECK ((((actor_type = 'shared'::text) AND (actor_id IS NULL)) OR ((actor_type <> 'shared'::text) AND (actor_id IS NOT NULL))))
 constraint package_persistence pkp_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text, 'shared'::text])))
-constraint package_schedules package_schedules_disabled_reason_matches CHECK ((enabled = (disabled_reason IS NULL)))
+constraint package_schedules package_schedules_enabled_has_no_disabled_reason CHECK (((NOT enabled) OR (disabled_reason IS NULL)))
 constraint package_schedules package_schedules_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
 constraint package_schedules package_schedules_exactly_one_actor CHECK (((user_id IS NOT NULL) <> (end_user_id IS NOT NULL)))
 constraint package_schedules package_schedules_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -910,7 +910,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
-enum schedule_disabled_reason user,actor_invalid,actor_left_org,connection_deleted
+enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)

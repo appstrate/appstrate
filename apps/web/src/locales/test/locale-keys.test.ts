@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
  * These three guards read every source file of three workspaces on each run.
@@ -257,4 +258,19 @@ describe("declared keys", () => {
     },
     SCAN_TIMEOUT_MS,
   );
+});
+
+describe("schedule disabled reasons", () => {
+  it("each have a sentence", () => {
+    // A Record, so a reason added to the enum without an entry here fails the typecheck.
+    const reasons = Object.keys({
+      actor_invalid: true,
+      actor_left_org: true,
+      connection_deleted: true,
+    } satisfies Record<NonNullable<ScheduleWireDto["disabled_reason"]>, true>);
+
+    expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
+      [],
+    );
+  });
 });

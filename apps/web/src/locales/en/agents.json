@@ -267,7 +267,6 @@
   "schedule.scheduled": "Scheduled",
   "schedule.statusDisabled": "Disabled",
   "schedule.statusActive": "Active",
-  "schedule.disabledReason.user": "This schedule was disabled manually.",
   "schedule.disabledReason.actor_invalid": "This schedule was disabled automatically: its actor can no longer run agents in this space.",
   "schedule.disabledReason.actor_left_org": "This schedule was disabled automatically: its actor left the organization.",
   "schedule.disabledReason.connection_deleted": "This schedule was disabled automatically: a connection it used was deleted. Check its connections before enabling it again.",

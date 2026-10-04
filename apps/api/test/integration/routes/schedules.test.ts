@@ -1487,7 +1487,7 @@ describe("Schedules API", () => {
         const res = await put(scheduleId, { enabled: false });
 
         expect(res.status).toBe(200);
-        expect(await res.json()).toMatchObject({ enabled: false, disabled_reason: "user" });
+        expect(await res.json()).toMatchObject({ enabled: false, disabled_reason: null });
       });
 
       it("can still be renamed and rescheduled", async () => {

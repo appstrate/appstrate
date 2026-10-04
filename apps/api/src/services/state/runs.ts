@@ -335,8 +335,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * Project the internal `runs.resolved_connections` snapshot into the
  * display-safe `connections_used` wire shape. Drops the raw `connectionId`
  * (internal state) and keeps the denormalized label/account so the panel
- * renders even after the connection is renamed or deleted. A label/account the
- * snapshot does not carry projects as null. Empty/absent → null.
+ * renders even after the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,

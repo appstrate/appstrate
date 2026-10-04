@@ -6573,10 +6573,10 @@ export interface components {
             name: string | null;
             enabled: boolean;
             /**
-             * @description Why the schedule is disabled; `null` exactly while `enabled` is true. `user`: switched off by a write (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted, which emptied that integration's set — re-enabling it resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. Cleared by re-enabling.
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted, which emptied that integration's set — re-enabling it resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. Cleared by re-enabling.
              * @enum {string|null}
              */
-            disabled_reason: "user" | "actor_invalid" | "actor_left_org" | "connection_deleted" | null;
+            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | null;
             cron_expression: string;
             timezone: string;
             input: {

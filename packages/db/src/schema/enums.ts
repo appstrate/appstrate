@@ -92,12 +92,8 @@ export const inferenceRouteValues = ["proxy", "sidecar"] as const;
 export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues);
 export type InferenceRoute = (typeof inferenceRouteValues)[number];
 
-/**
- * Why a `package_schedules` row is disabled — NULL exactly while it is enabled.
- * `user` is a person's pause; every other value names the system act.
- */
+/** The system act that disabled a `package_schedules` row; a person's pause leaves it NULL. */
 export const scheduleDisabledReasonValues = [
-  "user",
   "actor_invalid",
   "actor_left_org",
   "connection_deleted",

@@ -326,7 +326,7 @@ export interface ScheduleWireDto {
   spaceId: string;
   name: string | null;
   enabled: boolean;
-  /** Why the schedule is disabled — `null` exactly while it is enabled. */
+  /** The system act that disabled the schedule — `null` when enabled or paused by a person. */
   disabled_reason: ScheduleDisabledReason | null;
   cron_expression: string;
   timezone: string;

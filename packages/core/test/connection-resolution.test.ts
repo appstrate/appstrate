@@ -3,8 +3,7 @@
 /**
  * The persisted connection snapshot (`runs.resolved_connections`) has ONE
  * shape, and `resolvedConnectionMapSchema` is what every read seam parses it
- * with: a row that drifted from {@link ResolvedConnectionMap} must fail there,
- * not surface as a `null` label or an unknown `source` in a caller.
+ * with: a row that drifted from {@link ResolvedConnectionMap} must fail there.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -29,18 +28,11 @@ describe("resolvedConnectionMapSchema", () => {
     expect(resolvedConnectionMapSchema.parse(snapshot)).toEqual(snapshot);
   });
 
-  it("refuses an entry without its label or account, or with a null label", () => {
+  it("refuses an entry without its label or account, or with a source outside the cascade", () => {
     const { label: _label, ...unlabelled } = bound;
     const { accountId: _accountId, ...noAccount } = bound;
-    for (const entry of [unlabelled, noAccount, { ...bound, label: null }]) {
+    for (const entry of [unlabelled, noAccount, { ...bound, source: "pin" }]) {
       expect(() => resolvedConnectionMapSchema.parse({ "@acme/gmail": [entry] })).toThrow();
     }
-  });
-
-  it("refuses a source outside the cascade and the pre-set single-object shape", () => {
-    expect(() =>
-      resolvedConnectionMapSchema.parse({ "@acme/gmail": [{ ...bound, source: "pin" }] }),
-    ).toThrow();
-    expect(() => resolvedConnectionMapSchema.parse({ "@acme/gmail": bound })).toThrow();
   });
 });

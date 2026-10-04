@@ -8,8 +8,6 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
@@ -61,12 +59,4 @@ describe("runs — model_source and run_origin", () => {
       );
     });
   }
-
-  it("refuses a model_source outside the credential_source enum", async () => {
-    const seeded = await run({ modelSource: "system" });
-    const message = await refusal(
-      db.execute(sql`UPDATE runs SET model_source = 'custom' WHERE id = ${seeded.id}`),
-    );
-    expect(message).toContain("credential_source");
-  });
 });

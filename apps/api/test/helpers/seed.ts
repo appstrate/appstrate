@@ -452,7 +452,6 @@ export async function seedSchedule(
     .values({
       id: `sched_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       cronExpression: "0 * * * *",
-      disabledReason: overrides.enabled === false ? "user" : null,
       ...overrides,
     })
     .returning();

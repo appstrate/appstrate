@@ -182,9 +182,8 @@ export async function assertScheduleActorValid(
   }
 }
 
-/** Whether this call disabled it (false: someone already had). */
-async function disableScheduleForInvalidActor(scheduleId: string): Promise<boolean> {
-  const disabled = await db
+async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
+  await db
     .update(schedules)
     .set({
       enabled: false,
@@ -192,11 +191,9 @@ async function disableScheduleForInvalidActor(scheduleId: string): Promise<boole
       nextRunAt: null,
       updatedAt: new Date(),
     })
-    // A user who disabled it while this fire ran keeps their reason.
-    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)))
-    .returning({ id: schedules.id });
+    // A schedule paused while this fire ran is not relabelled.
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
   await removeScheduleJobs([scheduleId]);
-  return disabled.length > 0;
 }
 
 /**
@@ -424,10 +421,8 @@ export async function triggerScheduledRun(
         actorType: actor.type,
         actorId: actor.id,
       });
-      const disabled = await disableScheduleForInvalidActor(scheduleId);
-      await failSchedule(
-        `Schedule ${disabled ? "disabled" : "refused"}: ${invalidScheduleActorReason(actor)}`,
-      );
+      await disableScheduleForInvalidActor(scheduleId);
+      await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
       return row;
     }
 
@@ -1002,9 +997,7 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
-  // Only a switch this write makes is the user's: re-sending the current state
-  // (the edit form always does) keeps a system disable's reason.
-  if (enabled !== expected.enabled) payload.disabledReason = enabled ? null : "user";
+  if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.
