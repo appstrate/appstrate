@@ -22,8 +22,9 @@
  * only place that notices a spec bump leaving them behind.
  *
  * No source may inject a credential over HTTP (`delivery.http` or the auth-type
- * default) without an allowlist that names its hosts (`findUnboundedInjectedCredentials`,
- * `@appstrate/core/integration` — the rule every manifest write path applies).
+ * default) without an allowlist that names its hosts (`findUnboundedInjectedCredentials`),
+ * nor hold an expression the platform does not evaluate (`findUnevaluableExpressions`):
+ * the two `@appstrate/core/integration` rules every manifest write path applies.
  *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
@@ -34,7 +35,10 @@ import { join, posix, relative, sep } from "node:path";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { findUnboundedInjectedCredentials } from "@appstrate/core/integration";
+import {
+  findUnboundedInjectedCredentials,
+  findUnevaluableExpressions,
+} from "@appstrate/core/integration";
 
 /**
  * Recursively collect every regular file under `root` into the zip
@@ -136,18 +140,16 @@ async function main() {
     process.exit(1);
   }
 
-  const openInjection = [...manifests].flatMap(([dirName, manifest]) =>
-    findUnboundedInjectedCredentials(manifest).map((v) => ({ dirName, ...v })),
+  const refused = [...manifests].flatMap(([dirName, manifest]) =>
+    [findUnboundedInjectedCredentials, findUnevaluableExpressions].flatMap((find) =>
+      find(manifest).map((v) => ({ dirName, ...v })),
+    ),
   );
-  if (openInjection.length > 0) {
-    console.error(
-      `\nUNBOUNDED ALLOWLIST: ${openInjection.length} violation(s) of an auth that injects a credential over HTTP:`,
-    );
-    for (const { dirName, message } of openInjection) console.error(`  - ${dirName}: ${message}`);
-    console.error(
-      `\nThe proxy would send that credential to a host the caller names. Declare authorized_uris\n` +
-        `with a named host, or "{$credential.<field>}/**" for a per-connection one.\n`,
-    );
+  if (refused.length > 0) {
+    console.error(`\nMANIFEST POLICY: ${refused.length} write-path violation(s):`);
+    for (const { dirName, path, message } of refused) {
+      console.error(`  - ${dirName}: ${path.join(".")}: ${message}`);
+    }
     process.exit(1);
   }
 

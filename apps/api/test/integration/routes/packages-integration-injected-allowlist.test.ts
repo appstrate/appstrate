@@ -4,6 +4,7 @@
  * An auth that injects a credential over HTTP must bound its hosts (#1641): every path that
  * writes an integration manifest refuses `allow_all_uris` or a host-unbounded `authorized_uris`
  * entry on it (`CONFIG_BY_TYPE.checkManifest`), and accepts an auth the proxy injects nothing for.
+ * The same gate refuses an expression the platform does not evaluate.
  */
 
 import { etagVersion, ifMatch } from "../../helpers/etag.ts";
@@ -69,6 +70,12 @@ describe("writing an injecting auth's allowlist", () => {
       "manifest.auths.api.allow_all_uris",
     );
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  it("create refuses an expression the platform does not evaluate", async () => {
+    const m = manifest({ type: "api_key" }) as { auths: { api: { delivery: unknown } } };
+    m.auths.api.delivery = { http: { in: "header", name: "X-Key", value: "{$outputs.api_key}" } };
+    await expectRefused(await create(m), "manifest.auths.api.delivery.http.value");
   });
 
   it("create accepts allow_all_uris on an auth the proxy injects nothing for", async () => {

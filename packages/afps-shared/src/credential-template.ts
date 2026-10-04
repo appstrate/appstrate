@@ -29,9 +29,6 @@ const SINGLE_CREDENTIAL_REF = new RegExp(`^${CREDENTIAL_REF.source}$`);
 /** Any `{$…}` runtime expression embedded in a template (AFPS §7.7). */
 const EMBEDDED_EXPRESSION = /\{\$[^{}]*\}/g;
 
-/** The `{{…}}` placeholder of the api_call grammar, which a credential template never renders. */
-export const API_CALL_PLACEHOLDER = /\{\{[^{}]*\}\}/g;
-
 /** The field `expression` names when it is exactly one `{$credential.<field>}`, else `null`. */
 export function parseCredentialRef(expression: string): string | null {
   return SINGLE_CREDENTIAL_REF.exec(expression)?.[1] ?? null;
@@ -70,8 +67,7 @@ export function renderCredentialTemplate(
   credential: Readonly<Record<string, string>>,
   opts: RenderCredentialTemplateOptions = {},
 ): string | null {
-  const unsupported =
-    template.match(API_CALL_PLACEHOLDER)?.[0] ?? unsupportedTemplateExpressions(template)[0];
+  const [unsupported] = unsupportedTemplateExpressions(template);
   if (unsupported !== undefined) {
     throw new Error(
       `unsupported template expression '${unsupported}' — only {$credential.<field>} renders`,

@@ -3,9 +3,10 @@
 /**
  * `scripts/migration/0035-verify-manifest-expressions.ts` on a private PGlite replayed to the
  * current schema: its query reads every org integration draft and published version, and the
- * report lists both the expressions the platform no longer evaluates and the injected credentials
- * a run now refuses as `exfiltration`, and nothing for a clean manifest. Every version is gated —
- * a range resolves older ones too — and a system package is not read at all.
+ * report lists the expressions the platform does not evaluate, the `{{field}}` placeholders a
+ * delivery template leaves as literal text and the injected credentials a run refuses as
+ * `exfiltration`, and nothing for a clean manifest. Every version is gated — a range resolves
+ * older ones too — and a system package is not read at all.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -103,5 +104,18 @@ describe("0035 — stored manifests the release refuses", () => {
       `${BROKEN}@draft [expression] auths.k.delivery.http.value`,
       `${UPGRADED}@1.0.0 [exfiltration] auths.k.allow_all_uris`,
     ]);
+  });
+
+  it("lists a {{field}} placeholder in a delivery template", () => {
+    const delivery = { env: { A: { value: "{{ key }}" }, B: { value: "{$credential.key}" } } };
+    const auth = apiKeyAuth({ authorized_uris: ["https://api.acme.test/**"], delivery });
+    const manifest = JSON.stringify({ auths: { k: auth } });
+    expect(manifestIssues([{ id: CLEAN, version: "draft", manifest }])).toEqual({
+      lines: [
+        `${CLEAN}@draft [expression] auths.k.delivery.env.A.value: '{{ key }}' is delivered as literal text; write {$credential.<field>}`,
+      ],
+      expressions: 1,
+      exfiltration: 0,
+    });
   });
 });

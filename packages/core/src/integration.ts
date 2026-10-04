@@ -36,7 +36,6 @@ import {
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
-  API_CALL_PLACEHOLDER,
   credentialTemplateRefs,
   isHostUnboundedUriPattern,
   parseUrlFormPattern,
@@ -248,11 +247,6 @@ export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifes
 export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefine((m, ctx) => {
   const manifest = m as unknown as IntegrationManifest;
   const auths = manifest.auths ?? {};
-
-  // §7.6 + §7.7 install gate: no template or runtime expression reaches an upstream as literal text.
-  for (const { message, path } of findUnevaluableExpressions(manifest)) {
-    ctx.addIssue({ code: "custom", message, path });
-  }
 
   for (const [authKey, auth] of Object.entries(auths)) {
     // (1) authorized_uris non-empty unless allow_all_uris.
@@ -672,9 +666,10 @@ interface DeliveryView {
 }
 
 /**
- * List the templates and runtime expressions the platform cannot evaluate: in a delivery template
- * (http, env, files) anything but `{$credential.<field>}`, `{$…}` other than that in
- * `authorized_uris`, and a `connect.login` expression outside {@link loginBlockIssues}.
+ * List the templates and runtime expressions the platform cannot evaluate: a `{$…}` other than
+ * `{$credential.<field>}` in a delivery template (http, env, files) or in `authorized_uris`, and a
+ * `connect.login` expression outside {@link loginBlockIssues}. A WRITE-path policy, not part of
+ * {@link integrationManifestSchema}; rendering and the login engine refuse the same at run time.
  */
 export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
   const auths = (manifest as { auths?: unknown } | null)?.auths;
@@ -693,7 +688,8 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
         message: `${message} — the platform does not evaluate it (AFPS §7.6/§7.7)`,
       });
     const delivery = auth.delivery;
-    const deliveryTemplates: [string | undefined, IssuePath][] = [
+    const uris = Array.isArray(auth.authorized_uris) ? auth.authorized_uris : [];
+    const templates: [string | undefined, IssuePath][] = [
       [delivery?.http?.value, ["delivery", "http", "value"]],
       ...(["env", "files"] as const).flatMap((kind) =>
         Object.entries(delivery?.[kind] ?? {}).map(([k, e]): [string | undefined, IssuePath] => [
@@ -701,10 +697,6 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
           ["delivery", kind, k],
         ]),
       ),
-    ];
-    const uris = Array.isArray(auth.authorized_uris) ? auth.authorized_uris : [];
-    const templates: [string | undefined, IssuePath][] = [
-      ...deliveryTemplates,
       ...uris.map((u, i): [string | undefined, IssuePath] => [
         typeof u === "string" ? u : undefined,
         ["authorized_uris", i],
@@ -713,14 +705,6 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
     for (const [template, at] of templates) {
       for (const expr of unsupportedTemplateExpressions(template ?? "")) {
         push(`'${expr}' is not a {$credential.<field>} reference`, at);
-      }
-    }
-    for (const [template, at] of deliveryTemplates) {
-      for (const placeholder of new Set((template ?? "").match(API_CALL_PLACEHOLDER))) {
-        push(
-          `'${placeholder}' is not a delivery template expression; delivery templates reference credential fields as {$credential.<field>}`,
-          at,
-        );
       }
     }
     const login = auth.connect?.login;

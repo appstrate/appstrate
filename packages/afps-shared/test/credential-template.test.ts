@@ -16,22 +16,17 @@ import {
 } from "../src/credential-template.ts";
 
 describe("renderCredentialTemplate", () => {
-  it("renders {$credential.<field>} refs, never a value's own braces", () => {
-    expect(renderCredentialTemplate("x {$credential.a}", { a: "{{b}}" })).toBe("x {{b}}");
+  it("renders {$credential.<field>} refs, never a value's own expressions", () => {
+    expect(renderCredentialTemplate("x {$credential.a}", { a: "{$credential.b}", b: "v" })).toBe(
+      "x {$credential.b}",
+    );
   });
 
   it("renders a missing or inherited field empty", () => {
     expect(renderCredentialTemplate("[{$credential.x}{$credential.constructor}]", {})).toBe("[]");
   });
 
-  for (const expr of [
-    "{$outputs.token}",
-    "{$credential.a-b}",
-    "{$inputs.password}",
-    "{$}",
-    "{{access_token}}",
-    "{{ token }}",
-  ]) {
+  for (const expr of ["{$outputs.token}", "{$credential.a-b}", "{$inputs.password}", "{$}"]) {
     it(`throws on ${expr} rather than rendering it literally`, () => {
       expect(() => renderCredentialTemplate(`Bearer ${expr}`, { token: "t" })).toThrow(
         `unsupported template expression '${expr}'`,
@@ -70,8 +65,8 @@ describe("credentialTemplateRefs", () => {
 describe("renderAuthorizedUris", () => {
   const ssh = "ssh://{$credential.host}:{$credential.port}";
 
-  it("passes untemplated patterns unchanged, braces a delivery template refuses included", () => {
-    const patterns = ["https://api.example.com/**", "ssh://**", "https://a.com/v1/{{id}}"];
+  it("passes untemplated patterns unchanged", () => {
+    const patterns = ["https://api.example.com/**", "ssh://**"];
     expect(renderAuthorizedUris(patterns, {})).toEqual(patterns);
   });
 

@@ -9,6 +9,7 @@ import {
 import {
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
+  findUnevaluableExpressions,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { validationFailed } from "../../lib/errors.ts";
@@ -76,6 +77,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     checkManifest: (manifest) => [
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
       ...findUnboundedInjectedCredentials(manifest),
+      ...findUnevaluableExpressions(manifest),
     ],
     manifestIsStoredFile: true,
   },

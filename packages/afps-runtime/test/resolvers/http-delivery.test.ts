@@ -92,16 +92,6 @@ describe("resolveHttpDelivery — explicit overrides", () => {
     expect(plan!.value).toBe("pierre@example.com/");
   });
 
-  it("refuses a {{field}} placeholder instead of sending it upstream as a literal", () => {
-    expect(() =>
-      resolveHttpDelivery(
-        "api_key",
-        { api_key: "k" },
-        { valueFrom: { template: "Bearer {{api_key}}" } },
-      ),
-    ).toThrow("unsupported template expression '{{api_key}}'");
-  });
-
   it("refuses a {$…} expression it cannot render instead of sending it upstream", () => {
     expect(() =>
       resolveHttpDelivery(

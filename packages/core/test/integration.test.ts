@@ -1161,7 +1161,7 @@ describe("integrationManifestSchema — connect.login", () => {
   });
 });
 
-describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", () => {
+describe("findUnevaluableExpressions — write-path expression rule (§7.6/§7.7)", () => {
   const login = (overrides: Record<string, unknown> = {}) => ({
     login: {
       request: { method: "POST", url: "https://api.example.com/login", body: "p={{password}}" },
@@ -1170,31 +1170,41 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
     },
   });
   const tokenHttp = (value: string) => ({ http: { in: "header", name: "Authorization", value } });
+  const paths = (manifest: unknown) =>
+    findUnevaluableExpressions(manifest).map((v) => v.path.join("."));
 
   it("accepts every form the engine evaluates", () => {
-    const r = integrationManifestSchema.safeParse(
-      customWithConnect(
-        login({
-          success_criteria: [
-            { condition: "$response.header.X-Ok == 'yes'" },
-            { condition: "ok", type: "regex", context: "$response.header.X-State" },
-          ],
-          outputs: {
-            token: "$response.body#/token",
-            raw: "$response.body",
-            csrf: { from: "regex", source: "$response.header.Set-Cookie", pattern: "c=(\\w+)" },
-            sub: { from: "jwt", token: "{$credential.token}", path: "/sub" },
-          },
-        }),
-        tokenHttp("Bearer {$credential.token}"),
+    expect(
+      paths(
+        customWithConnect(
+          login({
+            success_criteria: [
+              { condition: "$response.header.X-Ok == 'yes'" },
+              { condition: "ok", type: "regex", context: "$response.header.X-State" },
+            ],
+            outputs: {
+              token: "$response.body#/token",
+              raw: "$response.body",
+              csrf: { from: "regex", source: "$response.header.Set-Cookie", pattern: "c=(\\w+)" },
+              sub: { from: "jwt", token: "{$credential.token}", path: "/sub" },
+            },
+          }),
+          tokenHttp("Bearer {$credential.token}"),
+        ),
       ),
-    );
-    expect(r.success).toBe(true);
+    ).toEqual([]);
   });
 
-  it("rejects {$outputs.<name>} in delivery — outputs are referenced as {$credential.<name>}", () => {
+  it("is not a read-path rule, and finds nothing on a non-manifest", () => {
     const m = customWithConnect(login(), tokenHttp("Bearer {$outputs.token}"));
-    expect(errorPaths(m)).toContain("auths.session.delivery.http.value");
+    expect(errorPaths(m)).toEqual([]);
+    expect(findUnevaluableExpressions(m).map((v) => [v.authKey, v.path.join(".")])).toEqual([
+      ["session", "auths.session.delivery.http.value"],
+    ]);
+    expect(findUnevaluableExpressions(null)).toEqual([]);
+    expect(
+      findUnevaluableExpressions({ auths: { a: null, b: { connect: { login: {} } } } }),
+    ).toEqual([]);
   });
 
   it("rejects a non-credential expression in env, files and authorized_uris", () => {
@@ -1204,35 +1214,11 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
     });
     const auths = m.auths as Record<string, Record<string, unknown>>;
     auths.session!.authorized_uris = ["https://{$outputs.host}/**"];
-    const paths = errorPaths(m);
-    expect(paths).toContain("auths.session.delivery.env.A");
-    expect(paths).toContain("auths.session.delivery.files./f");
-    expect(paths).toContain("auths.session.authorized_uris.0");
-  });
-
-  it("rejects the api_call {{…}} placeholder in every delivery template", () => {
-    const m = customWithConnect(login(), {
-      ...tokenHttp("Bearer {{token}}"),
-      env: { A: { value: "{{token}}" } },
-      files: { "/f": { value: "x{{ token }}" } },
-    });
-    const paths = errorPaths(m);
-    expect(paths).toContain("auths.session.delivery.http.value");
-    expect(paths).toContain("auths.session.delivery.env.A");
-    expect(paths).toContain("auths.session.delivery.files./f");
-  });
-
-  it("is exported as a manifest-level finder that tolerates a non-manifest", () => {
-    const found = findUnevaluableExpressions(
-      customWithConnect(login(), tokenHttp("Bearer {$outputs.token}")),
-    );
-    expect(found.map((v) => [v.authKey, v.path.join(".")])).toEqual([
-      ["session", "auths.session.delivery.http.value"],
+    expect(paths(m)).toEqual([
+      "auths.session.delivery.env.A",
+      "auths.session.delivery.files./f",
+      "auths.session.authorized_uris.0",
     ]);
-    expect(findUnevaluableExpressions(null)).toEqual([]);
-    expect(
-      findUnevaluableExpressions({ auths: { a: null, b: { connect: { login: {} } } } }),
-    ).toEqual([]);
   });
 
   it("rejects a {$…} expression in the login request", () => {
@@ -1245,11 +1231,11 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
         },
       }),
     );
-    expect(errorPaths(m)).toContain("auths.session.connect.login.request.body");
+    expect(paths(m)).toEqual(["auths.session.connect.login.request.body"]);
   });
 
   it("rejects output expressions the engine cannot evaluate", () => {
-    const paths = errorPaths(
+    const found = paths(
       customWithConnect(
         login({
           outputs: {
@@ -1265,7 +1251,7 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
         }),
       ),
     );
-    expect(paths).toEqual(
+    expect(found).toEqual(
       expect.arrayContaining([
         "auths.session.connect.login.outputs.alias",
         "auths.session.connect.login.outputs.sel.context",
@@ -1279,7 +1265,7 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
   });
 
   it("rejects criteria whose context or operand the engine cannot evaluate", () => {
-    const paths = errorPaths(
+    const found = paths(
       customWithConnect(
         login({
           success_criteria: [
@@ -1290,7 +1276,7 @@ describe("integrationManifestSchema — unevaluable expressions (§7.6/§7.7)", 
         }),
       ),
     );
-    expect(paths).toEqual([
+    expect(found).toEqual([
       "auths.session.connect.login.success_criteria.0",
       "auths.session.connect.login.success_criteria.1",
       "auths.session.connect.login.success_criteria.2",

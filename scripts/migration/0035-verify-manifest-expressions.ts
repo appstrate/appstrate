@@ -6,13 +6,14 @@
  *
  *   DATABASE_URL=<platform> bun scripts/migration/0035-verify-manifest-expressions.ts
  *
- * Lists, for every stored integration draft and published version, each expression
- * `integrationManifestSchema` now refuses (`findUnevaluableExpressions`, the manifest stops
- * loading) and each injected credential a run now refuses as `exfiltration` (the
- * `findUnboundedInjectedCredentials` hits `credentialUrlPolicy` refuses). Exits 1 while any of
- * them has one: a range (`^1.0.0`, the agent editor's default) resolves older versions too. System
- * packages are skipped: the image ships them (today's `system-packages/` has no issue) and an
- * operator cannot edit one. What it means and how to fix one: `scripts/migration/README.md`.
+ * Lists, for every stored integration draft and published version, each expression a connect or
+ * a run now refuses (`findUnevaluableExpressions`, the rule of the manifest write paths), each
+ * `{{field}}` in a delivery template (delivered as literal text) and each injected credential
+ * a run now refuses as `exfiltration` (the `findUnboundedInjectedCredentials` hits
+ * `credentialUrlPolicy` refuses). Exits 1 while any of them has one: a range (`^1.0.0`, the agent
+ * editor's default) resolves older versions too. System packages are skipped: the image ships them
+ * (today's `system-packages/` has no issue) and an operator cannot edit one. What it means and how
+ * to fix one: `scripts/migration/README.md`.
  */
 
 import { SQL } from "bun";
@@ -47,6 +48,26 @@ function refusedAtRun(manifest: unknown, issue: { authKey: string; path: readonl
   return !Array.isArray(uris) || uris.length === 0;
 }
 
+const DOUBLE_BRACE_PLACEHOLDER = /\{\{[^{}]*\}\}/g;
+
+interface Issue {
+  path: readonly PropertyKey[];
+  message: string;
+}
+
+/** `{{field}}` under `auths.<key>.delivery`, where only `{$credential.<field>}` renders. */
+function literalPlaceholders(node: unknown, path: string[] = []): Issue[] {
+  if (typeof node === "string") {
+    if (path[0] !== "auths" || path[2] !== "delivery") return [];
+    return [...new Set(node.match(DOUBLE_BRACE_PLACEHOLDER))].map((placeholder) => ({
+      path,
+      message: `'${placeholder}' is delivered as literal text; write {$credential.<field>}`,
+    }));
+  }
+  if (typeof node !== "object" || node === null) return [];
+  return Object.entries(node).flatMap(([k, v]) => literalPlaceholders(v, [...path, k]));
+}
+
 /** One line per issue: `<id>@<version> [expression|exfiltration] <path>: <message>`. */
 export function manifestIssues(rows: readonly StoredManifest[]): {
   lines: string[];
@@ -58,11 +79,11 @@ export function manifestIssues(rows: readonly StoredManifest[]): {
   let exfiltration = 0;
   for (const row of rows) {
     const manifest: unknown = row.manifest && JSON.parse(row.manifest);
-    const report = (kind: string, v: { path: readonly PropertyKey[]; message: string }) =>
+    const report = (kind: string, v: Issue) =>
       lines.push(
         `${row.id}@${row.version} [${kind}] ${v.path.map(String).join(".")}: ${v.message}`,
       );
-    for (const v of findUnevaluableExpressions(manifest)) {
+    for (const v of [...findUnevaluableExpressions(manifest), ...literalPlaceholders(manifest)]) {
       expressions += 1;
       report("expression", v);
     }
