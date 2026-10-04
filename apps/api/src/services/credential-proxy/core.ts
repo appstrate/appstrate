@@ -211,15 +211,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let refreshSelection;
   let connectionId: string;
   let rejectionStreak: number;
-  let ciphertext: string;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
     rejectionStreak = result.rejectionStreak;
-    ciphertext = result.ciphertext;
-    refreshSelection = { ...selection, connectionId, rejectedCiphertext: ciphertext };
+    refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCallError("credential_not_found", err.message);
@@ -401,14 +399,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   try {
     res = await performFetch(fetchInit as RequestInit);
 
-    // Reactive 401-refresh-retry — mirror of the sidecar
-    // (`executeApiCall`, runtime-pi/sidecar/credential-proxy.ts). The public route is
-    // used by CLI / GitHub Action / self-hosted runners, which were silently
-    // 401-ing whenever the stored OAuth access_token expired because the
-    // refresh logic only fired on streaming bodies. Buffered bodies can be
-    // replayed safely → refresh + retry once. Streaming bodies fall through
-    // to the authRefreshed escape-hatch below (caller must re-issue with a
-    // fresh body stream).
+    // Reactive 401: a buffered body is replayable, so refresh and retry once. A streaming
+    // body falls through to the `authRefreshed` signal below.
     if (
       res.status === 401 &&
       !isStreamBody &&
@@ -458,12 +450,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     credentialForwarded &&
     rejectionStreak > 0
   ) {
-    clearUpstreamRejections(connectionId, input.integrationId, selection, ciphertext).catch(
-      (err: unknown) =>
-        logger.warn("credential-proxy: could not clear the connection's rejection streak", {
-          connectionId,
-          error: getErrorMessage(err),
-        }),
+    clearUpstreamRejections(connectionId, input.integrationId, selection).catch((err: unknown) =>
+      logger.warn("credential-proxy: could not clear the connection's rejection streak", {
+        connectionId,
+        error: getErrorMessage(err),
+      }),
     );
   }
 

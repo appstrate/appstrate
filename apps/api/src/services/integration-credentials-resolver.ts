@@ -228,7 +228,6 @@ export async function resolveLiveIntegrationCredentials(
       connection.id,
       integrationId,
       reach,
-      connection.credentialsEncrypted,
     );
     if (needsReconnection) return throwTerminal(reason);
     logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
@@ -261,10 +260,7 @@ export async function resolveLiveIntegrationCredentials(
     // "nothing to inject, carry on".
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
-    await markIntegrationConnectionNeedsReconnection(
-      connection.id,
-      connection.credentialsEncrypted,
-    );
+    await markIntegrationConnectionNeedsReconnection(connection.id);
     return throwTerminal("stored credentials could not be decrypted");
   }
 

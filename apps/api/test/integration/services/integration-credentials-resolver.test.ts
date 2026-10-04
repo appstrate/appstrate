@@ -602,14 +602,9 @@ describe("resolveLiveIntegrationCredentials", () => {
       return row!;
     }
 
-    /** A 2xx relayed with the credential the row holds right now. */
-    const succeed = async (connId: string) =>
-      clearUpstreamRejections(
-        connId,
-        INTEGRATION_ID,
-        resolverContext(connId),
-        (await storedCredential(connId)).ciphertext,
-      );
+    /** A 2xx the platform relayed for the run's actor. */
+    const succeed = (connId: string) =>
+      clearUpstreamRejections(connId, INTEGRATION_ID, resolverContext(connId));
 
     /** What a reconnect leaves behind: another ciphertext, here with a streak of its own. */
     const replaceCredential = (connId: string, refreshFailureCount: number) =>
@@ -707,30 +702,18 @@ describe("resolveLiveIntegrationCredentials", () => {
       expect((await storedCredential(connId)).count).toBe(1);
     });
 
-    it("a success or a rejection on a replaced credential leaves the new one's streak alone", async () => {
-      const { connId } = await apiKeyConnection();
-      const replaced = (await storedCredential(connId)).ciphertext;
-      await replaceCredential(connId, 2);
-
-      await clearUpstreamRejections(connId, INTEGRATION_ID, resolverContext(connId), replaced);
-      expect((await storedCredential(connId)).count).toBe(2);
-      await recordUnrefreshableRejection(connId, INTEGRATION_ID, resolverContext(connId), replaced);
-      expect((await storedCredential(connId)).count).toBe(2);
-    });
-
     it("a verdict from an actor who no longer reaches the connection changes nothing", async () => {
       const { connId } = await apiKeyConnection();
       await replaceCredential(connId, 2);
-      const { ciphertext } = await storedCredential(connId);
       const stranger = await createTestUser();
       const lostReach = {
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user" as const, id: stranger.id },
       };
 
-      await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach, ciphertext);
+      await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach);
       expect((await storedCredential(connId)).count).toBe(2);
-      await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach, ciphertext);
+      await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach);
       expect((await storedCredential(connId)).count).toBe(2);
     });
 

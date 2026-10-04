@@ -113,18 +113,13 @@ interface ResolvedIntegrationProxyCredentials {
   rejectionStreak: number;
 }
 
-/** The read path also names the stored ciphertext it decrypted: a verdict on the call is a CAS on it. */
-interface ResolvedIntegrationProxyCall extends ResolvedIntegrationProxyCredentials {
-  ciphertext: string;
-}
-
 /**
  * Live credentials for the credential-proxy. Throws {@link IntegrationCredentialNotFoundError}
  * when there is no usable connection, and the selection's `ApiError` when it has no single answer.
  */
 export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
-): Promise<ResolvedIntegrationProxyCall> {
+): Promise<ResolvedIntegrationProxyCredentials> {
   const manifest = await loadManifest(input);
   await assertIntegrationActive(input.integrationId, input.spaceId);
 
@@ -148,7 +143,6 @@ export async function resolveIntegrationProxyCredentials(
     connectionId: connection.id,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
-    ciphertext: connection.credentialsEncrypted,
   };
 }
 
@@ -165,8 +159,7 @@ export async function resolveIntegrationProxyCredentials(
  *   - no accessible connection — nothing to conclude;
  *   - UNREFRESHABLE (a non-oauth2 auth, or oauth2 whose minting client is gone
  *     or whose manifest can never yield a token endpoint) — the rejection is
- *     counted by `recordUnrefreshableRejection` against `rejectedCiphertext`
- *     (the credential the failed call carried), as on the sidecar path, and
+ *     counted by `recordUnrefreshableRejection`, as on the sidecar path, and
  *     flags the connection at the threshold;
  *   - TERMINAL (the stored bundle has no `refresh_token`) — the connection is
  *     flagged `needsReconnection` before returning;
@@ -175,7 +168,7 @@ export async function resolveIntegrationProxyCredentials(
  *     upstream 401 is not what stands between the user and a reconnect prompt.
  */
 export async function forceRefreshIntegrationProxyCredentials(
-  input: ResolveIntegrationProxyInput & { rejectedCiphertext: string },
+  input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials | null> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
@@ -183,16 +176,6 @@ export async function forceRefreshIntegrationProxyCredentials(
 
   const authDef = manifest.auths?.[connection.authKey];
   if (!authDef) return null;
-  // Superseded: the 401 judged a credential the connection no longer holds — hand back the current one.
-  if (connection.credentialsEncrypted !== input.rejectedCiphertext) {
-    return {
-      payload: buildPayload(input.integrationId, manifest, connection),
-      declaredUris: declaredUrisOf(manifest, connection.authKey),
-      connectionId: connection.id,
-      authKey: connection.authKey,
-      rejectionStreak: upstreamRejectionStreak(connection),
-    };
-  }
   if (authDef.type !== "oauth2") {
     return countUnrefreshableRejection(input, connection, `auth type '${authDef.type}'`);
   }
@@ -292,7 +275,7 @@ export async function forceRefreshIntegrationProxyCredentials(
  * the proxy relays the upstream 401 unchanged.
  */
 async function countUnrefreshableRejection(
-  input: ResolveIntegrationProxyInput & { rejectedCiphertext: string },
+  input: ResolveIntegrationProxyInput,
   connection: ResolvedConnectionRow,
   reason: string,
 ): Promise<null> {
@@ -300,7 +283,6 @@ async function countUnrefreshableRejection(
     connection.id,
     input.integrationId,
     input,
-    input.rejectedCiphertext,
   );
   logger.warn("credential-proxy: integration credential rejected upstream and unrefreshable", {
     integrationId: input.integrationId,

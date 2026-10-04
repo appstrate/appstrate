@@ -348,28 +348,23 @@ export function createIntegrationCredentialsSource(
   const reportUpstreamSuccess = (revision: string | undefined): void => {
     if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
     // A verdict on a superseded credential leaves the held one's streak pending.
-    const held = revision === payload.credentialRevision;
-    if (held) rejectionPending = false;
-    // A report the platform never applied leaves the streak pending: the next success retries it.
+    if (revision === payload.credentialRevision) rejectionPending = false;
     postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, revision, {
       ...options,
       fetchFn,
     }).then(
       (res) => {
-        if (res.ok) return;
-        rejectionPending = true;
-        logger.warn("integration upstream success report refused", {
-          ...logCtx,
-          status: res.status,
-        });
+        if (!res.ok)
+          logger.warn("integration upstream success report refused", {
+            ...logCtx,
+            status: res.status,
+          });
       },
-      (err: unknown) => {
-        rejectionPending = true;
+      (err: unknown) =>
         logger.warn("integration upstream success report failed", {
           ...logCtx,
           error: err instanceof Error ? err.message : String(err),
-        });
-      },
+        }),
     );
   };
 

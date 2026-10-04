@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -434,17 +434,12 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(row!.count).toBe(0);
   });
 
-  it("counts nothing for a key the row no longer holds: a rotation in flight flags nothing", async () => {
+  it("never flags a key the row no longer holds", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-rotated");
     for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
     for (let i = 0; i < 6; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
-    const [row] = await db
-      .select({ count: modelProviderCredentials.refreshFailureCount })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
-    expect(row!.count).toBe(0);
   });
 
   it("never flags the rotated key when the threshold rejection interleaves with the rotation", async () => {
@@ -472,37 +467,12 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(await flagged(orgId, id)).toBe(true);
   });
 
-  it("a success landing between the threshold count and the flag write flags nothing", async () => {
-    const { orgId, id } = await apiKeyCredential("mpc-reject-success-race");
-    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    for (let i = 1; i < max; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-    // The threshold increment is followed at once by a success ending the streak.
-    await db.execute(sql`
-      CREATE OR REPLACE FUNCTION test_success_after_count() RETURNS trigger AS $$
-      BEGIN
-        UPDATE model_provider_credentials SET refresh_failure_count = 0 WHERE id = NEW.id;
-        RETURN NULL;
-      END $$ LANGUAGE plpgsql`);
-    await db.execute(sql`
-      CREATE TRIGGER test_success_after_count AFTER UPDATE ON model_provider_credentials
-      FOR EACH ROW WHEN (NEW.refresh_failure_count >= ${sql.raw(String(max))}
-        AND NEW.refresh_failure_count > OLD.refresh_failure_count)
-      EXECUTE FUNCTION test_success_after_count()`);
-    try {
-      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-    } finally {
-      await db.execute(sql`DROP TRIGGER test_success_after_count ON model_provider_credentials`);
-      await db.execute(sql`DROP FUNCTION test_success_after_count()`);
-    }
-    expect(await flagged(orgId, id)).toBe(false);
-  });
-
   it("a successful call ends the streak, so interleaved rejections never flag the key", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-healthy");
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 0; i < 2 * max; i++) {
       await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-      await clearModelCredentialRejections(orgId, id, PLAINTEXT);
+      await clearModelCredentialRejections(orgId, id);
     }
     expect(await flagged(orgId, id)).toBe(false);
     const [row] = await db
@@ -512,19 +482,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(row!.count).toBe(0);
   });
 
-  it("a success with a key the row no longer holds clears nothing", async () => {
-    const { orgId, id } = await apiKeyCredential("mpc-clear-rotated");
-    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
-    for (let i = 0; i < 3; i++) await recordModelCredentialRejection(orgId, id, "sk-rotated");
-    await clearModelCredentialRejections(orgId, id, PLAINTEXT);
-    const [row] = await db
-      .select({ count: modelProviderCredentials.refreshFailureCount })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
-    expect(row!.count).toBe(3);
-  });
-
-  it("leaves an OAuth credential's transient-refresh streak and flag untouched", async () => {
+  it("never flags an OAuth credential", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-reject-oauth" });
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
@@ -535,19 +493,8 @@ describe("model-provider-credentials service — upstream rejections of an api k
       refreshToken: "refresh-1",
       expiresAt: Date.now() + 3_600_000,
     });
-    await db
-      .update(modelProviderCredentials)
-      .set({ refreshFailureCount: 2 })
-      .where(eq(modelProviderCredentials.id, id));
 
     for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id, "access-1");
-    await clearModelCredentialRejections(ctx.orgId, id, "access-1");
-
-    const [row] = await db
-      .select({ count: modelProviderCredentials.refreshFailureCount })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
-    expect(row!.count).toBe(2);
     expect(await flagged(ctx.orgId, id)).toBe(false);
   });
 });

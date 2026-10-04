@@ -18,7 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
-import { and, eq, gt, gte, sql, type SQL } from "drizzle-orm";
+import { eq, gt, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -501,9 +501,6 @@ interface UpdateOAuthCredentialTokensInput {
   accountId?: string;
 }
 
-/** Compare-and-swap rounds of a blob write before it gives up under contention. */
-const MAX_CAS_ATTEMPTS = 5;
-
 /**
  * Shared blob read-modify-write: select → decrypt → apply `mutate` →
  * re-encrypt → update (org-scoped). `mutate` returns the next blob, or `null`
@@ -518,11 +515,7 @@ async function updateBlob(
   orgId: string,
   id: string,
   mutate: (existing: CredentialsBlob) => CredentialsBlob | null,
-  opts: {
-    extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>;
-    /** Writes only while the row also matches this. */
-    where?: SQL;
-  } = {},
+  extraColumns?: Partial<typeof modelProviderCredentials.$inferInsert>,
 ): Promise<void> {
   // Optimistic concurrency (compare-and-swap). The read-modify-write below is
   // NOT atomic on its own: a refresh (rotating tokens) and a dead-marking
@@ -533,6 +526,7 @@ async function updateBlob(
   // envelope uses a random GCM IV, every write produces a DISTINCT ciphertext,
   // so a racing writer's value makes our WHERE match zero rows. On a 0-row
   // outcome we re-read and re-apply the mutation against the fresh blob.
+  const MAX_CAS_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
     const [row] = await db
       .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
@@ -540,7 +534,7 @@ async function updateBlob(
       .where(
         scopedWhere(modelProviderCredentials, {
           orgId,
-          extra: [eq(modelProviderCredentials.id, id), opts.where],
+          extra: [eq(modelProviderCredentials.id, id)],
         }),
       )
       .limit(1);
@@ -549,7 +543,7 @@ async function updateBlob(
     const next = existing && mutate(existing);
     if (!existing || !next) return;
     const set: Record<string, unknown> = {
-      ...opts.extraColumns,
+      ...extraColumns,
       credentialsEncrypted: encryptCredentials(next as unknown as Record<string, unknown>),
       updatedAt: new Date(),
     };
@@ -574,7 +568,6 @@ async function updateBlob(
             eq(modelProviderCredentials.id, id),
             // CAS token: only write if the blob is still the one we read.
             eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted),
-            opts.where,
           ],
         }),
       )
@@ -616,7 +609,7 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { extraColumns: { refreshFailureCount: 0 } },
+    { refreshFailureCount: 0 },
   );
 }
 
@@ -688,79 +681,50 @@ export async function recordModelCredentialRefreshFailure(
 }
 
 /**
- * The row's WHERE while it still holds `apiKey` as a live api-key blob (`null` otherwise), so a
- * verdict on one key never lands on the key that replaced it. `onlyCounted` skips a zero count.
- */
-async function whileHoldingApiKey(
-  orgId: string,
-  id: string,
-  apiKey: string,
-  onlyCounted = false,
-): Promise<SQL | null> {
-  const byId = scopedWhere(modelProviderCredentials, {
-    orgId,
-    extra: [
-      eq(modelProviderCredentials.id, id),
-      onlyCounted ? gt(modelProviderCredentials.refreshFailureCount, 0) : undefined,
-    ],
-  });
-  const [row] = await db
-    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
-    .from(modelProviderCredentials)
-    .where(byId)
-    .limit(1);
-  if (!row) return null;
-  const blob = decryptBlob(row.credentialsEncrypted);
-  if (blob?.kind !== "api_key" || blob.apiKey !== apiKey || blob.needsReconnection) return null;
-  return and(byId, eq(modelProviderCredentials.credentialsEncrypted, row.credentialsEncrypted))!;
-}
-
-/**
- * Count an upstream 401 against the api key the request sent (none once the row holds another
- * key); the `INTEGRATION_REFRESH_MAX_FAILURES`-th consecutive one flags it, and any successful
- * call ({@link clearModelCredentialRejections}) ends the streak. OAuth rows are skipped.
+ * Count an upstream 401 on an api-key credential. The `INTEGRATION_REFRESH_MAX_FAILURES`-th
+ * consecutive one flags it, while the row still holds `rejectedApiKey`; a successful call
+ * ({@link clearModelCredentialRejections}) or a key rotation ends the streak.
  */
 export async function recordModelCredentialRejection(
   orgId: string,
   id: string,
   rejectedApiKey: string,
 ): Promise<void> {
-  const holding = await whileHoldingApiKey(orgId, id, rejectedApiKey);
-  if (!holding) return;
   const [updated] = await db
     .update(modelProviderCredentials)
     .set({ refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1` })
-    .where(holding)
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [eq(modelProviderCredentials.id, id)],
+      }),
+    )
     .returning({ failures: modelProviderCredentials.refreshFailureCount });
-  const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-  if (!updated || updated.failures < max) return;
+  if (!updated || updated.failures < getEnv().INTEGRATION_REFRESH_MAX_FAILURES) return;
 
   logger.warn("model provider: api key rejected upstream, flagging needsReconnection", {
     credentialId: id,
     failures: updated.failures,
   });
-  // A success landing in between reset the count: the streak it ended flags nothing.
-  await updateBlob(
-    orgId,
-    id,
-    (b) =>
-      b.kind === "api_key" && b.apiKey === rejectedApiKey
-        ? { ...b, needsReconnection: true }
-        : null,
-    { where: gte(modelProviderCredentials.refreshFailureCount, max) },
+  await updateBlob(orgId, id, (b) =>
+    b.kind === "api_key" && b.apiKey === rejectedApiKey ? { ...b, needsReconnection: true } : null,
   );
 }
 
-/** A successful upstream call with `apiKey` ends its rejection streak; one read when there is none. */
-export async function clearModelCredentialRejections(
-  orgId: string,
-  id: string,
-  apiKey: string,
-): Promise<void> {
-  const holding = await whileHoldingApiKey(orgId, id, apiKey, true);
-  if (holding) {
-    await db.update(modelProviderCredentials).set({ refreshFailureCount: 0 }).where(holding);
-  }
+/** A successful upstream call ends the credential's rejection streak. */
+export async function clearModelCredentialRejections(orgId: string, id: string): Promise<void> {
+  await db
+    .update(modelProviderCredentials)
+    .set({ refreshFailureCount: 0 })
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [
+          eq(modelProviderCredentials.id, id),
+          gt(modelProviderCredentials.refreshFailureCount, 0),
+        ],
+      }),
+    );
 }
 
 // ─── Delete ────────────────────────────────────────────────────────────────

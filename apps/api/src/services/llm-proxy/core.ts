@@ -348,15 +348,12 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       resolved.apiKey,
     );
   } else if (upstream.ok && resolved.credentialId) {
-    clearModelCredentialRejections(
-      inputs.principal.orgId,
-      resolved.credentialId,
-      resolved.apiKey,
-    ).catch((err: unknown) =>
-      logger.warn("llm-proxy: could not clear the credential's rejection streak", {
-        credentialId: resolved.credentialId,
-        error: getErrorMessage(err),
-      }),
+    clearModelCredentialRejections(inputs.principal.orgId, resolved.credentialId).catch(
+      (err: unknown) =>
+        logger.warn("llm-proxy: could not clear the credential's rejection streak", {
+          credentialId: resolved.credentialId,
+          error: getErrorMessage(err),
+        }),
     );
   }
 

@@ -505,17 +505,13 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     credentialRevision: "rev-a",
   });
 
-  function sourceWith(
-    initialPayload: IntegrationCredentialsWire,
-    reportOutcomes: Array<number | Error> = [],
-  ) {
+  function sourceWith(initialPayload: IntegrationCredentialsWire) {
     const calls: Array<{ url: string; method: string }> = [];
     const fetchFn = (async (url: string, init: RequestInit) => {
       calls.push({ url, method: init.method ?? "GET" });
-      if (url.includes("/refresh")) return new Response(null, { status: 502 });
-      const outcome = reportOutcomes.shift() ?? 204;
-      if (outcome instanceof Error) throw outcome;
-      return new Response(null, { status: outcome });
+      return new Response(null, {
+        status: url.includes("/refresh") ? 502 : 204,
+      });
     }) as unknown as typeof fetch;
     const source = createIntegrationCredentialsSource({
       connectionId: "conn-a",
@@ -546,26 +542,6 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     source.reportUpstreamSuccess("rev-a");
     expect(successCalls().length).toBe(0);
   });
-
-  for (const outcome of [500, new Error("network down")]) {
-    it(`re-arms a report the platform did not apply (${String(outcome)})`, async () => {
-      const { source, successCalls } = sourceWith(
-        { ...held(makePayload("tok")), rejectionStreak: 2 },
-        [outcome],
-      );
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        source.reportUpstreamSuccess("rev-a");
-        await Bun.sleep(0);
-        source.reportUpstreamSuccess("rev-a");
-        await Bun.sleep(0);
-        source.reportUpstreamSuccess("rev-a");
-      } finally {
-        warn.mockRestore();
-      }
-      expect(successCalls().length).toBe(2);
-    });
-  }
 
   it("names the credential it holds on /refresh", async () => {
     const { source, refreshCalls } = sourceWith(held(makePayload("tok")));
