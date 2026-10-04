@@ -129,6 +129,16 @@ jobs:
           RUN_TOKEN_SECRET: ci-dummy-run-token-secret
           CONNECT_SESSION_SECRET: ci-dummy-connect-session-secret
 
+      # `scripts/test/lint.test.ts` runs here, not in `test.yml`: it lints the
+      # whole repo before `--max-warnings 0` can trip, so it needs the
+      # `.eslintcache` `bun run check` just warmed in this job (~3 s) — on a
+      # test runner's cold cache it took ~150 s and set the unit job's pace.
+      # Tier 0: the root preload needs no service on PGlite.
+      - name: Lint gate tests
+        run: bun test --timeout=15000 scripts/test/lint.test.ts
+        env:
+          TEST_TIER: "0"
+
       - name: Save check caches
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
