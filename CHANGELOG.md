@@ -11,8 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
   lists every draft or version holding a template or runtime expression the
-  platform no longer evaluates (`[expression]`: it would stop loading) and
-  every auth whose injected credential runs will now refuse as exfiltration
+  platform does not evaluate, or a `{{field}}` in a delivery template
+  (`[expression]`: its connect or its delivery fails, or the placeholder is
+  sent as literal text) and every auth whose injected credential runs will now refuse as exfiltration
   (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
   or an entry that does not bound the host); it exits 1 while any draft or
   published version of an org integration has one, not only `latest`: a range
@@ -22,33 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   list is not listed (a run drops it and serves the list), but the next draft
   save refuses it: fix it when convenient. System packages are skipped: the
   image ships them (#1641).
-- **Migration `0078` adds the `notifications_type_valid` CHECK**. Before the
-  deploy, this query must return no row:
-  `SELECT type, count(*) FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') GROUP BY type;`
+- **Migration `0078` rewrites `runs` under an exclusive lock** (the
+  `model_source` column becomes the `credential_source` enum) and adds three
+  CHECKs and the nullable `package_schedules.disabled_reason`. It writes no
+  row. Before the deploy each of these must return no row, else the migration
+  fails and the release does not boot:
+  `SELECT type FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') LIMIT 1;`
+  `SELECT 1 FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org') LIMIT 1;`
+  `SELECT 1 FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL) LIMIT 1;`
   (#1641).
-- **Migration `0079` rewrites `runs` under an exclusive lock** (the
-  `model_source` column becomes the `credential_source` enum), adds
-  `package_schedules.disabled_reason` (every schedule already disabled is
-  labelled `user`) and two CHECKs. Before the deploy these must return 0:
-  `SELECT count(*) FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org');`
-  and
-  `SELECT count(*) FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL);`
-  (#1641).
-- **Run `scripts/migration/0036-resolved-connection-labels.sql` after `0032`,
-  before the new image serves traffic**: run snapshots written before #1611
-  can hold `label: null`, and the snapshot is now parsed on read (#1641). A
-  missing or empty label takes the first non-empty of the connection's label,
-  its account, the element's `accountId` (an API-key connection's placeholder
-  account `default` skipped) and its `connectionId` (before `0077` a
-  connection's label can still be empty); a missing account takes the
-  connection's, else `''` (the connection is deleted). It writes nothing while
-  an element lacks a string `connectionId` or names no cascade layer in `source`.
-- **Run `scripts/migration/0037-schedule-disabled-reason-backfill.sql` after
-  the release boots** (#1641): it relabels `actor_left_org` the disabled
-  schedules whose member actor is no longer in the organization. The other two
-  system disables are not derivable and stay `user`: a fire that found its
-  actor could no longer run agents (`actor_invalid`), and a connection
-  deletion that emptied an override set (`connection_deleted`).
 - **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
   `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
   every live ciphertext a retired kid wrote in the seven encrypted columns (a
@@ -104,10 +87,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING (manifests): one template grammar per concept, and nothing
   unrendered reaches an upstream** (#1641). Every delivery template (`http`,
   `env`, `files`) renders `{$credential.<field>}` and nothing else: the
-  api_call `{{…}}` placeholder, `{$outputs.*}` or any other `{$…}` there is
-  refused at import and throws at render, so `appstrate run` on a bundle that
-  skipped validation fails instead of sending `{{field}}`. `authorized_uris`
-  likewise refuses at import any `{$…}` but `{$credential.<field>}`. A
+  `{$outputs.*}` or any other `{$…}` there is refused when the manifest is
+  written and throws at render, so `appstrate run` on a bundle that skipped
+  validation fails instead of sending it as text. `authorized_uris` likewise
+  refuses, when written, any `{$…}` but `{$credential.<field>}`. A stored
+  manifest holding one still loads. A
   connect output is referenced as `{$credential.<name>}`, the jwt extractor's
   `token` included; login inputs are `{{name}}`.
 - **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
@@ -174,22 +158,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **A disabled schedule says why** (#1641). `disabled_reason` (`user`,
-  `actor_invalid`, `actor_left_org`, `connection_deleted`) is set by every
-  writer, cleared on re-enable and `NULL` exactly while enabled (CHECK); it is
-  on the schedule DTO and shown on the schedule badge and detail page.
-  Deleting a connection a schedule overrides disables only an enabled
-  schedule; one already disabled keeps its reason. A fire whose actor is no
-  longer valid records `Schedule disabled: …` only when it disabled the
-  schedule, else `Schedule refused: …`.
+- **A schedule the system disabled says why** (#1641). `disabled_reason`
+  (`actor_invalid`, `actor_left_org`, `connection_deleted`) is set by the
+  system act, cleared on re-enable and `NULL` otherwise: on an enabled
+  schedule (CHECK) and on one a person paused. It is on the schedule DTO and
+  shown on the schedule badge and detail page. Deleting a connection a
+  schedule overrides disables only an enabled schedule; one already disabled
+  keeps its reason.
 - **Credential-proxy use of another member's connection is audited** (#1641).
   The first call of an `X-Session-Id` through a connection the caller does not
   own writes one `integration.connection.proxied` row per acting principal
   (`principalType`, `principalId` in `after`); the call log names the
   connection used. A call that fails after the credential may have left
   (timeout, unreachable upstream, refused redirect) is audited like one that
-  returns; one refused before sending is not. A failed insert is logged and
-  retried by the session's next call.
+  returns; one refused before sending is not.
 
 ### Fixed
 
@@ -198,10 +180,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `credential_revision` its request carried, not the one held when the
   answer arrived. A response a redirect hop stripped the credential from
   (including a chain that comes back to the origin) is neither counted nor
-  credited, on the sidecar and the platform proxy alike. A platform-proxy 401
-  on a superseded credential returns the current one without refreshing or
-  counting. Reaching the threshold flags only the credential that was
-  counted, for integration connections and BYOK keys alike. A count and the
+  credited, on the sidecar and the platform proxy alike. A BYOK key is
+  flagged only while its row still holds the rejected key. A count and the
   platform proxy's reset apply only while the caller still reaches the
   connection. `credential_revision` must be 16 hex digits (empty or malformed
   → `400`).
@@ -217,10 +197,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/refresh` and `/upstream-success`: a 401 on a credential the connection no
   longer holds is not counted and gets the current credential back (`200`),
   and a success on a replaced credential no longer ends the new one's streak.
-  The platform credential proxy compares-and-sets on the ciphertext it
-  injected. A connection already flagged keeps its count; `/upstream-success`
-  refuses a connect run (`409 connect_run_no_refresh`); a success report that
-  is refused or fails is retried on the next success; and the remote-HTTP
+  A connection already flagged keeps its count; `/upstream-success`
+  refuses a connect run (`409 connect_run_no_refresh`); and the remote-HTTP
   transport no longer reports a success from an origin a redirect took the
   request to.
 - **An upstream that keeps rejecting an API key flags it; 401s between
@@ -271,7 +249,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `source`** (#1641):
   `$response.body` or `$response.header.<name>`; it was ignored. An
   expression, selector or criterion context the engine cannot evaluate is
-  refused at import and fails the login as `invalid_config` instead of
+  refused when the manifest is written and fails the login as `invalid_config` instead of
   silently not matching.
 - **BREAKING (config): a UUID-shaped system id is refused** (#1641). Such an
   id would take precedence over an organization's own row with the same id.

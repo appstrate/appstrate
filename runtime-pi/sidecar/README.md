@@ -144,8 +144,6 @@ The CLI's local resolver and the platform credential proxy call the same `fetchA
 
 Additional hardening: userinfo and fragment are stripped from every redirect `Location` before policy checks and before re-issuing the fetch. A compromised upstream cannot inject attacker-controlled basic-auth (`https://attacker:pwn@target/`) on the next hop.
 
-A streaming body (`ReadableStream`) cannot be replayed across hops, so its 30x is returned to the caller unfollowed: the credential never leaves the initial, allowlist-checked origin.
-
 Cap: 10 redirects (`DEFAULT_MAX_REDIRECTS`, `@appstrate/afps-shared/guarded-fetch`). Deadline: 30 s per exchange (`API_CALL_TIMEOUT_MS`).
 
 **Provider-author guidance**: if your API redirects between hosts (DigitalOcean Spaces signed URLs, Dropbox API ⇄ content, multi-region failover), declare every host in `authorizedUris`. The Bearer survives intra-allowlist hops; cross-allowlist redirects are refused.

@@ -16,8 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing each auth that injects a credential under `allow_all_uris`, with no
   `authorized_uris`, or with an entry that leaves the host to the caller
   (malformed included); it needs `@appstrate/afps-shared`
-  `isHostUnboundedUriPattern` / `injectsHttpCredential`. The second backs the
-  `integrationManifestSchema` rule below. (#1641)
+  `isHostUnboundedUriPattern` / `injectsHttpCredential`. The second is the
+  write-path rule listing each expression the platform does not evaluate: in
+  a delivery template (`http`, `env`, `files`) or in `authorized_uris`, any
+  `{$…}` but `{$credential.<field>}`; in `connect.login`, what
+  `loginBlockIssues` refuses. It needs `@appstrate/afps-shared`
+  `./runtime-expression` and `./credential-template`.
+  `integrationManifestSchema` runs neither. (#1641)
 - **The connection-resolution vocabulary is exported as runtime values**
   (`@appstrate/core/integration`): `CONNECTION_RESOLUTION_SOURCES` and
   `CONNECTION_RESOLUTION_ERROR_CODES`, from which the
@@ -36,14 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@appstrate/afps-shared` range moves from `^0.9.2` to `^0.10.0`**, which
   carries the exports below (published first). (#1641)
-- **BREAKING: `integrationManifestSchema` refuses expressions the platform
-  does not evaluate** (`findUnevaluableExpressions`), so a manifest that
-  parsed before can now fail: in a delivery template (`http`, `env`,
-  `files`) anything but `{$credential.<field>}`, the api_call `{{…}}`
-  placeholder included; a `{$…}` other than `{$credential.<field>}` in
-  `authorized_uris`; and every `connect.login` expression
-  `loginBlockIssues` refuses. Needs `@appstrate/afps-shared`
-  `./runtime-expression` and `./credential-template`. (#1641)
 
 ### Security
 

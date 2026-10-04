@@ -46,9 +46,6 @@ exports (core raises its range to `^0.10.0`).
   (`**://api.example.com/**`), an empty host, or a wildcard in either of the
   host's last two labels (`https://**`, `https://*.com./**`). A public suffix
   (`https://*.co.uk/**`) is not detected. (#1641)
-- **`API_CALL_PLACEHOLDER`** (`./credential-template`): the global regex of
-  the api_call `{{…}}` placeholder, which a credential template never renders.
-  (#1641)
 - **`parseCredentialRef`**, **`templateExpressions`** and
   **`unsupportedTemplateExpressions`** (`./credential-template`): the field a
   lone `{$credential.<field>}` names, and a template's (unsupported) `{$…}`
@@ -75,8 +72,8 @@ exports (core raises its range to `^0.10.0`).
 ### Changed
 
 - **BREAKING: `renderCredentialTemplate` throws on anything but
-  `{$credential.<field>}`**: an api_call `{{…}}` placeholder or any other
-  `{$…}` expression in the template is an `Error`, never sent as text. It no
+  `{$credential.<field>}`**: any other `{$…}` expression in the template is
+  an `Error`, never sent as text. It no
   longer reads inherited properties. (#1641)
 - **BREAKING: `projectHttpDeliveryConfig` carries `value` verbatim** as
   `valueFrom: { template, encoding? }` in the `{$credential.<field>}`

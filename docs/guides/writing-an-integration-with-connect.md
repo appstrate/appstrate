@@ -15,9 +15,9 @@ v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 > Platform source of truth: `apps/api/src/services/connect/registry.ts` (`resolveStrategy`).
 
 All manifest field names below are **snake_case** — the AFPS wire convention.
-All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}` —
-NOT the 1.x `{{<field>}}` form. A `connect` block's outputs are the connection's
-credential fields, so they are referenced as `{$credential.<name>}` too.
+All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`.
+A `connect` block's outputs are the connection's credential fields, so they are
+referenced as `{$credential.<name>}` too.
 
 ```jsonc
 {
@@ -124,9 +124,9 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
-e.g. `{$credential.access_token}`. No Handlebars, no `{{name}}`; any other `{$…}`
-expression (`{$outputs.token}`, …) is refused at import, since the platform does not
-evaluate it.
+e.g. `{$credential.access_token}`. Any other `{$…}` expression (`{$outputs.token}`, …)
+is refused when the manifest is saved or imported, since the platform does not evaluate
+it.
 
 ```jsonc
 // http — Bearer (OAuth2 / API key)

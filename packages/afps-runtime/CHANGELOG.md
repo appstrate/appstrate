@@ -42,7 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no HTTP field value; `RemoteAppstrateIntegrationResolver` applies the same
   caller-header rule to the agent's headers, its transport headers and
   `Content-Length` always its own.
-  `PreflightError`, `ApiCallFailureClass` and `HostResolver` (import it from
+  `LocalIntegrationResolver` refuses a call whose target, header or string
+  body names a `{{field}}` its credentials do not hold
+  (`RESOLVER_BODY_INVALID`); it was rendered empty. `ApiCallMeta` is
+  `{ name }`: `makeApiCallTool` gates nothing, the allowlist is
+  `fetchApiCall`'s. `ApiCallFailureClass` and `HostResolver` (import it from
   `@appstrate/afps-shared/ssrf-dns`) are not exported.
 - **BREAKING:** `matchesAuthorizedUriSpec`, `compileEgressPolicy` and
   `hostLiterallyAllowlisted` read each entry through
