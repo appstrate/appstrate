@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,7 @@ import {
   getModuleModelProviders,
   collectModulePermissions,
 } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
   AppstrateModule,
   ModelProviderDefinition,
@@ -102,6 +103,11 @@ const baseConfig: AppConfig = {
   },
   trustedOrigins: [],
 };
+
+// The loader registry is process-wide: hand it back as the preload left it.
+afterAll(async () => {
+  await restoreDiscoveredModules();
+});
 
 describe("module-loader", () => {
   beforeEach(() => {

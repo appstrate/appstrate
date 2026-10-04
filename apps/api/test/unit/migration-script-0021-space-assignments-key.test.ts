@@ -9,8 +9,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const SCRIPT = `${REPO_ROOT}/scripts/migration/0021-space-assignments-spaceid-key.sql`;
@@ -32,8 +32,7 @@ const client = () =>
   value(`SELECT signup_space_assignments AS v FROM oauth_clients WHERE id = 'oac_0021'`);
 
 beforeAll(async () => {
-  pg = new PGlite();
-  await replayJournal(pg);
+  pg = await journalPGlite();
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Twenty', 'twenty-0021');
     INSERT INTO org_invitations (id, token, email, org_id, role, status, expires_at, space_assignments)

@@ -2,7 +2,7 @@
 
 /**
  * Module discovery, and what a discovered module needs from the test harness.
- * `preload.ts` (load it?) and `scripts/test-tier0.ts` (collect its tests?) must
+ * `preload.ts` (load it?) and `scripts/run-tests.ts` (collect its tests?) must
  * agree, so both read the same optional `<module>/test/requirements.ts`, and a
  * malformed one throws instead of running in the tier it ruled out.
  */

@@ -40,8 +40,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 
@@ -94,7 +94,7 @@ const FKEY_SPELLING = {
  */
 const REPLAY_THROUGH = "0068_packages_org_home_validate";
 
-const pg = new PGlite();
+let pg: PGlite;
 
 /** Run the migration the way the runner does — whole file, breakpoints stripped. */
 async function applyMigration(): Promise<void> {
@@ -136,7 +136,7 @@ async function columnNames(table: string): Promise<Set<string>> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
 }, 300_000);
 
 afterAll(async () => {

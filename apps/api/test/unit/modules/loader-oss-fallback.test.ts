@@ -18,9 +18,10 @@
  * when a paid deployment is misconfigured.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { loadModules, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { getModuleRegistry } from "../../../src/lib/modules/module-loader.ts";
 import type { ModuleInitContext } from "@appstrate/core/module";
 
@@ -45,6 +46,11 @@ function mockCtx(): ModuleInitContext {
     services: {} as ModuleInitContext["services"],
   };
 }
+
+// The loader registry is process-wide: hand it back as the preload left it.
+afterAll(async () => {
+  await restoreDiscoveredModules();
+});
 
 describe("OSS-mode module loading", () => {
   beforeEach(() => {

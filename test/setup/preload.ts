@@ -25,8 +25,7 @@
  * one exception is a module whose requirements the current tier cannot meet.
  */
 import { resolve, join, relative } from "path";
-import { existsSync, mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync } from "fs";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
   TEST_DB_NAME,
@@ -40,6 +39,7 @@ import {
   skipsInTier,
   type DiscoveredModule,
 } from "./modules.ts";
+import { makeTempDir, sweepOrphanedTempDirs } from "./temp-dirs.ts";
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
@@ -119,18 +119,9 @@ if (TIER0) {
   delete process.env.S3_PUBLIC_ENDPOINT;
   delete process.env.AWS_ACCESS_KEY_ID;
   delete process.env.AWS_SECRET_ACCESS_KEY;
-  const pgliteDir = mkdtempSync(join(tmpdir(), "appstrate-test-pglite-"));
-  process.env.PGLITE_DATA_DIR = pgliteDir;
-  process.env.FS_STORAGE_PATH = mkdtempSync(join(tmpdir(), "appstrate-test-storage-"));
-  const storageDir = process.env.FS_STORAGE_PATH;
-  process.on("exit", () => {
-    try {
-      rmSync(pgliteDir, { recursive: true, force: true });
-      if (storageDir) rmSync(storageDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup — never let teardown failure mask the test outcome.
-    }
-  });
+  sweepOrphanedTempDirs();
+  process.env.PGLITE_DATA_DIR = makeTempDir("pglite");
+  process.env.FS_STORAGE_PATH = makeTempDir("storage");
 } else {
   // tier3: real external services from docker-compose.test.yml.
   process.env.DATABASE_URL = TEST_DATABASE_URL;
@@ -178,9 +169,13 @@ Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: tru
 
 if (TIER0) {
   // ─── tier0 core migrations ─────────────────────────────────
-  // Importing the db client initializes the throwaway PGlite database; then
-  // apply the core Drizzle migrations against it in-process. Shares the same
-  // migration walker as the embedded boot path (no drift).
+  // The throwaway data directory is seeded from a cached, already-migrated
+  // cluster (`journalDump`, keyed on the migration files). Importing the db
+  // client then opens it and the core Drizzle migrations run in-process — a
+  // no-op on the seeded ledger — through the same walker as the embedded boot
+  // path (no drift).
+  const { seedMigratedDataDir } = await import("../../apps/api/test/helpers/journal.ts");
+  await seedMigratedDataDir(process.env.PGLITE_DATA_DIR!);
   // migrate.ts lives under apps/api where the @appstrate/db/client alias
   // resolves; its own alias import initializes the (single, shared) PGlite
   // instance that the test helpers + app code also use. Importing the client
@@ -461,9 +456,9 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
 });
 
 // ─── Global auto-reset for process-wide singletons ────────────
-// Both resets below cover state that is process-wide, and `bun test` runs the
-// whole suite as a single process (see the "Testing" header in AGENTS.md), so
-// leaving either to individual files means every file has to remember it.
+// Both resets below cover state that is process-wide, and many test files share
+// one process, so leaving either to individual files means every file has to
+// remember it.
 //
 // `setPermissionDenialHandler` writes a module-level singleton inside
 // `@appstrate/core/permissions`. A test that installs a custom handler and
