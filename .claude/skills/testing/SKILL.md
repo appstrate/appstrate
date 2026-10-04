@@ -27,7 +27,7 @@ Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — star
 
 ## Configuration
 
-Single root `bunfig.toml` drives core tests; each module has its own pointing at the same root preload. Root preload (`test/setup/preload.ts`) runs Docker Compose, sets env, applies core migrations, then auto-discovers built-in modules (`apps/api/src/modules/*/`) **and** workspace modules (`packages/module-*/src/`) and wires:
+Single root `bunfig.toml` drives core tests; each module has its own pointing at the same root preload. Root preload (`test/setup/preload.ts`) refuses a Bun that does not satisfy the root `engines.bun` (the version CI pins), runs Docker Compose, sets env, applies core migrations, then auto-discovers built-in modules (`apps/api/src/modules/*/`) **and** workspace modules (`packages/module-*/src/`) and wires:
 
 - `index.ts` → dynamic-imported, registered in `test-modules.ts` for `getTestApp()`
 - `test/tables.ts` → `string[]` registered via `registerTruncationTables()`
