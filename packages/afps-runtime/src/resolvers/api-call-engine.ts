@@ -71,27 +71,19 @@ export function forwardableHeaders(
 }
 
 /**
- * A redirect hop refused: off the allowlist, blocked by the SSRF gate, or with no DNS answer. The
- * message names its host, credential values scrubbed, never the URL (`?token=…`).
+ * A target refused: off the allowlist, blocked by the SSRF gate, or with no DNS answer
+ * (`unresolvable`). A redirect's message names its host, credential values scrubbed, never the URL
+ * (`?token=…`).
  */
-export class RedirectBlockedError extends Error {
+export class ApiCallRefusedError extends Error {
   constructor(
-    public readonly reason: "ssrf" | "unauthorized" | "unresolvable",
-    redactedHost: string,
-  ) {
-    super(`Redirect blocked (${reason}): host=${redactedHost}`);
-    this.name = "RedirectBlockedError";
-  }
-}
-
-/** The initial target refused before any byte was sent (`unresolvable`: DNS gave no answer). */
-export class PreflightError extends Error {
-  constructor(
-    public readonly reason: "ssrf" | "not_authorized" | "unresolvable",
+    public readonly kind: "ssrf" | "not_authorized" | "unresolvable",
     message: string,
+    /** A redirect hop was refused; `false` is the initial target, before any byte was sent. */
+    public readonly redirect = false,
   ) {
     super(message);
-    this.name = "PreflightError";
+    this.name = "ApiCallRefusedError";
   }
 }
 
@@ -108,12 +100,8 @@ export interface ApiCallFailureClass {
 
 /** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
 export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
-  if (err instanceof PreflightError) {
-    return { kind: err.reason, redirect: false, message: err.message };
-  }
-  if (err instanceof RedirectBlockedError) {
-    const kind = err.reason === "unauthorized" ? "not_authorized" : err.reason;
-    return { kind, redirect: true, message: err.message };
+  if (err instanceof ApiCallRefusedError) {
+    return { kind: err.kind, redirect: err.redirect, message: err.message };
   }
   if (err instanceof InvalidHeaderValueError) {
     return { kind: "invalid_header", redirect: false, message: err.message };
@@ -225,20 +213,25 @@ export interface FetchApiCallOptions {
 }
 
 /**
- * Send one `api_call` upstream. Throws {@link PreflightError} (initial target refused, nothing
- * sent), {@link InvalidHeaderValueError} (likewise), {@link RedirectBlockedError} (a hop refused)
- * or the scrubbed transport error. A `ReadableStream` body cannot be replayed, so its redirect is
- * returned unfollowed.
+ * Send one `api_call` upstream. Throws {@link ApiCallRefusedError} (the initial target or a hop
+ * refused), {@link InvalidHeaderValueError} (nothing sent) or the scrubbed transport error. A
+ * `ReadableStream` body cannot be replayed, so its redirect is returned unfollowed.
  */
 export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
   const fields = opts.credentialFields;
   const { authorizedUris, declaredUris, allowAllUris } = opts;
-  if (!URL.canParse(opts.url)) throw new PreflightError("ssrf", "Invalid target URL");
+  if (!URL.canParse(opts.url)) throw new ApiCallRefusedError("ssrf", "Invalid target URL");
   const gated = !allowAllUris;
   const inAllowlist = (url: URL) =>
     authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
   const warn = (message: string, hop: number, host: string) =>
     opts.logger?.warn(message, { integrationId: opts.integrationId, hop, host });
+  const redirectRefused = (kind: ApiCallRefusedError["kind"], host: string) =>
+    new ApiCallRefusedError(
+      kind,
+      `Redirect blocked (${kind === "not_authorized" ? "unauthorized" : kind}): host=${host}`,
+      true,
+    );
 
   const callerSignal = opts.init.signal;
   const signal = AbortSignal.any([
@@ -261,14 +254,14 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
                 if (inAllowlist(url)) return;
                 if (hop === 0) {
                   // The declared entries: a rendered one may be a secret (an exact webhook URL).
-                  throw new PreflightError(
+                  throw new ApiCallRefusedError(
                     "not_authorized",
                     `URL not in authorized_uris allowlist. Allowed: ${declaredUris.join(", ")}`,
                   );
                 }
                 const host = redactCredentialHost(url.href, fields);
                 warn("Redirect refused (not in authorizedUris)", hop, host);
-                throw new RedirectBlockedError("unauthorized", host);
+                throw redirectRefused("not_authorized", host);
               },
               forwardCredentials: inAllowlist,
             }
@@ -288,13 +281,7 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
       },
     );
   } catch (err) {
-    if (
-      err instanceof PreflightError ||
-      err instanceof RedirectBlockedError ||
-      err instanceof InvalidHeaderValueError
-    ) {
-      throw err;
-    }
+    if (err instanceof ApiCallRefusedError || err instanceof InvalidHeaderValueError) throw err;
     if (!(err instanceof SsrfBlockedError)) throw scrubTransportError(err, fields);
     const host = redactCredentialHost(`http://${err.host}/`, fields);
     if (err.reason === "too-many-redirects") {
@@ -305,16 +292,16 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
       );
     }
     if (err.reason === "resolution-failed") {
-      if (err.hop > 0) throw new RedirectBlockedError("unresolvable", host);
-      throw new PreflightError(
+      if (err.hop > 0) throw redirectRefused("unresolvable", host);
+      throw new ApiCallRefusedError(
         "unresolvable",
         `Target host could not be resolved (${opts.targetHost})`,
       );
     }
     if (err.hop > 0) {
       warn("Redirect refused (SSRF)", err.hop, host);
-      throw new RedirectBlockedError("ssrf", host);
+      throw redirectRefused("ssrf", host);
     }
-    throw new PreflightError("ssrf", "URL targets a blocked network range");
+    throw new ApiCallRefusedError("ssrf", "URL targets a blocked network range");
   }
 }

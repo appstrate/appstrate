@@ -42,7 +42,6 @@ import {
   applyTransportHeaders,
   isReproducibleBody,
   type ApiCallFn,
-  type ApiCallMeta,
 } from "./http-call-core.ts";
 import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
 import {
@@ -68,7 +67,7 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, templateHost } from "./template-vars.ts";
+import { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
@@ -238,10 +237,8 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
 /**
  * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
  *
- * Package-internal: dropped from the `resolvers` barrel because nothing outside
- * this package ever consumed it. The `export` keyword survives only so
- * `test/resolvers/integration-api-call.test.ts` can pin the 56-character tool
- * name cap directly.
+ * Package-internal: exported only so `test/resolvers/integration-api-call.test.ts`
+ * can pin the 56-character tool name cap.
  */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
@@ -406,9 +403,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        // `buildCall` enforces authorized_uris on the SUBSTITUTED target (`{{site_url}}/…`).
         tools.push(
-          makeApiCallTool({ name: meta.name, allowAllUris: true }, this.buildCall(meta, entry), {
+          makeApiCallTool(meta, this.buildCall(meta, entry), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -469,6 +465,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         templates.push(value);
         headers[key] = substituteVars(value, fields);
         if (headers[key] !== value) credentialHeaders.push(key);
+      }
+      const unresolved = new Set(templates.flatMap((t) => unresolvedPlaceholders(t, fields)));
+      if (unresolved.size > 0) {
+        throw new ResolverError(
+          "RESOLVER_BODY_INVALID",
+          `Integration ${meta.name}: unresolved placeholders: {{${[...unresolved].join()}}}`,
+          { integration: meta.name },
+        );
       }
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
@@ -697,11 +701,8 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        // The platform enforces `authorized_uris` server-side — allow all
-        // locally so the tool dispatches and lets the proxy gate.
-        const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
         tools.push(
-          makeApiCallTool(remoteMeta, this.buildCall(meta), {
+          makeApiCallTool(meta, this.buildCall(meta), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +

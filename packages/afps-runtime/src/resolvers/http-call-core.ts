@@ -13,12 +13,12 @@
  * Scope of THIS module: request-body materialisation (string / `{ fromBytes }`
  * / `{ fromFile }` / `{ multipart }`, with streaming + size caps), the
  * workspace-rooted path-safety pipeline, the JSON-schema surfaced to the
- * LLM, the static `authorized_uris` allowlist matcher
- * ({@link matchesAuthorizedUriSpec}) + tool-layer enforcement
- * ({@link makeApiCallTool} calls `enforceAuthorizedUris` before dispatch),
- * and response serialisation ({@link serializeFetchResponse}).
+ * LLM, the `authorized_uris` allowlist matcher
+ * ({@link matchesAuthorizedUriSpec}), and response serialisation
+ * ({@link serializeFetchResponse}).
  *
- * The OUTBOUND half of an api_call is `fetchApiCall` (`./api-call-engine.ts`).
+ * The OUTBOUND half of an api_call, allowlist gate included, is `fetchApiCall`
+ * (`./api-call-engine.ts`).
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
@@ -33,7 +33,7 @@ import {
   parseAuthorizedUriPattern,
 } from "@appstrate/afps-shared/credential-template";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
-import { AuthorizedUrisError, ResolverError } from "../errors.ts";
+import { ResolverError } from "../errors.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
@@ -345,40 +345,13 @@ export const apiCallTargetJsonSchema = (
 ).properties.target;
 
 /**
- * Flat view over the subset of fields {@link makeApiCallTool} consumes
- * for URL-allowlist enforcement. Callers project their credential source
- * (integration manifest auth, local creds file, …) onto this shape.
- *
- * Credential header metadata (name / prefix / field name) is
- * deliberately NOT part of this type. Every shipped transport —
- * sidecar, credential-proxy, local/remote integration resolver — owns
- * credential injection itself:
- *
- *   - Sidecar + credential-proxy: read the metadata from the platform's
- *     internal credentials endpoint and write the header server-side.
- *     The runtime never sees the credential field at all.
- *   - Local integration resolver: reads the injection plan from the
- *     integration manifest's `delivery.http` (or the local creds file
- *     override), not surfaced on this meta.
- *
- * Consequence: the tool schema surfaced to the LLM is identical across
- * auth modes and carries no hint of how the credential is transported.
+ * What {@link makeApiCallTool} reads of an integration. The transport behind the {@link ApiCallFn}
+ * owns the URL allowlist and the credential header, so the tool schema surfaced to the LLM is
+ * identical across auth modes and carries no hint of how the credential is transported.
  */
 export interface ApiCallMeta {
   /** Scoped package name (e.g. `@appstrate/gmail`). */
   name: string;
-  /**
-   * URL allowlist enforced by the tool before dispatch. Patterns follow
-   * {@link matchesAuthorizedUriSpec} semantics (`*` = single path
-   * segment, `**` = any substring).
-   */
-  authorizedUris?: string[];
-  /**
-   * When true, the tool does not enforce the URL allowlist — the
-   * transport is expected to enforce it instead (e.g. Appstrate's
-   * sidecar gates this server-side). Defaults to false.
-   */
-  allowAllUris?: boolean;
 }
 
 /**
@@ -592,7 +565,6 @@ export function makeApiCallTool(
         );
       }
       const req: ApiCallRequest = parsed.data;
-      enforceAuthorizedUris(meta, req.target);
 
       const callCtx: ApiCallContext = {
         workspace: ctx.workspace,
@@ -1716,31 +1688,6 @@ export async function serializeFetchResponse(
       ...(truncatedSize !== undefined && { truncatedSize }),
     },
   };
-}
-
-/**
- * The tool-layer gate on `meta.authorizedUris`. Errors name only `target` and the declared
- * entries, never a rendered value (it may be a secret, e.g. an exact webhook URL).
- */
-function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
-  if (meta.allowAllUris) return;
-  const patterns = meta.authorizedUris ?? [];
-  if (patterns.length === 0) {
-    throw new AuthorizedUrisError(
-      "AUTHORIZED_URIS_EMPTY",
-      `Integration ${meta.name}: authorized_uris allowlist is empty; every target is forbidden. ` +
-        `Declare authorized_uris in the integration manifest or set allow_all_uris: true.`,
-      { integration: meta.name, target },
-    );
-  }
-  for (const pattern of patterns) {
-    if (matchesAuthorizedUriSpec(pattern, target)) return;
-  }
-  throw new AuthorizedUrisError(
-    "AUTHORIZED_URIS_MISMATCH",
-    `Integration ${meta.name}: target ${target} is not in authorized_uris allowlist`,
-    { integration: meta.name, target, allowlist: patterns },
-  );
 }
 
 /**

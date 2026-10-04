@@ -13,8 +13,7 @@ import {
   classifyApiCallFailure,
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
-  PreflightError,
-  RedirectBlockedError,
+  ApiCallRefusedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
@@ -27,7 +26,7 @@ const internalResolver = async () => ["10.0.0.5"];
 async function gate(
   url: string,
   opts: Partial<FetchApiCallOptions> & { declaredUris?: readonly string[] },
-): Promise<PreflightError | null> {
+): Promise<ApiCallRefusedError | null> {
   const fetchFn = mock(async () => new Response("ok")) as unknown as typeof fetch;
   const declaredUris = opts.declaredUris ?? [];
   const allowAllUris = opts.allowAllUris ?? false;
@@ -47,7 +46,7 @@ async function gate(
     });
     return null;
   } catch (err) {
-    if (err instanceof PreflightError) return err;
+    if (err instanceof ApiCallRefusedError) return err;
     throw err;
   }
 }
@@ -191,7 +190,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       allowAllUris: true,
       resolveHost: internalResolver,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
   });
 
   it("allow_all: an unresolvable host is `unresolvable`, host redacted to itself", async () => {
@@ -201,7 +200,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
         throw new Error("ENOTFOUND");
       },
     });
-    expect(err?.reason).toBe("unresolvable");
+    expect(err?.kind).toBe("unresolvable");
     expect(err!.message).toContain("gone.example");
     expect(err!.message).not.toContain("token");
   });
@@ -209,7 +208,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
   it("no allowlist and no allow_all: every target is refused before any DNS work", async () => {
     const resolveHost = mock(publicResolver);
     const err = await gate("https://ok.example/x", { resolveHost });
-    expect(err?.reason).toBe("not_authorized");
+    expect(err?.kind).toBe("not_authorized");
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
@@ -219,7 +218,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["https://**"],
       resolveHost: internalResolver,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
   });
 
   it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
@@ -239,7 +238,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["https://intranet.corp/**"],
       resolveHost: internalResolver,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
   });
 
   it("a path that does not trust declared hosts keeps them behind the SSRF gate", async () => {
@@ -249,7 +248,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       trustedHost: () => false,
       resolveHost: internalResolver,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
   });
 
   it("an operator-trusted host skips the SSRF gate", async () => {
@@ -268,7 +267,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["https://{$credential.host}/**"],
       resolveHost,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
     expect(resolveHost).toHaveBeenCalled();
   });
 
@@ -280,7 +279,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
         declaredUris: ["https://{$credential.host}/**", "{$credential.site_url}/**"],
         resolveHost: publicResolver,
       });
-      expect(err?.reason).toBe("ssrf");
+      expect(err?.kind).toBe("ssrf");
     }
   });
 
@@ -295,7 +294,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
         fetchFn,
         resolveHost: publicResolver,
       });
-      expect(err?.reason).toBe("not_authorized");
+      expect(err?.kind).toBe("not_authorized");
     }
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -307,7 +306,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["https://api.example.com/**"],
       resolveHost,
     });
-    expect(err?.reason).toBe("not_authorized");
+    expect(err?.kind).toBe("not_authorized");
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
@@ -317,7 +316,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["{$credential.site_url}/**"],
       resolveHost,
     });
-    expect(err?.reason).toBe("not_authorized");
+    expect(err?.kind).toBe("not_authorized");
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
@@ -327,7 +326,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       declaredUris: ["https://intranet.corp/**"],
       resolveHost: internalResolver,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
   });
 
   it("an off-allowlist refusal names the declared entries, never a rendered one", async () => {
@@ -347,7 +346,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
       allowAllUris: true,
       resolveHost,
     });
-    expect(err?.reason).toBe("ssrf");
+    expect(err?.kind).toBe("ssrf");
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
@@ -425,8 +424,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       authorizedUris: ["https://api.dropboxapi.com/**"],
       allowAllUris: false,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(RedirectBlockedError);
-    expect((err as RedirectBlockedError).reason).toBe("unauthorized");
+    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "not_authorized", redirect: true });
   });
 
   it("classifies a hop to a host with no DNS answer as unresolvable, not as SSRF", async () => {
@@ -450,7 +448,6 @@ describe("fetchApiCall — credentials across a redirect", () => {
         return ["203.0.113.7"];
       },
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(RedirectBlockedError);
     expect(classifyApiCallFailure(err)).toMatchObject({ kind: "unresolvable", redirect: true });
   });
 
@@ -651,19 +648,16 @@ describe("fetchApiCall — transport", () => {
 
 describe("classifyApiCallFailure", () => {
   it("names what every path maps: refusal, redirect, timeout, transport", () => {
-    expect(classifyApiCallFailure(new PreflightError("unresolvable", "m"))).toEqual({
+    expect(classifyApiCallFailure(new ApiCallRefusedError("unresolvable", "m"))).toEqual({
       kind: "unresolvable",
       redirect: false,
       message: "m",
     });
-    expect(classifyApiCallFailure(new RedirectBlockedError("unauthorized", "h"))).toMatchObject({
-      kind: "not_authorized",
+    expect(classifyApiCallFailure(new ApiCallRefusedError("ssrf", "m", true))).toEqual({
+      kind: "ssrf",
       redirect: true,
+      message: "m",
     });
-    expect(classifyApiCallFailure(new RedirectBlockedError("ssrf", "h")).kind).toBe("ssrf");
-    expect(classifyApiCallFailure(new RedirectBlockedError("unresolvable", "h")).kind).toBe(
-      "unresolvable",
-    );
     expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
@@ -727,7 +721,7 @@ describe("fetchApiCall — the target's host in a message", () => {
       resolveHost: async () => [],
       targetHost: "{{sub}}.example.com",
     });
-    expect(err?.reason).toBe("unresolvable");
+    expect(err?.kind).toBe("unresolvable");
     expect(err?.message).toBe("Target host could not be resolved ({{sub}}.example.com)");
   });
 });

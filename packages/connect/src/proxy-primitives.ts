@@ -30,22 +30,12 @@ import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
  *
  * Whitespace inside the `{{…}}` is tolerated so hand-written templates
  * can keep `{{ field }}`. Unknown placeholders are **left intact**
- * (`keepUnresolved`) — callers MAY inspect the result via
- * {@link findUnresolvedPlaceholders} to fail closed, matching the
- * sidecar's defensive pattern. Delegates to the single canonical
- * implementation in `@appstrate/afps-runtime`.
+ * (`keepUnresolved`): callers fail closed on the template with
+ * `unresolvedPlaceholders` before sending. Delegates to the single
+ * canonical implementation in `@appstrate/afps-runtime`.
  */
 export function substituteVars(input: string, credentials: Record<string, string>): string {
   return substituteVarsCore(input, credentials, { keepUnresolved: true });
-}
-
-/** Return the names of every unresolved `{{field}}` still present in `input`. */
-export function findUnresolvedPlaceholders(input: string): string[] {
-  const out: string[] = [];
-  for (const match of input.matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {
-    out.push(match[1]!);
-  }
-  return out;
 }
 
 /**

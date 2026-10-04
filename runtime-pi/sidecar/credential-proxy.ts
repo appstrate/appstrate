@@ -56,10 +56,9 @@ import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 
 /**
- * Body modes the proxy core accepts. The HTTP handler can produce
- * "none" / "buffered" / "streaming"; the MCP handler produces
- * "buffered" for text + binary uploads, "formData" for the
- * `{ multipart: [...] }` body shape, and "json" for a plain JSON
+ * Body modes the proxy core accepts. The MCP handler produces "none"
+ * for a bodiless call, "buffered" for text + binary uploads, "formData"
+ * for the `{ multipart: [...] }` body shape, and "json" for a plain JSON
  * object/array (serialized here, after leaf substitution).
  *
  * The `formData` variant carries a builder closure rather than a
@@ -71,7 +70,6 @@ import { filterSensitiveHeaders } from "./redact.ts";
 export type ApiCallRequestBody =
   | { kind: "none" }
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
-  | { kind: "streaming"; stream: ReadableStream }
   | {
       kind: "formData";
       build: (activeCreds: Record<string, string>) => FormData;
@@ -112,8 +110,7 @@ interface ApiCallArgs {
 
 /**
  * Result of a successful proxy call. The upstream response body has
- * NOT been read yet — the caller decides whether to buffer (HTTP
- * handler with truncation) or pass through (MCP `responseToToolResult`).
+ * NOT been read yet — the MCP handler passes it to `responseToToolResult`.
  */
 interface ApiCallSuccess {
   ok: true;
@@ -133,23 +130,11 @@ interface ApiCallSuccess {
    * and the debug envelope reports it as `host` (redacted) and as
    * `redirected` (`!== resolvedUrl`).
    *
-   * It is NOT projected onto `_meta` either. That projection existed for
-   * #471 and was removed with `UpstreamMeta.finalUrl`; the agent-side
-   * parser (`runtime-pi/mcp/upstream-meta.ts` — alive, and required on
-   * `api_upload`, which calls it uncaught; `api_call` wraps it in
-   * `safeStatus`, which falls back to `null`) reads `{ status, headers }`
-   * only. Nothing on `_meta` is agent-visible in any case: see the
-   * `redirect: "manual"` comment in `doUpstreamRequest` below.
+   * It is NOT projected onto `_meta`: the agent-side parser
+   * (`runtime-pi/mcp/upstream-meta.ts`) reads `{ status, headers }` only,
+   * and a redirect URL routinely carries credentials.
    */
   finalUrl: string;
-  /**
-   * `true` when a 401 triggered a credential refresh. On the buffered
-   * path the body was replayed and this is a no-op signal (the
-   * `response` is from the retried call). On the streaming path the
-   * body could not be replayed and the caller must surface the 401
-   * with `X-Auth-Refreshed: true` so the agent can retry idempotently.
-   */
-  authRefreshed: boolean;
 }
 
 interface ApiCallFailure {
@@ -257,8 +242,6 @@ export function credentialScope(integrationId: string, connectionId: string): st
 function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
-    case "streaming":
-      // Pass-through by design — no substitution ever happens on these kinds.
       return [];
     case "buffered":
       return body.text !== undefined ? [body.text] : [];
@@ -384,12 +367,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   /** Build the request body with credential substitution applied. */
   const buildBody = (
     activeCreds: Record<string, string>,
-  ): ArrayBuffer | string | ReadableStream | FormData | undefined => {
+  ): ArrayBuffer | string | FormData | undefined => {
     switch (body.kind) {
       case "none":
         return undefined;
-      case "streaming":
-        return body.stream;
       case "formData":
         return body.build(activeCreds);
       case "json":
@@ -472,10 +453,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       body: buildBody(activeCreds.credentials),
       proxy: args.proxyUrl || undefined,
     };
-    // A streaming body's 30x comes back unfollowed (not replayable), and the model never sees
-    // `location` (a redirect URL routinely carries credentials): a caller that must follow one
-    // re-issues with a buffered body, which walks the chain under the per-hop policy.
-    if (init.body instanceof ReadableStream) init.duplex = "half";
     const sent = await fetchApiCall({
       url: resolvedUrl,
       init,
@@ -523,14 +500,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return wrapRequestError(err, integrationId, targetHost);
   }
 
-  let authRefreshed = false;
-
   // 7b. Retry on 401 — force a refresh and re-issue the call. The platform
   //     `/refresh` flags the connection needsReconnection when the credential
   //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
   //     401'd), so a `null` result means "do not retry". A non-null result is
-  //     a genuine token rotation; replay once (buffered bodies only — streaming
-  //     bodies are consumed once and cannot be replayed).
+  //     a genuine token rotation; replay once.
   if (
     upstream.status === 401 &&
     refreshCredentials &&
@@ -541,31 +515,22 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   ) {
     const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
     if (fresh) {
-      if (body.kind !== "streaming") {
-        redactFields = redactionFields(policy, fresh.credentials);
-        try {
-          const r = await doUpstreamRequest(fresh);
-          upstream = r.response;
-          upstreamFinalUrl = r.finalUrl;
-          upstreamHops = r.hops;
-          requestHeaderNames = r.requestHeaderNames;
-          credentialInjection = r.credentialInjection;
-          answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
-        } catch (err) {
-          return wrapRequestError(err, integrationId, targetHost);
-        }
-      } else {
-        // Body already consumed — surface the rotated-but-still-401 signal to
-        // the caller, which adds X-Auth-Refreshed.
-        authRefreshed = true;
+      redactFields = redactionFields(policy, fresh.credentials);
+      try {
+        const r = await doUpstreamRequest(fresh);
+        upstream = r.response;
+        upstreamFinalUrl = r.finalUrl;
+        upstreamHops = r.hops;
+        requestHeaderNames = r.requestHeaderNames;
+        credentialInjection = r.credentialInjection;
+        answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
+      } catch (err) {
+        return wrapRequestError(err, integrationId, targetHost);
       }
     }
   }
 
-  // 8. Terminal-hop Set-Cookie capture (buffered: idempotent re-merge; streaming: no follower).
-  cookies.capture(upstreamFinalUrl, upstream.headers.getSetCookie());
-
-  // 9. Log a persistent auth failure once per connection per run. The flag is
+  // 8. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
@@ -579,12 +544,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
-  // 10. Success-path diagnostic envelope (#404). One structured line per
-  //     completed call — resolved auth mode, hop count, status, duration,
-  //     and the request/response header *names* (values redacted). Only
-  //     emitted at LOG_LEVEL=debug, so it is silent in default production
-  //     output yet available when an operator is debugging a provider call
-  //     (401/403/redirect loop) without leaking the injected secret.
+  // 9. Success-path diagnostic envelope (#404). One structured line per
+  //    completed call — resolved auth mode, hop count, status, duration,
+  //    and the request/response header *names* (values redacted). Only
+  //    emitted at LOG_LEVEL=debug, so it is silent in default production
+  //    output yet available when an operator is debugging a provider call
+  //    (401/403/redirect loop) without leaking the injected secret.
   logger.debug("integration api_call completed", {
     integrationId,
     method,
@@ -600,14 +565,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       credentialInjection === "inject" ? (creds.credentialHeaderName?.toLowerCase() ?? null) : null,
     // Which URL-trust policy gated the call.
     urlPolicy: policy.allowAllUris ? "allow_all" : "allowlist",
-    authRefreshed,
     requestHeaderNames,
     // Drops Set-Cookie / WWW-Authenticate / Authorization etc.; keeps
     // operator-useful headers like Location for redirect-loop diagnosis.
     responseHeaders: filterSensitiveHeaders(upstream.headers),
   });
 
-  return { ok: true, response: upstream, finalUrl: upstreamFinalUrl, authRefreshed };
+  return { ok: true, response: upstream, finalUrl: upstreamFinalUrl };
 }
 
 /**

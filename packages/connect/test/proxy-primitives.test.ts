@@ -10,7 +10,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   substituteVars,
-  findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
@@ -54,25 +53,6 @@ describe("substituteVars", () => {
 
   it("permits empty-string credential values", () => {
     expect(substituteVars("X={{empty}}", { empty: "" })).toBe("X=");
-  });
-});
-
-describe("findUnresolvedPlaceholders", () => {
-  it("returns [] when every placeholder resolves", () => {
-    const substituted = substituteVars("{{a}}{{b}}", { a: "1", b: "2" });
-    expect(findUnresolvedPlaceholders(substituted)).toEqual([]);
-  });
-
-  it("lists placeholder names that remain", () => {
-    expect(findUnresolvedPlaceholders("{{a}}/{{b}}")).toEqual(["a", "b"]);
-  });
-
-  it("returns duplicates as they appear (caller dedups if needed)", () => {
-    expect(findUnresolvedPlaceholders("{{x}}{{x}}")).toEqual(["x", "x"]);
-  });
-
-  it("tolerates whitespace", () => {
-    expect(findUnresolvedPlaceholders("{{ a }}")).toEqual(["a"]);
   });
 });
 

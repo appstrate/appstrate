@@ -37,7 +37,7 @@ function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
 
 describe("makeApiCallTool", () => {
   it("produces a {name}_call tool with JSON-schema parameters", () => {
-    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@afps/gmail" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 200,
       headers: {},
@@ -51,7 +51,7 @@ describe("makeApiCallTool", () => {
   });
 
   it("honours a toolName override (the {ns}__api_call shape integrations use)", () => {
-    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@afps/gmail" };
     const tool = makeApiCallTool(
       meta,
       async () => ({ status: 200, headers: {}, body: { kind: "text", text: "" } }),
@@ -60,24 +60,8 @@ describe("makeApiCallTool", () => {
     expect(tool.name).toBe("afps_gmail__api_call");
   });
 
-  it("enforces authorizedUris when allowAllUris is not set", async () => {
-    const meta: ApiCallMeta = {
-      name: "@acme/scoped",
-      authorizedUris: ["https://api.acme.com/**"],
-    };
-    const tool = makeApiCallTool(meta, async () => ({
-      status: 200,
-      headers: {},
-      body: { kind: "text", text: "" },
-    }));
-    const { ctx } = makeCtx();
-    await expect(
-      tool.execute({ method: "GET", target: "https://evil.example.com/x" }, ctx),
-    ).rejects.toThrow(/not in authorized_uris/);
-  });
-
   it("emits api_call.called with status + duration on success", async () => {
-    const meta: ApiCallMeta = { name: "@acme/ok", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@acme/ok" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 201,
       headers: {},
@@ -92,7 +76,7 @@ describe("makeApiCallTool", () => {
   });
 
   it("marks tool results as isError on 4xx/5xx", async () => {
-    const meta: ApiCallMeta = { name: "@acme/err", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@acme/err" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 404,
       headers: {},

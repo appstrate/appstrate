@@ -88,12 +88,12 @@ import {
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
+import { substituteVars, matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
 import {
-  substituteVars,
-  findUnresolvedPlaceholders,
-  matchesAuthorizedUriSpec,
-} from "@appstrate/connect/proxy-primitives";
-import { HOP_BY_HOP_HEADERS, type EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+  HOP_BY_HOP_HEADERS,
+  unresolvedPlaceholders,
+  type EgressPolicy,
+} from "@appstrate/afps-runtime/resolvers";
 import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import type { CertMinter } from "./integration-cert-minter.ts";
@@ -729,56 +729,28 @@ type ConnectInputSubstitutionResult =
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
- * substitution. Runs {@link substituteVars} over the URL, body, and each
- * header value using `inputs`, then re-checks each field with
- * {@link findUnresolvedPlaceholders}.
+ * substitution: {@link substituteVars} over the URL, body, and each header
+ * value using `inputs`.
  *
- * Fail-closed contract: if any field that originally contained a `{{...}}`
- * placeholder still contains one after substitution, we return
- * `{ failed: <name> }` rather than forwarding a half-substituted value
- * upstream. A literal secret/placeholder must NEVER leak upstream nor into
- * a tool result — refusing the request is the only safe outcome.
- *
- * Fields that never contained a placeholder are passed through untouched
- * (substituteVars is a no-op on them), so a request with no placeholders is
- * returned verbatim.
+ * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
+ * `{ failed: <name> }` rather than forwarding a half-substituted request
+ * upstream. A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
   parts: { url: string; bodyText: string | null; headers: Record<string, string> },
   inputs: Record<string, string>,
 ): ConnectInputSubstitutionResult {
-  const checkField = (original: string, substituted: string): string | null => {
-    // Only fail-closed when the ORIGINAL field carried a placeholder. A
-    // field that legitimately contains `{{...}}`-looking text but was never
-    // a substitution target (no placeholder before substitution) can't have
-    // a half-substituted secret in it — but here `original === substituted`
-    // for a field with no resolvable placeholder, so we gate on whether the
-    // original had any placeholder at all.
-    if (findUnresolvedPlaceholders(original).length === 0) return null;
-    const remaining = findUnresolvedPlaceholders(substituted);
-    return remaining.length > 0 ? remaining[0]! : null;
-  };
-
-  const url = substituteVars(parts.url, inputs);
-  const urlFail = checkField(parts.url, url);
-  if (urlFail) return { failed: urlFail };
-
-  let bodyText: string | null = null;
-  if (parts.bodyText !== null) {
-    bodyText = substituteVars(parts.bodyText, inputs);
-    const bodyFail = checkField(parts.bodyText, bodyText);
-    if (bodyFail) return { failed: bodyFail };
+  for (const template of [parts.url, parts.bodyText ?? "", ...Object.values(parts.headers)]) {
+    const [missing] = unresolvedPlaceholders(template, inputs);
+    if (missing !== undefined) return { failed: missing };
   }
-
   const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(parts.headers)) {
-    const sub = substituteVars(v, inputs);
-    const headerFail = checkField(v, sub);
-    if (headerFail) return { failed: headerFail };
-    headers[k] = sub;
-  }
-
-  return { url, bodyText, headers };
+  for (const [k, v] of Object.entries(parts.headers)) headers[k] = substituteVars(v, inputs);
+  return {
+    url: substituteVars(parts.url, inputs),
+    bodyText: parts.bodyText === null ? null : substituteVars(parts.bodyText, inputs),
+    headers,
+  };
 }
 
 /**

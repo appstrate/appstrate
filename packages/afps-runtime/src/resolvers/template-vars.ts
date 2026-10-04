@@ -11,9 +11,9 @@
  * keep `{{ field }}`. Two missing-key policies, picked per call site:
  *
  *   - default (`keepUnresolved: false`) → unknown placeholders render empty.
- *   - `keepUnresolved: true` → unknown placeholders are left intact so the
- *     caller can fail closed by scanning for survivors (the credential-proxy
- *     pattern — never silently blank a credential into a request).
+ *   - `keepUnresolved: true` → unknown placeholders are left intact (the
+ *     credential-proxy pattern — never silently blank a credential into a
+ *     request; the caller refuses them first, with {@link unresolvedPlaceholders}).
  *
  * NOTE: distinct from the Mustache renderer in `../template/mustache.ts`,
  * which renders agent prompts from a structured view. This one is a flat

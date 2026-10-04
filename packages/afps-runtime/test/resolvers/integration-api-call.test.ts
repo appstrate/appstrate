@@ -963,8 +963,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     });
   }
 
-  // Even with allow_all_uris (the tool-layer authorized_uris gate is a
-  // no-op), the engine's SSRF preflight must refuse internal targets.
+  // Even with allow_all_uris, the engine's SSRF gate must refuse internal targets.
   const blockedTargets = [
     "http://169.254.169.254/latest/meta-data/", // AWS/GCP metadata
     "http://127.0.0.1:8080/admin", // loopback
@@ -1331,6 +1330,12 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     await expect(call("https://{{host}}/x")).rejects.toMatchObject({
       code: "RESOLVER_URL_BLOCKED",
     });
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses a {{field}} the credential bag does not hold, naming it, unsent", async () => {
+    const { call, hits } = await toolFor(["https://api.acme.com/**"], {});
+    await expect(call("https://api.acme.com/{{tenant}}/x")).rejects.toThrow("{{tenant}}");
     expect(hits).toEqual([]);
   });
 });

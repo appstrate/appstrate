@@ -48,11 +48,8 @@
  * Pure: no DB / Redis / sidecar. `fetchImpl` + `now` are injectable for tests.
  */
 
-import {
-  substituteVars,
-  findUnresolvedPlaceholders,
-  matchesAuthorizedUriSpec,
-} from "../proxy-primitives.ts";
+import { substituteVars, matchesAuthorizedUriSpec } from "../proxy-primitives.ts";
+import { unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   evaluateJsonPath as evaluateManifestJsonPath,
@@ -597,13 +594,13 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     headers["Content-Type"] = login.request.content_type;
   }
 
-  // Fail closed on any unresolved `{{...}}` (a typo'd placeholder must never
+  // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never
   // be sent literally upstream).
   const unresolved = [
-    ...findUnresolvedPlaceholders(url),
-    ...(body ? findUnresolvedPlaceholders(body) : []),
-    ...Object.values(headers).flatMap(findUnresolvedPlaceholders),
-  ];
+    login.request.url,
+    login.request.body ?? "",
+    ...Object.values(login.request.headers ?? {}),
+  ].flatMap((template) => unresolvedPlaceholders(template, vars));
   if (unresolved.length > 0) {
     throw new LoginError(
       `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,

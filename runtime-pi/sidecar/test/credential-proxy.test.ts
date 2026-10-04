@@ -10,12 +10,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope } from "@appstrate/afps-runtime/resolvers";
-import {
-  credentialScope,
-  executeApiCall,
-  type ApiCallDeps,
-  type ApiCallRequestBody,
-} from "../credential-proxy.ts";
+import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -246,7 +241,6 @@ describe("executeApiCall — happy path", () => {
       expect(result.response.status).toBe(200);
       const text = await result.response.text();
       expect(text).toBe('{"data":42}');
-      expect(result.authRefreshed).toBe(false);
     }
     expect(jarCookies(deps, "gmail", "https://api.example.com/")).toBe("sess=abc");
     // Verify Authorization was server-side injected.
@@ -580,51 +574,6 @@ describe("executeApiCall — 401 retry path", () => {
     expect(refreshCredentials).toHaveBeenCalledWith("gmail", carried);
     expect(reportUpstreamSuccess).toHaveBeenCalledWith(fresh);
   });
-
-  it("does NOT replay a streaming-request body on 401", async () => {
-    let upstreamCalls = 0;
-    const fetchFn = mock(async (url: string | URL) => {
-      const target = typeof url === "string" ? url : url.toString();
-      if (target.startsWith("https://api.example.com")) upstreamCalls += 1;
-      return new Response("expired", { status: 401 });
-    });
-    const refreshCredentials = mock(async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "tok-fresh" },
-      authorizedUris: ["https://api.example.com/**"],
-      allowAllUris: false,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer ",
-      credentialFieldName: "access_token",
-    }));
-    const deps = makeDeps({
-      fetchFn: fetchFn as unknown as typeof fetch,
-      refreshCredentials,
-    });
-    const stream = new ReadableStream({
-      start(c) {
-        c.enqueue(new Uint8Array([1, 2, 3]));
-        c.close();
-      },
-    });
-    const result = await executeApiCall(
-      {
-        integrationId: "gmail",
-        connectionId: "conn-1",
-        targetUrl: "https://api.example.com/upload",
-        method: "POST",
-        callerHeaders: {},
-        body: { kind: "streaming", stream },
-      },
-      deps,
-    );
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.response.status).toBe(401);
-      expect(result.authRefreshed).toBe(true);
-    }
-    expect(upstreamCalls).toBe(1);
-    expect(refreshCredentials).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
@@ -942,41 +891,6 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(apiKeysSeen).toEqual(["caller-secret", null]);
   });
 
-  it("streaming bodies still use native fetch and only capture final-hop cookies", async () => {
-    const fetchFn = mock(
-      async (_url: string | URL, _init?: RequestInit) =>
-        new Response("ok", {
-          status: 200,
-          headers: { "set-cookie": "final=F" },
-        }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const stream = new ReadableStream({
-      start(c) {
-        c.enqueue(new Uint8Array([1, 2, 3]));
-        c.close();
-      },
-    });
-    const result = await executeApiCall(
-      {
-        integrationId: "demo",
-        connectionId: "conn-1",
-        targetUrl: "https://api.example.com/upload",
-        method: "POST",
-        callerHeaders: {},
-        body: { kind: "streaming", stream },
-      },
-      deps,
-    );
-    expect(result.ok).toBe(true);
-    // Streaming bodies can't be replayed across hops, so the path pins
-    // `redirect: "manual"` — native "follow" would leak the injected
-    // credential header into a cross-origin redirect.
-    const init = fetchFn.mock.calls[0]![1] as RequestInit;
-    expect(init.redirect).toBe("manual");
-    expect(jarCookies(deps, "demo", "https://api.example.com/")).toBe("final=F");
-  });
-
   it("propagates caller-supplied Cookie header across all hops (jar wins on dup)", async () => {
     const cookieHeadersSeen: (string | null)[] = [];
     const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
@@ -1289,60 +1203,6 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it("hybrid: preserves credentials on cross-host redirect inside allowlist", async () => {
-    // Multi-host APIs (Dropbox api ⇄ content, PayPal sandbox ⇄ live,
-    // Google googleapis ⇄ youtube) declare every host in authorizedUris
-    // and used to lose creds at the cross-host hop. With #475, the
-    // allowlist becomes the trust boundary for credential propagation.
-    const authSeen: { url: string; auth: string | null; apiKey: string | null }[] = [];
-    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      const u = typeof url === "string" ? url : url.toString();
-      const headers = new Headers(init?.headers);
-      authSeen.push({
-        url: u,
-        auth: headers.get("authorization"),
-        apiKey: headers.get("x-api-key"),
-      });
-      if (u.startsWith("https://api.dropboxapi.com")) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://content.dropboxapi.com/files/download?id=42" },
-        });
-      }
-      return new Response("payload", { status: 200 });
-    });
-    const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
-      credentials: { access_token: "dbx-token" },
-      authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
-      allowAllUris: false,
-      credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer ",
-      credentialFieldName: "access_token",
-    }));
-    const deps = makeDeps({
-      fetchFn: fetchFn as unknown as typeof fetch,
-      fetchCredentials,
-    });
-    const result = await executeApiCall(
-      {
-        integrationId: "dropbox",
-        connectionId: "conn-1",
-        targetUrl: "https://api.dropboxapi.com/2/files/get_metadata",
-        method: "GET",
-        callerHeaders: {},
-        body: { kind: "none" },
-      },
-      deps,
-    );
-    expect(result.ok).toBe(true);
-    expect(authSeen.length).toBe(2);
-    // Hop 1 (initial): Bearer injected.
-    expect(authSeen[0]!.auth).toBe("Bearer dbx-token");
-    // Hop 2 (cross-host, intra-allowlist): Bearer preserved (the fix).
-    expect(authSeen[1]!.auth).toBe("Bearer dbx-token");
-    expect(authSeen[1]!.url).toContain("content.dropboxapi.com");
-  });
-
   it("refuses an injected credential under allow_all_uris with no allowlist", async () => {
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
@@ -1433,36 +1293,6 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     expect(urlsSeen[1]).not.toContain("pwn");
     expect(urlsSeen[1]).not.toContain("#frag");
   });
-
-  it("hybrid: keeps credentials on same-origin redirect (allowlist mode)", async () => {
-    // Sanity check — the hybrid branch shouldn't strip on same-origin.
-    const authSeen: (string | null)[] = [];
-    const fetchFn = mock(async (url: string | URL, init?: RequestInit) => {
-      const u = typeof url === "string" ? url : url.toString();
-      authSeen.push(new Headers(init?.headers).get("authorization"));
-      if (u.endsWith("/start")) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://api.example.com/end" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    await executeApiCall(
-      {
-        integrationId: "demo",
-        connectionId: "conn-1",
-        targetUrl: "https://api.example.com/start",
-        method: "GET",
-        callerHeaders: {},
-        body: { kind: "none" },
-      },
-      deps,
-    );
-    expect(authSeen[0]).toBe("Bearer tok-123");
-    expect(authSeen[1]).toBe("Bearer tok-123");
-  });
 });
 
 describe("executeApiCall — finalUrl: redirect terminus", () => {
@@ -1472,17 +1302,11 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
    * envelope reports as `host` / `redirected`. Nothing re-issues against
    * it — the 401 replay re-issues against the resolved target URL and
    * re-follows the chain, overwriting this value. These cases pin that
-   * terminus across the four paths that can produce it: no redirect, a
-   * followed chain, a chain that dies without a `location`, and the
-   * streaming (`redirect: "manual"`) path.
+   * terminus across the paths that can produce it: no redirect, a
+   * followed chain, and a chain that dies without a `location`.
    *
-   * It is NOT an agent-visible field. The `_meta` projection this describe
-   * was originally written for (#471) is gone along with
-   * `UpstreamMeta.finalUrl` — and no other channel replaced it: the agent
-   * cannot see a redirect's `location` at all (see the `redirect: "manual"`
-   * comment in `doUpstreamRequest`), so a caller that must follow one
-   * re-issues with a buffered body and lets the manual follower walk the
-   * chain. Nothing here asserts anything about `_meta` — that is the point.
+   * It is NOT an agent-visible field: the agent cannot see a redirect's
+   * `location` at all, so nothing here asserts anything about `_meta`.
    */
   it("returns the resolved target URL when no redirect happens", async () => {
     const deps = makeDeps();
@@ -1566,38 +1390,6 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/b");
-  });
-
-  it("returns the target itself on the streaming path (its redirect is never followed)", async () => {
-    // `Response.url` is not read: with the address pin it names the IP, not the host.
-    const fetchFn = mock(
-      async () =>
-        new Response(null, { status: 302, headers: { location: "https://api.example.com/b" } }),
-    );
-    const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
-    const stream = new ReadableStream({
-      start(c) {
-        c.enqueue(new Uint8Array([1]));
-        c.close();
-      },
-    });
-    const result = await executeApiCall(
-      {
-        integrationId: "demo",
-        connectionId: "conn-1",
-        targetUrl: "https://api.example.com/upload",
-        method: "POST",
-        callerHeaders: {},
-        body: { kind: "streaming", stream },
-      },
-      deps,
-    );
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.response.status).toBe(302);
-      expect(result.finalUrl).toBe("https://api.example.com/upload");
-    }
-    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("returns the post-refresh URL after a 401 retry that followed redirects", async () => {
@@ -2237,31 +2029,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("allows a hostname resolving to public addresses only", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const result = await call(
-      makeDeps({
-        fetchCredentials: allowAllCreds,
-        declaredUris: [],
-        fetchFn: fetchFn as unknown as typeof fetch,
-        resolveHost: async () => ["203.0.113.7"],
-      }),
-    );
-    expect(result.ok).toBe(true);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("does NOT run the DNS layer when the allowlist pins the host literally", async () => {
-    const resolveHost = mock(async () => ["203.0.113.7"]);
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const result = await call(
-      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, resolveHost }),
-      "https://api.example.com/x",
-    );
-    expect(result.ok).toBe(true);
-    expect(resolveHost).not.toHaveBeenCalled();
-  });
-
   it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
     // On-prem case: the operator explicitly named the host; it resolving
     // into a private range is their declared network, not an agent pivot.
@@ -2286,56 +2053,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  for (const [label, pattern] of [
-    ["host-spanning **", "https://**"],
-    ["wildcard subdomain", "https://*.example.com/**"],
-  ] as const) {
-    it(`glob-matched allowlist host stays behind the SSRF gate (${label})`, async () => {
-      // `https://**` (and any glob in the host segment) means the concrete
-      // host is agent-chosen — without the gate the allowlist branch would
-      // be strictly weaker than allow_all.
-      const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
-      const result = await call(
-        makeDeps({
-          fetchFn: fetchFn as unknown as typeof fetch,
-          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
-            credentials: { access_token: "tok" },
-            authorizedUris: [pattern],
-            allowAllUris: false,
-            credentialFieldName: "access_token",
-          })),
-          resolveHost: async () => ["169.254.169.254"],
-        }),
-        "https://rebind.example.com/x",
-      );
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.status).toBe(403);
-        expect(result.error).toMatch(/blocked network range/);
-      }
-      expect(fetchFn).not.toHaveBeenCalled();
-    });
-  }
-
-  it("glob-matched allowlist host resolving public proceeds normally", async () => {
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const result = await call(
-      makeDeps({
-        fetchFn: fetchFn as unknown as typeof fetch,
-        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
-          credentials: { access_token: "tok" },
-          authorizedUris: ["https://**"],
-          allowAllUris: false,
-          credentialFieldName: "access_token",
-        })),
-        resolveHost: async () => ["203.0.113.7"],
-      }),
-      "https://anything.example.net/x",
-    );
-    expect(result.ok).toBe(true);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
   it("glob allowlist + IP-literal internal target is literal-blocked before DNS", async () => {
     // `https://**` matches `https://169.254.169.254/...` in the allowlist
     // matcher — the literal blocklist inside the gate must still refuse it.
@@ -2350,17 +2067,6 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         })),
         resolveHost,
       }),
-      "https://169.254.169.254/latest/meta-data",
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(403);
-    expect(resolveHost).not.toHaveBeenCalled();
-  });
-
-  it("IP-literal targets skip resolution but stay literal-blocked", async () => {
-    const resolveHost = mock(async () => ["203.0.113.7"]);
-    const result = await call(
-      makeDeps({ fetchCredentials: allowAllCreds, declaredUris: [], resolveHost }),
       "https://169.254.169.254/latest/meta-data",
     );
     expect(result.ok).toBe(false);
@@ -2709,21 +2415,7 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
     (_url: string, n: number) =>
       values[n];
 
-  const buffered = (): ApiCallRequestBody => ({ kind: "none" });
-  const streaming = (): ApiCallRequestBody => ({
-    kind: "streaming",
-    stream: new ReadableStream({
-      start(c) {
-        c.enqueue(new Uint8Array([1]));
-        c.close();
-      },
-    }),
-  });
-  async function callEach(
-    deps: ApiCallDeps,
-    targets: string[],
-    body: () => ApiCallRequestBody = buffered,
-  ) {
+  async function callEach(deps: ApiCallDeps, targets: string[]) {
     for (const targetUrl of targets) {
       await executeApiCall(
         {
@@ -2732,7 +2424,7 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
           targetUrl,
           method: "POST",
           callerHeaders: {},
-          body: body(),
+          body: { kind: "none" },
         },
         deps,
       );
@@ -2740,13 +2432,10 @@ describe("executeApiCall — injected Cookie credential meets the jar (#1613)", 
   }
   const PAGE = "https://api.example.com/page";
 
-  it.each([
-    ["buffered", buffered],
-    ["streaming", streaming],
-  ])("replays a rotated session once, without a duplicate name (%s)", async (_kind, body) => {
+  it("replays a rotated session once, without a duplicate name", async () => {
     const { sent, fetchFn } = scriptedFetch(byCall("PHPSESSID=rotated; HttpOnly"));
     const deps = makeDeps({ fetchFn, fetchCredentials: apiCreds });
-    await callEach(deps, [PAGE, PAGE], body);
+    await callEach(deps, [PAGE, PAGE]);
 
     expect(sent[1]).toEqual(["PHPSESSID=rotated"]);
   });

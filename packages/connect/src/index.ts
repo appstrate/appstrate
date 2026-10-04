@@ -46,7 +46,6 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // in-package-only `buildInjectedCredentialHeader` are reached through the subpath.
 export {
   substituteVars,
-  findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,

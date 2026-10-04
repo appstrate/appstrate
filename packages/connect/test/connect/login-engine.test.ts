@@ -802,16 +802,6 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
     ).rejects.toMatchObject({ reason: "invalid_config" });
   });
 
-  it("jwt token must be a {$credential.<output>} reference — a bare name is refused", async () => {
-    const jwt = `h.${b64url({ sub: "u1" })}.s`;
-    await expect(
-      run(
-        { token: "$response.body#/t", sub: { from: "jwt", token: "token", path: "/sub" } },
-        { body: JSON.stringify({ t: jwt }) },
-      ),
-    ).rejects.toMatchObject({ reason: "invalid_config" });
-  });
-
   it("refuses an $outputs.<name> output expression", async () => {
     await expect(
       run({ t: "$response.body#/t", u: "$outputs.t" }, { body: JSON.stringify({ t: "x" }) }),

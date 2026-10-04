@@ -7,7 +7,6 @@ import {
   isBlockedHost,
   isBlockedUrl,
   substituteVars,
-  findUnresolvedPlaceholders,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   INTEGRATION_ID_RE,
@@ -251,26 +250,6 @@ describe("substituteVars", () => {
 
   it("handles empty string", () => {
     expect(substituteVars("", { key: "val" })).toBe("");
-  });
-});
-
-// --- findUnresolvedPlaceholders ---
-
-describe("findUnresolvedPlaceholders", () => {
-  it("finds unresolved placeholders", () => {
-    expect(findUnresolvedPlaceholders("{{foo}} and {{bar}}")).toEqual(["foo", "bar"]);
-  });
-
-  it("returns empty array when none", () => {
-    expect(findUnresolvedPlaceholders("no placeholders here")).toEqual([]);
-  });
-
-  it("finds single placeholder", () => {
-    expect(findUnresolvedPlaceholders("value is {{key}}")).toEqual(["key"]);
-  });
-
-  it("handles empty string", () => {
-    expect(findUnresolvedPlaceholders("")).toEqual([]);
   });
 });
 
