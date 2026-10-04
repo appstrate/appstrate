@@ -40,6 +40,19 @@ import {
   type DiscoveredModule,
 } from "./modules.ts";
 import { makeTempDir, sweepOrphanedTempDirs } from "./temp-dirs.ts";
+import rootPackage from "../../package.json";
+
+// ─── Bun version ────────────────────────────────────────────
+// The suite is only known to pass on the Bun the repo declares
+// (`engines.bun`, the version CI and the Dockerfile pin). An older one fails
+// in ways that name nothing — on 1.3.11 the `apps/web` tests stop resolving
+// the `@/` alias — so it is refused here, by name.
+if (!Bun.semver.satisfies(Bun.version, rootPackage.engines.bun)) {
+  throw new Error(
+    `Bun ${Bun.version} does not satisfy this repo's \`engines.bun\` ` +
+      `(${rootPackage.engines.bun}). Run \`bun upgrade\`.`,
+  );
+}
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),

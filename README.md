@@ -111,7 +111,7 @@ Full recipe and flag reference: [`apps/cli/AGENTS.md`](./apps/cli/AGENTS.md). Se
 
 ## Quick Start (Development)
 
-Prerequisites: [Bun](https://bun.sh/) (v1.3+). Docker is optional.
+Prerequisites: [Bun](https://bun.sh/) (v1.3.14+). Docker is optional.
 
 ```sh
 git clone https://github.com/appstrate/appstrate.git
