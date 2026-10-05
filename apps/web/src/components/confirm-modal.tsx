@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
-import { IDLE_CONFIRM, confirmClick, confirmCommit } from "../lib/confirm-settle";
+import { trackConfirm } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
   /** Extra content under the description, for a decision that needs more than a sentence. */
@@ -21,7 +22,7 @@ interface ConfirmModalProps {
   /** The action cannot go ahead: the description says why, and only Cancel answers. */
   confirmDisabled?: boolean;
   /**
-   * Keep the dialog open once the confirmed action settles. Only for a dialog
+   * Keep the dialog open when the confirmed action is refused. Only for a dialog
    * that shows the refusal itself (the role deletion's « still held by N »):
    * every other one closes, since a refusal is reported by a toast and
    * confirming again would only be refused again.
@@ -43,18 +44,25 @@ export function ConfirmModal({
   children,
 }: ConfirmModalProps) {
   const { t } = useTranslation("common");
-  const record = useRef(IDLE_CONFIRM);
-
+  const mutationCache = useQueryClient().getMutationCache();
+  // A ref, not state: the second click of a double-click lands before any
+  // re-render could disable the button.
+  const confirming = useRef(false);
+  const latest = useRef({ open, keepOpenOnSettle, onClose });
   useEffect(() => {
-    const commit = confirmCommit(record.current, { isPending: !!isPending, open });
-    record.current = commit.record;
-    if (commit.settled && !keepOpenOnSettle) onClose();
-  }, [isPending, open, keepOpenOnSettle, onClose]);
+    latest.current = { open, keepOpenOnSettle, onClose };
+  });
 
   const confirm = () => {
-    const click = confirmClick(record.current);
-    record.current = click.record;
-    if (click.accepted) onConfirm();
+    if (confirming.current) return;
+    confirming.current = true;
+    trackConfirm(mutationCache, onConfirm, (refused) => {
+      confirming.current = false;
+      // A success is closed by the caller's `onSuccess`; a refusal is reported
+      // by a toast, and confirming again would only be refused again.
+      const now = latest.current;
+      if (refused && now.open && !now.keepOpenOnSettle) now.onClose();
+    });
   };
 
   return (

@@ -82,23 +82,37 @@ describe("noteStaleAuthority", () => {
       clock += AUTHORITY_REREAD_INTERVAL_MS - 1;
       noteStaleAuthority(request("/api/runs/run_x"), refusal(404));
 
-      // One re-read = the two listings.
-      expect(invalidate).toHaveBeenCalledTimes(2);
+      // One re-read = the two listings and the org detail.
+      expect(invalidate).toHaveBeenCalledTimes(3);
 
       clock += 1;
       noteStaleAuthority(request("/api/runs/run_x"), refusal(404));
-      expect(invalidate).toHaveBeenCalledTimes(4);
+      expect(invalidate).toHaveBeenCalledTimes(6);
     } finally {
       invalidate.mockRestore();
     }
   });
 
-  it("does not re-read a listing because that listing was refused", () => {
+  it("does not re-read because one of the re-read requests was refused", () => {
     noteStaleAuthority(request("/api/spaces"), refusal(403));
     noteStaleAuthority(request("/api/orgs"), refusal(403));
+    noteStaleAuthority(request("/api/orgs/org_1"), refusal(403));
 
     expect(isInvalidated(orgKeys.all)).toBe(false);
     expect(isInvalidated(SPACES_KEY)).toBe(false);
+  });
+
+  it("re-reads on a refused WRITE under those paths, and refreshes the member list", () => {
+    const ORG_DETAIL = ["get", "/api/orgs/{orgId}", { params: { path: { orgId: "org_1" } } }];
+    queryClient.setQueryData(ORG_DETAIL, { members: [] });
+
+    noteStaleAuthority(
+      new Request("http://localhost/api/orgs/org_1/members", { method: "POST" }),
+      refusal(403),
+    );
+
+    expect(isInvalidated(orgKeys.all)).toBe(true);
+    expect(isInvalidated(ORG_DETAIL)).toBe(true);
   });
 
   it("leaves other failures alone", () => {
