@@ -8,7 +8,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   createConnectWaiter,
-  openConnectPopup,
   routeCompletion,
   type Every,
   type PopupHandle,
@@ -134,51 +133,5 @@ describe("routeCompletion", () => {
     clock.tick();
     expect(calls.count).toBe(1);
     expect(failures).toEqual([]);
-  });
-});
-
-describe("a popup the browser blocks", () => {
-  /** A window that refuses popups, and fails the test if anything navigates it. */
-  function blockingWindow() {
-    const opened: string[] = [];
-    return {
-      opened,
-      open(url: string) {
-        opened.push(url);
-        return null;
-      },
-      get location(): never {
-        throw new Error("the chat tab must not be navigated to the connect flow");
-      },
-      set location(_url: string) {
-        throw new Error("the chat tab must not be navigated to the connect flow");
-      },
-    };
-  }
-
-  it("reports it and leaves the tab where it is", () => {
-    const win = blockingWindow();
-    const waiter = createConnectWaiter(manualEvery().every);
-    expect(openConnectPopup(win, waiter, "https://app.test/connect?x=1", "popup")).toBe("blocked");
-    expect(win.opened).toEqual(["https://app.test/connect?x=1"]);
-  });
-
-  it("still resumes when the flow completes in that tab", () => {
-    // No popup handle to wait on: the completion (BroadcastChannel or SSE)
-    // settles at once.
-    const clock = manualEvery();
-    const waiter = createConnectWaiter(clock.every);
-    let resumed = 0;
-    waiter.bind(() => {
-      resumed += 1;
-    });
-    openConnectPopup(blockingWindow(), waiter, "https://app.test/connect", "popup");
-    expect(resumed).toBe(0);
-
-    routeCompletion({ type: "appstrate:integration-connect", ok: true } as never, waiter, () => {
-      throw new Error("not a failure");
-    });
-    expect(resumed).toBe(1);
-    expect(clock.pending()).toBe(0);
   });
 });

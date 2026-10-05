@@ -16,7 +16,7 @@ export interface ClientTurnError {
 }
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
-/** Shape of a platform request id (`Request-Id`) — all a marker may carry besides the category. */
+/** The shape `classifyModelError` extracts from prose (`@appstrate/core/model-error`). */
 const REQUEST_ID = /^req_[A-Za-z0-9_-]+$/;
 
 /** assistant-ui hands a thrown Error over as a plain `{ code, message }`. */
@@ -58,11 +58,8 @@ export function clientTurnErrorForCategory(category: ChatTurnErrorCategory): Cli
  * metadata, or the transient stream marker), and only the category and the
  * request id survive the marker. Anything this path knew that those do not
  * would make one failed turn offer a retry on one render and refuse it on the
- * next.
- *
- * `turnRequestId` is the chat request's own `Request-Id`: the id a failed turn
- * is reported under when the upstream envelope named none, so every failure can
- * be matched to a server log line.
+ * next. `turnRequestId` (the chat request's `Request-Id`) is the id reported
+ * when the upstream envelope named none.
  */
 export function classifyClientTurnError(error: unknown, turnRequestId?: string): ClientTurnError {
   const message = messageFromError(error).trim();
@@ -81,7 +78,7 @@ export function clientTurnErrorMarker(error: ClientTurnError): string {
   return `${ERROR_MARKER_PREFIX}${error.category}${error.requestId ? `:${error.requestId}` : ""}`;
 }
 
-/** Recover the safe category (and the request id, when one rode along) from a transient stream marker. */
+/** Recover the safe category and request id from a transient stream marker. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
   const marker = messageFromError(value);
   if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
@@ -114,7 +111,7 @@ export function clientTurnErrorFromRateLimit(value: unknown): ClientTurnError | 
     : undefined;
 }
 
-/** The `request_id` every problem document the API answers with carries (RFC 9457 extension). */
+/** The `request_id` of a problem document. */
 export function problemRequestId(value: unknown): string | undefined {
   const requestId = problemFromError(value)?.request_id;
   return typeof requestId === "string" && REQUEST_ID.test(requestId) ? requestId : undefined;

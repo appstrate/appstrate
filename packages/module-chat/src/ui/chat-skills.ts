@@ -60,9 +60,8 @@ export function togglePinned(pinned: readonly string[], packageId: string): stri
 
 /**
  * A choosable picker row: the catalogue, then every pin missing from it
- * (`available: false`), so a dead pin can still be removed. The catalogue is
- * where a skill's name comes from, so a dead pin is named by the bare name of
- * its package id rather than by the raw `@scope/name`. Enforced skills are
+ * (`available: false`, named by its package's bare name), so a dead pin can
+ * still be removed. Enforced skills are
  * listed apart, locked.
  */
 export function skillPickerRows(

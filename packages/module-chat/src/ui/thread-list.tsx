@@ -91,7 +91,6 @@ export function ThreadList({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="flex-1 text-sm font-medium">Conversations</span>
-        {/* A new conversation is its first message: nothing to offer a reader. */}
         {canWrite && (
           <button
             type="button"
@@ -244,8 +243,7 @@ function ConversationRow({
               type="button"
               aria-label="Supprimer"
               title="Supprimer"
-              // The mobile drawer closes on any button click that reaches it,
-              // which would unmount this row and its dialog with it.
+              // The mobile drawer closes on a button click: it would unmount the dialog.
               onClick={(e) => {
                 e.stopPropagation();
                 setConfirmingDelete(true);
@@ -257,10 +255,7 @@ function ConversationRow({
           </div>
         )}
       </div>
-      {/* Deleting takes the messages and the conversation's files with it, bar
-          a file a run still consumes (`cleanupSessionFiles`): the text says so. */}
       <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
-        {/* A portal still bubbles through the React tree: same drawer, same reason. */}
         <DialogContent data-testid="chat-delete-confirm" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>{t("threads.delete.title")}</DialogTitle>

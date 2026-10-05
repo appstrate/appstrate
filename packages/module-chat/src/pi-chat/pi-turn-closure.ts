@@ -145,7 +145,7 @@ interface PiTurnClosure {
   chunks: UIMessageChunk[];
   /** The turn was cut by the wall-clock ceiling — the caller logs it. */
   deadlineReached: boolean;
-  /** What the client was told of the turn's error, when it carried one — the caller logs it. */
+  /** What the client was told — the caller logs it. */
   clientError?: ClientTurnError;
 }
 
@@ -178,7 +178,6 @@ export function closePiTurn(input: {
   modelId: string;
   /** Its display name frozen at write time — never resolved back into a model. */
   modelLabel: string;
-  /** The chat request's `Request-Id`, reported with an error that named none of its own. */
   requestId?: string;
   newId?: () => string;
 }): PiTurnClosure {

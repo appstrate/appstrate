@@ -71,7 +71,7 @@ export interface PiChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
-  /** The chat request's `Request-Id`: shown with a failed turn, and logged with it. */
+  /** The chat request's `Request-Id`. */
   requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
@@ -624,10 +624,7 @@ export function runPiChat(input: PiChatInput): Response {
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
         });
-        // The commonest failure — the provider answered with an error and the
-        // loop returned — throws nothing, so the catch below never sees it. Log
-        // it here under the id the user is shown: that id is only worth
-        // displaying if it finds this line. The raw text stays server-side.
+        // A provider-reported error throws nothing: log it under the id shown.
         if (closing.clientError) {
           logger.warn("chat turn failed on a model error", {
             requestId: closing.clientError.requestId,
@@ -691,7 +688,6 @@ export function runPiChat(input: PiChatInput): Response {
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
           });
-          // The id logged is the one the closure reports to the user.
           logger.error("Pi chat turn failed", {
             err: String(err),
             chatSessionId: input.chatSessionId,

@@ -412,8 +412,7 @@ interface ConversationProps {
  * the history load keeps `useChat`'s initial `messages` correct (the option is
  * read once at mount, not reactive). A not-yet-persisted conversation is
  * known-empty, so we skip the GET entirely (`enabled: false`) and seed `[]`
- * immediately — no speculative 404, no composer flash. A persisted one the
- * server does not know (404) renders `ConversationNotFound` instead.
+ * immediately — no speculative 404, no composer flash.
  *
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
@@ -489,14 +488,9 @@ const Conversation = memo(function Conversation({
       </div>
     );
   }
-  // The URL named a conversation this caller does not have (deleted, or someone
-  // else's). No runtime is mounted: a composer here would send under that id,
-  // and the server creates a session for any id it does not know.
-  //
-  // Only a conversation that was in the URL at mount can be "not found". One
-  // minted here has no row until its first turn is admitted, and the reconcile
-  // below writes its 404 into this same cache entry: a refused first send (rate
-  // limit, invalid body) must keep showing the message, its error and Retry.
+  // No composer on a 404: the server would create a session under that id.
+  // Mount-persisted only — the reconcile writes a refused first send's 404 into
+  // this same entry, and that conversation must keep its message and error.
   if (persistedAtMount && history.data === null) {
     return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
   }

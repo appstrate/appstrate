@@ -276,13 +276,8 @@ export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.
  * `updated_at` is stamped in the same statement: it is what lets the resume
  * route tell a freshly claimed turn from a marker whose producer died (see
- * {@link STALE_MARKER_MIN_AGE_MS}).
- *
- * Emits NO change signal of its own. Its one caller (`claimTurn`) writes the
- * user message in the next statement, and that write signals: the frame
- * connected clients refetch on already reads `generating: true`. A second frame
- * here was a second refetch of the conversation list, per open page, per turn.
- * If that write fails instead, `clearActiveStream` signals the marker's removal.
+ * {@link STALE_MARKER_MIN_AGE_MS}). Emits no signal: the caller's user-message
+ * write does; on its failure `clearActiveStream` does.
  */
 export async function setActiveStream(sessionId: string, streamId: string): Promise<void> {
   await db

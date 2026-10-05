@@ -50,7 +50,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
-import { createConnectWaiter, openConnectPopup, routeCompletion } from "./connect-waiter.ts";
+import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -144,8 +144,6 @@ export function OAuthConnectCard({
   const readsIntegration = can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
-  // The browser refused the popup: the button becomes a plain link, which no
-  // popup blocker stops.
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
   const resumed = useRef(false);
@@ -290,9 +288,12 @@ export function OAuthConnectCard({
     if (!authUrl) return;
     setErrMsg(null);
     setPhase("pending");
-    if (openConnectPopup(window, waiter, authUrl, popupName(packageId)) === "blocked") {
-      // Offer the flow as a link to a new tab instead; the BroadcastChannel +
-      // SSE listeners above resume when it completes.
+    // Keep the opener (no `noopener`) so the callback can postMessage us back.
+    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
+    waiter.popupOpened(popup);
+    if (!popup) {
+      // Blocked. Never navigate THIS tab to the flow: the conversation that must
+      // resume lives here. A link to a new tab replaces the button instead.
       setPopupBlocked(true);
       setPhase("error");
       setErrMsg(t("connect.popupBlocked"));

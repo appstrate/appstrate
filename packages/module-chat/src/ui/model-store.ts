@@ -8,8 +8,7 @@
  * model; `activeModelId` is the OPEN conversation's model, seeded from its
  * newest turn that carries a model and overridden by a pick. The seed is a
  * pre-selection, not a lock — the server honours each turn's `X-Model-Id`.
- * Only a PICK is stored: the organization's default is read off the catalog
- * every time, so changing it reaches everyone who never chose a model.
+ * Only a pick is stored: the organization's default is read off the catalog.
  * INVARIANT: once the catalog is known, the selection is always a live model,
  * whichever of catalog and seed lands first.
  * Generation settings are ONE global preference, pruned only against the
@@ -32,13 +31,11 @@ import {
 } from "@appstrate/core/model-generation";
 import { isModelLive } from "../model-liveness.ts";
 
-// Holds a PICK only: the organization's default is never written here.
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
 
-/** The user's own pick, as stored; `null` = none, the organization's default applies. */
+/** The user's own pick; `null` = none. */
 let cache: string | null = typeof localStorage === "undefined" ? null : localStorage.getItem(KEY);
-/** The organization's default among the live catalog models; never stored. */
 let orgDefaultModelId: string | null = null;
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
@@ -148,7 +145,6 @@ export function setModelCatalog(
   orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;
 
   if (activeModelId !== null && !liveModelIds.has(activeModelId)) activeModelId = null;
-  // A pick that is gone is no pick: back to the organization's default.
   if (cache !== null && !liveModelIds.has(cache)) storePick(null);
 
   const reconciled = reconcileModelGenerationSettings(generationCache, defaultCapabilities());

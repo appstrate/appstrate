@@ -51,10 +51,8 @@ const TURN_ERROR_KEY = {
 } as const;
 
 /**
- * Where a failure only an administrator can clear is fixed. Whoever holds
- * EVERY permission listed gets the link — the one the fix takes, and the one
- * the page itself is reached with; anyone else is sent to an administrator.
- * Plain paths: the module never imports the router.
+ * Where an administrator fixes a failure. The link needs EVERY permission: the
+ * fix's and the page's. Plain paths: the module never imports the router.
  */
 const FIX = {
   billing: {
@@ -69,11 +67,7 @@ const FIX = {
   },
 } as const;
 
-/**
- * A failure with a fix: `text` speaks to whoever can apply it. `memberText` is
- * the whole sentence for a reader who cannot, when `text` tells them to do the
- * fix; without one, `text` states a fact and "contact an administrator" follows.
- */
+/** `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for. */
 interface Fixable {
   text: string;
   memberText?: string;
@@ -111,7 +105,6 @@ interface TurnErrorState {
   action?: { label: string; href: string };
 }
 
-/** The sentence, plus the way out the reader's grants allow. */
 function withFix(
   { text, memberText, fix }: Fixable,
   t: ChatTranslate,
@@ -123,25 +116,18 @@ function withFix(
   return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
 }
 
-/**
- * A classified model failure as rendered. A dead credential is the one class
- * retrying cannot clear — so instead of a retry it names where it is fixed.
- */
+/** A dead credential cannot be retried: it names where it is fixed instead. */
 function classifiedState(
-  error: ClientTurnError,
+  category: ClientTurnError["category"],
   t: ChatTranslate,
   can: ChatCan,
 ): Pick<TurnErrorState, "text" | "action"> {
-  return error.category === "credential_unavailable"
+  return category === "credential_unavailable"
     ? withFix(DEAD_CREDENTIAL, t, can)
-    : { text: t(TURN_ERROR_KEY[error.category]) };
+    : { text: t(TURN_ERROR_KEY[category]) };
 }
 
-/**
- * Did this turn fail? Errored outright, or cut by the wall-clock ceiling while
- * it was failing. A deadline with no cause is not a failure: nothing failed,
- * the turn ran out of clock, and its notice already says so.
- */
+/** Errored outright, or cut by the deadline while failing (see `turnErrorState`). */
 export function turnFailed(turn: AppstrateTurnMetadata | null): turn is AppstrateTurnMetadata {
   return (
     turn?.finishReason === "error" ||
@@ -180,20 +166,13 @@ export function turnErrorState(
   // was cut mid-work. Hence the category is required for that branch, while the
   // `"error"` branch degrades a category-less turn to `unknown`.
   if (turnFailed(turn)) {
-    // `errorCategory` is OPTIONAL on the persisted shape — it is stamped only
-    // on a turn that carried an error, so the type forces a default here and
-    // the compiler rejects the bare index. Not a legacy accommodation: the
-    // `"deadline"` disjunct above has already proved it present, but a
-    // disjunction narrows nothing, and the metadata is read back out of
-    // unvalidated JSONB either way.
-    const category = turn.errorCategory ?? "unknown";
-    // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
-    // whose cause was rate limiting is retryable, one whose credential is
-    // dead is not. Read the persisted verdict either way.
-    const retryable = turn.errorRetryable !== false;
     return {
-      ...classifiedState({ category, retryable }, t, can),
-      retryable,
+      // Optional on the persisted shape (unvalidated JSONB): default it.
+      ...classifiedState(turn.errorCategory ?? "unknown", t, can),
+      // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
+      // whose cause was rate limiting is retryable, one whose credential is
+      // dead is not. Read the persisted verdict either way.
+      retryable: turn.errorRetryable !== false,
       requestId: turn.requestId,
     };
   }
@@ -205,11 +184,13 @@ export function turnErrorState(
     // `code` we localize here. A refusal names an action the user must take, so
     // retrying cannot clear it.
     const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromRateLimit(err);
-    // The marker carries the turn's request id; a refused request carries its
-    // own in the problem document.
     const requestId = classified?.requestId ?? problemRequestId(err);
     if (classified) {
-      return { ...classifiedState(classified, t, can), retryable: classified.retryable, requestId };
+      return {
+        ...classifiedState(classified.category, t, can),
+        retryable: classified.retryable,
+        requestId,
+      };
     }
     const code = refusalCode(err);
     const refusal =

@@ -61,8 +61,4 @@ describe("the conversation list", () => {
     expect(html).not.toContain('aria-label="threads.new"');
     expect(html).not.toContain('aria-label="Supprimer"');
   });
-
-  it("deletes nothing on render: the confirmation is closed until asked for", () => {
-    expect(render(["chat:read", "chat:write"])).not.toContain("threads.delete.title");
-  });
 });

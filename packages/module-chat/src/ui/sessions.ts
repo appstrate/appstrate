@@ -166,9 +166,7 @@ interface SessionHistory {
 /**
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
  * row), so we reconstruct `{ id, ...content }`. `null` when the caller has no
- * such conversation (deleted, or someone else's — the route answers 404 for
- * both): the page must say so rather than offer a composer, whose first send
- * would re-create the session under the dead id.
+ * such conversation (the route's 404).
  */
 export async function loadHistory(
   getHeaders: GetHeaders | null | undefined,

@@ -10,7 +10,7 @@
   "threads.delete.title": "Supprimer cette conversation ?",
   "threads.delete.description": "« {{title}} », ses messages et ses fichiers seront définitivement supprimés. Un fichier encore utilisé par un run est conservé.",
   "conversation.notFound.title": "Conversation introuvable",
-  "conversation.notFound.hint": "Elle a été supprimée, ou elle appartient à un autre compte ou à un autre espace.",
+  "conversation.notFound.hint": "Elle n'existe pas ou plus, ou elle appartient à un autre compte ou à un autre espace.",
   "context.label": "Contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",
   "context.loading": "Chargement du contexte…",

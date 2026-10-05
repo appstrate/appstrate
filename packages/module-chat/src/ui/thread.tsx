@@ -442,16 +442,13 @@ function TurnModelBadge() {
   const label = useAuiState((s) => turnModelLabel(s.message));
   const sentenceKey = useAuiState((s) => turnModelSentenceKey(s.message));
   if (label === null) return null;
-  const answeredBy = t(sentenceKey, { model: label });
+  const sentence = t(sentenceKey, { model: label });
   return (
     // `min-w-0` lets `truncate` shrink inside the flex row. Assistive tech reads
     // the full sentence: a bare model name says nothing out of context.
-    <span
-      className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs"
-      title={answeredBy}
-    >
+    <span className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs" title={sentence}>
       <span aria-hidden="true">{label}</span>
-      <span className="sr-only">{answeredBy}</span>
+      <span className="sr-only">{sentence}</span>
     </span>
   );
 }

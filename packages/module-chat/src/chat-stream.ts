@@ -666,7 +666,7 @@ export async function handleChatStream(
         orgId,
         userId: user.id,
         chatSessionId: meteringSessionId,
-        ...(requestId ? { requestId } : {}),
+        requestId,
         messages,
         system,
         generation: generationSettings,
