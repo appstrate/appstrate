@@ -50,12 +50,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
-import {
-  BLOCKED_POPUP_LINK,
-  createConnectWaiter,
-  openConnectPopup,
-  routeCompletion,
-} from "./connect-waiter.ts";
+import { createConnectWaiter, openConnectPopup, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -346,7 +341,7 @@ export function OAuthConnectCard({
           <>
             {popupBlocked ? (
               <Button asChild className="shrink-0">
-                <a href={authUrl} {...BLOCKED_POPUP_LINK}>
+                <a href={authUrl} target="_blank" rel="noopener noreferrer">
                   {t("connect.openInTab")}
                 </a>
               </Button>

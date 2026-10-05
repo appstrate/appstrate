@@ -80,8 +80,9 @@ export function createConnectWaiter(every: Every = everyInterval): ConnectWaiter
  * `"blocked"` when the browser refused the popup — and does nothing else then:
  * the opener's own tab must never be sent to the flow, because the conversation
  * that has to resume lives in it, and a tab that left has no listener left. The
- * card offers {@link BLOCKED_POPUP_LINK} instead; with no popup handle, the
- * waiter settles the moment a completion arrives.
+ * card offers a plain link to a new tab instead (a user's click on one is not a
+ * popup, so nothing blocks it); with no popup handle, the waiter settles the
+ * moment a completion arrives.
  */
 export function openConnectPopup(
   opener: { open(url: string, target: string, features: string): PopupHandle | null },
@@ -94,9 +95,6 @@ export function openConnectPopup(
   waiter.popupOpened(popup);
   return popup ? "opened" : "blocked";
 }
-
-/** A plain link to a new tab: a user's click on one is not a popup, so nothing blocks it. */
-export const BLOCKED_POPUP_LINK = { target: "_blank", rel: "noopener noreferrer" } as const;
 
 /**
  * A failure reaches `fail` at once, popup open or not, and leaves the waiter

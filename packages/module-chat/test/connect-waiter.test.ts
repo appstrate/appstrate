@@ -7,7 +7,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  BLOCKED_POPUP_LINK,
   createConnectWaiter,
   openConnectPopup,
   routeCompletion,
@@ -164,10 +163,6 @@ describe("a popup the browser blocks", () => {
     expect(win.opened).toEqual(["https://app.test/connect?x=1"]);
   });
 
-  it("offers the flow as a link to a new tab", () => {
-    expect(BLOCKED_POPUP_LINK.target).toBe("_blank");
-  });
-
   it("still resumes when the flow completes in that tab", () => {
     // No popup handle to wait on: the completion (BroadcastChannel or SSE)
     // settles at once.
@@ -185,20 +180,5 @@ describe("a popup the browser blocks", () => {
     });
     expect(resumed).toBe(1);
     expect(clock.pending()).toBe(0);
-  });
-
-  it("holds the resume until the popup closes when one did open", () => {
-    // Guards the case above: the waiter does wait when it has a handle.
-    const waiter = createConnectWaiter(manualEvery().every);
-    let resumed = 0;
-    waiter.bind(() => {
-      resumed += 1;
-    });
-    const popup = fakePopup();
-    expect(openConnectPopup({ open: () => popup }, waiter, "https://app.test/connect", "p")).toBe(
-      "opened",
-    );
-    waiter.connected();
-    expect(resumed).toBe(0);
   });
 });

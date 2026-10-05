@@ -32,8 +32,7 @@ import {
 } from "@appstrate/core/model-generation";
 import { isModelLive } from "../model-liveness.ts";
 
-// Holds PICKS only. `appstrate.chat.model`, its predecessor, also held the
-// organization's default written on the user's behalf, so it is not read.
+// Holds a PICK only: the organization's default is never written here.
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
 

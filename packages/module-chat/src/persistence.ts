@@ -433,7 +433,7 @@ const TITLE_BOUNDARY_FLOOR = 30;
  * (a short word, then a long unbroken token such as a URL), where a hard cut
  * keeps more of the message than the boundary would.
  */
-function titleFromText(text: string): string | null {
+export function titleFromText(text: string): string | null {
   if (!text) return null;
   if (text.length <= TITLE_MAX) return toPgSafe(text);
   const head = text.slice(0, TITLE_HEAD);
