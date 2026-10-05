@@ -344,7 +344,7 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
 
 /**
  * The adapter feeding `executeApiCall` (#1627): the list the platform renders for the connection
- * decides what matches; only the DECLARED list pins the SSRF gate or shares cookies.
+ * decides what matches; only the DECLARED list shares cookies or can skip the SSRF gate.
  */
 describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declared authorized_uris", () => {
   function run(
@@ -407,7 +407,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
 
   it.each([
     [["{$credential.site_url}/**"], { site_url: "https://169.254.169.254" }, "{{site_url}}/latest"],
-    [["https://{$credential.host}/**"], { host: "10.0.0.5" }, "https://{{host}}/admin"],
+    [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
   ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
     const { call, hits } = run(uris, fields);
     expect(await call(target)).toMatchObject({ ok: false, status: 403 });
@@ -417,7 +417,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
   it("runs the DNS rebind check on a rendered host", async () => {
     const { call, hits } = run(
       ["https://{$credential.host}/**"],
-      { host: "intranet.corp.example" },
+      { host: "intranet.corp" },
       async () => ["10.0.0.5"],
     );
     expect((await call("https://{{host}}/x")).ok).toBe(false);

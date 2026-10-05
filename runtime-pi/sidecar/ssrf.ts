@@ -24,11 +24,15 @@ import { isBlockedUrl } from "@appstrate/core/ssrf";
  * platform-side checks and then fails opaquely here at run time. Empty / unset
  * ⇒ nothing is exempt (the secure default).
  *
- * Scope is deliberate: this allowlist relaxes egress for operator-configured
- * upstreams — the LLM baseUrl gate (`/llm/*`) and the remote-MCP client boot
- * (`integrations-boot.ts`) — and for an `api_call` target (`credential-proxy.ts`),
- * as on the platform credential proxy. It is intentionally NOT consulted by
- * the MITM / transparent / egress listeners, which a runner drives directly.
+ * Scope is deliberate: this allowlist relaxes egress ONLY for operator-
+ * configured upstreams — the LLM baseUrl gate (`/llm/*`) and the remote-MCP
+ * client boot (`integrations-boot.ts`) — and, for an `api_call`, for a host
+ * the integration's manifest also names literally (`credential-proxy.ts`): the
+ * manifest alone never opens the operator's network. It is intentionally NOT
+ * consulted by the MITM / transparent / egress listeners, whose targets are
+ * agent- or manifest-chosen rather than operator-trusted; relaxing the
+ * blocklist there would let an agent-supplied URL reach an internal host the
+ * operator never vouched for.
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
   (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")

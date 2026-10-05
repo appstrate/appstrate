@@ -37,15 +37,15 @@ describe("sidecar runtime deps — api_call transport", () => {
       {
         integrationId: "@appstrate/test",
         connectionId: "conn-1",
-        targetUrl: "https://pin.example.com/v1/me",
+        targetUrl: "https://api.example.com/v1/me",
         method: "GET",
         callerHeaders: {},
         body: { kind: "none" },
       },
       {
         ...productionDeps().proxyDeps,
-        // Not `api.example.com`: the test preload lists it in EGRESS_ALLOW_INTERNAL_HOSTS, and a
-        // trusted host skips the SSRF gate, and with it the pin.
+        // A glob host: `api.example.com` named literally would skip the SSRF gate (the test
+        // preload lists it in EGRESS_ALLOW_INTERNAL_HOSTS), and with it the pin.
         declaredUris: ["https://*.example.com/**"],
         resolveHost: async () => ["203.0.113.9"],
         fetchCredentials: async () => ({
@@ -59,6 +59,6 @@ describe("sidecar runtime deps — api_call transport", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(seen).toEqual([{ url: "https://203.0.113.9/v1/me", host: "pin.example.com" }]);
+    expect(seen).toEqual([{ url: "https://203.0.113.9/v1/me", host: "api.example.com" }]);
   });
 });

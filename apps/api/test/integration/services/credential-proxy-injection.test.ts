@@ -340,6 +340,55 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(connection?.needsReconnection).toBe(false);
   });
 
+  // `intranet.corp` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+  it.each([
+    ["names it literally", "https://intranet.corp/**", true],
+    ["takes it from the connection", "https://{$credential.host}/**", false],
+  ])(
+    "reaches an operator-listed internal host only when authorized_uris %s",
+    async (_label, pattern, reached) => {
+      const packageId = `@cpinjectorg/internal-${reached ? "literal" : "rendered"}`;
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({
+          name: packageId,
+          displayName: "Internal",
+          description: "Internal API",
+          auths: {
+            api: {
+              type: "api_key",
+              authorizedUris: [pattern],
+              credentialFields: ["api_key", "host"],
+              requiredCredentialFields: ["api_key", "host"],
+              delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, packageId, "api", { api_key: "k", host: "intranet.corp" });
+
+      let sent = 0;
+      const call = proxyCall({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: "GET",
+        target: "https://intranet.corp/api/x",
+        headers: {},
+        fetch: (() => {
+          sent++;
+          return Promise.resolve(new Response("{}"));
+        }) as unknown as typeof fetch,
+        resolveHost: async () => ["10.0.0.5"],
+      });
+
+      if (reached) expect((await call).status).toBe(200);
+      else await expect(call).rejects.toMatchObject({ code: "blocked_target" });
+      expect(sent).toBe(reached ? 1 : 0);
+    },
+  );
+
   it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
     await seedProxyIntegration(

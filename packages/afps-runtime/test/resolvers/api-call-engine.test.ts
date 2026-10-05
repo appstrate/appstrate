@@ -3,7 +3,7 @@
 /**
  * `fetchApiCall` — the outbound half every api_call path shares (platform
  * proxy, sidecar, local CLI): the initial-target gate (allowlist + SSRF + DNS
- * rebind, literal declared hosts exempt when the path trusts them), the
+ * rebind, a literal declared host exempt when its network's operator allows it), the
  * credential rule across redirects, the address pin and the deadline.
  */
 
@@ -40,6 +40,8 @@ async function gate(
       credentialHeaders: [],
       integrationId: "i",
       fetchFn,
+      // The operator half granted, unless a test withholds it: the manifest half is under test.
+      internalHost: () => true,
       ...opts,
       credentialFields: opts.credentialFields ?? {},
       targetHost: opts.targetHost ?? new URL(url).hostname,
@@ -67,7 +69,7 @@ describe("fetchApiCall — a transport error", () => {
       declaredUris: [],
       allowAllUris: true,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       fetchFn: (async () => {
         throw thrown;
@@ -114,7 +116,7 @@ describe("redirect loop error", () => {
       declaredUris: ["https://api.acme.com/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       resolveHost: publicResolver,
       targetHost: "api.acme.com",
@@ -221,7 +223,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(err?.kind).toBe("ssrf");
   });
 
-  it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
+  it("a literal host the operator allows skips the SSRF gate", async () => {
     const resolveHost = mock(internalResolver);
     const err = await gate("https://intranet.corp/api", {
       authorizedUris: ["https://intranet.corp/**"],
@@ -232,7 +234,7 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(resolveHost).not.toHaveBeenCalled();
   });
 
-  it("under allow_all_uris no declared host is exempt by default: the caller picks the host", async () => {
+  it("under allow_all_uris no declared host is exempt: the caller picks the host", async () => {
     const err = await gate("https://intranet.corp/api", {
       allowAllUris: true,
       declaredUris: ["https://intranet.corp/**"],
@@ -241,23 +243,61 @@ describe("fetchApiCall — initial-target gate per branch", () => {
     expect(err?.kind).toBe("ssrf");
   });
 
-  it("a path that does not trust declared hosts keeps them behind the SSRF gate", async () => {
+  it("a literal host the operator does not allow stays behind the SSRF gate", async () => {
     const err = await gate("https://intranet.corp/api", {
       authorizedUris: ["https://intranet.corp/**"],
       declaredUris: ["https://intranet.corp/**"],
-      trustedHost: () => false,
+      internalHost: () => false,
       resolveHost: internalResolver,
     });
     expect(err?.kind).toBe("ssrf");
   });
 
-  it("an operator-trusted host skips the SSRF gate", async () => {
-    const err = await gate("https://idp.internal/x", {
-      allowAllUris: true,
-      trustedHost: (host) => host === "idp.internal",
+  it("a host the operator allows is still gated unless the manifest names it literally", async () => {
+    const operator = { internalHost: (host: string) => host === "idp.internal" };
+    const cases: Array<Partial<FetchApiCallOptions>> = [
+      { allowAllUris: true },
+      { allowAllUris: true, declaredUris: ["https://idp.internal/**"] },
+      { authorizedUris: ["https://*.internal/**"], declaredUris: ["https://*.internal/**"] },
+      {
+        authorizedUris: ["https://idp.internal/**"],
+        declaredUris: ["https://{$credential.host}/**"],
+      },
+    ];
+    for (const branch of cases) {
+      const err = await gate("https://idp.internal/x", {
+        ...operator,
+        ...branch,
+        resolveHost: internalResolver,
+      });
+      expect(err?.kind).toBe("ssrf");
+    }
+    const named = await gate("https://idp.internal/x", {
+      ...operator,
+      authorizedUris: ["https://idp.internal/**"],
+      declaredUris: ["https://idp.internal/**"],
       resolveHost: internalResolver,
     });
-    expect(err).toBeNull();
+    expect(named).toBeNull();
+  });
+
+  it("a redirect to a host the operator allows is gated unless the manifest names it", async () => {
+    const send = (declaredUris: string[]) => {
+      const fetchFn = mock(async (url: string | URL) =>
+        String(url).startsWith("https://api.example/")
+          ? new Response(null, { status: 302, headers: { location: "https://idp.internal/x" } })
+          : new Response("internal"),
+      ) as unknown as typeof fetch;
+      return gate("https://api.example/start", {
+        authorizedUris: declaredUris,
+        declaredUris,
+        internalHost: (host) => host === "idp.internal",
+        fetchFn,
+        resolveHost: async (host) => (host === "idp.internal" ? ["10.0.0.5"] : ["203.0.113.7"]),
+      });
+    };
+    expect((await send(["https://api.example/**", "https://*.internal/**"]))?.kind).toBe("ssrf");
+    expect(await send(["https://api.example/**", "https://idp.internal/**"])).toBeNull();
   });
 
   it("a host rendered from a connection value is never pinned (SSRF gate applies)", async () => {
@@ -389,7 +429,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       ...policy,
       declaredUris: policy.authorizedUris,
       credentialHeaders: ["Authorization", "X-Api-Key"],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -438,7 +478,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       declaredUris: ["https://api.example.com/**", "https://gone.test/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -462,7 +502,7 @@ describe("fetchApiCall — credentials across a redirect", () => {
       declaredUris: ["https://api.example.com/**", "https://x.example/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -494,7 +534,7 @@ describe("fetchApiCall — transport", () => {
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -519,7 +559,7 @@ describe("fetchApiCall — transport", () => {
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaders: ["X-Api-Key"],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -598,6 +638,7 @@ describe("fetchApiCall — transport", () => {
           duplex: "half",
         } as RequestInit,
         bodyLength: payload.length,
+        internalHost: () => false,
         authorizedUris: ["https://api.example.com/**"],
         declaredUris: ["https://api.example.com/**"],
         allowAllUris: false,
@@ -631,7 +672,7 @@ describe("fetchApiCall — transport", () => {
       declaredUris: [],
       allowAllUris: true,
       credentialHeaders: [],
-      trustedHost: () => false,
+      internalHost: () => false,
       integrationId: "i",
       targetHost: "api.example.com",
       credentialFields: {},
@@ -676,6 +717,7 @@ describe("fetchApiCall — a header value that is no HTTP field value", () => {
       declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaders: ["X-Api-Key"],
+      internalHost: () => false,
       integrationId: "i",
       fetchFn: fetchFn as unknown as typeof fetch,
       resolveHost: publicResolver,

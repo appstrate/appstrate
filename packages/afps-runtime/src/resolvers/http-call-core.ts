@@ -1705,7 +1705,8 @@ export function matchesAuthorizedUriSpec(pattern: string, target: string): boole
 
 /**
  * Whether an entry names the URL's host literally (no glob or template; port and a globbed scheme
- * aside): only then is an internal address behind it declared topology, exempt from the SSRF gate.
+ * aside): only then can an internal address behind it skip the SSRF gate, and only when the
+ * operator of the network allows that host too (`fetchApiCall`'s `internalHost`).
  */
 export function hostLiterallyAllowlisted(url: string, specs: readonly string[]): boolean {
   let host: string;

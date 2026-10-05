@@ -17,8 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `API_CALL_TIMEOUT_MS` combined with the caller's signal, keeps the
   credential across a redirect only to an origin the allowlist names (never
   https→http), and refuses every target when there is no allowlist and no
-  `allow_all_uris`. `trustedHost` is optional: omitted, the hosts the declared
-  allowlist names literally skip the SSRF gate (none under `allow_all_uris`).
+  `allow_all_uris`. `internalHost` is required: a host skips the SSRF gate
+  only when it accepts the host AND the declared allowlist names that host
+  literally, never under `allow_all_uris` (#1657). There is no default: each
+  caller says who owns the network the call leaves from.
   It forwards only end-to-end caller headers: a caller's `Host`, the
   hop-by-hop headers (and any header `Connection` names, except a credential
   header) and `Content-Length` are dropped.

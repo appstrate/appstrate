@@ -8,14 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **An integration calling an internal API from a run needs its host in
-  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). Until now an `api_call` made in a
-  run reached a private, loopback or link-local address when the
+- **An integration calling an internal API needs its host in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
+  reach a private, loopback or link-local address as soon as the
   integration's `authorized_uris` named the host literally. It is now refused
-  (403) unless the operator lists that host, as the platform credential proxy
-  already required. Before the deploy, list every org integration whose
-  `authorized_uris` names a host on your internal network and add those
-  hosts to the variable. The `afps` CLI is unchanged.
+  (403 `URL targets a blocked network range`; the sidecar logs
+  `Target refused (SSRF)` with the host) until the operator lists that host.
+  Before the deploy, add the internal hosts your integrations name; a listed
+  host is trusted by every egress site that reads the variable and by every
+  organization's integrations that name it. Through the platform credential
+  proxy the reverse tightening applies: a listed host is reached only when
+  `authorized_uris` names it literally, no longer through `allow_all_uris`,
+  a wildcard entry or a host taken from a connection value. A run's sidecar
+  now resolves every `api_call` host itself (a literal host used to skip the
+  lookup), so it needs working DNS even when it sends through `PROXY_URL`:
+  without it the call is a 502 `Target host could not be resolved`. The
+  local resolver of `appstrate run` is unchanged.
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
   lists every draft or version holding a template or runtime expression the
@@ -91,10 +99,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   redirects under one rule: an origin the `authorized_uris` allowlist names
   keeps the credential (Dropbox `api.` to `content.`), any other origin change
   strips it, and an https→http hop never carries it. Every hop is SSRF-checked
-  and connected to its DNS-validated address, except a trusted host: on the
-  sidecar and `appstrate run`, one the manifest's `authorized_uris` names
-  literally (by design); on the platform proxy, one
-  `EGRESS_ALLOW_INTERNAL_HOSTS` lists. One 30 s deadline bounds every
+  and connected to its DNS-validated address, except a host exempt from the
+  SSRF gate (#1657, under Security). One 30 s deadline bounds every
   call (`appstrate run` had none), and the sidecar answers a timeout 504 like
   the platform proxy (was 502). A streaming upload's redirect is returned
   unfollowed.
@@ -294,15 +300,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
-- **A run's `api_call` reaches an internal host only when the operator lists
-  it** (#1657). The sidecar skipped the SSRF gate for a host an
-  integration's `authorized_uris` named literally, so the author of a
-  manifest chose which addresses of the operator's network a run could
-  reach. The sidecar now exempts only `EGRESS_ALLOW_INTERNAL_HOSTS`, the rule
-  of the platform credential proxy; such a host is exempt under
-  `allow_all_uris` and for a host rendered from a connection value too, as
-  on the platform. The CLI resolver keeps the literal exemption: it runs on
-  the caller's own machine.
+- **An `api_call` reaches an internal host only when the manifest and the
+  operator both allow it** (#1657). The three paths disagreed: a run's
+  sidecar skipped the SSRF gate for any host `authorized_uris` named
+  literally, so a manifest's author chose which addresses of the operator's
+  network a run reached, and a public name made to resolve there passed
+  unchecked; the platform proxy skipped it for any
+  `EGRESS_ALLOW_INTERNAL_HOSTS` host, including one picked by the agent
+  under `allow_all_uris` or by a redirect. One rule now lives in
+  `fetchApiCall`: the manifest names the host literally (never
+  `allow_all_uris`, a wildcard or a rendered entry) AND the operator of the
+  network allows it — `EGRESS_ALLOW_INTERNAL_HOSTS` on the sidecar and the
+  platform proxy, always on the local resolver of `appstrate run`, where the
+  network is the caller's own. `internalHost` is required: a new caller
+  cannot inherit an exemption by omission.
 - **A credential no HTTP header can carry is refused, never quoted** (#1641).
   A stored or rendered credential holding CR, LF, NUL, another control
   character or a character above U+00FF made `Headers` throw an error quoting

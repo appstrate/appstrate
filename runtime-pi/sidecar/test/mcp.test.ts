@@ -488,7 +488,7 @@ describe("StreamableHTTPClientTransport interop (smoke test)", () => {
 describe("POST /mcp — api_call", () => {
   const integrationCreds = (token = "integ-tok-1") => ({
     credentials: { [PROXY_INJECTED_FIELD]: token },
-    authorizedUris: ["https://gmail.googleapis.com/**"],
+    authorizedUris: ["https://api.example.com/**"],
     allowAllUris: false,
     credentialHeaderName: "Authorization",
     credentialHeaderPrefix: "Bearer ",
@@ -504,7 +504,7 @@ describe("POST /mcp — api_call", () => {
           namespace: "gmail",
           integrationId: "@official/gmail",
           connectionId: "conn-1",
-          declaredUris: ["https://gmail.googleapis.com/**"],
+          declaredUris: ["https://api.example.com/**"],
           fetchCredentials: async () => integrationCreds(),
           refreshCredentials: async () => integrationCreds("integ-tok-2"),
         },
@@ -548,7 +548,7 @@ describe("POST /mcp — api_call", () => {
       method: "tools/call",
       params: {
         name: "gmail__api_call",
-        arguments: { target: "https://gmail.googleapis.com/v1/messages", method: "GET" },
+        arguments: { target: "https://api.example.com/v1/messages", method: "GET" },
       },
     });
     expect(res.status).toBe(200);
