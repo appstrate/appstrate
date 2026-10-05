@@ -21,11 +21,9 @@ import { useCanReach } from "../hooks/use-can-reach";
 import { FileListPanel, type PurposeFilter } from "../components/file-list-panel";
 
 /**
- * A single storage-usage line ("X used / Y limit") — the ORGANIZATION's quota,
- * every space and member included, so it says so: it does not add up to the
- * list below, which holds only the files this caller can see here. Carries a
- * warning when consumption has reached or passed the effective limit — at which
- * point new file writes are rejected (403) while existing files stay intact.
+ * A single storage-usage line ("X used / Y limit") with a conditional warning
+ * when consumption has reached or passed the effective limit — at which point
+ * new file writes are rejected (403) while existing files stay intact.
  * `effective_limit_bytes` null = unlimited: the line collapses to "X used".
  */
 function StorageUsageLine() {

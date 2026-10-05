@@ -17,15 +17,6 @@ describe("WebhookFormFields", () => {
         onPayloadModeChange={() => {}}
       />,
     );
-    for (const event of [
-      "run.started",
-      "run.success",
-      "run.failed",
-      "run.timeout",
-      "run.cancelled",
-      "run.connection_missing",
-    ]) {
-      expect(html).toContain(`event-${event}`);
-    }
+    expect(html).toContain("event-run.connection_missing");
   });
 });

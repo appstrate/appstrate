@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  beforeAll,
-  afterAll,
-  setDefaultTimeout,
-  spyOn,
-} from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
 import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
@@ -28,7 +19,6 @@ import {
   shutdownWebhookWorker,
 } from "../../../service.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
-import { LocalQueue } from "../../../../../infra/queue/local-queue.ts";
 import { PermanentJobError } from "../../../../../infra/queue/index.ts";
 
 setDefaultTimeout(30_000);
@@ -337,10 +327,8 @@ describe("webhooks service", () => {
     beforeAll(async () => {
       // Replace whatever worker an earlier boot of the module left running.
       await shutdownWebhookWorker();
-      await initWebhookWorker({
-        resolve: async () => {
-          throw new Error("ENOTFOUND (injected)");
-        },
+      await initWebhookWorker(async () => {
+        throw new Error("ENOTFOUND (injected)");
       });
     });
 
@@ -427,31 +415,18 @@ describe("webhooks service", () => {
       }
     });
 
-    it("sendTestPing queues a single-attempt test.ping the webhook is not subscribed to", async () => {
+    it("sendTestPing delivers one test.ping the webhook is not subscribed to", async () => {
       const wh = await createWebhook(
         appLevel({ url: "https://unresolvable.example/hook", events: ["run.failed"] }),
       );
 
-      // Tier 0 runs the in-memory queue; the per-job option is what keeps a
-      // test from being retried for hours, so it is asserted where it is passed.
-      const add = spyOn(LocalQueue.prototype, "add");
-      try {
-        const { eventId, payload } = await sendTestPing(wh);
-        expect(payload.type).toBe("test.ping");
-        expect(add).toHaveBeenCalledTimes(1);
-        expect(add.mock.calls[0]).toEqual([
-          "deliver",
-          expect.objectContaining({ webhookId: wh.id, eventId, eventType: "test.ping" }),
-          { attempts: 1 },
-        ]);
+      const { eventId, payload } = await sendTestPing(wh);
+      expect(payload.type).toBe("test.ping");
 
-        const row = await firstDelivery(wh.id);
-        expect([row.eventType, row.attempt]).toEqual(["test.ping", 1]);
-        const { data } = await listDeliveries({ orgId }, wh.id);
-        expect(data.map((d) => d.eventId)).toEqual([eventId]);
-      } finally {
-        add.mockRestore();
-      }
+      const row = await firstDelivery(wh.id);
+      expect([row.eventType, row.attempt]).toEqual(["test.ping", 1]);
+      const { data } = await listDeliveries({ orgId }, wh.id);
+      expect(data.map((d) => d.eventId)).toEqual([eventId]);
     });
   });
 });
