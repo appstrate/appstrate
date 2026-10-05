@@ -27,7 +27,7 @@ export function resolvesToUsableModel(
 }
 
 /** i18n key (namespace `agents`) of the reason a run of an agent cannot start. */
-export type AgentRunBlocker =
+type AgentRunBlocker =
   | "detail.titleNotActive"
   | "detail.titleEmptyPrompt"
   | "detail.titleMissingSkill"
