@@ -60,8 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `authorized_uris` is empty or an entry leaves the host to the caller
   (below).
 - **BREAKING:** `resolveHttpDelivery` renders `valueFrom.template` with
-  `renderCredentialTemplate`: `{$credential.<field>}` only, and a `{{field}}`
-  or any other `{$…}` in a delivery value throws.
+  `renderCredentialTemplate`: `{$credential.<field>}` only, and any other
+  `{$…}` in a delivery value throws.
 
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 

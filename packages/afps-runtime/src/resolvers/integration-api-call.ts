@@ -120,7 +120,7 @@ interface ApiCallIntegrationMeta {
   authType: string;
   /** DECLARED `authorized_uris`, unrendered: `{$credential.<field>}` entries render per connection. */
   authorizedUris: string[];
-  /** When true, the tool skips the URL allowlist (SSRF blocklist still applies upstream). */
+  /** When true, the call skips the URL allowlist (SSRF blocklist still applies upstream). */
   allowAllUris: boolean;
   /** `auths.{key}.delivery.http`, when declared. Drives header injection in local mode. */
   http?: HttpDeliveryConfig;

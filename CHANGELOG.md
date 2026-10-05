@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `SELECT 1 FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org') LIMIT 1;`
   `SELECT 1 FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL) LIMIT 1;`
   (#1641).
+- **A run's connection snapshot is parsed on read** (#1641): every element of
+  `runs.resolved_connections` must carry a string `label` and `accountId`,
+  which the platform has written since connections are labelled at creation.
+  This must return no row before the deploy; a run it names fails to load
+  until its snapshot elements are given both strings:
+  `SELECT r.id FROM runs r, jsonb_each(r.resolved_connections) e(k, v), jsonb_array_elements(CASE WHEN jsonb_typeof(v) = 'array' THEN v ELSE jsonb_build_array(v) END) el WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string' OR jsonb_typeof(el->'accountId') IS DISTINCT FROM 'string' LIMIT 1;`
 - **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
   `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
   every live ciphertext a retired kid wrote in the seven encrypted columns (a
@@ -224,8 +230,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `rejection_streak`). For an API-key integration connection that replaces a count since the last
   reconnect; a revoked BYOK model key, never flagged before, is counted the
   same way through the LLM proxy, which a 2xx resets, and stops inference
-  until it is re-entered. A BYOK rejection or success counts only against the
-  key the request sent; an OAuth2 subscription keeps its own counter, the
+  until it is re-entered. An OAuth2 subscription keeps its own counter, the
   refresh streak, which a successful refresh resets. The refresh `502` now
   reads `N/M consecutive upstream rejections before it is flagged`.
 - **An OAuth client update that sends a new `client_secret` without
