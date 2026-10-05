@@ -216,26 +216,48 @@ const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
 ]);
 
 /**
- * Strip caller-supplied headers that would forge sidecar control state.
- * Returns the sanitised map plus the list of names that were dropped
- * (used to surface the violation to the agent — silent stripping would
- * mask buggy MCP clients).
+ * The caller's `headers` argument as a header map, or why it is refused.
+ * The MCP SDK does not check `tools/call` arguments against the
+ * `inputSchema`, so a value may be a number, a boolean or an object, and a
+ * name may forge sidecar control state. Both are refused out loud — silent
+ * stripping would mask buggy MCP clients. A refusal names the header, never
+ * its value.
  */
-function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
-  headers: Record<string, string>;
-  dropped: string[];
-} {
-  if (!raw) return { headers: {}, dropped: [] };
-  const headers: Record<string, string> = {};
-  const dropped: string[] = [];
-  for (const [name, value] of Object.entries(raw)) {
-    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
-      dropped.push(name);
-      continue;
-    }
-    headers[name] = value;
+function readApiCallHeaders(
+  raw: unknown,
+): { ok: true; headers: Record<string, string> } | { ok: false; refusal: string } {
+  if (raw === undefined || raw === null) return { ok: true, headers: {} };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      ok: false,
+      refusal: "'headers' must be an object mapping header names to string values.",
+    };
   }
-  return { headers, dropped };
+  const headers: Record<string, string> = {};
+  const control: string[] = [];
+  const nonText: string[] = [];
+  for (const [name, value] of Object.entries(raw)) {
+    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) control.push(name);
+    else if (typeof value !== "string") nonText.push(name);
+    else headers[name] = value;
+  }
+  if (control.length > 0) {
+    return {
+      ok: false,
+      refusal:
+        `caller-supplied headers may not include sidecar-control names: ${control.join(", ")}. ` +
+        "Use the dedicated tool arguments (substituteBody, …) instead.",
+    };
+  }
+  if (nonText.length > 0) {
+    return {
+      ok: false,
+      refusal:
+        `header values must be strings, and these are not: ${nonText.join(", ")}. ` +
+        'Write a number or a boolean as a string ("5", "true").',
+    };
+  }
+  return { ok: true, headers };
 }
 
 /**
@@ -1019,7 +1041,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const args = rawArgs as {
         target: string;
         method?: string;
-        headers?: Record<string, string>;
+        headers?: unknown;
         // Untyped LLM input — a tag-less union of body shapes. Narrowed
         // by `resolveRequestBody` (via `in` checks, the right tool for
         // external data) into the internal discriminated body type.
@@ -1071,21 +1093,15 @@ function buildSidecarTools(options: MountMcpOptions): {
         };
       }
 
-      const { headers: callerHeaders, dropped } = sanitiseApiCallHeaders(args.headers);
-      if (dropped.length > 0) {
+      const readHeaders = readApiCallHeaders(args.headers);
+      if (!readHeaders.ok) {
         return {
-          content: [
-            {
-              type: "text",
-              text:
-                `${ctx.label}: caller-supplied headers may not include sidecar-control names: ` +
-                `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
-            },
-          ],
+          content: [{ type: "text", text: `${ctx.label}: ${readHeaders.refusal}` }],
           isError: true,
           _meta: API_CALL_PREFLIGHT_META,
         };
       }
+      const callerHeaders = readHeaders.headers;
 
       // Resolve the loosely-typed body argument into the internal
       // discriminated `ApiCallRequestBody`. All shape narrowing + the

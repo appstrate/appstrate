@@ -573,6 +573,52 @@ describe("POST /mcp — api_call", () => {
     expect(result.content[0]!.text).toContain("not in authorized_uris allowlist");
   });
 
+  // The SDK does not check `tools/call` arguments against the `inputSchema`.
+  for (const [what, headers, named] of [
+    ["a number", { "X-Count": 5 }, "X-Count"],
+    ["a boolean", { "X-Flag": true }, "X-Flag"],
+    ["null", { "X-Null": null }, "X-Null"],
+    ["an object", { "X-Obj": { a: 1 } }, "X-Obj"],
+    ["not an object", "X-Count: 5", "'headers'"],
+    ["an array", ["X-Count: 5"], "'headers'"],
+  ] as const) {
+    it(`refuses headers whose value is ${what} without calling upstream`, async () => {
+      const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+      const app = await makeApiCallApp({ fetchFn: fetchFn as unknown as typeof fetch });
+      const res = await rpc(app, {
+        method: "tools/call",
+        params: {
+          name: "gmail__api_call",
+          arguments: { target: "https://api.example.com/v1/messages", method: "GET", headers },
+        },
+      });
+      const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain(named);
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("refuses a sidecar-control header name without calling upstream", async () => {
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const app = await makeApiCallApp({ fetchFn: fetchFn as unknown as typeof fetch });
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "gmail__api_call",
+        arguments: {
+          target: "https://api.example.com/v1/messages",
+          method: "GET",
+          headers: { "X-Substitute-Body": "1" },
+        },
+      },
+    });
+    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("X-Substitute-Body");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("registers no api_call tool when no integration opts in", async () => {
     const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });

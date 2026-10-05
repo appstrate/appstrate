@@ -195,6 +195,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **In a run, an `api_call` whose `headers` are not text is refused with a
+  message the agent can act on** (#1670). A header value written as a number,
+  a boolean, `null` or an object (`"X-Count": 5`) raised a `TypeError` and
+  came back as a JSON-RPC internal error (-32603); it is now a tool error
+  naming the header, never its value. A `headers` argument that is a string
+  or an array was sent upstream as headers named `0`, `1`, …; it is refused
+  too. Nothing is sent in either case.
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in
