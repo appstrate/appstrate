@@ -250,6 +250,10 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.orgId);
+      // The answer names the role the member actually holds — it used to echo
+      // the invited one, which told the SPA (and the user) they were now admin.
+      expect(body.role).toBe("guest");
+      expect(body.permissions).not.toContain("members:invite");
 
       // Exactly one membership row, role unchanged, invitation consumed.
       await assertDbCount(

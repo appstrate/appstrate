@@ -25,6 +25,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { toast } from "sonner";
+import { hasFullOrgAccess } from "../../lib/org-role";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -258,6 +259,11 @@ export function OrgSettingsMembersPage() {
                   ),
                   revokesAccess(roleChange.from, roleChange.role)
                     ? t("orgSettings.demotionUnsharesConnections")
+                    : "",
+                  // A promotion deleted the explicit space roles (RBAC spec
+                  // §3.2), so the demotion restores none of them.
+                  hasFullOrgAccess(roleChange.from) && !hasFullOrgAccess(roleChange.role)
+                    ? t("orgSettings.demotionRestoresNoSpaceRole")
                     : "",
                 ]
                   .filter(Boolean)
