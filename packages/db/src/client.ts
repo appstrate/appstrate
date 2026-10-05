@@ -65,9 +65,14 @@ async function initPGlite(): Promise<Db> {
   const { client, unlisten } = instance;
 
   _pgliteClient = client;
-  _closeDb = () => {
+  _closeDb = async () => {
     pgliteInstances.delete(dataDir);
-    return client.close();
+    // Under the query mutex: `close()` takes no lock of its own, and tearing the
+    // WASM module down under a query still in flight never settles — a request
+    // served during shutdown was enough to leave the process to SIGKILL.
+    // Ready first: initialisation runs under that same mutex.
+    await client.waitReady;
+    await client.runExclusive(() => client.close());
   };
   _listenClient = {
     listen: async (channel, handler) => {

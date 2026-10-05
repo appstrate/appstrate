@@ -24,6 +24,8 @@ async function runChild(script: string): Promise<{ out: string; code: number; er
       env: { ...process.env, DATABASE_URL: "", PGLITE_DATA_DIR: dataDir },
       stdout: "pipe",
       stderr: "pipe",
+      // A child that never settles is the failure one of these cases exists for.
+      timeout: 20_000,
     });
     const [out, err, code] = await Promise.all([
       new Response(child.stdout).text(),
@@ -61,5 +63,21 @@ describe("PGlite client under bun --hot", () => {
        process.stdout.write(heard.join(","));`,
     );
     expect(result).toEqual({ out: "new", code: 0, err: "" });
+  }, 30_000);
+});
+
+describe("PGlite client shutdown", () => {
+  it("closes while a query is still in flight", async () => {
+    // Not awaited on purpose: the query is queued or running when `closeDb()`
+    // starts, as a request served during shutdown leaves one.
+    const result = await runChild(
+      `const a = await import("${client}");
+       await a.getPGliteClient().waitReady;
+       const pending = a.getPGliteClient().query("select 1").then(() => "served", () => "refused");
+       await a.closeDb();
+       process.stdout.write("closed," + (await pending));`,
+    );
+    expect(result.code).toBe(0);
+    expect(result.out).toStartWith("closed,");
   }, 30_000);
 });
