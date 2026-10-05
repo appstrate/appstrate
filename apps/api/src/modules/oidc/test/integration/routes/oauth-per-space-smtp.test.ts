@@ -277,4 +277,40 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
     expect(mails.length).toBeGreaterThanOrEqual(1);
     for (const m of mails) expect(m.source).toBe("per-space");
   });
+
+  it("reset-password (with per-space SMTP): the 'password changed' notice goes through the per-space transport", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: true });
+    const email = `changed-${Date.now()}@test.com`;
+    await getAuth().api.signUpEmail({
+      body: { email, password: "TestPassword123!", name: "R" },
+      asResponse: true,
+    });
+    await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.email, email));
+
+    const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
+    const forgot = await getCsrf(await app.request(`/api/oauth/forgot-password${qs}`));
+    await app.request(`/api/oauth/forgot-password${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: forgot.cookie },
+      body: `_csrf=${forgot.csrfToken}&email=${encodeURIComponent(email)}`,
+    });
+    // The emailed link is Better Auth's `/reset-password/<token>?callbackURL=…`.
+    const token = /\/reset-password\/([^?"&]+)\?/.exec(mails.at(-1)!.html)![1]!;
+    mails = [];
+
+    const reset = await getCsrf(
+      await app.request(`/api/oauth/reset-password${qs}&token=${encodeURIComponent(token)}`),
+    );
+    const res = await app.request(`/api/oauth/reset-password${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: reset.cookie },
+      body: `_csrf=${reset.csrfToken}&token=${encodeURIComponent(token)}&password=BrandNewPassword456!&password_confirm=BrandNewPassword456!`,
+    });
+    expect(res.status).toBe(200);
+
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.subject).toBe("Votre mot de passe a été modifié");
+    expect(mails[0]!.to).toBe(email);
+    expect(mails[0]!.source).toBe("per-space");
+  });
 });
