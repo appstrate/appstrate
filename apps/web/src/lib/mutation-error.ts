@@ -66,7 +66,10 @@ export function refusalMessage(err: Refusal): string | null {
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
-  return i18n.t(key, { field: err.field ?? err.param ?? "", message, ns: "common" });
+  // A code emitted both with and without a field has a second sentence, `<key>_nofield`, so
+  // the first never renders an empty « ».
+  const field = err.field ?? err.param;
+  return i18n.t(key, { field, message, context: field ? undefined : "nofield", ns: "common" });
 }
 
 /** The `errors[]` items of a `validation_failed`: each one's own code names a refusal. */

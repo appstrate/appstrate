@@ -294,7 +294,7 @@ export type PackageZipErrorCode = (typeof PACKAGE_ZIP_ERROR_CODES)[number];
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
 export class PackageZipError extends Error {
   /**
-   * @param code - One of {@link PACKAGE_ZIP_ERROR_CODES}
+   * @param code - Error code; this module only ever throws {@link PACKAGE_ZIP_ERROR_CODES}
    * @param message - Human-readable error description
    * @param details - Optional structured error details (e.g. validation error list)
    * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising this
@@ -302,7 +302,7 @@ export class PackageZipError extends Error {
    *   `preserve-caught-error` cannot see custom classes, so this is on us.
    */
   constructor(
-    public code: PackageZipErrorCode,
+    public code: string,
     message: string,
     public details?: unknown,
     options?: ErrorOptions,
@@ -310,6 +310,16 @@ export class PackageZipError extends Error {
     super(message, options);
     this.name = "PackageZipError";
   }
+}
+
+/** This module's own throws, held to the exported list (the public constructor takes any string). */
+function zipError(
+  code: PackageZipErrorCode,
+  message: string,
+  details?: unknown,
+  options?: ErrorOptions,
+): PackageZipError {
+  return new PackageZipError(code, message, details, options);
 }
 
 /** Canonical compressed-size ceiling for one author-supplied package archive. */
@@ -364,10 +374,7 @@ export function parsePackageZip(
   const opts: ParsePackageZipOptions = options ?? {};
   const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {
-    throw new PackageZipError(
-      "FILE_TOO_LARGE",
-      `ZIP exceeds maximum size of ${limit / 1024 / 1024} MB`,
-    );
+    throw zipError("FILE_TOO_LARGE", `ZIP exceeds maximum size of ${limit / 1024 / 1024} MB`);
   }
 
   // Zip bomb protection is now enforced DURING decompression (streaming budget)
@@ -394,13 +401,13 @@ export function parsePackageZip(
         // only uploader-controlled string `DecompressionLimitError` ever
         // interpolates is an archive entry name, and that belongs to
         // `file-too-large`, which lands on the ZIP_BOMB branch below.
-        throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
+        throw zipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
       }
       // Deliberately fixed. The budget verdicts already name themselves
       // completely — there is no decoder sentence to add — and their detail
       // CAN be an archive entry name (`file-too-large` passes `file.name`),
       // i.e. attacker-chosen text that would be echoed into a 400.
-      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit", undefined, {
+      throw zipError("ZIP_BOMB", "Decompressed size exceeds limit", undefined, {
         cause: err,
       });
     }
@@ -410,7 +417,7 @@ export function parsePackageZip(
     // renders `PackageZipError.message` into the 400 the uploader sees, so
     // "invalid zip data" vs "unexpected EOF" is the difference between a
     // fixable report and a shrug.
-    throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
+    throw zipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
   }
 
   // Strip single wrapper folder if present (e.g. ZIPs from macOS Finder)
@@ -420,7 +427,7 @@ export function parsePackageZip(
   const manifestBuffer = files["manifest.json"];
   const manifestText = manifestBuffer ? new TextDecoder().decode(manifestBuffer) : undefined;
   if (!manifestText) {
-    throw new PackageZipError("MISSING_MANIFEST", "manifest.json not found in ZIP");
+    throw zipError("MISSING_MANIFEST", "manifest.json not found in ZIP");
   }
 
   let manifestRaw: unknown;
@@ -430,7 +437,7 @@ export function parsePackageZip(
     // `PackageZipError` gained its `ErrorOptions` parameter for exactly this:
     // "is not valid JSON" is the same sentence for a truncated file, a BOM and
     // a trailing comma. The SyntaxError's offset is what tells them apart.
-    throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON", undefined, {
+    throw zipError("INVALID_MANIFEST", "manifest.json is not valid JSON", undefined, {
       cause: err,
     });
   }
@@ -440,7 +447,7 @@ export function parsePackageZip(
   });
   if (!validation.valid) {
     const detail = validation.errors.join("; ");
-    throw new PackageZipError(
+    throw zipError(
       "INVALID_MANIFEST",
       detail ? `Manifest validation failed: ${detail}` : "Manifest validation failed",
       validation.errors,
@@ -464,7 +471,7 @@ export function parsePackageZip(
   if (violation) {
     const code =
       violation.reason === "SKILL_MISSING_FRONTMATTER_NAME" ? "INVALID_CONTENT" : "MISSING_CONTENT";
-    throw new PackageZipError(code, violation.message);
+    throw zipError(code, violation.message);
   }
 
   // Extract primary content based on type. Companion-file presence is
@@ -502,7 +509,7 @@ export function parsePackageZip(
       break;
     }
     default:
-      throw new PackageZipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
+      throw zipError("INVALID_MANIFEST", `Unsupported package type: "${type}"`);
   }
 
   // Canonical AFPS identity, type-agnostic: AFPS (§3.4) lifted the

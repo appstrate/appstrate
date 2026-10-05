@@ -4,13 +4,16 @@
  * Refusal codes ↔ locale files, in both directions.
  *
  * What this suite can see of the API's codes, and no more:
- *   - the literal ones — `code: "…"`, `conflict("…")`, `gone("…")`, `error: "UPPER"`,
- *     `new GithubImportError("UPPER"` — read from the API SOURCE (comments stripped);
+ *   - the literal ones — `code: "…"`, `conflict("…")`, `gone("…")`,
+ *     `new GithubImportError("UPPER"` — read from the API SOURCE, plus the `error: "UPPER"`
+ *     of the modules that build a connection-test result;
  *   - the ones forwarded from an error class, through the runtime lists their modules export
  *     (`PACKAGE_ZIP_ERROR_CODES`, `PACKAGE_FILE_WRITE_ERROR_CODES`, `COMPANION_VIOLATION_REASONS`);
  *   - Better Auth's, checked against the installed package's own table.
- * A code assembled any other way (a ternary, a value from a third-party module) is invisible
+ * A code assembled any other way (a ternary, a lookup table, a third-party module) is invisible
  * unless it is named in `EMITTED_OUT_OF_SIGHT` — the guard narrows the gap, it does not close it.
+ * A code that only a comment names is counted too: it then needs a sentence or an exemption,
+ * which errs on the loud side.
  *
  * A visible code with no sentence in both locales fails, unless it is exempted in `NOT_SURFACED`
  * with the reason; an `apiError.*` key that matches no known code fails too.
@@ -51,22 +54,23 @@ const SOURCES = [
 ];
 const NOT_A_SOURCE = /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\//;
 
+/** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [
   /\bcode:\s*"([a-z][a-z0-9_]*)"/g,
-  /\b(?:conflict|gone)\(\s*"([a-z][a-z0-9_]*)"/g,
-  // The UPPER_SNAKE outcome of a connection test or a version check (`TestResult.error`, …).
-  /\berror:\s*"([A-Z][A-Z_]*)"/g,
+  // Either case: two `gone(…)` codes are UPPER_SNAKE on the wire.
+  /\b(?:conflict|gone)\(\s*"([A-Za-z][A-Za-z0-9_]*)"/g,
   // `POST /packages/import-github` forwards this class's code as the problem code.
   /\bnew GithubImportError\(\s*"([A-Z][A-Z_]*)"/g,
 ];
 
 /**
- * A code named in a comment is not an emitted code. Only comments that START a line are
- * removed: a `/*` met mid-line is as likely a glob or a route pattern inside a string.
+ * `TestResult.error`: the UPPER_SNAKE outcome of a connection test. Read only where a
+ * `TestResult` is built — the same `error: "X"` shape elsewhere is an internal result tag
+ * (`VERSION_NOT_HIGHER`, …) that never reaches the wire as a code.
  */
-function stripComments(source: string): string {
-  return source.replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, "").replace(/^[ \t]*\/\/.*$/gm, "");
-}
+const TEST_RESULT_PATTERN = /\berror:\s*"([A-Z][A-Z_]*)"/g;
+const BUILDS_TEST_RESULTS =
+  /^apps\/api\/src\/(lib\/network-error|services\/(org-models|org-proxies|model-providers\/)|routes\/(models|proxies|model-provider-credentials))/;
 
 /** Codes forwarded from an error class: the lists their modules export. */
 const FORWARDED = [
@@ -94,6 +98,22 @@ const BETTER_AUTH_CODES = [
   "CREDENTIAL_ACCOUNT_NOT_FOUND",
 ];
 
+/**
+ * The keys of `PROXY_PROBLEMS` (`apps/api/src/lib/proxy-status.ts`), picked by a lookup or a
+ * ternary. `invalid_request` is one of them too; it is a literal elsewhere.
+ */
+const PROXY_PROBLEM_CODES = [
+  "unauthorized_target",
+  "blocked_target",
+  "credential_exfiltration_refused",
+  "credential_not_found",
+  "credential_unusable",
+  "unresolved_placeholder",
+  "upstream_unresolvable",
+  "upstream_unreachable",
+  "upstream_timeout",
+];
+
 /** Codes no list and no literal can show. */
 const EMITTED_OUT_OF_SIGHT = [
   // The two `beforeUsage` refusals of `@appstrate/module-ee`, picked by a ternary.
@@ -109,6 +129,7 @@ const EMITTED_OUT_OF_SIGHT = [
   "invalid_union",
   "invalid_key",
   "invalid_element",
+  ...PROXY_PROBLEM_CODES,
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -153,6 +174,8 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
+  // The credential and LLM proxies answer an agent or an API client, never a dashboard screen.
+  ...PROXY_PROBLEM_CODES,
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",
@@ -165,8 +188,11 @@ async function literalCodes(): Promise<Set<string>> {
   for (const pattern of SOURCES) {
     for await (const file of new Bun.Glob(pattern).scan({ cwd: REPO_ROOT })) {
       if (NOT_A_SOURCE.test(file)) continue;
-      const source = stripComments(await Bun.file(join(REPO_ROOT, file)).text());
-      for (const re of CODE_PATTERNS) {
+      const source = await Bun.file(join(REPO_ROOT, file)).text();
+      const patterns = BUILDS_TEST_RESULTS.test(file)
+        ? [...CODE_PATTERNS, TEST_RESULT_PATTERN]
+        : CODE_PATTERNS;
+      for (const re of patterns) {
         for (const match of source.matchAll(re)) codes.add(match[1]!.toLowerCase());
       }
     }
@@ -198,12 +224,6 @@ describe("API refusal codes ↔ locale files", () => {
     expect(literal.has("repo_too_large")).toBe(true);
   });
 
-  it("ignores a code that only a comment names", () => {
-    expect(
-      stripComments('// code: "ghost_a"\n/* code: "ghost_b" */\nx("/api/*", { code: "real" })'),
-    ).toBe('\n\nx("/api/*", { code: "real" })');
-  });
-
   for (const lng of ["fr", "en"] as const) {
     it(`translates every surfaced code in ${lng}`, async () => {
       await i18n.changeLanguage(lng);
@@ -216,13 +236,19 @@ describe("API refusal codes ↔ locale files", () => {
   }
 
   it("keeps no exemption for a code the API stopped emitting", () => {
-    expect([...NOT_SURFACED].filter((code) => !literal.has(code))).toEqual([]);
+    expect([...NOT_SURFACED].filter((code) => !emitted.has(code))).toEqual([]);
+  });
+
+  it("lists only proxy codes `PROXY_PROBLEMS` still defines", async () => {
+    const source = await Bun.file(join(REPO_ROOT, "apps/api/src/lib/proxy-status.ts")).text();
+    expect(PROXY_PROBLEM_CODES.filter((code) => !source.includes(`\n  ${code}: {`))).toEqual([]);
   });
 
   it("keeps no sentence for a code nothing emits", () => {
     const orphans = Object.keys(fr)
       .filter((key) => key.startsWith("apiError."))
-      .map((key) => key.slice("apiError.".length))
+      // `<code>_nofield` is the same code's sentence for a refusal that names no field.
+      .map((key) => key.slice("apiError.".length).replace(/_nofield$/, ""))
       .filter((code) => !emitted.has(code))
       .sort();
     expect(orphans).toEqual([]);
@@ -287,6 +313,13 @@ describe("errorMessage", () => {
       "Champ « manifest.source.remote.url » : format invalide (Invalid URL) (+2 autres erreurs)",
     );
     expect(errorField(err)).toBe("manifest.source.remote.url");
+  });
+
+  it("drops the field clause of a code emitted without a field", async () => {
+    await i18n.changeLanguage("fr");
+    const err = await problem({ code: "invalid_input", detail: "age: must be number" });
+    expect(errorMessage(err)).toBe("Paramètres invalides : age: must be number");
+    expect(errorMessage(err)).not.toContain("«");
   });
 
   it("keeps the server's own summary when the item code has no sentence", async () => {
