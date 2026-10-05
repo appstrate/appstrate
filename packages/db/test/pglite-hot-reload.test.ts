@@ -67,17 +67,43 @@ describe("PGlite client under bun --hot", () => {
 });
 
 describe("PGlite client shutdown", () => {
-  it("closes while a query is still in flight", async () => {
-    // Not awaited on purpose: the query is queued or running when `closeDb()`
-    // starts, as a request served during shutdown leaves one.
+  it("serves a query already running, then closes", async () => {
+    // The query owns both mutexes before `closeDb()` is called (it is one
+    // macrotask ahead), so the close has to wait for it rather than tear the
+    // module down underneath — which never settled.
     const result = await runChild(
       `const a = await import("${client}");
-       await a.getPGliteClient().waitReady;
-       const pending = a.getPGliteClient().query("select 1").then(() => "served", () => "refused");
+       const pg = a.getPGliteClient();
+       await pg.waitReady;
+       const pending = pg.query("select 42 as n").then((r) => r.rows[0].n, (e) => "refused: " + e);
+       await new Promise((r) => setTimeout(r, 0));
        await a.closeDb();
        process.stdout.write("closed," + (await pending));`,
     );
-    expect(result.code).toBe(0);
-    expect(result.out).toStartWith("closed,");
+    expect(result).toEqual({ out: "closed,42", code: 0, err: "" });
+  }, 30_000);
+
+  it("lets a transaction in flight commit before closing", async () => {
+    // The close arrives between the transaction's two statements.
+    const result = await runChild(
+      `const a = await import("${client}");
+       const pg = a.getPGliteClient();
+       await pg.waitReady;
+       await pg.exec("create table t (i int)");
+       const order = [];
+       const tx = pg.transaction(async (tx) => {
+         await tx.query("insert into t values (1)");
+         await new Promise((r) => setTimeout(r, 200));
+         await tx.query("insert into t values (2)");
+         const { rows } = await tx.query("select count(*)::int as n from t");
+         order.push("tx:" + rows[0].n);
+       }).catch((e) => order.push("tx failed: " + e));
+       await new Promise((r) => setTimeout(r, 50));
+       await a.closeDb();
+       order.push("closed");
+       await tx;
+       process.stdout.write(order.join(","));`,
+    );
+    expect(result).toEqual({ out: "tx:2,closed", code: 0, err: "" });
   }, 30_000);
 });
