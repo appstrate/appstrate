@@ -12,11 +12,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { spaceLabel } from "../lib/space-label";
 
-/**
- * The space choices of a dropdown menu — the ONE list both space selectors (the
- * sidebar's and the space settings breadcrumb's) render, so they cannot disagree
- * on which space may be entered. "Mon espace" is pinned above the team spaces.
- */
+/** The ONE list both space selectors render, so they cannot disagree on what may be entered. */
 export function SpaceMenuItems() {
   const { t } = useTranslation(["common", "settings"]);
   const { data: spaces = [] } = useSpaces();
@@ -27,9 +23,6 @@ export function SpaceMenuItems() {
 
   const renderItem = (space: (typeof spaces)[number]) => {
     const isActive = space.id === currentSpaceId;
-    // A LIVE `private` space never reaches the client; `closed` ones do, listed
-    // but not enterable, and so does an ORPHANED personal space for an owner or
-    // admin — they may convert or sweep it, not enter it.
     const enterable = isSpaceEnterable(space);
     return (
       <DropdownMenuItem

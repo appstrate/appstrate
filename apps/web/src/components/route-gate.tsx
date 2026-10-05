@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
-import { absentFallback, routeVerdict, type RoutePath } from "../lib/route-access";
+import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { EmptyState, LoadingState } from "./page-states";
 
 /**
@@ -14,14 +14,17 @@ import { EmptyState, LoadingState } from "./page-states";
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
  * that does not exist here (module not loaded, team-space page in a personal
- * space) falls back where `absentFallback` says.
+ * space) falls back to the space's settings or the dashboard.
  */
 export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
   const { can, ready, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   const verdict = routeVerdict(path, can, features, inPersonalSpace);
 
-  if (verdict === "absent") return <Navigate to={absentFallback(path)} replace />;
+  if (verdict === "absent") {
+    const fallback = path.startsWith("/org-settings/space/") ? "/org-settings/space/general" : "/";
+    return <Navigate to={fallback} replace />;
+  }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
   return ready ? <NoAccessState /> : <LoadingState />;

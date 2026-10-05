@@ -19,7 +19,6 @@ export function OnboardingWaitingStep() {
   const canCreateOrg = useCanCreateOrg();
   const { orgs, loading } = useOrg();
 
-  // Decided once the org list is known — "has none" is not "not loaded yet".
   if (loading) return null;
   const redirect = waitingStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0 });
   if (redirect) return <Navigate to={redirect} replace />;

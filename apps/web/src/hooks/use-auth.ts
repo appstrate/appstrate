@@ -155,11 +155,7 @@ export async function refreshAuth(): Promise<void> {
   }
 }
 
-/**
- * Whether `POST /api/orgs` would accept the signed-in user (`can_create_org`).
- * `true` while the profile is unknown: a failed profile read must not strand a
- * new user of an open instance on the "waiting for an invitation" page.
- */
+/** `can_create_org`; `true` while the profile is unknown, so a failed read strands nobody on the waiting page. */
 export function useCanCreateOrg(): boolean {
   return useStore(authStore, (s) => s.profile?.canCreateOrg ?? true);
 }

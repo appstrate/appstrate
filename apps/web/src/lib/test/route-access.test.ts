@@ -10,7 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ROUTE_ACCESS, absentFallback, routeVerdict, type RoutePath } from "../route-access.ts";
+import { ROUTE_ACCESS, routeVerdict, type RoutePath } from "../route-access.ts";
 import { routeOf } from "../route-match.ts";
 
 const source = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -109,20 +109,6 @@ describe("routeVerdict", () => {
   it("opens an ungated route to a caller holding nothing", () => {
     const open: RoutePath[] = ["/", "/agents/:scope/:name/edit", "/preferences/general"];
     for (const path of open) expect(routeVerdict(path, none, {}, false)).toBe("granted");
-  });
-});
-
-describe("absentFallback", () => {
-  it("keeps a space-settings visitor in the space's settings", () => {
-    // Picking "Mon espace" in the breadcrumb selector while on a team-only tab.
-    expect(absentFallback("/org-settings/space/members")).toBe("/org-settings/space/general");
-    expect(absentFallback("/org-settings/space/api-keys")).toBe("/org-settings/space/general");
-    expect(routeVerdict("/org-settings/space/general", () => true, {}, true)).toBe("granted");
-  });
-
-  it("sends every other absent route to the dashboard", () => {
-    expect(absentFallback("/end-users")).toBe("/");
-    expect(absentFallback("/chat")).toBe("/");
   });
 });
 

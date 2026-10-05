@@ -71,21 +71,14 @@ interface ResolvableSpace {
   access: string;
 }
 
-/**
- * Whether the caller may stand in a listed space. Only `member` access enters:
- * a `closed` space or an orphaned personal one is listed with `access: "none"`,
- * and scoping to it would 403 every space-scoped request.
- */
+/** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
 export function isSpaceEnterable(space: { access: string }): boolean {
   return space.access === "member";
 }
 
 /**
- * The space to stand in: the remembered one while it is still enterable, else
- * the default, else a team space, else the caller's personal one; null when
- * none is. Team before personal whatever the listing order: a guest holds no
- * role in the default space and must land in the team space they were invited
- * to, not in an empty "Mon espace".
+ * The space to stand in: remembered while enterable, else default, else a team
+ * space (a guest has no default), else the personal one; null when none is.
  */
 export function enterableSpaceId(
   remembered: string | null,
@@ -101,10 +94,9 @@ export function enterableSpaceId(
 }
 
 /**
- * The only path from the space this account remembered for the current
- * organization to a scope: requests carry no space until `GET /api/spaces`
- * proves one enterable, and lose it the moment the listing stops listing it.
- * Render inside MainLayout.
+ * The only path from the remembered space to a scope: requests carry no space
+ * until `GET /api/spaces` proves one enterable, and lose it the moment the
+ * listing stops listing it. Render inside MainLayout.
  */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();

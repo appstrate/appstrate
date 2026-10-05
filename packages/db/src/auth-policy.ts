@@ -32,12 +32,7 @@ export function isPlatformAdmin(email: string): boolean {
   return env.AUTH_PLATFORM_ADMIN_EMAILS.includes(normalizeEmail(email));
 }
 
-/**
- * Whether the user behind `email` may create an organization: anyone on an
- * open instance, platform admins alone under `AUTH_DISABLE_ORG_CREATION`.
- * The ONE rule `POST /api/orgs` enforces and `GET /api/profile` reports
- * (`can_create_org`), so the SPA offers the form exactly when it would succeed.
- */
+/** The one rule `POST /api/orgs` enforces and `GET /api/profile` reports as `can_create_org`. */
 export function mayCreateOrganization(email: string): boolean {
   return !getEnv().AUTH_DISABLE_ORG_CREATION || isPlatformAdmin(email);
 }

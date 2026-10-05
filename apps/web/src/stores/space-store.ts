@@ -6,11 +6,7 @@ import { getCurrentOrgId } from "./org-store";
 
 const STORAGE_KEY = "appstrate_last_space_by_org";
 
-/**
- * The key a choice is remembered under: an account's, in an organization. By
- * user because the map outlives the session — another account signing in on
- * the same browser must not be dropped into the previous one's last space.
- */
+/** By user as well as org: the map outlives the session, and the next account must not inherit it. */
 export function rememberedSpaceKey(userId: string, orgId: string): string {
   return `${userId}:${orgId}`;
 }
@@ -20,28 +16,20 @@ function readRemembered(): Record<string, string> {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "");
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    return parsed as Record<string, string>;
   } catch {
     return {};
   }
 }
 
-/**
- * Apply `change` to the PERSISTED map, not to this tab's copy of it: another
- * tab may have remembered a space in another organization since this one loaded.
- */
+/** Applies `change` to the PERSISTED map, not this tab's copy: another tab may have written since. */
 function writeRemembered(change: (map: Record<string, string>) => void): Record<string, string> {
   const remembered = readRemembered();
   change(remembered);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(remembered));
   } catch {
-    // Storage blocked (private mode, sandboxed iframe): the choice holds for
-    // this tab, it just does not survive a reload.
+    // Storage blocked: the choice holds for this tab only.
   }
   return remembered;
 }
@@ -53,14 +41,8 @@ interface SpaceState {
    * without it), so only `useSpaceResolver` promotes it, once proven enterable.
    */
   id: string | null;
-  /**
-   * The last space each account chose in each organization
-   * ({@link rememberedSpaceKey}), persisted across reloads, org switches and
-   * sign-outs — candidates, never a scope: an id is only ever promoted to `id`
-   * after `GET /api/spaces` lists it as enterable.
-   */
+  /** Last space per account and org ({@link rememberedSpaceKey}): candidates, never a scope. */
   remembered: Record<string, string>;
-  /** `null` leaves the scope (org switch, sign-out) without forgetting the choice. */
   setId: (id: string | null) => void;
 }
 

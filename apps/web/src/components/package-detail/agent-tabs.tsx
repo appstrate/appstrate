@@ -185,8 +185,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
-  // The key section follows the keys page: absent in a personal space, which
-  // takes no API key (409 `personal_space_takes_no_keys`).
+  // The key section follows the keys page (absent in a personal space).
   const canReach = useCanReach();
 
   const [rawKey, setRawKey] = useState<string | null>(null);

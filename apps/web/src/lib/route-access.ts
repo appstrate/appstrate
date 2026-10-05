@@ -19,11 +19,7 @@ type Permission = CorePermission | (string & {});
 type RouteAccess = {
   /** Module feature flag (`features.<key>`) without which the route does not exist. */
   readonly feature?: string;
-  /**
-   * The route does not exist in a personal space: the server refuses there every
-   * write the page is for (409 `personal_space_*`, RBAC spec §3.6), whatever the
-   * owner's permissions.
-   */
+  /** Absent in a personal space: the server refuses its writes there (409 `personal_space_*`). */
   readonly teamSpaceOnly?: true;
 } & (
   | {
@@ -168,20 +164,8 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
-/**
- * `absent`: the route does not exist here — its module is not loaded, or it is
- * a team-space route and the current space is personal.
- */
+/** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
 type RouteVerdict = "absent" | "granted" | "denied";
-
-/**
- * Where an `absent` route sends its visitor: a space-settings page stays in the
- * space's settings (picking a personal space on its Members page must not eject
- * to the dashboard), anything else falls back to the dashboard.
- */
-export function absentFallback(path: RoutePath): RoutePath {
-  return path.startsWith("/org-settings/space/") ? "/org-settings/space/general" : "/";
-}
 
 export function routeVerdict(
   path: RoutePath,

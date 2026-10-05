@@ -169,13 +169,8 @@ async function listVisibleSpaces(
   /** `null` joins no row: a preview's overlay replaces them. */
   userId: string | null,
 ) {
-  // One order for every caller: the default space, then personal spaces, then
-  // team spaces, each oldest first. "Personal" is the caller's own and, for an
-  // owner or admin, the orphaned ones — one rank, not ordered between them.
-  // Without that rank a personal space would sit wherever its owner's
-  // membership date fell among the team spaces — a different place for each
-  // member. The order is for display: the SPA picks the space to stand in by
-  // kind (`enterableSpaceId`), never by position.
+  // Default, then personal, then team spaces, each oldest first; display order
+  // only — the SPA picks by kind (`enterableSpaceId`).
   return db
     .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
     .from(spaces)

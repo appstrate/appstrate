@@ -138,8 +138,7 @@ export async function getUserOrganizations(
         ? and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgIdFilter))
         : eq(organizationMembers.userId, userId),
     )
-    // Oldest membership first. Unordered, the list followed the heap: renaming
-    // an organization moved it to the end, and the SPA's selector with it.
+    // Oldest membership first.
     .orderBy(asc(organizationMembers.joinedAt), asc(organizations.id));
 
   return rows.map((row) => ({

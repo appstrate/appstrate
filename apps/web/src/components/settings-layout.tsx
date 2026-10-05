@@ -104,8 +104,6 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
 
         {/* Mobile: dropdown selector (sidebar hidden) */}
         <div className="mb-4 md:hidden">
-          {/* No tab is selected on a page this caller has no tab for (a refused
-              URL): naming the first one would title the page with another's. */}
           <Select value={activeItem?.to ?? ""} onValueChange={(v) => navigate(v)}>
             <SelectTrigger>
               <SelectValue placeholder={title} />

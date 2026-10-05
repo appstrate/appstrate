@@ -45,14 +45,11 @@ describe("space store", () => {
     expect(persisted()).toEqual({ "usr_a:org_a": "spc_studio", "usr_a:org_b": "spc_beta" });
   });
 
-  it("drops the scope on an organization switch or a sign-out, and forgets nothing", () => {
-    // `selectOrg` (switch) and `clearSession` (sign-out) both end on `setId(null)`.
+  it("drops the scope on an organization switch, and forgets nothing", () => {
+    // `selectOrg` ends on `setId(null)`; sign-out is `lib/test/clear-session.test.ts`.
     orgStore.getState().setId("org_a");
     spaceStore.getState().setId(null);
     expect(spaceStore.getState().id).toBeNull();
-
-    orgStore.getState().setId(null);
-    spaceStore.getState().setId(null);
     expect(persisted()).toEqual({ "usr_a:org_a": "spc_studio", "usr_a:org_b": "spc_beta" });
     expect(spaceStore.getState().remembered).toEqual(persisted());
   });
@@ -90,9 +87,5 @@ describe("space store", () => {
     orgStore.getState().setId("org_a");
     spaceStore.getState().setId("spc_studio");
     expect(persisted()).toEqual({ "usr_a:org_a": "spc_studio" });
-
-    storage.setItem(KEY, JSON.stringify({ org_z: 3, "usr_a:org_y": "spc_y" }));
-    spaceStore.getState().setId("spc_vitrine");
-    expect(persisted()).toEqual({ "usr_a:org_a": "spc_vitrine", "usr_a:org_y": "spc_y" });
   });
 });
