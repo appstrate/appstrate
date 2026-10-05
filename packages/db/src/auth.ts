@@ -2,12 +2,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
-import { renderEmail } from "@appstrate/emails";
+import { renderEmail, type RenderedEmail } from "@appstrate/emails";
 import { createLogger } from "@appstrate/core/logger";
 
 const logger = createLogger("info");
@@ -485,10 +485,26 @@ export function shouldAutoVerifyEmailOnCreate(
   return undefined;
 }
 
-function buildBasePlugins(
+// How long each emailed link stays valid. Each constant is both what Better
+// Auth enforces and what the email tells its reader.
+const MAGIC_LINK_TTL_SECONDS = 15 * 60;
+const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
+const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
+
+/** Send an auth email through the tenant transport when one is active, else the instance one. */
+async function sendAuthMail(
   env: ReturnType<typeof getEnv>,
-  smtpTransport: ReturnType<typeof createTransport> | null,
-) {
+  smtpTransport: Transporter,
+  to: string,
+  { subject, html }: RenderedEmail,
+): Promise<void> {
+  const override = getSmtpOverride();
+  const transport = override?.transport ?? smtpTransport;
+  const from = override ? formatFrom(override) : env.SMTP_FROM;
+  await transport.sendMail({ from, to, subject, html });
+}
+
+function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transporter | null) {
   const smtpEnabled = !!smtpTransport;
   return [
     ...(smtpEnabled
@@ -508,7 +524,7 @@ function buildBasePlugins(
             // 15 minutes is enough for a human to click through immediately
             // while closing the replay window. `allowedAttempts` still lets
             // email prefetchers hit the URL without burning the token early.
-            expiresIn: 15 * 60, // 15 minutes
+            expiresIn: MAGIC_LINK_TTL_SECONDS,
             allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
@@ -535,16 +551,17 @@ function buildBasePlugins(
                 // user opens the `/invite/{token}` page and authenticates
                 // through the standard login/signup path, then accepts. So a
                 // single generic template covers every magic-link send.
-                const { subject, html } = renderEmail("magic-link", {
-                  email: normalizedEmail,
-                  url,
-                  locale: "fr",
-                });
-
-                const override = getSmtpOverride();
-                const transport = override?.transport ?? smtpTransport!;
-                const from = override ? formatFrom(override) : env.SMTP_FROM;
-                await transport.sendMail({ from, to: email, subject, html });
+                await sendAuthMail(
+                  env,
+                  smtpTransport!,
+                  email,
+                  renderEmail("magic-link", {
+                    email: normalizedEmail,
+                    url,
+                    expiresInMinutes: MAGIC_LINK_TTL_SECONDS / 60,
+                    locale: "fr",
+                  }),
+                );
               } catch {
                 // Fire-and-forget
               }
@@ -649,6 +666,19 @@ function buildAuth(options: CreateAuthOptions) {
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
+  const notifyPasswordChanged = async (email: string): Promise<void> => {
+    if (!smtpTransport) return;
+    try {
+      await sendAuthMail(
+        env,
+        smtpTransport,
+        email,
+        renderEmail("password-changed", { locale: "fr" }),
+      );
+    } catch {
+      // Fire-and-forget — the password is already changed
+    }
+  };
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
@@ -740,45 +770,79 @@ function buildAuth(options: CreateAuthOptions) {
               new Bun.CryptoHasher("sha256").update(password).digest("hex") === hash,
           },
         }),
-      ...(smtpEnabled && {
+      ...(smtpTransport && {
+        resetPasswordTokenExpiresIn: RESET_PASSWORD_TTL_SECONDS,
         sendResetPassword: async ({ user, url }) => {
           try {
-            const { subject, html } = renderEmail("reset-password", {
-              email: user.email,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("reset-password", {
+                email: user.email,
+                url,
+                expiresInMinutes: RESET_PASSWORD_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block reset flow if email fails
+          }
+        },
+        onPasswordReset: async ({ user }) => {
+          await notifyPasswordChanged(user.email);
+        },
+        // With verification required, signing up on a taken address answers
+        // exactly like a fresh signup, so the SPA announces an email. This is
+        // that email — sent to the account's owner, the only party it informs.
+        onExistingUserSignUp: async ({ user }) => {
+          try {
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("existing-account", { locale: "fr" }),
+            );
+          } catch {
+            // Fire-and-forget — the signup response must not depend on it
           }
         },
       }),
     },
 
-    ...(smtpEnabled && {
+    ...(smtpTransport && {
       emailVerification: {
         sendOnSignUp: true,
         sendOnSignIn: true,
         autoSignInAfterVerification: true,
+        expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
         sendVerificationEmail: async ({ user, url }) => {
           try {
-            const { subject, html } = renderEmail("verification", {
-              user,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("verification", {
+                user,
+                url,
+                expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block signup if email fails
           }
         },
+      },
+      // The one account change Better Auth has no callback for.
+      hooks: {
+        after: createAuthMiddleware(async (ctx) => {
+          if (ctx.path !== "/change-password") return;
+          const returned = ctx.context.returned;
+          if (returned instanceof APIError) return;
+          const email = (returned as { user?: { email?: string } } | undefined)?.user?.email;
+          if (email) await notifyPasswordChanged(email);
+        }),
       },
     }),
 
@@ -850,6 +914,28 @@ function buildAuth(options: CreateAuthOptions) {
       changeEmail: {
         enabled: true,
         updateEmailWithoutVerification: !smtpEnabled,
+        // The current address approves the change before anything is sent to
+        // the new one: a hijacked session alone cannot move the account to
+        // another mailbox, and the owner learns of the attempt.
+        ...(smtpTransport && {
+          sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+            try {
+              await sendAuthMail(
+                env,
+                smtpTransport,
+                user.email,
+                renderEmail("email-change-confirmation", {
+                  newEmail,
+                  url,
+                  expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                  locale: "fr",
+                }),
+              );
+            } catch {
+              // Fire-and-forget — same as every other auth email
+            }
+          },
+        }),
       },
     },
 

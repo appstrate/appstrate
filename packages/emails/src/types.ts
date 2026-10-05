@@ -21,12 +21,21 @@ type _OrgRoleParity = [CoreOrgRole] extends [OrgRole]
 const _orgRoleParity: _OrgRoleParity = true;
 void _orgRoleParity;
 
-export type EmailType = "verification" | "invitation" | "magic-link" | "reset-password";
+export type EmailType =
+  | "verification"
+  | "invitation"
+  | "magic-link"
+  | "reset-password"
+  | "email-change-confirmation"
+  | "existing-account"
+  | "password-changed";
 
 export interface EmailPropsMap {
   verification: {
     user: { name: string; email: string };
     url: string;
+    /** How long the link stays valid, as configured where the link is minted. */
+    expiresInMinutes: number;
     locale: SupportedLocale;
   };
   invitation: {
@@ -40,11 +49,32 @@ export interface EmailPropsMap {
   "magic-link": {
     email: string;
     url: string;
+    expiresInMinutes: number;
     locale: SupportedLocale;
   };
   "reset-password": {
     email: string;
     url: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  };
+  /** Sent to the CURRENT address: approving it is what lets the change proceed. */
+  "email-change-confirmation": {
+    newEmail: string;
+    url: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  };
+  /**
+   * Sent when someone signs up with an address that already has an account.
+   * No link: the recipient may belong to a tenant application, whose sign-in
+   * page this package does not know.
+   */
+  "existing-account": {
+    locale: SupportedLocale;
+  };
+  /** Sent after a password change or reset. No link, for the same reason. */
+  "password-changed": {
     locale: SupportedLocale;
   };
 }

@@ -25,6 +25,7 @@ const renderers: Record<string, (locale: SupportedLocale) => RenderedEmail> = {
     renderEeVerificationEmail({
       user: { name: "Ada", email: "ada@example.com" },
       url: URL_WITH_AMPERSAND,
+      expiresInMinutes: 60,
       locale,
     }),
   invitation: (locale) =>
@@ -37,9 +38,19 @@ const renderers: Record<string, (locale: SupportedLocale) => RenderedEmail> = {
       locale,
     }),
   "magic-link": (locale) =>
-    renderEeMagicLinkEmail({ email: "ada@example.com", url: URL_WITH_AMPERSAND, locale }),
+    renderEeMagicLinkEmail({
+      email: "ada@example.com",
+      url: URL_WITH_AMPERSAND,
+      expiresInMinutes: 15,
+      locale,
+    }),
   "reset-password": (locale) =>
-    renderEeResetPasswordEmail({ email: "ada@example.com", url: URL_WITH_AMPERSAND, locale }),
+    renderEeResetPasswordEmail({
+      email: "ada@example.com",
+      url: URL_WITH_AMPERSAND,
+      expiresInMinutes: 60,
+      locale,
+    }),
 };
 
 describe("EE platform email overrides", () => {
@@ -66,4 +77,10 @@ describe("EE platform email overrides", () => {
       });
     });
   }
+
+  it("states how long each expiring link stays valid", () => {
+    expect(renderers.verification!("fr").html).toContain("Ce lien expire dans 1 heure.");
+    expect(renderers["magic-link"]!("en").html).toContain("This link expires in 15 minutes.");
+    expect(renderers["reset-password"]!("fr").html).toContain("Ce lien expire dans 1 heure.");
+  });
 });

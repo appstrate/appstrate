@@ -7,12 +7,12 @@ const render = createSimpleEmailRenderer({
   fr: {
     subject: "Vérifiez votre adresse email",
     body: "Cliquez sur le lien ci-dessous pour vérifier votre adresse email :",
-    footer: "Si vous n'avez pas créé de compte, ignorez cet email.",
+    footer: "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.",
   },
   en: {
     subject: "Verify your email address",
     body: "Click the link below to verify your email address:",
-    footer: "If you did not create an account, ignore this email.",
+    footer: "If you did not request this, ignore this email.",
   },
 });
 
