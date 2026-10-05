@@ -2802,6 +2802,47 @@ describe("Packages API", () => {
         expect((await importArchive(archive("1.1.0", "Next."))).status).toBe(201);
       });
 
+      it("reports the published version too when a dirty draft hides it (draft_overwrite)", async () => {
+        // One `force=true` waives both checks: the refusal that asks for it
+        // must name both things it will overwrite.
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        const before = await app.request(`/api/packages/skills/${id}`, {
+          headers: authHeaders(ctx),
+        });
+        const edit = await app.request(`/api/packages/skills/${id}`, {
+          method: "PATCH",
+          headers: authHeaders(ctx, {
+            "Content-Type": "application/json",
+            ...ifMatch(etagVersion(before)),
+          }),
+          body: JSON.stringify({
+            content: "---\nname: conflicting-skill\ndescription: A skill.\n---\n\nEdited.",
+          }),
+        });
+        expect(edit.status).toBe(200);
+
+        const res = await importArchive(archive("1.0.0", "Different."));
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({
+          code: "draft_overwrite",
+          packageId: id,
+          active_version: "1.0.0",
+          version: "1.0.0",
+        });
+      });
+
+      it("keeps the draft unarchived when the replaced version is not the latest", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect((await importArchive(archive("1.1.0", "Second."))).status).toBe(201);
+        expect(await hasUnarchivedChanges()).toBe(false);
+
+        // The draft now holds 1.0.0's content while 1.1.0 is the latest.
+        expect((await importArchive(archive("1.0.0", "Replaced."), "?force=true")).status).toBe(
+          201,
+        );
+        expect(await hasUnarchivedChanges()).toBe(true);
+      });
+
       it("leaves a clean draft after re-importing identical content", async () => {
         expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
         expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);

@@ -18253,7 +18253,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) or `version` (`integrity_mismatch`). */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18264,7 +18264,7 @@ export interface operations {
                         packageId?: string;
                         /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
                         active_version?: string | null;
-                        /** @description `integrity_mismatch` only: the published version whose content differs. */
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
                         version?: string;
                     };
                 };
@@ -18402,7 +18402,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) or `version` (`integrity_mismatch`). */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18413,7 +18413,7 @@ export interface operations {
                         packageId?: string;
                         /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
                         active_version?: string | null;
-                        /** @description `integrity_mismatch` only: the published version whose content differs. */
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
                         version?: string;
                     };
                 };

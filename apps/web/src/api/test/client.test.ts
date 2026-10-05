@@ -74,6 +74,18 @@ describe("toApiError", () => {
     expect(error.details).toEqual({ packageId: "@acme/skill", active_version: "1.0.0" });
   });
 
+  it("prefers `errors` when a problem carries both it and extension members", async () => {
+    // Consumers of a validation problem index `details` as an array.
+    const error = (await toApiError(
+      problem(
+        { code: "validation_failed", detail: "invalid", errors: [{ path: "name" }], hint: "x" },
+        400,
+      ),
+    )) as ApiError;
+
+    expect(error.details).toEqual([{ path: "name" }] as never);
+  });
+
   it("leaves details undefined when a problem has only standard fields", async () => {
     const error = (await toApiError(
       problem({ code: "conflict", detail: "nope", request_id: "req_1", status: 409 }, 409),

@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { etagVersion, ifMatch } from "../../helpers/etag.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -48,6 +50,26 @@ describe("an integration naming itself as its mcp-server", () => {
       code: "invalid_manifest",
     });
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  it("is refused at draft save and leaves the draft untouched", async () => {
+    const created = await create(manifest("@selforg/server"));
+    const res = await app.request(`/api/packages/integrations/${ID}`, {
+      method: "PATCH",
+      headers: authHeaders(ctx, {
+        "Content-Type": "application/json",
+        ...ifMatch(etagVersion(created)),
+      }),
+      body: JSON.stringify({ manifest: manifest(ID) }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: { field?: string }[] };
+    expect(body.errors?.[0]?.field).toBe("manifest.source.server.name");
+    const [row] = await db
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(eq(packages.id, ID));
+    expect(row?.draftManifest).toMatchObject({ source: { server: { name: "@selforg/server" } } });
   });
 
   it("naming another package is accepted", async () => {

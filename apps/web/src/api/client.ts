@@ -118,6 +118,8 @@ export async function toApiError(response: Response): Promise<Error> {
       // array (the cast bridges the spec's array type), any other problem its
       // RFC 9457 §3.2 extension members — the code-specific half the server
       // writes beside the standard fields (`member_count`, `active_version`).
+      // `errors` wins when a problem carries both: it is the typed standard
+      // field, and its consumers index it as an array.
       (errors as unknown as Record<string, unknown> | undefined) ??
         (Object.keys(extensions).length > 0 ? extensions : undefined),
       request_id,

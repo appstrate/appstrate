@@ -211,6 +211,7 @@
   "bundle.requiresVersion": "Publish a version of the agent first",
   "import.errSize": "File exceeds 10 MB",
   "import.confirmOverwrite": "This package has unarchived changes (active version v{{activeVersion}}). The import will overwrite them.",
+  "import.confirmOverwriteNoVersion": "This package has unarchived changes. The import will overwrite them.",
   "import.forceSubmit": "Overwrite and import",
   "import.confirmIntegrity": "Version {{version}} already exists with different content. The import will replace this version's content.",
   "import.forceIntegrity": "Replace and import",

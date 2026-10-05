@@ -33,7 +33,8 @@ const importConflictProblem = {
         },
         version: {
           type: "string",
-          description: "`integrity_mismatch` only: the published version whose content differs.",
+          description:
+            "The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too.",
         },
       },
     },
@@ -366,7 +367,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) or `version` (`integrity_mismatch`).",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both).",
           content: {
             "application/problem+json": {
               schema: importConflictProblem,
@@ -451,7 +452,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) or `version` (`integrity_mismatch`).",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both).",
           content: {
             "application/problem+json": {
               schema: importConflictProblem,

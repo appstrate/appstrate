@@ -33,7 +33,7 @@ import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
+import { getVersionForDownload } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
@@ -2544,12 +2544,22 @@ export function createPackagesRouter() {
           detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
         });
       }
-      // Draft overwrite protection
+      // A forced import overwrites TWO things, and the caller must be told
+      // about both before `force=true` waives them together: the unpublished
+      // draft, and a published version of the same number whose bytes differ.
       if (!force) {
-        const [vCount, latestDate] = await Promise.all([
+        const importedVersion = asRecord(manifest).version;
+        const [vCount, latestDate, existingVer] = await Promise.all([
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
+          typeof importedVersion === "string"
+            ? getVersionForDownload(packageId, importedVersion)
+            : null,
         ]);
+        const replacedVersion =
+          existingVer && existingVer.integrity !== computeIntegrity(new Uint8Array(artifact))
+            ? existingVer.version
+            : null;
         if (
           computeHasUnpublishedChanges(
             existing.source,
@@ -2561,25 +2571,23 @@ export function createPackagesRouter() {
           const activeVersion = asRecord(existing.draftManifest).version;
           throw conflict(
             "draft_overwrite",
-            "This package has unpublished changes that will be overwritten by the import.",
-            { packageId, active_version: typeof activeVersion === "string" ? activeVersion : null },
+            "This package has unpublished changes that will be overwritten by the import." +
+              (replacedVersion
+                ? ` Published version ${replacedVersion} also exists with different content and would be replaced.`
+                : ""),
+            {
+              packageId,
+              active_version: typeof activeVersion === "string" ? activeVersion : null,
+              ...(replacedVersion ? { version: replacedVersion } : {}),
+            },
           );
         }
-      }
-
-      // Integrity mismatch detection — same version, different content
-      const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
-      if (!force && importedVersion) {
-        const existingVer = await getVersionForDownload(packageId, importedVersion);
-        if (existingVer) {
-          const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
-          if (existingVer.integrity !== importedIntegrity) {
-            throw conflict(
-              "integrity_mismatch",
-              "This version already exists with different content. Use the force option to replace.",
-              { packageId, version: importedVersion },
-            );
-          }
+        if (replacedVersion) {
+          throw conflict(
+            "integrity_mismatch",
+            "This version already exists with different content. Use the force option to replace.",
+            { packageId, version: replacedVersion },
+          );
         }
       }
     }
@@ -2598,6 +2606,7 @@ export function createPackagesRouter() {
         homeSpaceId: c.get("spaceId"),
         draftManifest: manifest as Record<string, unknown>,
         lockVersion: force ? undefined : existing?.lockVersion,
+        replaceExistingVersion: force,
       });
     } catch (err) {
       if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
@@ -2620,24 +2629,6 @@ export function createPackagesRouter() {
       await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
         logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
-    }
-
-    // Force import: replace existing version content if integrity differs
-    const importedVersionForReplace = (manifest as Record<string, unknown>).version as
-      string | undefined;
-    if (existing && force && importedVersionForReplace) {
-      const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
-      if (existingVer) {
-        const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
-        if (existingVer.integrity !== importedIntegrity) {
-          await replaceVersionContent({
-            packageId,
-            version: importedVersionForReplace,
-            zipBuffer: artifact,
-            manifest: manifest as Record<string, unknown>,
-          });
-        }
-      }
     }
 
     logger.info("Package imported", { packageId, type: packageType, orgId });

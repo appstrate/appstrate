@@ -112,6 +112,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               setConfirmOverwrite({
                 activeVersion: (err.details?.active_version as string | null) ?? null,
               });
+              // The same forced import also replaces a published version: say both.
+              if (err.details?.version)
+                setConfirmIntegrity({ version: String(err.details.version) });
               return;
             }
             if (err instanceof ApiError && err.code === "integrity_mismatch") {
@@ -240,7 +243,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       {errorMessage && <p className="text-destructive mt-3 text-sm">{errorMessage}</p>}
       {confirmOverwrite && (
         <p className="text-destructive mt-3 text-sm">
-          {t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion ?? "?" })}
+          {confirmOverwrite.activeVersion
+            ? t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion })
+            : t("import.confirmOverwriteNoVersion")}
         </p>
       )}
       {confirmIntegrity && (

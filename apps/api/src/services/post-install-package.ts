@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
-import { createVersionAndUpload, finalizeDraftPublication } from "./package-versions.ts";
+import {
+  createVersionAndUpload,
+  finalizeDraftPublication,
+  getVersionForDownload,
+  replaceVersionContent,
+} from "./package-versions.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { createPackageDraft, mutatePackageDraftFiles } from "./package-files.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
@@ -30,6 +36,8 @@ export async function postInstallPackage(params: {
   lockVersion?: number;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
+  /** A forced import: an existing version with different bytes is replaced by `zipBuffer`. */
+  replaceExistingVersion?: boolean;
 }): Promise<void> {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
@@ -95,17 +103,26 @@ export async function postInstallPackage(params: {
     zipBuffer,
     manifest,
   });
-  // `exists` settles the draft too: every caller reaches it only with the
-  // content that version holds (identical bytes, or a forced import that
-  // replaces the version right after), so leaving the draft dirty would make
-  // every later import answer `409 draft_overwrite` for edits nobody made.
-  // A version that is not the latest is left alone by the callee.
-  if (published) {
-    await finalizeDraftPublication({
-      packageId,
-      orgId,
-      lockVersion: draft.lockVersion,
-      versionId: published.id,
-    });
+  if (!published) return;
+  if (published.outcome === "exists") {
+    // The version already existed, so nothing above proved the draft matches
+    // it: an importer checks before it writes, and a concurrent publish can
+    // land in between. Compare against the stored row, and replace it only
+    // for a caller that declared the replacement.
+    const stored = await getVersionForDownload(packageId, version);
+    if (stored?.integrity !== computeIntegrity(new Uint8Array(zipBuffer))) {
+      if (!params.replaceExistingVersion) return;
+      await replaceVersionContent({ packageId, version, zipBuffer, manifest });
+    }
   }
+  // The draft now holds what that version holds. Left dirty, every later
+  // import would answer `409 draft_overwrite` for edits nobody made; settled
+  // before a replacement that then failed, it would hide real ones. The callee
+  // leaves a version that is not the latest alone.
+  await finalizeDraftPublication({
+    packageId,
+    orgId,
+    lockVersion: draft.lockVersion,
+    versionId: published.id,
+  });
 }

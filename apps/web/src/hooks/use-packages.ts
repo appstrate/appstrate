@@ -5,7 +5,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import i18n from "../i18n";
 import { stripScope } from "@appstrate/core/naming";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -241,6 +240,7 @@ function useUploadPackage(type: PackageType) {
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { t } = useTranslation("settings");
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (id: string) => {
@@ -250,7 +250,7 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
-      toast.success(i18n.t("settings:packages.deleted"));
+      toast.success(t("packages.deleted"));
       navigate("/");
     },
   });
