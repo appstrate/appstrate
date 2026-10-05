@@ -17,7 +17,6 @@ import { endPreviewIfRefused } from "../lib/view-as-refusal";
 import { useViewAsHeader } from "../stores/view-as-store";
 import {
   runKeys,
-  runsKeys,
   paginatedRunsKeys,
   packageKeys,
   agentsKeys,
@@ -186,7 +185,7 @@ export function createBroadInvalidator(
 
 /**
  * Single writer of the run-detail cache from a `run_update` frame; returns the
- * patch to reuse on the run's list rows, or `null` when the frame is dropped:
+ * patch it applied, or `null` when the frame is dropped:
  * a per-connection snapshot can predate a live frame, and status only moves on.
  */
 export function patchRunDetail(
@@ -235,7 +234,7 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
 function reconcileRunQueries(qc: QueryClient, orgId: string) {
   // Run detail/list caches are patched in place by live frames, so only a gap
   // needs them refetched — they are not part of the per-event throttle.
-  for (const queryKey of [runKeys.all, runsKeys.all, ...broadRunKeys(orgId)]) {
+  for (const queryKey of [runKeys.all, ...broadRunKeys(orgId)]) {
     qc.invalidateQueries({ queryKey });
   }
 }
@@ -295,31 +294,12 @@ function handleSSEMessage(
   const parsed = runUpdateEventSchema.safeParse(json);
   if (!parsed.success) return;
   const evt = parsed.data;
-  const { id: runId, packageId, status, scheduleId } = evt;
-  const patch = patchRunDetail(qc, orgId, spaceId, evt);
-  // Frame dropped as stale — the list rows below must not regress either.
-  if (!patch) return;
+  const { status, scheduleId } = evt;
+  // Frame dropped as stale — nothing below may move on it either.
+  if (!patchRunDetail(qc, orgId, spaceId, evt)) return;
 
-  // Only the per-agent run list is keyed by packageId (nullable on the wire
-  // once a run's package is deleted — ON DELETE SET NULL).
-  if (packageId) {
-    const listKey = runsKeys.forAgent(orgId, spaceId, packageId);
-    const list = qc.getQueryData<EnrichedRun[]>(listKey);
-    if (list) {
-      if (list.some((ex) => ex.id === runId)) {
-        qc.setQueryData<EnrichedRun[]>(listKey, (prev) =>
-          prev?.map((ex) => (ex.id === runId ? { ...ex, ...patch } : ex)),
-        );
-      } else {
-        // A run not yet in this list (its first event) — refetch the full
-        // enriched row instead of inserting a 13-field partial as a full one.
-        qc.invalidateQueries({ queryKey: listKey });
-      }
-    }
-  }
-
-  // Broad invalidations are throttled (~2s) — the in-place cache patches above
-  // keep the visible run data live in the meantime.
+  // Broad invalidations are throttled (~2s) — the in-place cache patch above
+  // keeps the visible run live in the meantime.
   for (const key of broadRunKeys(orgId)) broad.schedule(key);
 
   // Invalidate schedule-specific caches
@@ -331,7 +311,6 @@ function handleSSEMessage(
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
     invalidateNotificationQueries(qc);
-    qc.invalidateQueries({ queryKey: runsKeys.all });
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.

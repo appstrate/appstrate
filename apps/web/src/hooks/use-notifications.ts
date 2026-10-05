@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
-import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
+import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
 
 /**
  * Safety-net poll for the notification queries — a BACKSTOP, not the freshness
@@ -84,7 +84,6 @@ function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClien
   invalidateNotificationQueries(qc);
   // Legacy keys — the run hooks are not migrated to the typed client yet.
   qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
-  qc.invalidateQueries({ queryKey: runsKeys.all });
   qc.invalidateQueries({ queryKey: runKeys.all });
 }
 

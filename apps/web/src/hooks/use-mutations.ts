@@ -13,7 +13,6 @@ import { onMutationError } from "../lib/mutation-error";
 import {
   packageKeys,
   agentsKeys,
-  runsKeys,
   runKeys,
   paginatedRunsKeys,
   persistenceKeys,
@@ -23,7 +22,7 @@ import { retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
-// NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
+// NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
 // events, and the runs hooks are migrated with the same pinned keys. The
 // package/agent keys stay legacy too (see the note in use-packages.ts).
@@ -98,8 +97,10 @@ function useRunAgent(packageId: string) {
       return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: runsKeys.all });
-      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+      // Stale, not refetched: every launch lands on the run's own page, so the
+      // lists behind it are read again by whichever screen mounts them next,
+      // and the ones that stay mounted move on the run's realtime frames.
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },
     onError: onMutationError,
@@ -243,7 +244,6 @@ export function useCancelRun() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runKeys.all });
-      qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
     },
     onError: onMutationError,
@@ -260,7 +260,6 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });

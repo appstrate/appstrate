@@ -20,7 +20,6 @@ const SPACE_SCOPED_KEYS = new Set([
   "agent-persistence",
   "agent-model",
   "agent-proxy",
-  "runs",
   "run",
   "run-logs",
   "paginated-runs",

@@ -13,7 +13,10 @@
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
  *  4. the reconciliation running on the FIRST connect too, which issued every
- *     notification and chat-session query twice on every page load (#1678).
+ *     notification and chat-session query twice on every page load (#1678);
+ *  5. the agent page fetching the agent's runs a second time, unpaginated and
+ *     under a key of its own, to learn whether there is any (#1678);
+ *  6. a launch refetching the run lists of the page it is leaving (#1678).
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -64,6 +67,8 @@ const SCHEDULE_CARD = read("../schedule-card.tsx");
 const RUN_LIST = read("../run-list.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
+const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
+const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
   it("renders the presentational rows, not a second fetching list", () => {
@@ -94,6 +99,24 @@ describe("schedule cards read their counters from the schedule", () => {
     expect(SCHEDULE_CARD).toContain("schedule.running_runs");
     expect(SCHEDULE_CARD).toContain("schedule.unread_count");
     expect(SCHEDULE_CARD).toContain("schedule.last_run_number");
+  });
+});
+
+describe("agent page", () => {
+  it("reads whether the agent has runs off the detail it already holds", () => {
+    expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(AGENT_ACTIONS).toContain("hasRuns={detail.last_run !== null}");
+  });
+
+  it("marks the run lists stale on launch without refetching the page being left", () => {
+    const launch = MUTATIONS.slice(
+      MUTATIONS.indexOf("function useRunAgent("),
+      MUTATIONS.indexOf("export function useRunLauncher("),
+    );
+    const invalidations = [...code(launch).matchAll(/invalidateQueries\(([^)]*)\)/g)].map(
+      (m) => m[1]!,
+    );
+    expect(invalidations).toEqual(['{ queryKey: paginatedRunsKeys.all, refetchType: "none" }']);
   });
 });
 
