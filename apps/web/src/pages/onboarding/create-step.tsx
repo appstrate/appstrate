@@ -14,7 +14,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
-import { orgLessEntry } from "../../lib/onboarding-entry";
+import { createStepRedirect } from "../../lib/onboarding-entry";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
@@ -110,10 +110,12 @@ export function OnboardingCreateStep() {
   };
 
   // The server refuses this user's `POST /api/orgs` (closed instance): no form.
-  if (!canCreateOrg) {
-    if (loading) return null;
-    return <Navigate to={orgs.length > 0 ? "/" : orgLessEntry(canCreateOrg)} replace />;
-  }
+  // Decided once the org list is known — "has none" is not "not loaded yet".
+  const redirect = loading
+    ? null
+    : createStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0, fromSwitcher: !!fromSwitcher });
+  if (redirect) return <Navigate to={redirect} replace />;
+  if (!canCreateOrg && loading) return null;
 
   return (
     <OnboardingLayout
