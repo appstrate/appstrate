@@ -181,6 +181,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The integration editor's default auth allowlist is the source host**
+  (#1641): a new integration's `authorized_uris` starts empty and takes the
+  remote source's host (`https://<host>/**`) as the URL is typed, until the
+  author edits it. The former default, `https://**`, is what the host-bound
+  rule refuses.
+
 - **An upstream verdict is credited to the credential that earned it**
   (#1641). The sidecar reports a 401 or 2xx against the
   `credential_revision` its request carried, not the one held when the
