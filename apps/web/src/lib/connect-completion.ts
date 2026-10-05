@@ -44,3 +44,17 @@ export function publishConnectCompletion(
     /* BroadcastChannel unsupported — the SSE backstop still fires server-side */
   }
 }
+
+/**
+ * Close the window a finished connect ran in — only when a surface opened it.
+ * Reached by plain navigation (a blocked popup falls back to the same tab), the
+ * page IS the user's tab: it keeps its confirmation instead of vanishing.
+ */
+export function closeIfPopup(win: Pick<Window, "opener" | "close">): void {
+  if (!win.opener) return;
+  try {
+    win.close();
+  } catch {
+    /* the confirmation stays visible */
+  }
+}

@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { INTEGRATION_CONNECT_MESSAGE_TYPE } from "@appstrate/core/connect-handshake";
-import { publishConnectCompletion } from "../connect-completion.ts";
+import { closeIfPopup, publishConnectCompletion } from "../connect-completion.ts";
 
 const SELF = "https://app.appstrate.dev";
 
@@ -64,5 +64,24 @@ describe("publishConnectCompletion", () => {
 
   it("survives a missing opener (full-tab completion) and still broadcasts", () => {
     expect(() => publishConnectCompletion({ ok: true }, null, SELF)).not.toThrow();
+  });
+});
+
+describe("closeIfPopup", () => {
+  const windowWith = (opener: unknown) => {
+    const win = { opener, closed: 0, close: () => void win.closed++ };
+    return win;
+  };
+
+  it("closes the window a surface opened", () => {
+    const popup = windowWith({});
+    closeIfPopup(popup);
+    expect(popup.closed).toBe(1);
+  });
+
+  it("leaves a tab reached by navigation open", () => {
+    const tab = windowWith(null);
+    closeIfPopup(tab);
+    expect(tab.closed).toBe(0);
   });
 });

@@ -55,7 +55,7 @@ const INTEGRATION_TABS = [
   "versions",
 ] as const;
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Trash2,
@@ -67,6 +67,7 @@ import {
   ChevronRight,
   ArrowUpFromLine,
   AlertTriangle,
+  SearchX,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -94,7 +95,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -140,6 +141,9 @@ import { useIntegrations } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
+import { useCanReach } from "../hooks/use-can-reach";
+import { ApiError } from "../api/errors";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
@@ -698,9 +702,12 @@ function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
 function ConnectAuthBlock({
   packageId,
   status,
+  personalConnectionsBlocked,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
+  /** The space's `block_user_connections` gate — `integrations:configure` is exempt, as on the server. */
+  personalConnectionsBlocked: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { user } = useAuth();
@@ -735,7 +742,16 @@ function ConnectAuthBlock({
               ? t("integration.auth.noClientHintAdmin")
               : t("integration.auth.noClientHint")}
           </p>
-        ) : can("integrations:connect") ? (
+        ) : !can("integrations:connect") ? null : personalConnectionsBlocked && !canConfigure ? (
+          // The server answers 403 `connection_blocked_by_admin`: say why here
+          // instead of offering a button that can only fail.
+          <p
+            className="text-muted-foreground text-xs"
+            data-testid={`connections-blocked-hint-${status.auth_key}`}
+          >
+            {t("integration.auth.blockedByAdminHint")}
+          </p>
+        ) : (
           <InlineConnectButton
             packageId={packageId}
             authKey={status.auth_key}
@@ -744,7 +760,7 @@ function ConnectAuthBlock({
             forceAccountSelect={ownConnectionCount > 0}
             lockToAuthKey
           />
-        ) : null}
+        )}
       </div>
 
       <ConnectionsTable
@@ -1596,9 +1612,19 @@ function ConnectionTableRow({
               </label>
             </DisabledReasonTooltip>
           ) : (
+            // No control to offer: state the fact, not the action's label.
             <span className="text-muted-foreground text-xs">
-              {t("integration.connection.shareWithOrg.label")}
+              {isShared ? t("connections.sharedBadge") : "—"}
             </span>
+          )}
+          {/* Also in the tooltips, which a touch screen never opens. */}
+          {lockHint && (isOwn || canToggleShare) && (
+            <p
+              className="text-muted-foreground mt-1 max-w-[16rem] text-[0.65rem] whitespace-normal"
+              data-testid={`connection-lock-reason-${connection.id}`}
+            >
+              {lockHint}
+            </p>
           )}
         </TableCell>
 
@@ -1722,10 +1748,27 @@ export function IntegrationDetailPage() {
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const canBrowseIntegrations = useCanReach()("/integrations");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={String(error)} />;
-  if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
+  // Not placed in this space (or gone): the server answers one opaque 404 for
+  // both, so the page says what the member can do about either.
+  if ((error instanceof ApiError && error.status === 404) || (!error && !detail)) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        message={t("integration.notInSpace.title")}
+        hint={t("integration.notInSpace.hint")}
+      >
+        {canBrowseIntegrations && (
+          <Button variant="outline" asChild>
+            <Link to="/integrations">{t("integration.notInSpace.back")}</Link>
+          </Button>
+        )}
+      </EmptyState>
+    );
+  }
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
   const active = Boolean(summary?.active);
@@ -1878,6 +1921,7 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
+                personalConnectionsBlocked={summary?.block_user_connections ?? false}
               />
             ))
           )}
