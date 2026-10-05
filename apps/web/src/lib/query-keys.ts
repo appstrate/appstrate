@@ -68,25 +68,6 @@ export function invalidateRunDetails(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
-/**
- * Invalidate a key family after one of its resources was deleted. The reads OF
- * that resource are still mounted on the page being left, and refetching them
- * can only fetch a 404: they are marked stale and left alone, so a later visit
- * of the same URL asks the server instead of trusting the cache.
- */
-export function invalidateAfterDelete(
-  qc: QueryClient,
-  queryKey: readonly unknown[],
-  isDeleted: (queryKey: readonly unknown[]) => boolean,
-) {
-  void qc.invalidateQueries({ queryKey, predicate: (q) => !isDeleted(q.queryKey) });
-  void qc.invalidateQueries({
-    queryKey,
-    predicate: (q) => isDeleted(q.queryKey),
-    refetchType: "none",
-  });
-}
-
 /** Cursor/offset-paginated run tables (runs page, agent runs tab). */
 export const paginatedRunsKeys = {
   /** Prefix — invalidates every paginated-runs query. */

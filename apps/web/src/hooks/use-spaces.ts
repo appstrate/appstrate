@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { queryClient } from "../lib/query-client";
-import { invalidateAfterDelete } from "../lib/query-keys";
 import { getCurrentOrgId } from "../stores/org-store";
 import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
 import { invalidateIntegrationQueries } from "./use-integrations";
@@ -57,36 +56,20 @@ export function useSpace(spaceId: string) {
  * path — list and detail live under different path strings, so both need
  * invalidating after a write.
  */
-const SPACE_PATHS = [
-  "/api/spaces",
-  "/api/spaces/{id}",
-  "/api/spaces/{id}/roles",
-  // Visibility and the default role determine implicit member rows and roles.
-  "/api/spaces/{id}/members",
-] as const;
-
-/** `deletedId` names the space a delete just removed: its own reads are not refetched. */
 function useInvalidateSpaces() {
   const qc = useQueryClient();
-  return (deletedId?: string) => {
-    for (const path of SPACE_PATHS) {
-      invalidateAfterDelete(
-        qc,
-        ["get", path],
-        (key) => deletedId !== undefined && spaceIdOf(key) === deletedId,
-      );
-    }
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
+    // Visibility and the default role determine implicit member rows and roles.
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
   };
-}
-
-function spaceIdOf(queryKey: readonly unknown[]): unknown {
-  const init = queryKey[2] as { params?: { path?: { id?: unknown } } } | undefined;
-  return init?.params?.path?.id;
 }
 
 export function useCreateSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces", { onSuccess: () => invalidate() });
+  return $api.useMutation("post", "/api/spaces", { onSuccess: invalidate });
 }
 
 export function useUpdateSpace() {
@@ -103,23 +86,17 @@ export function useUpdateSpace() {
 
 export function useDeleteSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("delete", "/api/spaces/{id}", {
-    onSuccess: (_data, { params }) => invalidate(params.path.id),
-  });
+  return $api.useMutation("delete", "/api/spaces/{id}", { onSuccess: invalidate });
 }
 
 /** The transfer: an orphaned personal space becomes a team space. */
 export function useConvertSpaceToTeam() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", {
-    onSuccess: () => invalidate(),
-  });
+  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", { onSuccess: invalidate });
 }
 
 /** Run the offboarding routine on one orphaned personal space immediately. */
 export function useSweepPersonalSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", {
-    onSuccess: (_data, { params }) => invalidate(params.path.id),
-  });
+  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", { onSuccess: invalidate });
 }
