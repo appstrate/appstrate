@@ -59,6 +59,14 @@ describe("Models API", () => {
   });
 
   /** Helper: create a model provider key and return its ID (required for model creation). */
+  /** The first model of an org is its default, and the default cannot be switched off. */
+  async function releaseDefaultModel(): Promise<void> {
+    await db
+      .update(organizations)
+      .set({ defaultModelId: null })
+      .where(eq(organizations.id, ctx.orgId));
+  }
+
   async function createProviderKey(): Promise<string> {
     const res = await app.request("/api/model-provider-credentials", {
       method: "POST",
@@ -700,12 +708,7 @@ describe("Models API", () => {
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as any;
 
-      // The first model of an org is its default, and the default cannot be
-      // switched off: release the pointer first.
-      await db
-        .update(organizations)
-        .set({ defaultModelId: null })
-        .where(eq(organizations.id, ctx.orgId));
+      await releaseDefaultModel();
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",
@@ -957,12 +960,7 @@ describe("Models API", () => {
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
 
-      // The first model of an org is its default, and the default cannot be
-      // switched off: release the pointer first.
-      await db
-        .update(organizations)
-        .set({ defaultModelId: null })
-        .where(eq(organizations.id, ctx.orgId));
+      await releaseDefaultModel();
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",

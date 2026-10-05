@@ -94,3 +94,10 @@ export function resolveProviderId(
   }
   return findProviderByApiShapeAndBaseUrl(spec.apiShape, spec.base_url, registry)?.providerId ?? "";
 }
+
+/** The providers the quick-connect offers: the subscription (OAuth) ones. */
+export function quickConnectProviders(
+  registry: readonly ProviderRegistryEntry[] | undefined,
+): ProviderRegistryEntry[] {
+  return (registry ?? []).filter((p) => p.authMode === "oauth2");
+}

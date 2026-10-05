@@ -10,8 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildDiscoverBody, discoveryFailureOutcome, parsesAsUrl } from "../model-discovery.ts";
-import { ApiError } from "../../api/errors.ts";
+import { buildDiscoverBody, parsesAsUrl } from "../model-discovery.ts";
 
 const OPENAI_COMPATIBLE = {
   providerId: "openai-compatible",
@@ -68,17 +67,5 @@ describe("parsesAsUrl", () => {
     expect(parsesAsUrl("https://api.example.com")).toBe(true);
     expect(parsesAsUrl("ftp://example.com")).toBe(false);
     expect(parsesAsUrl("not a url")).toBe(false);
-  });
-});
-
-describe("discoveryFailureOutcome", () => {
-  it("names the platform's own rate limit apart from any other refusal", () => {
-    expect(discoveryFailureOutcome(new ApiError("rate_limited", "Too many", 429))).toBe(
-      "throttled",
-    );
-    expect(discoveryFailureOutcome(new ApiError("internal_error", "boom", 500))).toBe(
-      "request_failed",
-    );
-    expect(discoveryFailureOutcome(new TypeError("fetch failed"))).toBe("request_failed");
   });
 });

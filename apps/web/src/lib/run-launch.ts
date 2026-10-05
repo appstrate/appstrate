@@ -102,10 +102,8 @@ export function launchFromOptions({
 }
 
 /**
- * What a launch with no override resolves to, for the "Inherit" row to name:
- * the agent's own setting where the server would use it, else the organization
- * default. The server skips a setting whose entry is gone or not `usable`
- * (switched off, dead credential) and falls to the default — so does this.
+ * What a launch with no override resolves to: the agent's own setting, else the
+ * org default — also past a setting that is gone or not `usable`, as the server does.
  */
 export function inheritedEntry<T extends { id: string }>(
   entries: readonly T[] | undefined,

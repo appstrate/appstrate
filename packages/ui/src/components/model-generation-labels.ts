@@ -1,32 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  DEFAULT_MODEL_REASONING_LEVEL,
-  MODEL_REASONING_LEVELS,
   mapModelReasoningLevels,
   type ModelGenerationCapabilities,
-  type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
+import { defaultReasoningLevel } from "./default-reasoning-level.ts";
 import type { ModelGenerationControlLabels } from "./model-generation-controls.tsx";
-
-/**
- * The level an unset reasoning level resolves to on a model: the platform
- * default where the model takes it, else the nearest level it does take,
- * upward first — the runner's own clamp (Pi's `clampThinkingLevel`). Unknown
- * capabilities name the platform default.
- */
-export function defaultReasoningLevel(
-  capabilities?: ModelGenerationCapabilities | null,
-): ModelReasoningLevel {
-  const takes = (level: ModelReasoningLevel) =>
-    capabilities?.reasoning.levels[level] === "supported";
-  const at = MODEL_REASONING_LEVELS.indexOf(DEFAULT_MODEL_REASONING_LEVEL);
-  return (
-    MODEL_REASONING_LEVELS.slice(at).find(takes) ??
-    MODEL_REASONING_LEVELS.slice(0, at).reverse().find(takes) ??
-    DEFAULT_MODEL_REASONING_LEVEL
-  );
-}
 
 /**
  * Wire every label of this control from one i18n key family, so the two

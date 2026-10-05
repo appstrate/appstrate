@@ -524,8 +524,6 @@ export async function updateOrgModel(
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot modify built-in model");
   }
-  // The other door to the state `setDefaultModel` refuses: switching the
-  // default itself off would leave a pointer `resolveModel` skips.
   if (data.enabled === false && (await defaultModel.getDefaultId(orgId)) === modelDbId) {
     throw conflict(
       "model_disabled",
@@ -680,8 +678,7 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // `org-proxies` and must stay generic. System ids, unknown rows and non-UUIDs
   // carry no binding, so the pointer helper below still owns the 404.
   const row = modelDbId === null ? undefined : await loadModelBinding(orgId, modelDbId);
-  // A switched-off row is skipped by `resolveModel`: as the default it would
-  // read "default" in the list while every run resolved something else.
+  // `resolveModel` skips a switched-off row.
   if (row && !row.enabled) {
     throw conflict(
       "model_disabled",
@@ -1040,11 +1037,7 @@ async function loadModelBinding(
   }
 }
 
-/**
- * The list's two tests, in its order: dead for inference, but still
- * renderable. See {@link modelNeedsReconnection} for why the second one is not
- * redundant.
- */
+/** Dead for inference but still renderable — see {@link modelNeedsReconnection}. */
 async function credentialIsDeadButListed(orgId: string, credentialId: string): Promise<boolean> {
   if (!credentialId) return false;
   if ((await loadInferenceCredentials(orgId, credentialId)) !== null) return false;

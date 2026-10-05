@@ -44,17 +44,10 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { normalizeHttpUrl } from "@appstrate/core/url";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-/**
- * An endpoint base URL: HTTP(S) only, by the platform's one protocol rule
- * (`normalizeHttpUrl`). Not `z.httpUrl()`, which also demands a domain name —
- * a self-hosted endpoint is often an IP or `localhost`.
- */
-const endpointUrlSchema = z
-  .url()
-  .refine((value) => normalizeHttpUrl(value) !== null, { error: "must be an http(s) URL" });
+/** Not `z.httpUrl()`: that one refuses the IP or `localhost` of a self-hosted endpoint. */
+const endpointUrlSchema = z.url({ protocol: /^https?$/ });
 
 export const createSchema = z
   .object({

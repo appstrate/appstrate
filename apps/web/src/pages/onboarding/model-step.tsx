@@ -13,6 +13,7 @@ import {
 } from "../../components/onboarding-layout";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
+import { quickConnectProviders } from "../../lib/provider-registry-helpers";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
@@ -36,8 +37,7 @@ export function OnboardingModelStep() {
   if (!orgId) return null;
 
   const hasModels = models && models.length > 0;
-  // The same test `OnboardingQuickConnect` renders on.
-  const hasQuickConnect = (registry ?? []).some((p) => p.authMode === "oauth2");
+  const hasQuickConnect = quickConnectProviders(registry).length > 0;
 
   return (
     <OnboardingLayout

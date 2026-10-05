@@ -33,13 +33,9 @@ import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../api/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
-import {
-  buildDiscoverBody,
-  discoveryFailureOutcome,
-  parsesAsUrl,
-  type DiscoveryState,
-} from "@/lib/model-discovery";
+import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
@@ -246,7 +242,6 @@ function ModelForm({
    */
   const dropEndpointBinding = () => {
     setCreatedCredentialId(null);
-    // What the refusal named is being answered: it must not outlive the edit.
     clearErrors(["credentialId", "modelId"]);
     dropListing();
   };
@@ -341,7 +336,8 @@ function ModelForm({
         onError: (err) =>
           setDiscovery({
             key,
-            outcome: discoveryFailureOutcome(err),
+            // The platform's own rate limit; `rate_limited` is the endpoint's.
+            outcome: err instanceof ApiError && err.status === 429 ? "throttled" : "request_failed",
             models: [],
             truncated: false,
           }),
@@ -391,12 +387,9 @@ function ModelForm({
       isEdit: !!model,
       catalogEntry: catalogEntry(data.modelId.trim()),
     });
-    if (!result.ok) {
-      setError(result.field, { message: t(result.messageKey) });
-      return;
-    }
+    if (!result) return;
     // The host closes on success and reports nothing here.
-    const outcome = await onSubmit(result.data);
+    const outcome = await onSubmit(result);
     if (outcome.failedModelIds.length > 0) {
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
       setError("modelId", {
@@ -427,17 +420,13 @@ function ModelForm({
       offeredIds:
         source === "catalog" && selectedProvider ? selectedProvider.models.map((m) => m.id) : null,
     });
-  // Said on the key row, where it is answered.
   const credentialValidate = () => {
     const key = refusals("").credentialId;
     return key ? t(key) : undefined;
   };
   const modelIdValidate = (v: string) => {
     const key = refusals(v).modelId;
-    if (!key) return undefined;
-    return key === "validation.required"
-      ? t(key, { ns: "common" })
-      : t(key, { provider: selectedProvider?.displayName });
+    return key ? t(key, { provider: selectedProvider?.displayName }) : undefined;
   };
 
   const modelIdError =
@@ -452,9 +441,7 @@ function ModelForm({
   );
 
   return (
-    // `noValidate`: the fields answer in the form's own words, not the browser's.
     <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
-      {/* The credential is set, not typed: registered so its absence refuses the save. */}
       <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
       <ProviderPicker
         id="mdl-provider"

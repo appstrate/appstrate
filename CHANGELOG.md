@@ -64,6 +64,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Models, proxies and endpoint URLs refuse three states they used to
+  accept** (#1681). A disabled model cannot be the organization default:
+  `PUT /api/models/default` naming one, and `PATCH /api/models/{id}` with
+  `enabled: false` on the current default, answer 409 `model_disabled` (move or
+  clear the default first). `base_url_override` / `base_url` on
+  `POST /api/model-provider-credentials`, `/discover` and `/test` must be
+  http(s), else 400. A proxy's `urlPrefix` masks the username as well as the
+  password. Deleting a model or a proxy now also clears the per-space agent
+  settings naming it; settings left dangling by earlier deletions are not
+  rewritten.
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are

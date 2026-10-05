@@ -1612,12 +1612,10 @@ function ConnectionTableRow({
               </label>
             </DisabledReasonTooltip>
           ) : (
-            // No control to offer: state the fact, not the action's label.
             <span className="text-muted-foreground text-xs">
               {isShared ? t("connections.sharedBadge") : "—"}
             </span>
           )}
-          {/* Also in the tooltips, which a touch screen never opens. */}
           {lockHint && (isOwn || canToggleShare) && (
             <p
               className="text-muted-foreground mt-1 max-w-[16rem] text-[0.65rem] whitespace-normal"

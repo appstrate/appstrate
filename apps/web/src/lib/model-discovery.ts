@@ -11,7 +11,6 @@ import type {
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { normalizeHttpUrl } from "@appstrate/core/url";
-import { ApiError } from "../api/errors";
 
 export interface DiscoveryState {
   /** Identifies the endpoint+key the listing came from — see `discoveryKey`. */
@@ -61,15 +60,6 @@ export function buildDiscoverBody(input: {
     api_key: input.inlineApiKey.trim(),
     ...(input.provider.baseUrlOverridable ? { base_url_override: input.baseUrl.trim() } : {}),
   };
-}
-
-/**
- * A request the platform refused before it reached the endpoint. Its own rate
- * limit is named apart: `rate_limited` is the ENDPOINT's 429, and waiting is
- * the only fix for this one.
- */
-export function discoveryFailureOutcome(err: unknown): "throttled" | "request_failed" {
-  return err instanceof ApiError && err.status === 429 ? "throttled" : "request_failed";
 }
 
 /** An endpoint is reached over HTTP(S): any other scheme parses and then serves nothing. */

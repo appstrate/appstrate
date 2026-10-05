@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  buildGenerationLabels,
-  defaultReasoningLevel,
-} from "../src/components/model-generation-labels.ts";
+import { buildGenerationLabels } from "../src/components/model-generation-labels.ts";
+import { defaultReasoningLevel } from "../src/components/default-reasoning-level.ts";
 import type {
   ModelGenerationCapabilities,
   ModelReasoningLevel,

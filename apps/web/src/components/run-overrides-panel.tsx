@@ -101,8 +101,7 @@ export function RunOverridesPanel({
   // users can still clear an override and see which model will be resolved.
   const orgDefaultModel = orgModels?.find((model) => model.is_default);
   const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
-  // "Inherit" is the absence of an override, so it names what then applies:
-  // the agent's own setting, and the organization default only below it.
+  // "Inherit" names what applies with no override.
   const inheritedModel = inheritedEntry(
     orgModels,
     persistedModelId,
@@ -115,8 +114,7 @@ export function RunOverridesPanel({
     orgDefaultProxy,
     (proxy) => proxy.enabled,
   );
-  // A stored override whose entry was deleted (a schedule keeps its own, as
-  // governed state): shown as what it is, so the select never renders blank.
+  // A schedule keeps an override whose entry was deleted: show it, not a blank select.
   const goneModelOverride =
     value.model_id_override && !orgModels?.some((m) => m.id === value.model_id_override)
       ? value.model_id_override
@@ -129,7 +127,6 @@ export function RunOverridesPanel({
       : null;
 
   const setModel = (next: string) => {
-    // "Inherit" reconciles against the model it names, not a setting the server skips.
     const nextModel =
       next === INHERIT ? inheritedModel : orgModels?.find((model) => model.id === next);
     const generation = reconcileModelGenerationSettings(

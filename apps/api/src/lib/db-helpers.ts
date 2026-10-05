@@ -404,8 +404,7 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
       .update(organizations)
       .set(set)
       .where(and(eq(organizations.id, orgId), eq(pointerColumn, deletedId)));
-    // The agent setting is free text (it also names system entries and
-    // `none`), so no FK clears it: a stale id would read as a live setting.
+    // Free text (system ids, `none`): no FK clears the agent setting.
     const placementField = PLACEMENT_FIELD[pointerField];
     await db
       .update(spacePackages)
