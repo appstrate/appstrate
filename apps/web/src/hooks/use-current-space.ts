@@ -3,8 +3,9 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
-import { spaceStore } from "../stores/space-store";
+import { rememberedSpaceKey, spaceStore } from "../stores/space-store";
 import { useSpaces } from "./use-spaces";
 
 /** Reactive hook — re-renders when the current space changes; null until one is resolved. */
@@ -100,15 +101,20 @@ export function enterableSpaceId(
 }
 
 /**
- * The only path from the space remembered for the current organization to a
- * scope: requests carry no space until `GET /api/spaces` proves one enterable,
- * and lose it the moment the listing stops listing it. Render inside MainLayout.
+ * The only path from the space this account remembered for the current
+ * organization to a scope: requests carry no space until `GET /api/spaces`
+ * proves one enterable, and lose it the moment the listing stops listing it.
+ * Render inside MainLayout.
  */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
   const current = useStore(spaceStore, (s) => s.id);
   const orgId = useStore(orgStore, (s) => s.id);
-  const remembered = useStore(spaceStore, (s) => (orgId && s.remembered[orgId]) || null);
+  const userId = useStore(authStore, (s) => s.user?.id);
+  const remembered = useStore(
+    spaceStore,
+    (s) => (userId && orgId && s.remembered[rememberedSpaceKey(userId, orgId)]) || null,
+  );
   const { data: spaces } = useSpaces();
 
   useEffect(() => {

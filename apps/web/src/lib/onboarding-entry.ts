@@ -11,6 +11,19 @@ export function orgLessEntry(canCreateOrg: boolean): "/onboarding/create" | "/on
 }
 
 /**
+ * Where the waiting page sends a user it has nothing to tell, or `null` when
+ * they are indeed waiting: a member of an organization is not waiting for an
+ * invitation, and a user who may create one has a form to fill.
+ */
+export function waitingStepRedirect(state: {
+  canCreateOrg: boolean;
+  hasOrg: boolean;
+}): "/" | "/onboarding/create" | null {
+  if (state.hasOrg) return "/";
+  return state.canCreateOrg ? "/onboarding/create" : null;
+}
+
+/**
  * Where the creation form sends a user it must not be shown to, or `null` when
  * the page stays in charge. A user who may not create is turned away only
  * where the form would be USED: without an organization, or asking for another

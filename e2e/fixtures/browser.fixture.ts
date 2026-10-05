@@ -45,11 +45,14 @@ export async function createAuthedContext(
     ]);
   }
   await context.addInitScript(
-    ({ orgId, spaceId }) => {
+    ({ userId, orgId, spaceId }) => {
       localStorage.setItem("appstrate_current_org", orgId);
-      localStorage.setItem("appstrate_last_space_by_org", JSON.stringify({ [orgId]: spaceId }));
+      localStorage.setItem(
+        "appstrate_last_space_by_org",
+        JSON.stringify({ [`${userId}:${orgId}`]: spaceId }),
+      );
     },
-    { orgId, spaceId },
+    { userId: auth.userId, orgId, spaceId },
   );
   return context;
 }

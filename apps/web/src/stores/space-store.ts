@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createStore } from "zustand/vanilla";
+import { authStore } from "./auth-store";
 import { getCurrentOrgId } from "./org-store";
 
 const STORAGE_KEY = "appstrate_last_space_by_org";
+
+/**
+ * The key a choice is remembered under: an account's, in an organization. By
+ * user because the map outlives the session — another account signing in on
+ * the same browser must not be dropped into the previous one's last space.
+ */
+export function rememberedSpaceKey(userId: string, orgId: string): string {
+  return `${userId}:${orgId}`;
+}
 
 function readRemembered(): Record<string, string> {
   if (typeof localStorage === "undefined") return {};
@@ -44,16 +54,14 @@ interface SpaceState {
    */
   id: string | null;
   /**
-   * The last space chosen in each organization, persisted across reloads, org
-   * switches and sign-outs — candidates, never a scope: an id is only ever
-   * promoted to `id` after `GET /api/spaces` lists it as enterable for whoever
-   * is signed in, so one left behind by another account selects nothing.
+   * The last space each account chose in each organization
+   * ({@link rememberedSpaceKey}), persisted across reloads, org switches and
+   * sign-outs — candidates, never a scope: an id is only ever promoted to `id`
+   * after `GET /api/spaces` lists it as enterable.
    */
   remembered: Record<string, string>;
   /** `null` leaves the scope (org switch, sign-out) without forgetting the choice. */
   setId: (id: string | null) => void;
-  /** Drop what was remembered for an organization the caller left or deleted. */
-  forgetOrg: (orgId: string) => void;
 }
 
 export const spaceStore = createStore<SpaceState>()((set) => ({
@@ -61,23 +69,18 @@ export const spaceStore = createStore<SpaceState>()((set) => ({
   remembered: readRemembered(),
   setId: (id) => {
     const orgId = getCurrentOrgId();
-    if (!id || !orgId) {
+    const userId = authStore.getState().user?.id;
+    if (!id || !orgId || !userId) {
       set({ id });
       return;
     }
     set({
       id,
       remembered: writeRemembered((map) => {
-        map[orgId] = id;
+        map[rememberedSpaceKey(userId, orgId)] = id;
       }),
     });
   },
-  forgetOrg: (orgId) =>
-    set({
-      remembered: writeRemembered((map) => {
-        delete map[orgId];
-      }),
-    }),
 }));
 
 /** Non-hook accessor for use outside React (e.g. api.ts headers) */

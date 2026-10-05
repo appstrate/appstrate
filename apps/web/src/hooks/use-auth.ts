@@ -4,12 +4,9 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
-import { queryClient } from "../lib/query-client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
-import { orgStore } from "../stores/org-store";
-import { spaceStore } from "../stores/space-store";
-import { exitViewAs } from "../stores/view-as-store";
+import { clearSession } from "../lib/clear-session";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -29,29 +26,6 @@ async function fetchProfile(): Promise<AuthProfile | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Centralized session teardown. Resets the auth store AND the org/space scope
- * so a subsequent login can never carry over a stale `X-Org-Id` / `X-Space-Id`
- * header from the previous user — the scoping-header builder reads straight off
- * these stores. The space each organization was last left in stays remembered:
- * it is a candidate `useSpaceResolver` only promotes once the next session's
- * own space list proves it enterable.
- */
-function clearSession() {
-  authStore.setState({ user: null, profile: null, loading: false });
-  // Every cached answer belongs to the session that just ended. Kept, the
-  // previous account's space listing would let the resolver promote ITS
-  // remembered space as the next account's `X-Space-Id` before a refetch.
-  queryClient.clear();
-  orgStore.getState().setId(null);
-  spaceStore.getState().setId(null);
-  // Same reason, one scope deeper: a persona left behind would ride the next
-  // user's requests as `X-View-As`. Here rather than at the sign-out button —
-  // the OIDC branch navigates away before anything after `logout()` runs, and
-  // a session lost mid-flight never passes through a button at all.
-  exitViewAs();
 }
 
 function setAuthenticatedUser(

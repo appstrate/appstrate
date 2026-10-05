@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { createStepRedirect, orgLessEntry } from "../onboarding-entry.ts";
+import { createStepRedirect, orgLessEntry, waitingStepRedirect } from "../onboarding-entry.ts";
 
 describe("orgLessEntry", () => {
   it("sends a user who may create an organization to the creation form", () => {
@@ -38,5 +38,21 @@ describe("createStepRedirect", () => {
     // The bootstrap owner of a closed instance: has the org, may not create
     // another, and must still be moved on to the model step by the page.
     expect(createStepRedirect({ ...closed, hasOrg: true, fromSwitcher: false })).toBeNull();
+  });
+});
+
+describe("waitingStepRedirect", () => {
+  it("keeps an org-less user who may not create one on the waiting page", () => {
+    expect(waitingStepRedirect({ canCreateOrg: false, hasOrg: false })).toBeNull();
+  });
+
+  it("sends a member of an organization back to the app, whatever they may create", () => {
+    // They are not waiting for an invitation, and the page offers only a sign-out.
+    expect(waitingStepRedirect({ canCreateOrg: false, hasOrg: true })).toBe("/");
+    expect(waitingStepRedirect({ canCreateOrg: true, hasOrg: true })).toBe("/");
+  });
+
+  it("sends an org-less platform admin to the creation form", () => {
+    expect(waitingStepRedirect({ canCreateOrg: true, hasOrg: false })).toBe("/onboarding/create");
   });
 });
