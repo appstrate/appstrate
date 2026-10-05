@@ -38,6 +38,25 @@ export interface RunLaunch {
   dependencyOverrides?: Record<string, string>;
 }
 
+/**
+ * Lets one launch through at a time. The mutation's `isPending` cannot do it:
+ * it is render state, so two clicks landing in the same frame both read it
+ * `false` and both create a run.
+ */
+export function launchGate(): { tryEnter: () => boolean; leave: () => void } {
+  let busy = false;
+  return {
+    tryEnter: () => {
+      if (busy) return false;
+      busy = true;
+      return true;
+    },
+    leave: () => {
+      busy = false;
+    },
+  };
+}
+
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
 const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
 

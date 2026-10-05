@@ -11,7 +11,17 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { launchFromOptions, retryLaunch } from "../run-launch.ts";
+import { launchFromOptions, launchGate, retryLaunch } from "../run-launch.ts";
+
+describe("launchGate", () => {
+  it("lets one launch through until it settles — a double click creates one run", () => {
+    const gate = launchGate();
+    // Both clicks land before React re-renders with `isPending`.
+    expect([gate.tryEnter(), gate.tryEnter()]).toEqual([true, false]);
+    gate.leave();
+    expect(gate.tryEnter()).toBe(true);
+  });
+});
 
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {

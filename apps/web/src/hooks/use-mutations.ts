@@ -19,7 +19,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchGate, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
@@ -118,31 +118,33 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  const [gate] = useState(launchGate);
 
-  const onError = (err: Error) => {
-    const errors = missingConnectionErrors(err);
-    if (errors) setMissingErrors(errors);
+  /** One run per click: a second call while one is in flight is dropped. */
+  const send = (launch: RunLaunch, onSuccess?: () => void) => {
+    if (!gate.tryEnter()) return;
+    lastLaunch.current = { launch, onSuccess };
+    runAgent.mutate(launch, {
+      onSuccess: () => {
+        setMissingErrors(null);
+        onSuccess?.();
+      },
+      onError: (err: Error) => {
+        const errors = missingConnectionErrors(err);
+        if (errors) setMissingErrors(errors);
+      },
+      onSettled: gate.leave,
+    });
   };
 
   return {
     isPending: runAgent.isPending,
     missingErrors,
     /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
-    launch: (launch: RunLaunch, onSuccess?: () => void) => {
-      lastLaunch.current = { launch, onSuccess };
-      runAgent.mutate(launch, { onSuccess, onError });
-    },
+    launch: send,
     retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      const next = retryLaunch(launch, picks, missingErrors ?? []);
-      lastLaunch.current = { launch: next, onSuccess };
-      runAgent.mutate(next, {
-        onSuccess: () => {
-          setMissingErrors(null);
-          onSuccess?.();
-        },
-        onError,
-      });
+      send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
     },
     dismiss: () => {
       setMissingErrors(null);
