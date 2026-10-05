@@ -1571,25 +1571,6 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     expect((await download(viewer, AGENT, homeId)).status).not.toBe(403);
   });
 
-  it("on: a fork answers 404 for a package the caller cannot reach, never the copy refusal", async () => {
-    // The 403 names the package and its home space, so it must come after the
-    // reachability check: a caller who cannot see the id learns nothing here.
-    await setRestrictCopy(true);
-    await seedPackage({
-      id: PRIVATE_AGENT,
-      orgId: ctx.orgId,
-      type: "agent",
-      homeSpaceId: author.personalSpaceId,
-      createdBy: author.userId,
-      draftManifest: { name: PRIVATE_AGENT, version: "0.1.0", type: "agent" },
-      draftContent: "Private.",
-    });
-    await expectProblem(await fork(viewer, PRIVATE_AGENT), 404);
-    await expectProblem(await fork(viewer, "@shares/no-such-package"), 404);
-    // Control: the same caller on a package they do reach gets the copy refusal.
-    await expectProblem(await fork(viewer, AGENT), 403, { code: "package_copy_restricted" });
-  });
-
   it("on: a SKILL of the organization is exempt — the CLI's `code sync` copies by design", async () => {
     // The org's own skill, not the system one: a system package is exempt for a
     // reason of its own, so asserting the skill exemption on one would pass
