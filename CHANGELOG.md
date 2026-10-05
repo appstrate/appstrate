@@ -64,6 +64,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Six refusals answer with their own problem `code`, and a taken package
+  identifier is always a 409** (#1677). A client that branches on the old
+  value must follow; `detail`, `param` and the other statuses are unchanged.
+  - `POST /api/orgs` with `AUTH_DISABLE_ORG_CREATION` set, for a caller who
+    is not a platform admin: 403 `forbidden` → 403 `org_creation_disabled`.
+  - Schedule create/update with an invalid cron expression: 400
+    `invalid_request` → 400 `invalid_cron_expression`; with a timezone that
+    cannot be scheduled against: → 400 `invalid_timezone`; with an actor who
+    cannot fire it: → 400 `schedule_actor_invalid`.
+  - Model create/update/seed with a model outside its provider's catalog
+    offer: 400 `invalid_request` → 400 `model_not_offered`.
+  - Webhook create/update with a target on a private or reserved network:
+    400 `invalid_request` → 400 `blocked_url` (the code `/api/proxies`
+    already used).
+  - `name_collision` was a 400 or a 409 depending on which check met the
+    taken identifier. It is now **409** everywhere: package create
+    (`POST /api/packages/{type}`), fork, and the import routes (a system
+    package's identifier, or one owned by another organization).
+
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are

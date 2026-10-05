@@ -3540,6 +3540,15 @@ describe("Packages API", () => {
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.type).toBeUndefined();
+
+      // The fork's name is now taken: the same refusal, and the same status, as a create.
+      const again = await app.request("/api/packages/@forksrc/forkable-agent/fork", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      });
+      expect(again.status).toBe(409);
+      expect(((await again.json()) as any).code).toBe("name_collision");
     });
 
     it("POST fork returns the bare forked SKILL detail DTO (oneOf non-agent arm)", async () => {

@@ -2137,12 +2137,10 @@ export function createPackagesRouter() {
         case "NOT_FOUND":
           throw notFound("Package not found");
         case "NAME_COLLISION":
-          throw new ApiError({
-            status: 400,
-            code: "name_collision",
-            title: "Name Collision",
-            detail: "A package with this name already exists in your organization",
-          });
+          throw conflict(
+            "name_collision",
+            "A package with this name already exists in your organization",
+          );
         case "UNKNOWN_TYPE":
           throw invalidRequest(`Unsupported package type: ${result.type}`);
         case "NO_PUBLISHED_VERSION":
@@ -2494,12 +2492,10 @@ export function createPackagesRouter() {
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
-      throw new ApiError({
-        status: 400,
-        code: "name_collision",
-        title: "Name Collision",
-        detail: `'${packageId}' is a system package and cannot be overwritten`,
-      });
+      throw conflict(
+        "name_collision",
+        `'${packageId}' is a system package and cannot be overwritten`,
+      );
     }
 
     // Phase 1 — for agent imports, cross-check integrations_configuration
@@ -2525,12 +2521,7 @@ export function createPackagesRouter() {
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
     if (existing) {
       if (existing.orgId !== orgId) {
-        throw new ApiError({
-          status: 400,
-          code: "name_collision",
-          title: "Name Collision",
-          detail: `A package with identifier '${packageId}' already exists`,
-        });
+        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
       }
       if (existing.type !== packageType) {
         throw new ApiError({
