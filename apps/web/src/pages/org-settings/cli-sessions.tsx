@@ -107,7 +107,7 @@ export function OrgSettingsCliSessionsPage() {
           if (!pendingRevoke) return;
           revoke.mutate(
             { params: { path: { orgId: orgId ?? "", familyId: pendingRevoke.familyId } } },
-            { onSettled: () => setPendingRevoke(null) },
+            { onSuccess: () => setPendingRevoke(null) },
           );
         }}
         onClose={() => setPendingRevoke(null)}

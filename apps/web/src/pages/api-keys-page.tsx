@@ -158,7 +158,7 @@ export function ApiKeysPage() {
           revokeApiKeyMutation.mutate(
             { params: { path: { id: confirmState.id } } },
             {
-              onSettled: () => setConfirmState(null),
+              onSuccess: () => setConfirmState(null),
             },
           );
         }}
