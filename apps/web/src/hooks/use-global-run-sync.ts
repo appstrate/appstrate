@@ -246,16 +246,20 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
  * the notification and chat polls be slow backstops instead of the freshness
  * mechanism.
  *
- * Exactly one connection owes nothing: the first attempt of a fresh mount,
- * when it succeeds. It opens beside the mount's own queries, and reconciling
- * there issued each of them a second time on every page load. Everything else
- * follows a gap — a failed attempt (`missed`, the caches then age through the
- * whole backoff), a stream that ended, or `followsGap`: a previous stream of
- * the same mount, closed because the scope or the grants changed.
+ * One reconciler lives as long as the hook's mount; `open` is called for each
+ * stream the effect opens, with the scope (org, space, persona) it covers.
  *
- * Residual race, accepted: a frame emitted between a mount query's read and
- * this stream's subscription is seen by neither. The window is the stream's
- * own round trip, and the polls are what eventually correct it.
+ * The first attempt of a stream over a NEW scope, when it succeeds, owes
+ * nothing: the caches of that scope are being created beside it, by the page
+ * load or by the switch itself, and reconciling there issued each of them a
+ * second time. Everything else follows a gap — a failed attempt (`missed`: the
+ * caches then age through the whole backoff), a stream that ended, or a stream
+ * reopened over the SAME scope (the grants changed), whose caches were not
+ * listened to in between.
+ *
+ * Residual race, accepted: a frame emitted between a query's read and the
+ * stream's subscription is seen by neither. The window is the stream's own
+ * round trip, and the polls are what eventually correct it.
  *
  * The run families are rate-limited on top: the server writes a frame on every
  * connection, so a repeatedly dropped stream would reconcile at ~1 Hz and storm
@@ -263,33 +267,43 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
  */
 export function createGapReconciler(
   getQueryClient: () => QueryClient,
-  orgId: string,
-  followsGap: boolean,
   runReconcileMinIntervalMs = 10_000,
-): { missed: () => void; connected: (now: number) => void } {
-  let gap = followsGap;
-  let lastRunReconcileAt = 0;
+): { open: (orgId: string, scope: string) => StreamGaps } {
+  let previousScope: string | null = null;
   return {
-    missed() {
-      gap = true;
-    },
-    connected(now) {
-      if (!gap) {
-        // Whatever connects next does so after this stream went away.
-        gap = true;
-        return;
-      }
-      const qc = getQueryClient();
-      handleChatSessionUpdate(qc);
-      invalidateNotificationQueries(qc);
-      if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
-        lastRunReconcileAt = now;
-        reconcileRunQueries(qc, orgId);
-        // `connection_update` frames were missed on the same stream.
-        handleConnectionUpdate(qc);
-      }
+    open(orgId, scope) {
+      let gap = scope === previousScope;
+      previousScope = scope;
+      let lastRunReconcileAt = 0;
+      return {
+        missed() {
+          gap = true;
+        },
+        connected(now) {
+          if (!gap) {
+            // Whatever connects next does so after this stream went away.
+            gap = true;
+            return;
+          }
+          const qc = getQueryClient();
+          handleChatSessionUpdate(qc);
+          invalidateNotificationQueries(qc);
+          if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
+            lastRunReconcileAt = now;
+            reconcileRunQueries(qc, orgId);
+            // `connection_update` frames were missed on the same stream.
+            handleConnectionUpdate(qc);
+          }
+        },
+      };
     },
   };
+}
+
+interface StreamGaps {
+  /** An attempt failed, or the stream ended: the next connect follows a gap. */
+  missed: () => void;
+  connected: (now: number) => void;
 }
 
 function handleSSEMessage(
@@ -390,8 +404,7 @@ export function useGlobalRunSync() {
     : null;
   const qcRef = useRef(qc);
   qcRef.current = qc;
-  // Whether an earlier effect instance of this mount already opened a stream.
-  const streamOpened = useRef(false);
+  const gapReconciler = useRef<ReturnType<typeof createGapReconciler> | null>(null);
 
   useEffect(() => {
     if (!orgId || !spaceId || !channels) return;
@@ -407,8 +420,8 @@ export function useGlobalRunSync() {
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
-    const reconciler = createGapReconciler(() => qcRef.current, orgId, streamOpened.current);
-    streamOpened.current = true;
+    gapReconciler.current ??= createGapReconciler(() => qcRef.current);
+    const reconciler = gapReconciler.current.open(orgId, JSON.stringify([orgId, spaceId, viewAs]));
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {

@@ -33,7 +33,7 @@ import { broadRunKeys, createGapReconciler } from "../../hooks/use-global-run-sy
 type InvalidateCall = { queryKey: readonly unknown[] } | { predicate: unknown };
 
 /** A reconciler over a client that records what it is asked to refetch. */
-function recordingReconciler(followsGap = false) {
+function recordingReconciler() {
   const calls: InvalidateCall[] = [];
   const qc = {
     invalidateQueries: (filters: InvalidateCall) => {
@@ -41,12 +41,14 @@ function recordingReconciler(followsGap = false) {
       return Promise.resolve();
     },
   } as unknown as QueryClient;
+  const reconciler = createGapReconciler(() => qc, 10_000);
   return {
     calls,
     /** Every key-addressed call, serialized. */
     keys: () =>
       calls.flatMap((call) => ("queryKey" in call ? [JSON.stringify(call.queryKey)] : [])),
-    ...createGapReconciler(() => qc, "org_1", followsGap, 10_000),
+    /** Open a stream over `scope`, as one run of the hook's effect does. */
+    open: (scope = "org_1/spc_1") => reconciler.open("org_1", scope),
   };
 }
 
@@ -144,9 +146,10 @@ describe("notification freshness", () => {
   // The load-bearing half: without this, slowing the poll down means a missed
   // terminal event leaves the badge wrong for five minutes.
   it("reconciles the badges on every SSE reconnect", () => {
-    const { keys, connected } = recordingReconciler();
-    connected(0);
-    connected(1_000);
+    const { keys, open } = recordingReconciler();
+    const stream = open();
+    stream.connected(0);
+    stream.connected(1_000);
     expect(keys()).toContain('["get","/api/notifications"]');
     expect(keys()).toContain('["get","/api/notifications/unread-count"]');
     expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
@@ -162,42 +165,55 @@ describe("run cache reconciliation on reconnect", () => {
   // Same protocol gap as the badges, run side: `run_update` frames missed while
   // the stream was down left the page reading "running" under a bell that said
   // "finished".
+  const BADGE = '["get","/api/notifications/unread-count"]';
+
   it("reconciles nothing on the first connect, which opens beside the mount's own queries", () => {
-    const { calls, connected } = recordingReconciler();
-    connected(0);
+    const { calls, open } = recordingReconciler();
+    open().connected(0);
     expect(calls).toHaveLength(0);
   });
 
-  const BADGE = '["get","/api/notifications/unread-count"]';
+  // A switch of org, space or persona creates its caches beside the new
+  // stream, exactly as a page load does: reconciling there refetched everything
+  // the switch had just fetched.
+  it("reconciles nothing on the first connect after a change of scope", () => {
+    const { calls, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    open("org_1/spc_2").connected(1_000);
+    expect(calls).toHaveLength(0);
+  });
+
+  // The effect also reopens the stream when only the grants changed: the
+  // caches are the same ones, and nothing listened for them in between.
+  it("reconciles on the first connect of a stream reopened over the same scope", () => {
+    const { keys, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    open("org_1/spc_1").connected(1_000);
+    expect(keys()).toContain(BADGE);
+  });
 
   // The mount's queries are as old as the whole backoff by the time a stream
   // finally opens: that first SUCCESSFUL connect is not the first attempt.
   it("reconciles on the first successful connect when an attempt failed before it", () => {
-    const { keys, missed, connected } = recordingReconciler();
-    missed();
-    connected(0);
-    expect(keys()).toContain(BADGE);
-  });
-
-  // The effect reopens the stream when the space, the persona or the grants
-  // change; the caches the new stream covers were not listened to meanwhile.
-  it("reconciles on the first connect of a stream that replaces an earlier one", () => {
-    const { keys, connected } = recordingReconciler(true);
-    connected(0);
+    const { keys, open } = recordingReconciler();
+    const stream = open();
+    stream.missed();
+    stream.connected(0);
     expect(keys()).toContain(BADGE);
   });
 
   it("reconciles the run families on a reconnect, at most once per interval", () => {
-    const { keys, calls, connected } = recordingReconciler();
-    connected(0);
-    connected(20_000);
+    const { keys, calls, open } = recordingReconciler();
+    const stream = open();
+    stream.connected(0);
+    stream.connected(20_000);
     for (const key of broadRunKeys("org_1")) expect(keys()).toContain(JSON.stringify(key));
     expect(keys()).toContain('["run"]');
 
     // A stream dropped again within the interval still owes the signal-only
     // families (badges, chat), not a second sweep of the run caches.
     const afterFirst = calls.length;
-    connected(21_000);
+    stream.connected(21_000);
     const second = calls.slice(afterFirst);
     expect(second.length).toBeGreaterThan(0);
     expect(second.some((call) => "queryKey" in call && call.queryKey[0] === "run")).toBe(false);
