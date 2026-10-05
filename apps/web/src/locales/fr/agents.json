@@ -531,7 +531,7 @@
   "files.errorReserved": "manifest.json s'écrit dans l'onglet JSON, pas dans l'arborescence.",
   "files.errorExists": "Ce package contient déjà un fichier à ce chemin.",
   "files.errorConflictPath": "Ce chemin entre en conflit avec un fichier ou un dossier existant, y compris après normalisation des caractères et de la casse.",
-  "files.errorImportConflict": "Impossible d'importer « {{path}} » : ce chemin est déjà utilisé. Pour remplacer un fichier, utilisez « Remplacer ».",
+  "files.errorImportConflict": "Impossible d’importer « {{path}} » : ce chemin est déjà utilisé. Pour remplacer un fichier, utilisez « Remplacer ».",
   "files.errorTooLarge": "Fichier trop volumineux : {{limit}} au maximum par fichier. Importez le package en ZIP pour des fichiers plus gros.",
   "files.errorConflict": "Ce package a été modifié ailleurs. Vos changements sont conservés. Copiez-les avant de recharger le package pour repartir de sa version actuelle.",
   "files.errorGeneric": "L'enregistrement des fichiers a échoué.",
