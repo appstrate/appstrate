@@ -66,6 +66,16 @@ export function getSource(manifest: Rec): SourceState {
   };
 }
 
+/** The allowlist a remote source's own host gives an auth: `<origin>/**`, empty while the URL names no host. */
+function sourceHostAllowlist(url: string): string[] {
+  try {
+    const { protocol, hostname, origin } = new URL(url);
+    return (protocol === "https:" || protocol === "http:") && hostname ? [`${origin}/**`] : [];
+  } catch {
+    return [];
+  }
+}
+
 export function setSource(manifest: Rec, s: SourceState): Rec {
   // Merge onto the existing source so changing kind doesn't discard sibling
   // keys (`_meta`, headers, …) the forms don't surface. On a kind switch we
@@ -82,7 +92,21 @@ export function setSource(manifest: Rec, s: SourceState): Rec {
     delete source.remote;
     delete source.server;
   }
-  return { ...manifest, source };
+  if (s.kind !== "remote" || manifest.auths === undefined) return { ...manifest, source };
+
+  // An auth whose allowlist is the previous URL's host follows the new one.
+  const before = sourceHostAllowlist(getSource(manifest).remoteUrl);
+  const after = sourceHostAllowlist(s.remoteUrl);
+  const auths = Object.fromEntries(
+    Object.entries(asRec(manifest.auths)).map(([key, raw]) => {
+      const auth = asRec(raw);
+      const tracks =
+        auth.allow_all_uris !== true &&
+        asStringArray(auth.authorized_uris).join("\n") === before.join("\n");
+      return [key, tracks ? { ...auth, authorized_uris: after } : raw];
+    }),
+  );
+  return { ...manifest, source, auths };
 }
 
 // ─── Auths ──────────────────────────────────────────────────
