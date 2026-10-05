@@ -20,12 +20,16 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 
 // --- URL Masking ---
 
+/**
+ * The userinfo is masked whole: several proxy vendors carry the account token
+ * in the USERNAME (`http://<token>:@host`), and this string reaches every role
+ * holding `proxies:read`.
+ */
 function maskProxyUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.password) {
-      parsed.password = "***";
-    }
+    if (parsed.username) parsed.username = "***";
+    if (parsed.password) parsed.password = "***";
     const str = parsed.toString();
     // Truncate long URLs for display
     return str.length > 60 ? `${str.slice(0, 57)}...` : str;

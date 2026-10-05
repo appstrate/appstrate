@@ -6112,7 +6112,7 @@ export interface components {
         OrgProxy: {
             id: string;
             label: string;
-            /** @description Masked proxy URL for display */
+            /** @description Proxy URL for display, its username and password both masked */
             urlPrefix: string;
             enabled: boolean;
             is_default: boolean;
@@ -15029,7 +15029,7 @@ export interface operations {
                     api_key: string;
                     /**
                      * Format: uri
-                     * @description Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
+                     * @description Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
                      */
                     base_url_override?: string | null;
                 };
@@ -15763,7 +15763,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time. */
+            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -20643,7 +20643,7 @@ export interface operations {
                      *         {
                      *           "id": "cm6pqr678",
                      *           "label": "US Residential Proxy",
-                     *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *           "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
                      *           "is_default": false,
@@ -20702,7 +20702,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
@@ -20750,7 +20750,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": true,
@@ -20837,7 +20837,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
