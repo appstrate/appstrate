@@ -19,6 +19,7 @@ async function fetchProfile(): Promise<AuthProfile | null> {
       id: data.id,
       displayName: data.displayName ?? null,
       language: data.language,
+      canCreateOrg: data.can_create_org,
     };
     if (profile.language && profile.language !== i18n.language) {
       i18n.changeLanguage(profile.language);
@@ -173,6 +174,15 @@ export async function refreshAuth(): Promise<void> {
       "Authentication did not complete — the session could not be established.",
     );
   }
+}
+
+/**
+ * Whether `POST /api/orgs` would accept the signed-in user (`can_create_org`).
+ * `true` while the profile is unknown: a failed profile read must not strand a
+ * new user of an open instance on the "waiting for an invitation" page.
+ */
+export function useCanCreateOrg(): boolean {
+  return useStore(authStore, (s) => s.profile?.canCreateOrg ?? true);
 }
 
 export function useAuth() {

@@ -12535,7 +12535,8 @@
                   "displayName": "Alice Martin",
                   "language": "fr",
                   "email": "alice@example.com",
-                  "name": "Alice Martin"
+                  "name": "Alice Martin",
+                  "can_create_org": true
                 }
               }
             }
@@ -12599,7 +12600,8 @@
                   "displayName": "Alice Martin",
                   "language": "en",
                   "email": "alice@example.com",
-                  "name": "Alice Martin"
+                  "name": "Alice Martin",
+                  "can_create_org": true
                 }
               }
             }
@@ -27941,7 +27943,7 @@
       "UserProfile": {
         "type": "object",
         "description": "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
-        "required": ["id", "language", "email", "name"],
+        "required": ["id", "language", "email", "name", "can_create_org"],
         "properties": {
           "id": {
             "type": "string"
@@ -27959,6 +27961,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "can_create_org": {
+            "type": "boolean",
+            "description": "Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`)."
           }
         }
       },

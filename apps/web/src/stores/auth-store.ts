@@ -8,7 +8,10 @@ import type { UserProfile } from "@appstrate/shared-types";
  * (and the SPA never reads them), so the store holds only the fields the
  * server actually returns — no fabricated timestamps.
  */
-export type AuthProfile = Omit<UserProfile, "createdAt" | "updatedAt">;
+export type AuthProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
+  /** `can_create_org`: whether `POST /api/orgs` would accept this user. */
+  canCreateOrg: boolean;
+};
 
 interface AuthState {
   user: { id: string; email: string; emailVerified: boolean; name?: string } | null;

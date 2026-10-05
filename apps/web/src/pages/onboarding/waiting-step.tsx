@@ -5,14 +5,20 @@
 // organization membership. Self-hosters get a calm "wait for invitation"
 // screen instead of a broken /onboarding/create flow.
 
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { useAuth } from "../../hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
+import { orgLessEntry } from "../../lib/onboarding-entry";
 import { Mail } from "lucide-react";
 
 export function OnboardingWaitingStep() {
   const { t } = useTranslation("settings");
   const { user, logout } = useAuth();
+  const entry = orgLessEntry(useCanCreateOrg());
+
+  // A platform admin may create an organization on a closed instance.
+  if (entry !== "/onboarding/waiting") return <Navigate to={entry} replace />;
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">

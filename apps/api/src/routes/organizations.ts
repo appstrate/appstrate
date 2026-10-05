@@ -48,7 +48,7 @@ import { assertSpaceAssignmentsValid } from "../services/space-assignments.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
-import { isPlatformAdmin } from "@appstrate/db/auth-policy";
+import { mayCreateOrganization } from "@appstrate/db/auth-policy";
 import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -154,7 +154,7 @@ router.post("/", async (c) => {
   // platform-wide, only platform admins (AUTH_PLATFORM_ADMIN_EMAILS) may
   // create new organizations. The OrgGate webapp branch surfaces a
   // "waiting for invitation" page to non-admin users with no org.
-  if (getEnv().AUTH_DISABLE_ORG_CREATION && !isPlatformAdmin(user.email)) {
+  if (!mayCreateOrganization(user.email)) {
     throw forbidden("Organization creation is disabled on this instance");
   }
   const data = await readJsonBody(c, createOrgSchema);

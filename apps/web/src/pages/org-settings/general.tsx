@@ -14,6 +14,7 @@ import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
+import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
@@ -32,6 +33,7 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
   const { features } = useAppConfig();
+  const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
@@ -391,9 +393,9 @@ export function OrgSettingsGeneralPage() {
         </p>
         {orgs.length === 1 && (
           <p className="mt-2 text-sm font-medium">
-            {features.orgCreationDisabled
-              ? t("orgSettings.leaveLastOrgWaiting")
-              : t("orgSettings.leaveLastOrgCreate")}
+            {canCreateOrg
+              ? t("orgSettings.leaveLastOrgCreate")
+              : t("orgSettings.leaveLastOrgWaiting")}
           </p>
         )}
       </ConfirmModal>

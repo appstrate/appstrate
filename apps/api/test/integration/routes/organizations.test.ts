@@ -257,6 +257,12 @@ describe("Organizations API", () => {
         const { _resetCacheForTesting } = await import("@appstrate/env");
         _resetCacheForTesting();
       };
+      // What the SPA reads to decide whether to show the creation form: it
+      // must agree with what the POST beside it answers.
+      const profileSaysCanCreate = async (cookie: string) => {
+        const res = await app.request("/api/profile", { headers: { Cookie: cookie } });
+        return ((await res.json()) as { can_create_org: boolean }).can_create_org;
+      };
 
       it("blocks non-admin signups from creating an org", async () => {
         const testUser = await createTestUser({ email: "regular@test.com" });
@@ -269,6 +275,7 @@ describe("Organizations API", () => {
             body: JSON.stringify({ name: "Blocked Org", slug: "blocked-org" }),
           });
           expect(res.status).toBe(403);
+          expect(await profileSaysCanCreate(testUser.cookie)).toBe(false);
         } finally {
           for (const [k, v] of Object.entries(SNAPSHOT)) {
             if (v === undefined) delete process.env[k];
@@ -291,6 +298,7 @@ describe("Organizations API", () => {
             body: JSON.stringify({ name: "Admin Org", slug: "admin-org" }),
           });
           expect(res.status).toBe(201);
+          expect(await profileSaysCanCreate(adminUser.cookie)).toBe(true);
         } finally {
           for (const [k, v] of Object.entries(SNAPSHOT)) {
             if (v === undefined) delete process.env[k];

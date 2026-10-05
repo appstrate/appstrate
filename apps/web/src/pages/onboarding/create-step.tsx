@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
@@ -13,7 +13,8 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
-import { useAuth } from "../../hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
+import { orgLessEntry } from "../../lib/onboarding-entry";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
@@ -39,6 +40,7 @@ export function OnboardingCreateStep() {
   const queryClient = useQueryClient();
   const { switchOrg, currentOrg, orgs, loading } = useOrg();
   const { user } = useAuth();
+  const canCreateOrg = useCanCreateOrg();
   const { nextRoute } = useOnboardingNav("create");
 
   const location = useLocation();
@@ -106,6 +108,12 @@ export function OnboardingCreateStep() {
   const onSubmit = (data: CreateOrgFormData) => {
     createMutation.mutate({ body: { name: data.name.trim(), slug: data.slug.trim() } });
   };
+
+  // The server refuses this user's `POST /api/orgs` (closed instance): no form.
+  if (!canCreateOrg) {
+    if (loading) return null;
+    return <Navigate to={orgs.length > 0 ? "/" : orgLessEntry(canCreateOrg)} replace />;
+  }
 
   return (
     <OnboardingLayout

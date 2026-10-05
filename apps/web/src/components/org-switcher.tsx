@@ -8,6 +8,7 @@ import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanManageOrgCatalog } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
+import { useCanCreateOrg } from "../hooks/use-auth";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +53,7 @@ export function OrgSwitcher() {
   const currentSpaceId = useCurrentSpaceId();
   const canReach = useCanReach();
   const canManageCatalog = useCanManageOrgCatalog();
+  const canCreateOrg = useCanCreateOrg();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
@@ -136,16 +138,18 @@ export function OrgSwitcher() {
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             )}
-            <DropdownMenuItem asChild>
-              <Link
-                to="/onboarding/create"
-                state={{ fromSwitcher: true }}
-                className="text-primary flex items-center gap-2"
-              >
-                <Plus size={14} />
-                {t("switcher.createOrg")}
-              </Link>
-            </DropdownMenuItem>
+            {canCreateOrg && (
+              <DropdownMenuItem asChild>
+                <Link
+                  to="/onboarding/create"
+                  state={{ fromSwitcher: true }}
+                  className="text-primary flex items-center gap-2"
+                >
+                  <Plus size={14} />
+                  {t("switcher.createOrg")}
+                </Link>
+              </DropdownMenuItem>
+            )}
             {canReach("/space/packages") && (
               <DropdownMenuItem asChild>
                 <Link to="/space/packages" className="text-primary flex items-center gap-2">

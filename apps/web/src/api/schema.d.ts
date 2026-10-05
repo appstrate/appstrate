@@ -6834,6 +6834,8 @@ export interface components {
             /** Format: email */
             email: string;
             name: string;
+            /** @description Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`). */
+            can_create_org: boolean;
         };
         /** @description Webhook configuration object */
         WebhookObject: {
@@ -20448,7 +20450,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "fr",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20490,7 +20493,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "en",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
