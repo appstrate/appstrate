@@ -86,6 +86,18 @@ export const redeemSchema = z
 // point: only one process holds it at a time.
 const BOOTSTRAP_REDEEM_LOCK_KEY = 8729463725001923174n;
 
+function bootstrapUserExists(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "bootstrap_user_exists",
+    title: "Conflict",
+    detail:
+      "An account already exists for this address, and the bootstrap token only creates " +
+      "a new one. Sign in with that account, then make it owner of the root organization " +
+      "with `bun apps/api/scripts/bootstrap-org.ts --owner=<email>`.",
+  });
+}
+
 export function createAuthBootstrapRouter(): Hono {
   const router = new Hono();
 
@@ -198,6 +210,17 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
+      // The token creates the owner's account; it does not take over one that
+      // exists. Said plainly here, to the operator, rather than through
+      // Better Auth's duplicate answer — which is a 422 without mail
+      // verification and a synthetic success with it.
+      const [taken] = await db
+        .select({ id: userTable.id })
+        .from(userTable)
+        .where(eq(userTable.email, data.email))
+        .limit(1);
+      if (taken) throw bootstrapUserExists();
+
       // Step 3: signup via BA inside the bypass envelope
       const authApi = getAuth().api;
       let authResponse: Response;
@@ -213,15 +236,9 @@ export function createAuthBootstrapRouter(): Hono {
         const msg = getErrorMessage(err);
         // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
+        // The same address registered between the check above and here.
         if (msg.includes("already exists") || msg.includes("duplicate")) {
-          throw new ApiError({
-            status: 409,
-            code: "bootstrap_user_exists",
-            title: "Conflict",
-            detail:
-              "An account with that email already exists. Use a different email — " +
-              "the bootstrap owner must be a fresh account.",
-          });
+          throw bootstrapUserExists();
         }
         // Domain allowlist rejection (#344 hardening — bootstrap-token
         // bypass does NOT skip AUTH_ALLOWED_SIGNUP_DOMAINS). Surface
@@ -280,7 +297,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: authResponse.status === 422 ? "Unprocessable Entity" : "Bad Request",
           detail:
             authResponse.status === 422
-              ? "Bootstrap signup rejected (likely duplicate email or weak password)."
+              ? "Bootstrap signup rejected (password refused by the password policy)."
               : "Bootstrap signup rejected by auth provider.",
         });
       }

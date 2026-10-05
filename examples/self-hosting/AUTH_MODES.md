@@ -98,18 +98,35 @@ moment that account is created, an organization named
 Because that account is born owner, knowing the address is not enough to
 create it. The platform creates it only for a caller who proves control:
 
-| How the account is created                                 | Accepted? |
-| ---------------------------------------------------------- | --------- |
-| `/claim` with `AUTH_BOOTSTRAP_TOKEN` (see below)           | yes       |
-| Google / GitHub sign-in whose provider asserts the address | yes       |
-| Magic link sent to the address (requires SMTP)             | yes       |
-| Email + password on `/register`, with or without SMTP      | **no**    |
+| How the account is created                                                      | Accepted? |
+| ------------------------------------------------------------------------------- | --------- |
+| `/claim` with `AUTH_BOOTSTRAP_TOKEN` (see below)                                | yes       |
+| Google / GitHub sign-in, when the provider asserts the address is verified      | yes       |
+| Magic link sent to the address (requires SMTP)                                  | yes       |
+| Email + password on `/register`, with or without SMTP                           | **no**    |
+| An existing account changing its e-mail to the address (`email_change_refused`) | **no**    |
 
-The sign-up form is refused (`bootstrap_owner_proof_required`) whatever
-else is configured — open or closed sign-up, `AUTH_PLATFORM_ADMIN_EMAILS`,
-a pending invitation. A verification e-mail does not count: it shows who
-reads the inbox, not who chose the password. The address itself is never
-sent to the browser.
+The sign-up form refuses whatever else is configured — open or closed
+sign-up, `AUTH_PLATFORM_ADMIN_EMAILS`, a pending invitation. A
+verification e-mail does not count: it shows who reads the inbox, not who
+chose the password. The refusal does not say why: the form answers what
+it answers any address it will not register (`signup_disabled`,
+`signup_domain_not_allowed`, or "User already exists"), so it never
+confirms which address is the owner's, and the address is never sent to
+the browser. The reason is in the server log
+(`refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of ownership`).
+
+The named owner is exempt from `AUTH_ALLOWED_SIGNUP_DOMAINS` on every
+accepted path: the operator named that address.
+
+While a bootstrap token is redeemable the dashboard shows `/claim` and
+nothing else to a signed-out visitor, so the token is the path to use
+whenever one is set (the installer always sets one). The social and
+magic-link paths are for an instance configured without a token.
+
+The same rule covers `AUTH_PLATFORM_ADMIN_EMAILS` for e-mail changes: an
+existing account cannot move onto a listed address. A listed admin signs
+up with that address.
 
 Idempotent: if the user already owns an org, the after-hook is a no-op.
 Slug collisions add a numeric suffix.
@@ -129,7 +146,9 @@ operator. The CLI generates a 256-bit base64url token on every closed
 install, writes it to `.env`, and prints a banner with the redemption URL.
 
 - With `AUTH_BOOTSTRAP_OWNER_EMAIL`: the token claims that address and no
-  other (`bootstrap_owner_email_mismatch` otherwise).
+  other (`bootstrap_owner_email_mismatch` otherwise). If an account already
+  exists for it, the answer is `409 bootstrap_user_exists`: sign in with
+  that account and use the script of Recipe 4.
 - Alone — typically `curl … | bash -s -- --yes` or any unattended flow
   (Ansible, cloud-init, GitHub Actions) where no email is known at install
   time: the token holder picks the owner address on `/claim`.
@@ -361,7 +380,8 @@ To go back to open mode, unset the flags and restart. No data migration.
   org exists, the new email won't get a fresh org (idempotent on
   user-already-owns-an-org).
 - **`AUTH_BOOTSTRAP_OWNER_EMAIL` without a token** — the sign-up form
-  answers `bootstrap_owner_proof_required` for that address. Add
+  refuses that address like any address it will not register, and the
+  server log says why. Add
   `AUTH_BOOTSTRAP_TOKEN` to `.env`, restart, and claim the instance at
   `/claim`. The token is redeemable only while the instance has no
   organization at all; on an instance that already has some, sign in with

@@ -10,10 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The owner account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` is created at
   `/claim`, with `AUTH_BOOTSTRAP_TOKEN`.** The email/password sign-up form
-  no longer creates that account (403 `bootstrap_owner_proof_required`); it
-  is created by redeeming the bootstrap token, by a Google/GitHub sign-in
-  whose provider asserts the address, or by a magic link. With both
-  variables set, the token claims the named address only. An instance whose
+  no longer creates that account (it answers as for any address it will not
+  register, and the server log says why); it is created by redeeming the
+  bootstrap token, by a Google/GitHub sign-in whose provider asserts the
+  address, or by a magic link. With both variables set, the token claims the
+  named address only, and that address is exempt from
+  `AUTH_ALLOWED_SIGNUP_DOMAINS`. An existing account can no longer change
+  its e-mail to that address or to one listed in `AUTH_PLATFORM_ADMIN_EMAILS`
+  (403 `email_change_refused`). A Google sign-in now takes `emailVerified`
+  from Google's `email_verified` claim instead of assuming it. An instance whose
   owner account already exists is unaffected. An instance that names an
   owner who has not signed up yet needs a token before they can: add
   `AUTH_BOOTSTRAP_TOKEN` (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`)

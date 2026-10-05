@@ -5,11 +5,12 @@
  *
  * Runs after `createBootstrapOrg` actually inserted a new org row,
  * regardless of how the bootstrap was initiated:
- *   - `AUTH_BOOTSTRAP_OWNER_EMAIL` first-signup (via the BA after-hook
- *     in `packages/db/src/auth.ts`)
+ *   - the `AUTH_BOOTSTRAP_OWNER_EMAIL` account being created (via the BA
+ *     after-hook in `packages/db/src/auth.ts`)
  *   - `AUTH_BOOTSTRAP_TOKEN` redemption via `POST /api/auth/bootstrap/redeem`
  *
  * Side effects (all isolated — failures are logged, never re-raised):
+ *   0. Mark the bootstrap token consumed.
  *   1. Emit `onOrgCreate` so module listeners (the ee module's free-tier gate,
  *      audit) see it.
  *   2. Create the default Space for the new org.
@@ -24,6 +25,7 @@ import { emitEvent } from "./modules/module-loader.ts";
 import { createDefaultSpace } from "../services/spaces.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { markBootstrapTokenConsumed } from "./bootstrap-token.ts";
 
 interface PostBootstrapOrgArgs {
   orgId: string;
@@ -34,6 +36,11 @@ interface PostBootstrapOrgArgs {
 
 export async function triggerPostBootstrapOrg(args: PostBootstrapOrgArgs): Promise<void> {
   const { orgId, slug, userId, userEmail } = args;
+  // The token is dead once any organization exists, whichever path created
+  // this one (redeem, or the named owner arriving by a verified sign-in).
+  // Saying so now is what stops the SPA sending signed-out visitors to a
+  // `/claim` that can only answer 410 until the next restart.
+  markBootstrapTokenConsumed();
   await emitEvent("onOrgCreate", orgId, userEmail);
   const defaultSpace = await createDefaultSpace(orgId, userId).catch((err) => {
     logger.warn("Failed to create default space for bootstrap org", {

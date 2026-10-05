@@ -1,28 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit test for the `mapProfileToUser` override on every social provider
- * we configure in `buildAuth()`. The override forces `emailVerified: true`
- * on the `userInfo` object BA's `link-account.mjs` consumes, which has two
- * effects:
+ * Unit test for the social providers configured in `buildAuth()`: none of
+ * them carries a `mapProfileToUser` override, so `emailVerified` is what the
+ * provider itself asserts (Google's `email_verified` id_token claim, GitHub's
+ * per-address `/user/emails` flag).
  *
- *   1. The brand-new user row is inserted with `emailVerified: true`
- *      (double-safety with `shouldAutoVerifyEmailOnCreate`, which sets the
- *      same flag via the `databaseHooks.user.create.before` path).
- *   2. The `!userInfo.emailVerified` gate at `link-account.mjs:95` is
- *      bypassed, so BA does NOT send a spurious verification email right
- *      after a successful OAuth round-trip. Without this override, users
- *      whose GitHub primary email is flagged as unverified (or whose
- *      OAuth App lacks the `user:email` scope grant on a pre-existing
- *      authorization) receive a verification link moments after they
- *      finish signing in with GitHub — a UX bug that was reported and
- *      fixed on 2026-04-13.
- *
- * Why a dedicated unit test: the override is a single tiny function, but
- * losing it silently reintroduces the bug in a code path that is hard to
- * cover with integration tests (BA's social flow requires a mock OAuth2
- * provider; the suite does not have one). Testing the config shape is the
- * cheapest regression guard available.
+ * Why a dedicated unit test: the suite has no mock OAuth2 provider to drive
+ * Better Auth's social flow end to end, and an override forcing the flag is
+ * one line that silently turns a round-trip into an assertion. Testing the
+ * config shape is the cheapest regression guard available.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -36,7 +23,7 @@ const SOCIAL_TEST_VARS = {
   GITHUB_CLIENT_SECRET: "test-github-client-secret",
 } as const;
 
-describe("auth social provider config — emailVerified override", () => {
+describe("auth social provider config — emailVerified comes from the provider", () => {
   const saved: Record<string, string | undefined> = {};
 
   beforeAll(() => {
@@ -62,8 +49,7 @@ describe("auth social provider config — emailVerified override", () => {
     // NOT blanket-force `emailVerified: true` — that let an attacker link a
     // victim's unverified email onto a GitHub account and take over. GitHub is
     // configured WITHOUT a `mapProfileToUser` override so Better Auth's genuine
-    // per-email `/user/emails` verified flag decides linking. (Google keeps the
-    // override because its OIDC `email_verified` claim is authoritative.)
+    // per-email `/user/emails` verified flag decides linking.
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
     const github = options.socialProviders?.github as { mapProfileToUser?: unknown } | undefined;
@@ -71,19 +57,15 @@ describe("auth social provider config — emailVerified override", () => {
     expect(github?.mapProfileToUser).toBeUndefined();
   });
 
-  it("google provider is configured with mapProfileToUser → emailVerified: true", async () => {
+  it("google provider does NOT force emailVerified either — the id_token claim decides", async () => {
+    // Better Auth maps Google's `email_verified` claim onto `emailVerified`.
+    // An override answering `true` for every profile would turn "came back
+    // from Google" into "Google asserts this address", which is what account
+    // linking and the bootstrap-owner proof rely on.
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
-    const google = options.socialProviders?.google as
-      | {
-          mapProfileToUser?: (
-            profile: unknown,
-          ) => { emailVerified?: boolean } | Promise<{ emailVerified?: boolean }>;
-        }
-      | undefined;
+    const google = options.socialProviders?.google as { mapProfileToUser?: unknown } | undefined;
     expect(google).toBeDefined();
-    expect(typeof google?.mapProfileToUser).toBe("function");
-    const result = await google!.mapProfileToUser!({});
-    expect(result.emailVerified).toBe(true);
+    expect(google?.mapProfileToUser).toBeUndefined();
   });
 });

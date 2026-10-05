@@ -6,16 +6,18 @@
 // creating it takes proof that the caller controls it. One test per row of
 // the predicate:
 //
-//   address is the named owner | account exists | proof            | outcome
-//   ---------------------------+----------------+------------------+---------------------------
-//   yes                        | no             | none             | refused, nothing created
-//   yes                        | no             | bootstrap token  | account + root org
-//   yes                        | no             | verified at birth| account + root org
-//   yes                        | yes            | any              | Better Auth's duplicate path
-//   no                         | —              | —                | ordinary sign-up policy
+//   address is the named owner | account exists | how it is acquired | outcome
+//   ---------------------------+----------------+--------------------+---------------------------
+//   yes                        | no             | sign-up, no proof  | refused, nothing created
+//   yes                        | no             | e-mail change      | refused, row unchanged
+//   yes                        | no             | bootstrap token    | account + root org
+//   yes                        | no             | verified at birth  | account + root org
+//   yes                        | yes            | sign-up / token    | refused, account untouched
+//   no                         | —              | —                  | ordinary sign-up policy
 //
-// "none" holds whatever else would let an address through: open or closed
+// "no proof" holds whatever else would let an address through: open or closed
 // sign-up, the platform-admin allowlist, a pending invitation, SMTP, realm.
+// A refusal reads like the one any other address gets in the same mode.
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -35,13 +37,18 @@ import { seedInvitation } from "../helpers/seed.ts";
 import { enableSmtpForSuite } from "../helpers/smtp.ts";
 import {
   account,
+  verification,
   organizations,
   organizationMembers,
   user,
   spaces,
   packages,
 } from "@appstrate/db/schema";
-import { _resetBootstrapTokenForTesting } from "../../src/lib/bootstrap-token.ts";
+import {
+  _resetBootstrapTokenForTesting,
+  isBootstrapTokenPending,
+} from "../../src/lib/bootstrap-token.ts";
+import { triggerPostBootstrapOrg } from "../../src/lib/post-bootstrap-hook.ts";
 import { resetRateLimiters } from "../../src/middleware/rate-limit.ts";
 import { emitEvent } from "../../src/lib/modules/module-loader.ts";
 import { createDefaultSpace } from "../../src/services/spaces.ts";
@@ -57,6 +64,7 @@ const SNAPSHOT = {
   AUTH_BOOTSTRAP_TOKEN: process.env.AUTH_BOOTSTRAP_TOKEN,
   AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP,
   AUTH_PLATFORM_ADMIN_EMAILS: process.env.AUTH_PLATFORM_ADMIN_EMAILS,
+  AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
 };
 
 function setEnv(vars: Record<string, string | undefined>) {
@@ -94,12 +102,34 @@ async function redeem(email: string, token = VALID_TOKEN) {
   });
 }
 
+type Refusal = { status: number; code: string };
+const TAKEN: Refusal = { status: 422, code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" };
+const CLOSED: Refusal = { status: 403, code: "signup_disabled" };
+
 /** The refusal leaves no trace: no account to squat the address, no organization. */
-async function expectRefusedWithNothingCreated(res: Response) {
-  expect(res.status).toBe(403);
-  expect(((await res.json()) as { code?: string }).code).toBe("bootstrap_owner_proof_required");
+async function expectRefusedWithNothingCreated(res: Response, as: Refusal) {
+  expect(res.status).toBe(as.status);
+  expect(((await res.json()) as { code?: string }).code).toBe(as.code);
   expect(await db.select().from(user)).toHaveLength(0);
   expect(await db.select().from(organizations)).toHaveLength(0);
+}
+
+/** Sign up through the real route and keep the session it opens. */
+async function signedUpSession(email: string): Promise<string> {
+  const res = await signUp(email);
+  expect(res.status).toBe(200);
+  return res.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+}
+
+async function changeEmail(cookie: string, newEmail: string) {
+  return app.request("/api/auth/change-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ newEmail }),
+  });
 }
 
 async function expectRootOrgOwnedBy(email: string, slug: string) {
@@ -132,6 +162,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       AUTH_BOOTSTRAP_TOKEN: undefined,
       AUTH_DISABLE_SIGNUP: undefined,
       AUTH_PLATFORM_ADMIN_EMAILS: undefined,
+      AUTH_ALLOWED_SIGNUP_DOMAINS: undefined,
     });
   });
 
@@ -140,22 +171,42 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   });
 
   describe("without proof of ownership", () => {
-    it("refuses the address when sign-up is open", async () => {
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"));
+    it("refuses the address when sign-up is open, as it refuses a taken address", async () => {
+      const res = await signUp("owner@acme.com");
+      const body = await res.clone().text();
+      await expectRefusedWithNothingCreated(res, TAKEN);
+
+      // Byte for byte what Better Auth answers for an address that IS taken,
+      // so a Better Auth upgrade that rewords one cannot leave them apart.
+      expect((await signUp("someone@acme.com")).status).toBe(200);
+      const taken = await signUp("someone@acme.com");
+      expect(taken.status).toBe(422);
+      expect(await taken.text()).toBe(body);
     });
 
-    it("refuses the address when sign-up is closed", async () => {
+    it("refuses the address when sign-up is closed, as it refuses a stranger", async () => {
       setEnv({ AUTH_DISABLE_SIGNUP: "true" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"));
+      const res = await signUp("owner@acme.com");
+      const body = await res.clone().text();
+      await expectRefusedWithNothingCreated(res, CLOSED);
+      expect(await (await signUp("stranger@acme.com")).text()).toBe(body);
+    });
+
+    it("refuses the address as a disallowed domain when the allowlist excludes it", async () => {
+      setEnv({ AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test" });
+      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), {
+        status: 403,
+        code: "signup_domain_not_allowed",
+      });
     });
 
     it("refuses the address whatever its casing", async () => {
-      await expectRefusedWithNothingCreated(await signUp("Owner@Acme.com"));
+      await expectRefusedWithNothingCreated(await signUp("Owner@Acme.com"), TAKEN);
     });
 
     it("refuses the address when it is also a platform admin (the installer's default)", async () => {
       setEnv({ AUTH_DISABLE_SIGNUP: "true", AUTH_PLATFORM_ADMIN_EMAILS: "owner@acme.com" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"));
+      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), CLOSED);
     });
 
     it("refuses the address when it holds a pending invitation", async () => {
@@ -178,7 +229,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
 
     it("refuses the address in an end-user realm too", async () => {
       setRealmResolver(async () => "end_user:spc_test_space_id");
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"));
+      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), TAKEN);
     });
 
     it("refuses a wrong bootstrap token", async () => {
@@ -191,7 +242,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
 
     it("refuses the address on the sign-up form even while a token is redeemable", async () => {
       setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_DISABLE_SIGNUP: "true" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"));
+      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), CLOSED);
     });
 
     it("refuses a row Better Auth is about to create unverified", async () => {
@@ -201,7 +252,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           { email: "owner@acme.com", name: "Owner" },
           { method: "email-password" },
         ),
-      ).rejects.toMatchObject({ body: { code: "bootstrap_owner_proof_required" } });
+      ).rejects.toMatchObject({ body: { code: TAKEN.code } });
       expect(await db.select().from(user)).toHaveLength(0);
     });
 
@@ -217,6 +268,42 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
         expect(await db.select().from(user)).toHaveLength(0);
         expect(await db.select().from(organizations)).toHaveLength(0);
       });
+    });
+  });
+
+  describe("by changing an existing account's e-mail", () => {
+    it("refuses to move an account onto the owner's address, and the token still claims it", async () => {
+      setEnv({ AUTH_BOOTSTRAP_OWNER_EMAIL: undefined });
+      const cookie = await signedUpSession("member@acme.com");
+      setEnv({ AUTH_BOOTSTRAP_OWNER_EMAIL: "owner@acme.com", AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+
+      const res = await changeEmail(cookie, "owner@acme.com");
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe("email_change_refused");
+      expect((await db.select().from(user)).map((u) => u.email)).toEqual(["member@acme.com"]);
+      expect(await db.select().from(organizations)).toHaveLength(0);
+
+      expect((await redeem("owner@acme.com")).status).toBe(200);
+      await expectRootOrgOwnedBy("owner@acme.com", "acme-hq");
+    });
+
+    it("refuses to move an account onto a platform admin's address", async () => {
+      const cookie = await signedUpSession("member@acme.com");
+      setEnv({ AUTH_PLATFORM_ADMIN_EMAILS: "ops@acme.com" });
+
+      const res = await changeEmail(cookie, "Ops@Acme.com");
+      expect(res.status).toBe(403);
+      expect((await db.select().from(user)).map((u) => u.email)).toEqual(["member@acme.com"]);
+    });
+
+    it("still lets an account move to an ordinary address", async () => {
+      // The control: without it the two refusals above prove nothing about
+      // the rule, only that the route answers 403.
+      const cookie = await signedUpSession("member@acme.com");
+      setEnv({ AUTH_PLATFORM_ADMIN_EMAILS: "ops@acme.com" });
+
+      expect((await changeEmail(cookie, "renamed@acme.com")).status).toBe(200);
+      expect((await db.select().from(user)).map((u) => u.email)).toEqual(["renamed@acme.com"]);
     });
   });
 
@@ -244,16 +331,49 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       await expectRootOrgOwnedBy("owner@acme.com", "acme-hq");
     });
 
-    it("a creation path that verified the inbox creates the account and the root organization", async () => {
-      // What Better Auth does at the end of a magic link, and for a social
-      // sign-in whose provider asserts the address: the row is born verified.
-      setEnv({ AUTH_DISABLE_SIGNUP: "true" });
-      const ctx = await getAuth().$context;
-      await ctx.internalAdapter.createUser(
-        { email: "owner@acme.com", name: "Owner", emailVerified: true },
-        { method: "magic-link" },
-      );
+    it("the token claims a named owner outside AUTH_ALLOWED_SIGNUP_DOMAINS", async () => {
+      // The operator named that address; the allowlist is for everybody else.
+      setEnv({
+        AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN,
+        AUTH_DISABLE_SIGNUP: "true",
+        AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test",
+      });
+      expect((await redeem("owner@acme.com")).status).toBe(200);
       await expectRootOrgOwnedBy("owner@acme.com", "acme-hq");
+    });
+
+    describe("a magic link sent to the address", () => {
+      enableSmtpForSuite();
+
+      it("creates the account and the root organization, and retires the token", async () => {
+        // Through Better Auth's own routes, so the row is born verified
+        // because the link was consumed and not because a test said so.
+        setPostBootstrapOrgHook(triggerPostBootstrapOrg);
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_DISABLE_SIGNUP: "true" });
+        expect(isBootstrapTokenPending()).toBe(true);
+
+        const sent = await app.request("/api/auth/sign-in/magic-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "owner@acme.com" }),
+        });
+        expect(sent.status).toBe(200);
+        const [link] = await db.select().from(verification);
+        expect(link).toBeDefined();
+
+        const verified = await app.request(
+          `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}`,
+        );
+        expect(verified.status).toBeLessThan(400);
+
+        await expectRootOrgOwnedBy("owner@acme.com", "acme-hq");
+        const [u] = await db.select().from(user);
+        expect(u!.emailVerified).toBe(true);
+        expect(await db.select().from(account)).toHaveLength(0);
+        // Nobody redeemed it, and `/claim` must not stay the only page shown.
+        expect(isBootstrapTokenPending()).toBe(false);
+        expect((await redeem("owner@acme.com")).status).toBe(410);
+      });
     });
 
     it("falls back to slug 'default' when AUTH_BOOTSTRAP_ORG_NAME is unset", async () => {
@@ -307,6 +427,9 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     });
 
     it("does not provision a platform org for an end-user realm row", async () => {
+      // Hand-set `emailVerified`: only the realm guard of the after-hook is
+      // under test here. The proof itself is driven through the magic-link
+      // routes above.
       setRealmResolver(async () => "end_user:spc_test_space_id");
       const ctx = await getAuth().$context;
       await ctx.internalAdapter.createUser(
@@ -339,6 +462,47 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       expect(res.status).toBe(422);
       expect(await db.select().from(account)).toHaveLength(0);
       expect(await db.select().from(organizations)).toHaveLength(0);
+    });
+
+    it("the token says so instead of taking the account over", async () => {
+      await db.insert(user).values({
+        id: "usr_existing_owner",
+        email: "owner@acme.com",
+        name: "Owner",
+        emailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+
+      const res = await redeem("owner@acme.com");
+      expect(res.status).toBe(409);
+      const problem = (await res.json()) as { code?: string; detail?: string };
+      expect(problem.code).toBe("bootstrap_user_exists");
+      expect(problem.detail).toContain("bootstrap-org.ts");
+      expect(await db.select().from(account)).toHaveLength(0);
+      expect(await db.select().from(organizations)).toHaveLength(0);
+    });
+
+    describe("with outbound mail configured", () => {
+      enableSmtpForSuite();
+
+      it("the token still does not make the existing account owner", async () => {
+        // Better Auth answers a duplicate sign-up with a synthetic success
+        // here, which the route used to read as "account created".
+        await db.insert(user).values({
+          id: "usr_existing_owner",
+          email: "owner@acme.com",
+          name: "Owner",
+          emailVerified: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+
+        expect((await redeem("owner@acme.com")).status).toBe(409);
+        expect(await db.select().from(organizations)).toHaveLength(0);
+      });
     });
 
     it("a second claim with the token is refused once the owner exists", async () => {

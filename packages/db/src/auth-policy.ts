@@ -103,11 +103,20 @@ export function evaluateSignupPolicy(
   email: string,
   hasPendingInvitation: boolean,
 ): SignupPolicyDecision {
-  const env = getEnv();
-
   if (isBootstrapOwner(email)) return { allowed: true, reason: "bootstrap" };
   if (isPlatformAdmin(email)) return { allowed: true, reason: "platform_admin" };
   if (hasPendingInvitation) return { allowed: true, reason: "invitation" };
+  return evaluateUnprivilegedSignup(email);
+}
+
+/**
+ * Rules 4-6 alone: what the policy answers an address that holds no
+ * exception. Also the answer given to a caller who names the bootstrap
+ * owner's address without proving control of it, so that refusal reads like
+ * any other and does not confirm which address is the owner's.
+ */
+export function evaluateUnprivilegedSignup(email: string): SignupPolicyDecision {
+  const env = getEnv();
 
   if (env.AUTH_DISABLE_SIGNUP) {
     if (!isAllowedSignupDomain(email)) {

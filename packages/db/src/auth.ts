@@ -18,8 +18,10 @@ import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
+  evaluateUnprivilegedSignup,
   isAllowedSignupDomain,
   isBootstrapOwner,
+  isPlatformAdmin,
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
@@ -620,7 +622,6 @@ function buildAuth(options: CreateAuthOptions) {
     {
       clientId: string;
       clientSecret: string;
-      mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
     }
   > = {
     google: {
@@ -630,24 +631,10 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
       },
-      // Google asserts `email_verified` in its OIDC id_token and BA maps it
-      // onto `user.emailVerified` (see `@better-auth/core` google provider).
-      // Google never issues a token for an email the user hasn't proven
-      // ownership of, so treating a successful Google round-trip as
-      // verified is safe. We keep the explicit override only for Google.
-      //
-      // SECURITY: we do NOT do the same for GitHub. GitHub lets a user add
-      // an UNVERIFIED email to their account, and BA already computes the
-      // real per-email verified flag from `/user/emails`
-      // (`emails.find(e => e.email === profile.email)?.verified ?? false`).
-      // Blanket-setting `emailVerified: true` there clobbered that real
-      // signal and opened a pre-account-takeover: an attacker adds the
-      // victim's email (unverified) to a GitHub account, signs in, and —
-      // because the email is (falsely) "verified" — BA account-links it to
-      // the victim's existing user (trusted provider + matching email),
-      // handing the attacker the account. Leaving GitHub without an
-      // override lets BA's genuine verified flag decide linking.
-      mapProfileToUser: () => ({ emailVerified: true }),
+      // No `mapProfileToUser` override: Better Auth maps Google's
+      // `email_verified` id_token claim onto `user.emailVerified`, and that
+      // claim — not the fact of a Google round-trip — is what account linking
+      // and the bootstrap-owner proof in the create hook rest on.
     },
     github: {
       get clientId() {
@@ -656,9 +643,11 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
-      // No `mapProfileToUser` override on purpose — see the GitHub note above.
-      // BA sets `emailVerified` from GitHub's real `/user/emails` verified
-      // flag; forcing it true here would defeat the takeover guard.
+      // No `mapProfileToUser` override either. GitHub lets a user add an
+      // UNVERIFIED email to their account; BA computes the real per-email
+      // flag from `/user/emails`. Forcing it true opened a pre-account
+      // takeover: add the victim's address unverified, sign in, and BA links
+      // the trusted provider onto the victim's existing user.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
@@ -971,15 +960,35 @@ function buildAuth(options: CreateAuthOptions) {
             // sign-up, whose later verification mail proves who reads the
             // inbox, not who chose the password. Checked before every other
             // gate and in every realm, so no allowlist reopens it.
+            //
+            // The refusal must not confirm the address to whoever guessed it:
+            // it is the answer any address without an exception gets under the
+            // current policy and, where that policy would let it in, the answer
+            // an address that is already taken gets. The explanation goes to
+            // the log, where the operator is the reader.
             const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
             if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
-              logger.warn("auth: bootstrap owner sign-up refused, no proof of ownership");
-              throw new APIError("FORBIDDEN", {
-                message:
-                  "This address is reserved for the instance owner. Its account is " +
-                  "created with the instance's bootstrap token (AUTH_BOOTSTRAP_TOKEN).",
-                code: "bootstrap_owner_proof_required",
-              });
+              logger.warn(
+                "auth: refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of " +
+                  "ownership — claim it at /claim with AUTH_BOOTSTRAP_TOKEN " +
+                  "(examples/self-hosting/AUTH_MODES.md)",
+              );
+              const unprivileged = evaluateUnprivilegedSignup(user.email);
+              if (!unprivileged.allowed) {
+                throw new APIError("FORBIDDEN", {
+                  message: unprivileged.reason,
+                  code: unprivileged.reason,
+                });
+              }
+              // With verification required, Better Auth answers a taken address
+              // with a synthetic success, and gives a 403 from this hook that
+              // same answer; without it, a taken address is this 422.
+              throw smtpEnabled
+                ? new APIError("FORBIDDEN", { message: "signup_disabled", code: "signup_disabled" })
+                : new APIError("UNPROCESSABLE_ENTITY", {
+                    message: "User already exists. Use another email.",
+                    code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+                  });
             }
             // A pending invitation for this exact email overrides the signup
             // gate (Infisical-style breakage avoidance) so an invited user can
@@ -995,7 +1004,13 @@ function buildAuth(options: CreateAuthOptions) {
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
               if (bootstrapTokenBypass) {
-                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !invited) {
+                // The named owner passes the allowlist here as on every other
+                // path (`evaluateSignupPolicy` rule 1): the operator named it.
+                if (
+                  envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 &&
+                  !invited &&
+                  !isBootstrapOwner(user.email)
+                ) {
                   if (!isAllowedSignupDomain(user.email)) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
@@ -1115,6 +1130,36 @@ function buildAuth(options: CreateAuthOptions) {
               } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
               await _afterSignupHook({ id: user.id, email: user.email }, afterCtx);
             }
+          },
+        },
+        update: {
+          // The addresses the environment grants authority to
+          // (`AUTH_BOOTSTRAP_OWNER_EMAIL`, `AUTH_PLATFORM_ADMIN_EMAILS`) are
+          // acquired by creating their account, under the create hook above —
+          // never by moving an existing account onto them. Every Better Auth
+          // writer of `user.email` comes through here (change-email with or
+          // without verification, a provider profile update), so this is the
+          // one place the rule needs stating. A write that restates the
+          // address its own row already holds is not an acquisition: the
+          // column is unique, so a row holding it can only be that row.
+          before: async (data) => {
+            const next = (data as { email?: unknown }).email;
+            if (typeof next !== "string") return;
+            if (!isBootstrapOwner(next) && !isPlatformAdmin(next)) return;
+            const [holder] = await db
+              .select({ id: user.id })
+              .from(user)
+              .where(eq(user.email, next))
+              .limit(1);
+            if (holder) return;
+            logger.warn(
+              "auth: refused to move an account onto an address named in " +
+                "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
+            );
+            throw new APIError("FORBIDDEN", {
+              message: "This e-mail address cannot be used.",
+              code: "email_change_refused",
+            });
           },
         },
       },

@@ -73,6 +73,11 @@ export const authPaths = {
             "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
           content: betterAuthError,
         },
+        "422": {
+          description:
+            "The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free.",
+          content: betterAuthError,
+        },
       },
     },
   },
