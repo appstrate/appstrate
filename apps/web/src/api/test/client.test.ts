@@ -51,9 +51,7 @@ describe("toApiError", () => {
     expect(error.details).toEqual([{ path: "name" }] as never);
   });
 
-  it("exposes RFC 9457 extension members, and only those, as extensions", async () => {
-    // The server writes them at the top level of the problem (`conflict(code,
-    // detail, extensions)`), never under `errors`.
+  it("carries a code's own extension members as details", async () => {
     const error = (await toApiError(
       problem(
         {
@@ -61,8 +59,8 @@ describe("toApiError", () => {
           title: "Conflict",
           status: 409,
           code: "role_in_use",
-          detail: "still held",
-          request_id: "req_1",
+          detail: "Role is still held",
+          request_id: "req_2",
           member_count: 1,
           pending_invitation_count: 0,
         },
@@ -70,7 +68,14 @@ describe("toApiError", () => {
       ),
     )) as ApiError;
 
-    expect(error.extensions).toEqual({ member_count: 1, pending_invitation_count: 0 });
+    expect(error.details).toEqual({ member_count: 1, pending_invitation_count: 0 });
+  });
+
+  it("leaves details undefined when the problem carries nothing of its own", async () => {
+    const error = (await toApiError(
+      problem({ title: "Not Found", status: 404, code: "not_found", detail: "gone" }, 404),
+    )) as ApiError;
+
     expect(error.details).toBeUndefined();
   });
 

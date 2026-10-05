@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { captureDialogOpener, restoreDialogOpener } from "../dialog-focus.ts";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -37,22 +38,23 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  * Radix returns focus to its own `DialogTrigger` on close, and nowhere when
  * there is none: every dialog here is opened by state (`<Dialog open>`), so
  * without this, Escape drops keyboard users on `<body>`.
+ *
+ * Known limit: an opener wrapped in a Radix `Tooltip` shows its tooltip when
+ * refocused (Radix opens on any focus not preceded by a pointer-down), exactly
+ * as it would behind a `DialogTrigger`.
  */
 const DialogSurface = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ onCloseAutoFocus, ...props }, ref) => {
-  const [opener] = React.useState(() => document.activeElement);
+  const [opener] = React.useState(() => captureDialogOpener(document.activeElement));
   return (
     <DialogPrimitive.Content
       ref={ref}
       onCloseAutoFocus={(event) => {
         onCloseAutoFocus?.(event);
-        // An opener that left the page (a menu item, a deleted row) keeps Radix's default.
-        if (event.defaultPrevented || !(opener instanceof HTMLElement) || !opener.isConnected)
-          return;
-        event.preventDefault();
-        opener.focus();
+        if (event.defaultPrevented) return;
+        if (restoreDialogOpener(opener, document)) event.preventDefault();
       }}
       {...props}
     />

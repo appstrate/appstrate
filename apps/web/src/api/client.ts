@@ -83,8 +83,8 @@ const orgContext: Middleware = {
   },
 };
 
-/** The fields RFC 9457 and this API own — `RESERVED_PROBLEM_KEYS` in `@appstrate/core/api-errors`. */
-const STANDARD_PROBLEM_KEYS = new Set([
+/** The members RFC 9457 and this API define; anything else is a per-code extension. */
+const STANDARD_PROBLEM_MEMBERS: ReadonlySet<string> = new Set<keyof ProblemDetail>([
   "type",
   "title",
   "status",
@@ -110,19 +110,21 @@ export async function toApiError(response: Response): Promise<Error> {
     .json()
     .catch(() => ({ detail: response.statusText }));
   if (body.code) {
+    // The machine-readable half of a refusal: validation failures list field
+    // errors under `errors`, every other code merges its own members into the
+    // problem body (RFC 9457 §3.2 extensions — `member_count`, `invitation_id`).
+    const extensions = Object.fromEntries(
+      Object.entries(body).filter(([member]) => !STANDARD_PROBLEM_MEMBERS.has(member)),
+    );
     return new ApiError(
       body.code,
       body.detail || `API Error: ${response.status}`,
       response.status,
-      // `ApiError.details` is intentionally an open record: the spec models
-      // `errors` as a typed array, but runtime problem bodies are polymorphic
-      // by `code` (validation → array of field errors; conflict codes →
-      // code-specific object), so consumers narrow per `code`. The cast
-      // bridges the spec's array type to that open shape.
-      body.errors as unknown as Record<string, unknown> | undefined,
+      // An open record on purpose: consumers narrow per `code`.
+      (body.errors ?? (Object.keys(extensions).length > 0 ? extensions : undefined)) as
+        Record<string, unknown> | undefined,
       body.request_id,
       body.param,
-      Object.fromEntries(Object.entries(body).filter(([key]) => !STANDARD_PROBLEM_KEYS.has(key))),
     );
   }
   return new Error(body.detail || `API Error: ${response.status}`);

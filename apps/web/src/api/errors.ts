@@ -19,12 +19,6 @@ export class ApiError extends Error {
      * it to name the offending field in a translated message.
      */
     public param?: string,
-    /**
-     * RFC 9457 §3.2 extension members — every top-level key of the problem
-     * body that is not a standard field (`member_count` on `role_in_use`, …).
-     * The server writes them next to `code`, not under `errors`.
-     */
-    public extensions: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";

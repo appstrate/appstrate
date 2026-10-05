@@ -24,8 +24,11 @@ export function DisabledReasonTooltip({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  // Radix closes a tooltip on click, right after our own handler in the same
-  // dispatch. A tap is the only gesture touch has, so that one close is ignored.
+  // A tap is the only gesture touch has, so it toggles. Radix closes an open
+  // tooltip on pointer-down (the second tap's close) and closes again on click,
+  // right after our handler in the same dispatch — that one is ignored when the
+  // tap is opening it.
+  const openAtPointerDown = useRef(false);
   const tapping = useRef(false);
   if (!reason) return children;
   return (
@@ -40,7 +43,11 @@ export function DisabledReasonTooltip({
           <span
             tabIndex={0}
             className="relative inline-flex"
+            onPointerDown={() => {
+              openAtPointerDown.current = open;
+            }}
             onClick={() => {
+              if (openAtPointerDown.current) return;
               tapping.current = true;
               queueMicrotask(() => {
                 tapping.current = false;
