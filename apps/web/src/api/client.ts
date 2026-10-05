@@ -83,6 +83,20 @@ const orgContext: Middleware = {
   },
 };
 
+/** The fields RFC 9457 and this API own — `RESERVED_PROBLEM_KEYS` in `@appstrate/core/api-errors`. */
+const STANDARD_PROBLEM_KEYS = new Set([
+  "type",
+  "title",
+  "status",
+  "detail",
+  "instance",
+  "code",
+  "request_id",
+  "param",
+  "retry_after",
+  "errors",
+]);
+
 /**
  * Normalizes a non-2xx response into the error the caller sees. A body with an
  * RFC 9457 `code` becomes an `ApiError` carrying the problem details; anything
@@ -108,6 +122,7 @@ export async function toApiError(response: Response): Promise<Error> {
       body.errors as unknown as Record<string, unknown> | undefined,
       body.request_id,
       body.param,
+      Object.fromEntries(Object.entries(body).filter(([key]) => !STANDARD_PROBLEM_KEYS.has(key))),
     );
   }
   return new Error(body.detail || `API Error: ${response.status}`);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { Copy } from "lucide-react";
 import { Modal } from "./modal";
 import { ConfirmModal } from "./confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
@@ -13,70 +13,13 @@ import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
+import { EndUserMetadataEditor } from "./end-user-metadata-editor";
+import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   endUser: EndUserInfo | null;
-}
-
-type MetadataValue = string | number | boolean | null;
-
-interface MetadataEntry {
-  key: string;
-  value: string;
-  /**
-   * Original typed value for entries loaded from the server. Preserved so
-   * an untouched number/boolean/null round-trips as its own type instead of
-   * being stringified (`30` must not become `"30"`). Absent for new rows.
-   */
-  original?: MetadataValue;
-}
-
-function metadataToEntries(metadata: Record<string, unknown> | null): MetadataEntry[] {
-  if (!metadata) return [];
-  return Object.entries(metadata).map(([key, value]) => ({
-    key,
-    value: typeof value === "string" ? value : JSON.stringify(value),
-    original: isMetadataValue(value) ? value : undefined,
-  }));
-}
-
-function isMetadataValue(value: unknown): value is MetadataValue {
-  return (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  );
-}
-
-/**
- * Resolve an entry back to its wire value. New rows and originally-string
- * values keep the raw text; a non-string original returns verbatim when
- * untouched, and re-parses to a scalar when edited (falling back to the raw
- * string when the edit is not valid JSON or is not a scalar).
- */
-function coerceEntryValue(entry: MetadataEntry): MetadataValue {
-  if (entry.original === undefined || typeof entry.original === "string") {
-    return entry.value;
-  }
-  if (JSON.stringify(entry.original) === entry.value) return entry.original;
-  try {
-    const parsed: unknown = JSON.parse(entry.value);
-    return isMetadataValue(parsed) ? parsed : entry.value;
-  } catch {
-    return entry.value;
-  }
-}
-
-function entriesToMetadata(entries: MetadataEntry[]): Record<string, MetadataValue> {
-  const result: Record<string, MetadataValue> = {};
-  for (const entry of entries) {
-    const k = entry.key.trim();
-    if (k) result[k] = coerceEntryValue(entry);
-  }
-  return result;
 }
 
 function CopyableField({ label, value }: { label: string; value: string }) {
@@ -168,18 +111,6 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
     );
   };
 
-  const handleMetadataChange = (index: number, field: "key" | "value", val: string) => {
-    setEditMetadata((prev) => prev.map((e, i) => (i === index ? { ...e, [field]: val } : e)));
-  };
-
-  const handleMetadataRemove = (index: number) => {
-    setEditMetadata((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleMetadataAdd = () => {
-    setEditMetadata((prev) => [...prev, { key: "", value: "" }]);
-  };
-
   if (editing) {
     return (
       <>
@@ -241,40 +172,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>{t("spaces.metadata")}</Label>
-              <div className="space-y-2">
-                {editMetadata.map((entry, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <Input
-                      value={entry.key}
-                      onChange={(e) => handleMetadataChange(index, "key", e.target.value)}
-                      placeholder={t("spaces.metadataKey")}
-                      className="flex-1"
-                    />
-                    <Input
-                      value={entry.value}
-                      onChange={(e) => handleMetadataChange(index, "value", e.target.value)}
-                      placeholder={t("spaces.metadataValue")}
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0"
-                      onClick={() => handleMetadataRemove(index)}
-                    >
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={handleMetadataAdd}>
-                <Plus size={14} className="mr-1" />
-                {t("spaces.addMetadataKey")}
-              </Button>
-            </div>
+            <EndUserMetadataEditor entries={editMetadata} onChange={setEditMetadata} />
 
             {updateMutation.error && (
               <p className="text-destructive text-sm">

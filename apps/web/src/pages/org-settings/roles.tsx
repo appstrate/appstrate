@@ -80,15 +80,15 @@ export function OrgSettingsRolesPage() {
           // PENDING invitations that assign the role. Reporting only the first
           // makes the refusal look wrong when the blocker is an invitation.
           if (err instanceof ApiError && err.code === "role_in_use") {
-            const members = Number(err.details?.member_count ?? 0);
-            const invitations = Number(err.details?.pending_invitation_count ?? 0);
+            const members = Number(err.extensions.member_count ?? 0);
+            const invitations = Number(err.extensions.pending_invitation_count ?? 0);
             setDeleteError(
               [
                 members > 0 ? t("roles.inUse", { count: members }) : null,
                 invitations > 0 ? t("roles.inUseInvitations", { count: invitations }) : null,
               ]
                 .filter(Boolean)
-                .join(" ") || t("roles.inUse", { count: 0 }),
+                .join(" ") || getErrorMessage(err),
             );
             return;
           }
