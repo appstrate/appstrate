@@ -122,7 +122,7 @@ export function ResourceSection({
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
   const upload = useUploadPackage(type);
-  const setActive = useSetPackageActive();
+  const setActive = useSetPackageActive({ errorHandledByCaller: true });
   const currentSpaceId = useCurrentSpaceId();
   // The tree's ONE activation verdict, the same one the library and the package
   // dropdown ask: the type's grant in THIS space, or owning it (RBAC §3.6).
@@ -342,6 +342,8 @@ export function ResourceSection({
                       {
                         onSuccess: () =>
                           toast.success(t("integrations.activate.success", { ns: "settings" })),
+                        onError: () =>
+                          toast.error(t("integrations.activate.error", { ns: "settings" })),
                       },
                     );
                   }}

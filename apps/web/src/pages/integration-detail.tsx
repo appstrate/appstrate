@@ -1693,7 +1693,7 @@ export function IntegrationDetailPage() {
   // a space by `POST /api/spaces/{id}/packages` and switched off by its
   // `DELETE`, exactly like an agent or a skill. The row and its settings
   // survive the deactivation — connections were never held there anyway.
-  const setActive = useSetPackageActive();
+  const setActive = useSetPackageActive({ errorHandledByCaller: true });
   const currentSpaceId = useCurrentSpaceId();
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
@@ -1746,6 +1746,8 @@ export function IntegrationDetailPage() {
           );
           onSuccess?.();
         },
+        onError: () =>
+          toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
       },
     );
   };

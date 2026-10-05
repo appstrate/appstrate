@@ -16,7 +16,10 @@ import { $api } from "../api/client";
 import { usePermissions } from "./use-permissions";
 
 export function useCreateModelProviderPairing() {
-  return $api.useMutation("post", "/api/model-providers-oauth/pairing");
+  return $api.useMutation("post", "/api/model-providers-oauth/pairing", {
+    // The pairing dialog reports a refused mint itself.
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 /**

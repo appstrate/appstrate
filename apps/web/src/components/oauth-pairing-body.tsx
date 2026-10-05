@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
@@ -144,8 +145,10 @@ export function OAuthPairingBody({
         addPendingPairing({ id: res.id, providerId, expiresAt: res.expiresAt, orgId });
         registeredRef.current = true;
       }
-    } catch {
-      // Reported by the mutation cache.
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? getErrorMessage(err) : t("credentials.oauth.pairingCreateFailed"),
+      );
     }
   }
 

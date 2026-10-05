@@ -150,7 +150,7 @@ router.post("/:token/accept", async (c) => {
       assignments: current.spaceAssignments,
       onMissing: "skip",
     });
-    return { invitation: current, assignments, role };
+    return { invitation: current, assignments, role, created };
   });
 
   if (!claimed) {
@@ -200,6 +200,8 @@ router.post("/:token/accept", async (c) => {
     slug: org.slug,
     role: claimed.role,
     permissions: listedOrgPermissions(claimed.role),
+    // False for a caller who was already a member: their role was left as it was.
+    created: claimed.created,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
   });

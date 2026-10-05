@@ -25792,7 +25792,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). */
+            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs) plus `created`. For a new member `role` is the invitation's role. A caller who was already a member keeps their role: `created` is `false` and `role` is the one they hold, while the invitation's space assignments are still applied. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -25811,10 +25811,14 @@ export interface operations {
                      *         "spaces:read"
                      *       ],
                      *       "createdAt": "2026-01-10T08:00:00Z",
-                     *       "deleting_at": null
+                     *       "deleting_at": null,
+                     *       "created": true
                      *     }
                      */
-                    "application/json": components["schemas"]["Organization"];
+                    "application/json": components["schemas"]["Organization"] & {
+                        /** @description Whether the acceptance created the membership. `false` when the caller was already a member of the organization. */
+                        created: boolean;
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];

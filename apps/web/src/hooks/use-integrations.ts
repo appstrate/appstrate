@@ -259,8 +259,8 @@ export function useIntegrationRunBlocking(
  * — scope-union + reconnect semantics are identical.
  */
 export function useInitiateIntegrationConnect() {
-  const { t } = useTranslation("settings");
   return useMutation({
+    // `useIntegrationOAuthPopup` reports a failed mint with the popup's own outcomes.
     meta: { errorHandledByCaller: true },
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
@@ -277,7 +277,6 @@ export function useInitiateIntegrationConnect() {
       if (!data) throw new Error("empty response");
       return data;
     },
-    onError: () => toast.error(t("integration.connect.error")),
   });
 }
 

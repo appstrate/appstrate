@@ -115,11 +115,11 @@ export function InviteAcceptPage() {
     }
     // Someone who was already a member keeps their role, whatever the
     // invitation offered: say so, or the invitation reads as having applied.
-    if (data && info && data.role !== info.role) {
+    if (data && !data.created) {
       toast.info(t("invite.roleUnchanged", { role: t(roleI18nKey(data.role)) }));
     }
     navigate("/");
-  }, [token, navigate, queryClient, info, t]);
+  }, [token, navigate, queryClient, t]);
 
   if (loading) {
     return (

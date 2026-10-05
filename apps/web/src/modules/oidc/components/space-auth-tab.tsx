@@ -238,7 +238,7 @@ function SmtpSection() {
         onSend={(to) =>
           test.mutate(to, {
             // A failed SMTP send is a non-2xx response (the server surfaces
-            // the SMTP error verbatim), so it lands in onError.
+            // the SMTP error verbatim), which the mutation cache toasts.
             onSuccess: () => {
               toast.success(t("settings:spaceAuth.smtpTestOk"));
               setTestOpen(false);
