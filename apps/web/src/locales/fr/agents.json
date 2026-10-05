@@ -92,7 +92,7 @@
   "detail.memorySectionArchive": "Archive",
   "detail.memorySectionArchiveEmpty": "Aucune note archivée. L'agent en ajoute via `note(content)`.",
   "detail.memoryEmptyAll": "Aucune mémoire",
-  "detail.memoryEmptyAllHint": "L'agent ajoutera ici les blocs épinglés (`pin`) et les notes (`note`) qu'il écrit pendant ses runs.",
+  "detail.memoryEmptyAllHint": "L'agent ajoutera ici les blocs épinglés (pin) et les notes (note) qu'il écrit pendant ses runs.",
   "detail.pinnedCheckpointHint": "report d'état (carry-over)",
   "detail.memoryHelp": "Blocs épinglés : injectés dans chaque prompt · Archive : consultée à la demande via recall_memory",
   "detail.clearMemories": "Supprimer les mémoires",

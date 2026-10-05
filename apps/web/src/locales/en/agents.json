@@ -92,7 +92,7 @@
   "detail.memorySectionArchive": "Archive",
   "detail.memorySectionArchiveEmpty": "No archived note. Agents add them via `note(content)`.",
   "detail.memoryEmptyAll": "No memory",
-  "detail.memoryEmptyAllHint": "The agent will add pinned blocks (`pin`) and notes (`note`) here as it writes them during runs.",
+  "detail.memoryEmptyAllHint": "The agent will add pinned blocks (pin) and notes (note) here as it writes them during runs.",
   "detail.pinnedCheckpointHint": "carry-over state",
   "detail.memoryHelp": "Pinned = injected in every prompt · Archive = retrieved via recall_memory",
   "detail.clearMemories": "Clear memories",

@@ -269,7 +269,10 @@ async function validateManifestForRoute(
 
 export const githubImportSchema = z
   .object({
-    url: z.url("Missing 'url' field"),
+    // One message per case: a supplied value that is not a URL is not "missing".
+    url: z.url({
+      error: (issue) => (issue.input === undefined ? "Missing 'url' field" : "Invalid URL"),
+    }),
   })
   .strict();
 

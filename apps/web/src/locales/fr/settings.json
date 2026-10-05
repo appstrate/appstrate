@@ -1043,7 +1043,7 @@
   "models.generation.levels.high": "Élevé",
   "models.generation.levels.xhigh": "Très élevé",
   "models.generation.levels.max": "Maximum",
-  "models.generation.levelsShort.off": "Désact.",
+  "models.generation.levelsShort.off": "Non",
   "models.generation.levelsShort.minimal": "Min.",
   "models.generation.levelsShort.low": "Faible",
   "models.generation.levelsShort.medium": "Moyen",

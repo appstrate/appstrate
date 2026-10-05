@@ -50,6 +50,14 @@ describe("unknown body keys are named by the key, not by the route's param", () 
     expect(body.detail).toStartWith("branch: ");
   });
 
+  it("POST /api/packages/import-github — a supplied non-URL is invalid, not missing", () => {
+    const invalid = refusal(githubImportSchema, { url: "not a url" }, "url");
+    expect(invalid.errors[0]).toMatchObject({ field: "url", message: "Invalid URL" });
+
+    const missing = refusal(githubImportSchema, {}, "url");
+    expect(missing.errors[0]).toMatchObject({ field: "url", message: "Missing 'url' field" });
+  });
+
   it("every unrecognized key gets its own entry", () => {
     const body = refusal(
       githubImportSchema,
