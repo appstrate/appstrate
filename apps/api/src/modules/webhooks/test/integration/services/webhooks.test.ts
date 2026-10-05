@@ -13,6 +13,7 @@ import {
   rotateSecret,
   listDeliveries,
   dispatchWebhookEvents,
+  sendTestPing,
   initWebhookWorker,
   shutdownWebhookWorker,
 } from "../../../service.ts";
@@ -330,11 +331,21 @@ describe("webhooks service", () => {
     async function waitForDelivery(
       webhookId: string,
       timeoutMs = 20_000,
-    ): Promise<{ eventType: string; status: string } | null> {
+    ): Promise<{
+      eventType: string;
+      status: string;
+      attempt: number;
+      error: string | null;
+    } | null> {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const rows = await db
-          .select({ eventType: webhookDeliveries.eventType, status: webhookDeliveries.status })
+          .select({
+            eventType: webhookDeliveries.eventType,
+            status: webhookDeliveries.status,
+            attempt: webhookDeliveries.attempt,
+            error: webhookDeliveries.error,
+          })
           .from(webhookDeliveries)
           .where(eq(webhookDeliveries.webhookId, webhookId))
           .limit(1);
@@ -361,6 +372,39 @@ describe("webhooks service", () => {
       const row = await waitForDelivery(orgWh.id);
       expect(row).not.toBeNull();
       expect(row?.eventType).toBe("run.success");
+    });
+
+    it("records an unresolvable host as a retryable failure, not a blocked address", async () => {
+      // `.test` never resolves (RFC 6761). A DNS miss reached nothing, so it
+      // must not carry the SSRF guard's permanent "blocked address" verdict.
+      const wh = await createWebhook(
+        appLevel({ url: "https://no-such-domain-xyz123.test/hook", events: ["run.success"] }),
+      );
+
+      await dispatchWebhookEvents({ orgId, spaceId: defaultSpaceId }, "run.success", {
+        id: "run_dns_miss",
+        packageId: "@scope/agent",
+        status: "success",
+      });
+
+      const row = await waitForDelivery(wh.id);
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toBe("Delivery target hostname could not be resolved");
+    });
+
+    it("sendTestPing delivers a test.ping the webhook is not subscribed to, once", async () => {
+      const wh = await createWebhook(
+        appLevel({ url: "https://no-such-domain-xyz123.test/hook", events: ["run.failed"] }),
+      );
+
+      const { eventId, payload } = await sendTestPing(wh);
+      expect(payload.type).toBe("test.ping");
+
+      const row = await waitForDelivery(wh.id);
+      expect(row?.eventType).toBe("test.ping");
+      expect(row?.attempt).toBe(1);
+      const { data } = await listDeliveries({ orgId }, wh.id);
+      expect(data.map((d) => d.eventId)).toEqual([eventId]);
     });
   });
 });

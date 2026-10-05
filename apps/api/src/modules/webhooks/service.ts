@@ -638,9 +638,39 @@ export async function dispatchWebhookEvents(
 }
 
 /**
+ * Deliver a synthetic `test.ping` to one webhook, through the same signed
+ * delivery path as a real event so the attempt is recorded in its history.
+ * One attempt only: a test answers "does my endpoint receive this now?", and
+ * an eight-attempt schedule would keep pinging it for hours.
+ */
+export async function sendTestPing(
+  webhook: Pick<WebhookInfo, "id" | "payloadMode">,
+): Promise<{ eventId: string; payload: Record<string, unknown> }> {
+  const eventType = "test.ping";
+  const envelope = buildEventEnvelope({
+    eventType,
+    run: { id: "run_test", packageId: "test", status: "success" },
+    payloadMode: webhook.payloadMode,
+  });
+  const queue = await getDeliveryQueue();
+  await queue.add(
+    "deliver",
+    {
+      webhookId: webhook.id,
+      eventId: envelope.eventId,
+      eventType,
+      payload: JSON.stringify(envelope.payload),
+    },
+    { attempts: 1 },
+  );
+  return envelope;
+}
+
+/**
  * Process a single webhook delivery attempt.
  * Throws on failure — queue handles retry scheduling via backoffStrategy.
- * Throws PermanentJobError for permanent failures (4xx except 408/429).
+ * Throws PermanentJobError for permanent failures (4xx except 408/429, or a
+ * target the SSRF guard blocks).
  */
 async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const { webhookId, eventId, eventType, payload } = job.data;
@@ -733,9 +763,14 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
       // The endpoint answered with a redirect. Transient-failure semantics —
       // same retry behaviour as the former `redirect: "manual"` 3xx response.
       errorMessage = "Delivery endpoint responded with a redirect (redirects are not followed)";
+    } else if (err instanceof SsrfBlockedError && err.reason === "resolution-failed") {
+      // DNS did not answer. Nothing was reached, so nothing was blocked: a
+      // resolver hiccup or a record still propagating is as transient as a
+      // 503, and dropping the event on the first miss loses it for good.
+      errorMessage = "Delivery target hostname could not be resolved";
     } else if (err instanceof SsrfBlockedError) {
-      // blocked-literal / blocked-resolved / resolution-failed — permanent,
-      // same as the former pre-delivery host check.
+      // blocked-literal / blocked-resolved — the target IS an internal
+      // address; retrying cannot change that verdict. Permanent.
       logger.warn("Webhook delivery blocked by SSRF guard", {
         webhookId,
         eventId,

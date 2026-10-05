@@ -28,7 +28,7 @@ import {
   deleteWebhook,
   rotateSecret,
   listDeliveries,
-  buildEventEnvelope,
+  sendTestPing,
   webhookEventSchema,
 } from "./service.ts";
 import type { WebhookInfo } from "@appstrate/shared-types";
@@ -346,18 +346,9 @@ export function createWebhooksRouter() {
     return c.body(null, 204);
   });
 
-  // POST /api/webhooks/:id/test — send a synthetic test.ping event
+  // POST /api/webhooks/:id/test — deliver a synthetic test.ping event
   router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
-    const wh = await loadWebhookForAction(c, "write");
-
-    const { eventId, payload } = buildEventEnvelope({
-      eventType: "test.ping",
-      run: { id: "run_test", packageId: "test", status: "success" },
-      payloadMode:
-        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
-    });
-
-    return c.json({ eventId, payload });
+    return c.json(await sendTestPing(await loadWebhookForAction(c, "write")));
   });
 
   // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.

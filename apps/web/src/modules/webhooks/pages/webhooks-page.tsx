@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -20,10 +21,12 @@ export function WebhooksPage() {
 
   const { data: webhooks, isLoading, error } = useWebhooks();
 
-  // Creating from here always pins `level: "space"` (see `useCreateWebhook`),
-  // so the button is the space grant — an org-level webhook is not creatable
-  // from this UI. The route gate owns the read half (either level opens it).
-  const canCreate = can("webhooks:write");
+  // One grant per level (`webhooks` in the space, `org-webhooks` across the
+  // org); the modal offers the levels the caller holds.
+  const createLevels = (["space", "org"] as const).filter((level) =>
+    can(`${webhookResource(level)}:write`),
+  );
+  const canCreate = createLevels.length > 0;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
@@ -68,6 +71,9 @@ export function WebhooksPage() {
                     <Badge variant={wh.enabled ? "success" : "secondary"}>
                       {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
                     </Badge>
+                    {wh.level === "org" && (
+                      <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
+                    )}
                   </div>
                   <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
                   <p className="text-muted-foreground mt-1 text-xs">
@@ -85,7 +91,11 @@ export function WebhooksPage() {
         </div>
       )}
 
-      <WebhookCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <WebhookCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        levels={createLevels}
+      />
     </div>
   );
 }

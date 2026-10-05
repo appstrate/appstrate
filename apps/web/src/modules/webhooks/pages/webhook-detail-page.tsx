@@ -35,6 +35,9 @@ export function WebhookDetailPage() {
         ]}
         actions={
           <div className="flex items-center gap-2">
+            {webhook.level === "org" && (
+              <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
+            )}
             <Badge variant={webhook.enabled ? "success" : "secondary"}>
               {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
             </Badge>

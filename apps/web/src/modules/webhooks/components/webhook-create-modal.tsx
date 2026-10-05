@@ -13,23 +13,32 @@ import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
+import type { WebhookInfo } from "../hooks/use-webhooks";
+
+type Level = WebhookInfo["level"];
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Levels the caller may create at — never empty (the page gates the button). */
+  levels: readonly Level[];
 }
 
 type FormData = {
   url: string;
 };
 
-export function WebhookCreateModal({ open, onClose }: Props) {
+export function WebhookCreateModal({ open, onClose, levels }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
 
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
+  const [chosenLevel, setChosenLevel] = useState<Level>("space");
+  // A caller holding one grant only has no choice to make.
+  const level = levels.includes(chosenLevel) ? chosenLevel : levels[0]!;
 
   const {
     register,
@@ -46,6 +55,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
     setCreatedSecret(null);
     setSelectedEvents([]);
     setPayloadMode("full");
+    setChosenLevel("space");
     createMutation.reset();
     onClose();
   };
@@ -58,6 +68,7 @@ export function WebhookCreateModal({ open, onClose }: Props) {
 
     createMutation.mutate(
       {
+        level,
         url: data.url.trim(),
         events: selectedEvents,
         payloadMode,
@@ -123,6 +134,22 @@ export function WebhookCreateModal({ open, onClose }: Props) {
             <p className="text-muted-foreground text-xs">{t("settings:webhooks.urlHint")}</p>
           )}
         </div>
+
+        {levels.length > 1 && (
+          <div className="space-y-2">
+            <Label>{t("settings:webhooks.levelLabel")}</Label>
+            <RadioGroup value={level} onValueChange={(v) => setChosenLevel(v as Level)}>
+              {levels.map((l) => (
+                <div key={l} className="flex items-center gap-2">
+                  <RadioGroupItem value={l} id={`create-level-${l}`} />
+                  <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
+                    {t(`settings:webhooks.level.${l}`)}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+        )}
 
         <WebhookFormFields
           selectedEvents={selectedEvents}
