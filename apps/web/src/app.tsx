@@ -22,6 +22,7 @@ import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 
 import { useAuth } from "./hooks/use-auth";
+import { hasVerificationLinkError } from "./lib/auth-errors";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
@@ -563,6 +564,18 @@ function useExternalRedirect(isAuthenticated: boolean) {
   }, [isAuthenticated, trustedOrigins]);
 }
 
+/**
+ * Where a signed-out visitor lands outside the auth routes. A verification
+ * link that could not be honoured redirects to its callback URL with
+ * `?error=` — say so, rather than dropping the visitor on a bare login form.
+ */
+function SignedOutFallback() {
+  const { search } = useLocation();
+  return (
+    <Navigate to={hasVerificationLinkError(search) ? `/verify-email${search}` : "/login"} replace />
+  );
+}
+
 export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
@@ -699,7 +712,7 @@ export function App() {
            * inputs — see invite-accept.tsx.
            */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<SignedOutFallback />} />
         </Routes>
       </ErrorBoundary>
     );

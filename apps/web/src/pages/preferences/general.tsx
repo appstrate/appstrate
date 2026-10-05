@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
-import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
+import { useAuth, EmailChangeError } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 
@@ -64,7 +64,6 @@ function EmailVerificationBadge() {
 function EmailChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { user, changeEmail } = useAuth();
-  const { features } = useAppConfig();
   const [success, setSuccess] = useState("");
   const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
 
@@ -88,13 +87,12 @@ function EmailChangeForm() {
     setSuccess("");
     setVerificationPendingEmail("");
     try {
-      await changeEmail(data.newEmail.trim());
+      const outcome = await changeEmail(data.newEmail.trim());
       reset();
-      if (features.smtp) {
+      if (outcome === "confirmation_sent") {
         setVerificationPendingEmail(data.newEmail.trim());
       } else {
         setSuccess(t("preferences.emailChanged"));
-        await refreshAuth();
       }
     } catch (err) {
       if (err instanceof EmailChangeError && err.conflict) {
@@ -124,7 +122,13 @@ function EmailChangeForm() {
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
             <Trans
               ns="settings"
-              i18nKey="preferences.emailChangeVerificationSent"
+              // A verified address must approve the change before the new
+              // one is contacted; an unverified one has nothing to approve with.
+              i18nKey={
+                user?.emailVerified
+                  ? "preferences.emailChangeConfirmationSent"
+                  : "preferences.emailChangeVerificationSent"
+              }
               values={{ email: verificationPendingEmail }}
               components={{ strong: <strong /> }}
             />

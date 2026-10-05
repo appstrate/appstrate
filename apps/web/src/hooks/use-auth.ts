@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
-import { toUnlinkError } from "../lib/auth-errors";
+import { toLoginError, toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -102,13 +102,17 @@ async function syncAuth() {
   }
 }
 
-let initialized = false;
-function initAuth() {
-  if (initialized) return;
-  initialized = true;
-  syncAuth().catch(() => {
+// The boot resync. When it finds no session it signs out, to drop a stale
+// cookie — and that response deletes whatever session cookie exists by the
+// time it lands. A sign-in or sign-up sent while it is still in flight would
+// have its fresh cookie deleted right after being told it succeeded, so both
+// wait for it.
+let bootSync: Promise<void> | null = null;
+function initAuth(): Promise<void> {
+  bootSync ??= syncAuth().catch(() => {
     clearSession();
   });
+  return bootSync;
 }
 
 /**
@@ -119,7 +123,7 @@ function initAuth() {
  * initializer, which no-ops once this has run.
  */
 export function startAuthBootstrap(): void {
-  initAuth();
+  void initAuth();
 }
 
 /**
@@ -176,7 +180,7 @@ export async function refreshAuth(): Promise<void> {
 }
 
 export function useAuth() {
-  initAuth();
+  void initAuth();
 
   const state = useStore(authStore);
 
@@ -187,8 +191,9 @@ export function useAuth() {
    * there is no redirect variant here — the gate owns that path.
    */
   const login = useCallback(async (email: string, password: string) => {
+    await initAuth();
     const result = await authClient.signIn.email({ email, password });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toLoginError(result.error);
     const profile = await fetchProfile();
     if (result.data?.user) {
       setAuthenticatedUser(result.data.user, profile);
@@ -199,8 +204,12 @@ export function useAuth() {
     async (
       email: string,
       password: string,
-      displayName?: string,
+      displayName: string | undefined,
+      // Where the verification link lands once the address is verified —
+      // the page that asked for the signup (e.g. an invitation).
+      callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
+      await initAuth();
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
       // page first — so signup has no OIDC branch; the gate owns that path.
@@ -208,6 +217,7 @@ export function useAuth() {
         email,
         password,
         name: displayName || email,
+        callbackURL,
       });
       if (result.error) throw new Error(result.error.message);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
@@ -292,8 +302,8 @@ export function useAuth() {
     if (result.error) throw toUnlinkError(result.error);
   }, []);
 
-  const resendVerificationEmail = useCallback(async (email: string) => {
-    const result = await authClient.sendVerificationEmail({ email });
+  const resendVerificationEmail = useCallback(async (email: string, callbackURL?: string) => {
+    const result = await authClient.sendVerificationEmail({ email, callbackURL });
     if (result.error) throw new Error(result.error.message);
   }, []);
 
@@ -330,12 +340,28 @@ export function useAuth() {
   // inside the dashboard — they are not unauthenticated entry points, so they
   // run natively in both modes. Routed through the seam only for the ban.
 
-  const changeEmail = useCallback(async (newEmail: string) => {
-    const result = await authClient.changeEmail({ newEmail });
-    if (result.error) {
-      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
-    }
-  }, []);
+  /**
+   * Resolves `"changed"` when the address was replaced at once, and
+   * `"confirmation_sent"` when the change now waits on emailed links (SMTP).
+   */
+  const changeEmail = useCallback(
+    async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {
+      const result = await authClient.changeEmail({ newEmail, callbackURL: "/preferences" });
+      if (result.error) {
+        throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
+      }
+      if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
+      // Better Auth answers 200 whether or not the address was free — it never
+      // says that an address has an account. Without email verification the
+      // change is immediate, so the session is what tells whether it happened.
+      await refreshAuth();
+      if (authStore.getState().user?.email !== newEmail.toLowerCase()) {
+        throw new EmailChangeError(true, "");
+      }
+      return "changed";
+    },
+    [],
+  );
 
   const listLinkedAccounts = useCallback(async () => {
     const result = await authClient.listAccounts();

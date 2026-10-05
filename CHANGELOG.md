@@ -64,6 +64,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Changing a verified email address is approved from the current address
+  first** (#1673). With SMTP configured, `change-email` used to send its one
+  link to the new address. It now emails the current address; once approved
+  there, the verification link goes to the new one, and the address changes
+  when that second link is opened. An account whose current mailbox is no
+  longer reachable cannot change its address on its own any more.
+- **Three account e-mails are new** (#1673, SMTP only): a notice after every
+  password change or reset, a notice to the owner when a sign-up is attempted
+  on an address that already has an account (the sign-up screen announced an
+  e-mail that was never sent), and the approval e-mail above. The
+  verification, magic-link and password-reset e-mails state how long their
+  link stays valid (1 hour, 15 minutes, 1 hour). `@appstrate/module-ee` has no
+  branded version of the three new ones: they go out in the plain template.
+
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -194,6 +208,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   returns; one refused before sending is not.
 
 ### Fixed
+
+- **The magic-link e-mail works on an instance that does not load the `oidc`
+  module** (#1673). Its link always pointed at the module's confirmation page
+  and answered 401 without it; it now points at Better Auth's own verify
+  endpoint there. That link is consumed by its first `GET`, so a mail scanner
+  that opens links can spend it — the confirmation page that prevents this
+  remains part of the `oidc` module.
+- **Sign-up from an invitation returns to the invitation after e-mail
+  verification** (#1673): the verification link carried `/`, and the invitee
+  landed on "create your organization". Also in the built-in sign-in pages:
+  signing in to an unverified account opens the "check your inbox" screen
+  instead of a raw `Email not verified`; a verification link that is invalid
+  or expired says so; `/verify-email` opened on its own redirects to
+  `/login`; changing one's e-mail to an address already in use no longer
+  reports success; and a sign-in submitted while the page was still clearing
+  a stale session cookie could lose its session.
 
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the

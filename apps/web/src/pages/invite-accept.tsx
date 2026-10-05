@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
@@ -15,6 +15,7 @@ import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { orgKeys } from "../lib/query-keys";
+import { hasVerificationLinkError } from "../lib/auth-errors";
 
 /** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
 type InviteInfo =
@@ -56,6 +57,9 @@ export function InviteAcceptPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
+  // The verification link of a signup made from this page lands back here,
+  // with `?error=` when it could not be honoured.
+  const verificationLinkFailed = hasVerificationLinkError(useLocation().search);
 
   const [info, setInfo] = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -285,6 +289,9 @@ export function InviteAcceptPage() {
     <AuthLayout>
       <div className="flex flex-col gap-6">
         {inviteBanner}
+        {verificationLinkFailed && (
+          <p className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</p>
+        )}
         {serverError && <p className="text-destructive text-sm">{serverError}</p>}
         {mode === "register" ? (
           <RegisterForm
