@@ -191,55 +191,7 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
 }
 
 /**
- * Headers an LLM caller may NOT inject via `api_call.args.headers`.
- *
- * The MCP descriptor advertises that routing / sidecar-control headers
- * are filtered server-side. Without this filter, an LLM could supply
- * `X-Stream-Response: 1` to opt into the binary streaming path (which
- * the MCP layer deliberately does not expose),
- * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
- * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Integration-Id` and `X-Target`
- * routing headers are also stripped so the LLM can't redirect the
- * request post-validation. Header names are matched case-insensitively
- * (HTTP header semantics).
- */
-const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-integration-id",
-  "x-target",
-  "x-substitute-body",
-  "x-stream-response",
-  "x-max-response-size",
-  "x-truncated",
-  "x-truncated-size",
-  "x-auth-refreshed",
-]);
-
-/**
- * Strip caller-supplied headers that would forge sidecar control state.
- * Returns the sanitised map plus the list of names that were dropped
- * (used to surface the violation to the agent — silent stripping would
- * mask buggy MCP clients).
- */
-function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
-  headers: Record<string, string>;
-  dropped: string[];
-} {
-  if (!raw) return { headers: {}, dropped: [] };
-  const headers: Record<string, string> = {};
-  const dropped: string[] = [];
-  for (const [name, value] of Object.entries(raw)) {
-    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
-      dropped.push(name);
-      continue;
-    }
-    headers[name] = value;
-  }
-  return { headers, dropped };
-}
-
-/**
- * Case-insensitive presence check over a sanitised header map. HTTP
+ * Case-insensitive presence check over a header map. HTTP
  * header names are case-insensitive, but a plain `Record` lookup is
  * not — so a caller's `content-type` would not be seen by a literal
  * `headers["Content-Type"]` read. Used to decide whether the sidecar
@@ -673,9 +625,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       headers: {
         type: "object",
         description:
-          "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-          "headers (X-Integration-Id, X-Target, X-Substitute-Body, …) are filtered " +
-          "server-side.",
+          "Additional headers to forward. Host, hop-by-hop and framing headers are dropped.",
         additionalProperties: { type: "string" },
       },
       body: {
@@ -1016,6 +966,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
   ): Promise<CallToolResult> {
     {
+      // The agent runtime checks the arguments against `CREDENTIAL_PROXY_INPUT_SCHEMA`
+      // before it calls (Pi's `validateToolArguments`; pinned by
+      // `test/api-call-argument-contract.test.ts`), so this handler only checks
+      // what that schema cannot say.
       const args = rawArgs as {
         target: string;
         method?: string;
@@ -1027,29 +981,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         substituteBody?: boolean;
       };
 
-      // The MCP SDK does NOT validate `tools/call` arguments against the
-      // descriptor's `inputSchema`, so `target` may be absent or a
-      // non-string. Guard before it reaches executeApiCall →
-      // substituteVars(undefined) → opaque `undefined.replace` TypeError
-      // (surfaced as JSON-RPC -32603 instead of a structured tool error).
-      if (typeof args.target !== "string" || args.target.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${ctx.label}: 'target' is required and must be a non-empty string (the request URL or path).`,
-            },
-          ],
-          isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
-        };
-      }
-
-      // Normalise the method to upper-case. The descriptor enum is upper-case
-      // and every downstream check (`method === "GET"`, upstream preflight)
-      // compares against upper-case literals — a caller-supplied `"get"` /
-      // `"post"` must not slip past the GET/HEAD body guard on a case mismatch.
-      const method = (typeof args.method === "string" ? args.method : "GET").toUpperCase();
+      const method = args.method ?? "GET";
 
       // Refuse `body` on GET/HEAD explicitly rather than silently
       // dropping it. A model that supplies a body genuinely expects it
@@ -1071,21 +1003,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         };
       }
 
-      const { headers: callerHeaders, dropped } = sanitiseApiCallHeaders(args.headers);
-      if (dropped.length > 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `${ctx.label}: caller-supplied headers may not include sidecar-control names: ` +
-                `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
-            },
-          ],
-          isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
-        };
-      }
+      const callerHeaders = { ...args.headers };
 
       // Resolve the loosely-typed body argument into the internal
       // discriminated `ApiCallRequestBody`. All shape narrowing + the
