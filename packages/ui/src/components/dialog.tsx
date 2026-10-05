@@ -29,6 +29,37 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * Mounted only while the dialog is open (the overlay's `Presence` owns that), so
+ * the lazy initializer runs during the opening render — before any `autoFocus`
+ * inside the dialog moves focus — and captures the control that opened it.
+ *
+ * Radix returns focus to its own `DialogTrigger` on close, and nowhere when
+ * there is none: every dialog here is opened by state (`<Dialog open>`), so
+ * without this, Escape drops keyboard users on `<body>`.
+ */
+const DialogSurface = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ onCloseAutoFocus, ...props }, ref) => {
+  const [opener] = React.useState(() => document.activeElement);
+  return (
+    <DialogPrimitive.Content
+      ref={ref}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event);
+        // An opener that left the page (a menu item, a deleted row) keeps Radix's default.
+        if (event.defaultPrevented || !(opener instanceof HTMLElement) || !opener.isConnected)
+          return;
+        event.preventDefault();
+        opener.focus();
+      }}
+      {...props}
+    />
+  );
+});
+DialogSurface.displayName = "DialogSurface";
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
@@ -36,7 +67,7 @@ const DialogContent = React.forwardRef<
   <DialogPortal>
     <DialogOverlay>
       <div className="flex min-h-full items-center justify-center p-4">
-        <DialogPrimitive.Content
+        <DialogSurface
           ref={ref}
           className={cn(
             "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg duration-200",
@@ -49,7 +80,7 @@ const DialogContent = React.forwardRef<
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
-        </DialogPrimitive.Content>
+        </DialogSurface>
       </div>
     </DialogOverlay>
   </DialogPortal>

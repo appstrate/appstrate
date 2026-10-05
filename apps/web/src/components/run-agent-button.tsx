@@ -7,6 +7,7 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
@@ -149,30 +150,33 @@ export function RunAgentButton({
 
   return (
     <>
-      {showLabel ? (
-        <Button
-          variant={variant}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-          className="relative"
-        >
-          {isPending ? <Spinner /> : t("detail.run")}
-          {warningDot}
-        </Button>
-      ) : (
-        <Button
-          variant={variant}
-          size={size}
-          className={`relative ${className ?? ""}`}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-        >
-          {isPending ? <Spinner /> : <Play size={14} />}
-          {warningDot}
-        </Button>
-      )}
+      <DisabledReasonTooltip reason={blockedTitle}>
+        {showLabel ? (
+          <Button
+            variant={variant}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            className="relative"
+          >
+            {isPending ? <Spinner /> : t("detail.run")}
+            {warningDot}
+          </Button>
+        ) : (
+          <Button
+            variant={variant}
+            size={size}
+            className={`relative ${className ?? ""}`}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            aria-label={t("detail.run")}
+          >
+            {isPending ? <Spinner /> : <Play size={14} />}
+            {warningDot}
+          </Button>
+        )}
+      </DisabledReasonTooltip>
 
       {detail && (
         <RunModal

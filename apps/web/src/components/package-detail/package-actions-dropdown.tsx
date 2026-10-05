@@ -122,6 +122,21 @@ interface PackageActionsDropdownProps {
   activationPending?: boolean;
 }
 
+/**
+ * A menu item's label with, when the item is disabled, the reason under it. A
+ * disabled item is skipped by the keyboard and fires no pointer event, so a
+ * `title` on it is read by nobody — the reason has to be on screen.
+ */
+function DisabledItemLabel({ label, reason }: { label: string; reason?: string }) {
+  if (!reason) return label;
+  return (
+    <span className="flex max-w-56 flex-col">
+      {label}
+      <span className="text-xs">{reason}</span>
+    </span>
+  );
+}
+
 export function PackageActionsDropdown({
   packageId,
   type,
@@ -242,10 +257,9 @@ export function PackageActionsDropdown({
               <DropdownMenuItem
                 onSelect={() => !runBlockedReason && onRunWithOptions()}
                 disabled={!!runBlockedReason}
-                title={runBlockedReason}
               >
                 <SlidersHorizontal size={14} />
-                {t("run.options.menuItem")}
+                <DisabledItemLabel label={t("run.options.menuItem")} reason={runBlockedReason} />
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
@@ -269,10 +283,12 @@ export function PackageActionsDropdown({
             <DropdownMenuItem
               onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
               disabled={!hasPublishedVersion}
-              title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
             >
               <Package size={14} />
-              {t("bundle.download")}
+              <DisabledItemLabel
+                label={t("bundle.download")}
+                reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
+              />
             </DropdownMenuItem>
           )}
 

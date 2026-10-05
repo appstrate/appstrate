@@ -9,7 +9,15 @@ import type { UploadFn } from "./upload-client.ts";
  * widgets. Templates should read it via `registry.formContext as SchemaFormContext`
  * rather than re-declaring ad-hoc types.
  */
+/** Translated strings for the form's own chrome. Defaults are English. */
+export type SchemaFormLabels = FileWidgetLabels & {
+  addItem?: string;
+  removeItem?: string;
+  moveItemUp?: string;
+  moveItemDown?: string;
+};
+
 export interface SchemaFormContext {
   upload?: UploadFn;
-  labels?: FileWidgetLabels & { addItem?: string };
+  labels?: SchemaFormLabels;
 }

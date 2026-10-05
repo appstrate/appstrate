@@ -186,7 +186,8 @@ export function ObjectFieldTemplate(props: ObjectFieldTemplateProps) {
 }
 
 export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
-  const { children, buttonsProps, hasToolbar } = props;
+  const { children, buttonsProps, hasToolbar, registry } = props;
+  const labels = (registry.formContext as SchemaFormContext | undefined)?.labels;
   const {
     hasMoveUp,
     hasMoveDown,
@@ -207,7 +208,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               size="icon"
               variant="ghost"
               onClick={onMoveUpItem}
-              aria-label="Move up"
+              aria-label={labels?.moveItemUp ?? "Move up"}
             >
               <ArrowUp className="h-4 w-4" />
             </Button>
@@ -218,7 +219,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               size="icon"
               variant="ghost"
               onClick={onMoveDownItem}
-              aria-label="Move down"
+              aria-label={labels?.moveItemDown ?? "Move down"}
             >
               <ArrowDown className="h-4 w-4" />
             </Button>
@@ -229,7 +230,7 @@ export function ArrayFieldItemTemplate(props: ArrayFieldItemTemplateProps) {
               size="icon"
               variant="ghost"
               onClick={onRemoveItem}
-              aria-label="Remove"
+              aria-label={labels?.removeItem ?? "Remove"}
             >
               <Trash2 className="text-destructive h-4 w-4" />
             </Button>
