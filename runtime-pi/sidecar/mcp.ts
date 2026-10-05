@@ -191,9 +191,9 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
 }
 
 /**
- * Case-insensitive presence check over a header map. HTTP
- * header names are case-insensitive, but a plain `Record` lookup is
- * not — so a caller's `content-type` would not be seen by a literal
+ * Case-insensitive presence check over a header map. HTTP header names
+ * are case-insensitive, but a plain `Record` lookup is not — so a
+ * caller's `content-type` would not be seen by a literal
  * `headers["Content-Type"]` read. Used to decide whether the sidecar
  * may inject a default Content-Type without clobbering an explicit one.
  */
@@ -966,10 +966,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
   ): Promise<CallToolResult> {
     {
-      // The agent runtime checks the arguments against `CREDENTIAL_PROXY_INPUT_SCHEMA`
-      // before it calls (Pi's `validateToolArguments`; pinned by
-      // `test/api-call-argument-contract.test.ts`), so this handler only checks
-      // what that schema cannot say.
+      // `target`, `method` and `headers` arrive as `CREDENTIAL_PROXY_INPUT_SCHEMA`
+      // declares them: Pi validates a model's call against it before `execute`
+      // (pinned in `test/api-call-tool-defs.test.ts`), and the upload resolver
+      // builds its own in code. `body` is a union, narrowed below.
       const args = rawArgs as {
         target: string;
         method?: string;

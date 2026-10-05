@@ -114,20 +114,25 @@ describe("createApiCallToolDefs — _meta marker payloads", () => {
   });
 });
 
-// Pi validates tool arguments against the published schema before the sidecar sees them.
-describe("createApiCallToolDefs — api_call target schema (#1627)", () => {
+// Pi validates tool arguments against the published schema before the sidecar sees them:
+// the handler takes `target`, `method` and `headers` as this schema declares them.
+describe("createApiCallToolDefs — what Pi settles before the sidecar", () => {
   const [call] = createApiCallToolDefs(integ(), deps);
+  type Arguments = Parameters<typeof validateToolArguments>[1]["arguments"];
+  const validate = (args: Arguments): Arguments =>
+    validateToolArguments(
+      { name: "t", description: "", parameters: call!.descriptor.inputSchema } as never,
+      { type: "toolCall", id: "1", name: "t", arguments: args },
+    );
   const accepts = (target: string): boolean => {
     try {
-      validateToolArguments(
-        { name: "t", description: "", parameters: call!.descriptor.inputSchema } as never,
-        { type: "toolCall", id: "1", name: "t", arguments: { target } },
-      );
+      validate({ target });
       return true;
     } catch {
       return false;
     }
   };
+  const target = "https://api.example.com/x";
 
   it.each(["https://api.example.com/x", "{{site_url}}/wp-json/x", "{{webhook_url}}"])(
     "Pi accepts %s",
@@ -135,4 +140,24 @@ describe("createApiCallToolDefs — api_call target schema (#1627)", () => {
   );
 
   it("Pi still refuses a non-URL target", () => expect(accepts("not a url")).toBe(false));
+
+  const refused: Array<[string, Arguments, string]> = [
+    ["a missing target", { method: "GET" }, "target"],
+    ["a target that is not a string", { target: 5 }, "target"],
+    ["an empty target", { target: "" }, "target"],
+    ["a lower-case method", { target, method: "get" }, "method"],
+    ["a method outside the enum", { target, method: "TRACE" }, "method"],
+    ["a header value that is an object", { target, headers: { "X-Obj": {} } }, "headers.X-Obj"],
+    ["headers that are a string", { target, headers: "X-Count: 5" }, "headers"],
+    ["headers that are an array", { target, headers: ["X-Count: 5"] }, "headers"],
+    ["an undeclared argument", { target, integrationId: "@x/y" }, "integrationId"],
+  ];
+  it.each(refused)("Pi refuses %s", (_what, args, path) => {
+    expect(() => validate(args)).toThrow(`  - ${path}: `);
+  });
+
+  it("Pi hands every header value over as a string", () => {
+    const { headers } = validate({ target, headers: { "X-Count": 5, "X-Flag": true, "X-T": "v" } });
+    expect(headers).toEqual({ "X-Count": "5", "X-Flag": "true", "X-T": "v" });
+  });
 });
