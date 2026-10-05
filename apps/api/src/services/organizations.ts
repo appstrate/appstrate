@@ -33,6 +33,7 @@ import {
   or,
   count,
   sql,
+  asc,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
@@ -136,7 +137,10 @@ export async function getUserOrganizations(
       orgIdFilter
         ? and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgIdFilter))
         : eq(organizationMembers.userId, userId),
-    );
+    )
+    // Oldest membership first. Unordered, the list followed the heap: renaming
+    // an organization moved it to the end, and the SPA's selector with it.
+    .orderBy(asc(organizationMembers.joinedAt), asc(organizations.id));
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),

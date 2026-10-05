@@ -169,6 +169,11 @@ async function listVisibleSpaces(
   /** `null` joins no row: a preview's overlay replaces them. */
   userId: string | null,
 ) {
+  // One order for every caller: the default space, then the caller's own
+  // personal space (an orphaned one, for an admin), then team spaces oldest
+  // first. Without the personal rank it would sit wherever its owner's
+  // membership date fell among the team spaces — a different place for each
+  // member.
   return db
     .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
     .from(spaces)
@@ -184,7 +189,12 @@ async function listVisibleSpaces(
         ),
       ),
     )
-    .orderBy(desc(spaces.isDefault), asc(spaces.createdAt));
+    .orderBy(
+      desc(spaces.isDefault),
+      asc(isNull(spaces.ownerUserId)),
+      asc(spaces.createdAt),
+      asc(spaces.id),
+    );
 }
 
 /** Get a single space by ID, verifying org ownership. Throws 404 if not found. */
@@ -323,7 +333,7 @@ function spaceHasActiveRuns() {
 }
 
 /**
- * Delete a space. Throws 400 if default, 404 if not found, 409 if it is the
+ * Delete a space. Throws 404 if not found, 409 if it is the default space, the
  * home of any package (RBAC spec §6.9) or if it is a personal space and the
  * caller is not the sweeper (§3.6).
  *
@@ -383,7 +393,12 @@ async function deleteSpaceInTx(
     .limit(1)
     .for("update");
   if (!space) throw notFound("Space not found");
-  if (space.isDefault) throw invalidRequest("Cannot delete default space");
+  if (space.isDefault) {
+    throw conflict(
+      "default_space_not_deletable",
+      "The default space cannot be deleted: every organization member lands there.",
+    );
+  }
   if (space.ownerUserId !== null && actor !== "sweeper") {
     throw personalSpaceNotDeletable();
   }

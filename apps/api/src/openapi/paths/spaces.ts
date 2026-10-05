@@ -87,7 +87,8 @@ export const spacesPaths = {
       operationId: "listSpaces",
       tags: ["Spaces"],
       summary: "List spaces",
-      description: "List all spaces for the organization.",
+      description:
+        "List the spaces of the organization the caller reaches: the default space first, then the caller's personal space, then team spaces oldest first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XViewAs" },
@@ -284,13 +285,12 @@ export const spacesPaths = {
           description: "Space deleted",
           headers: REQUEST_ID_ONLY_HEADERS,
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
+            "It is the organization's default space (`default_space_not_deletable`), runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

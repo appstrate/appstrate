@@ -79,6 +79,31 @@ describe("Organizations API", () => {
       expect(res.status).toBe(401);
     });
 
+    it("lists oldest membership first, and a rename does not move an organization", async () => {
+      const ctx = await createTestContext({ orgName: "Alpha" });
+      const { org: beta } = await createTestOrg(ctx.user.id, { name: "Beta" });
+      const { org: gamma } = await createTestOrg(ctx.user.id, { name: "Gamma" });
+      // Gamma is the oldest membership although its row was written last, so
+      // the expected order is not the insertion order an unordered scan returns.
+      await db
+        .update(organizationMembers)
+        .set({ joinedAt: new Date("2020-01-01T00:00:00Z") })
+        .where(eq(organizationMembers.orgId, gamma.id));
+      const listed = async () => {
+        const res = await app.request("/api/orgs", { headers: { Cookie: ctx.cookie } });
+        return ((await res.json()) as { data: { id: string }[] }).data.map((o) => o.id);
+      };
+      expect(await listed()).toEqual([gamma.id, ctx.orgId, beta.id]);
+
+      const renamed = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alpha renamed" }),
+      });
+      expect(renamed.status).toBe(200);
+      expect(await listed()).toEqual([gamma.id, ctx.orgId, beta.id]);
+    });
+
     // RBAC spec §6.5 — each item carries the caller's ORG-LEVEL effective set
     // in that org, so the SPA never re-derives anything from `role`.
     describe("permissions", () => {
