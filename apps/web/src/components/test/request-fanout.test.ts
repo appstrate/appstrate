@@ -9,11 +9,11 @@
  *  2. the schedule CARD fetching a schedule's runs to count three numbers
  *     (N cards → N requests);
  *  3. the notification queries polling every 30s, which is only safe to slow
- *     down while the realtime stream reconciles them on (re)connect — the SSE
+ *     down while the realtime stream reconciles them on reconnect — the SSE
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
- *  4. the run caches, reconciled on the same reconnect for the same reason, and
- *     on RE-connects only (the first one races the mount's own queries).
+ *  4. the reconciliation running on the FIRST connect too, which issued every
+ *     notification and chat-session query twice on every page load (#1678).
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -23,7 +23,28 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { broadRunKeys } from "../../hooks/use-global-run-sync.ts";
+import type { QueryClient } from "@tanstack/react-query";
+import { broadRunKeys, createGapReconciler } from "../../hooks/use-global-run-sync.ts";
+
+type InvalidateCall = { queryKey: readonly unknown[] } | { predicate: unknown };
+
+/** A reconciler over a client that records what it is asked to refetch. */
+function recordingReconciler() {
+  const calls: InvalidateCall[] = [];
+  const qc = {
+    invalidateQueries: (filters: InvalidateCall) => {
+      calls.push(filters);
+      return Promise.resolve();
+    },
+  } as unknown as QueryClient;
+  return {
+    calls,
+    /** Every key-addressed call, serialized. */
+    keys: () =>
+      calls.flatMap((call) => ("queryKey" in call ? [JSON.stringify(call.queryKey)] : [])),
+    reconcile: createGapReconciler(() => qc, "org_1", 10_000),
+  };
+}
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8");
 
@@ -88,14 +109,13 @@ describe("notification freshness", () => {
 
   // The load-bearing half: without this, slowing the poll down means a missed
   // terminal event leaves the badge wrong for five minutes.
-  it("reconciles the badges on every SSE (re)connect, before reading frames", () => {
-    const connectStart = GLOBAL_SYNC.indexOf("const connectOnce = async () => {");
-    const readerStart = GLOBAL_SYNC.indexOf("const reader = res.body.getReader();");
-    expect(connectStart).toBeGreaterThan(-1);
-    expect(readerStart).toBeGreaterThan(connectStart);
-
-    const onConnect = GLOBAL_SYNC.slice(connectStart, readerStart);
-    expect(onConnect).toContain("invalidateNotificationQueries(qcRef.current)");
+  it("reconciles the badges on every SSE reconnect", () => {
+    const { keys, reconcile } = recordingReconciler();
+    reconcile(0);
+    reconcile(1_000);
+    expect(keys()).toContain('["get","/api/notifications"]');
+    expect(keys()).toContain('["get","/api/notifications/unread-count"]');
+    expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
   });
 
   it("still invalidates them on a terminal run seen live", () => {
@@ -108,20 +128,26 @@ describe("run cache reconciliation on reconnect", () => {
   // Same protocol gap as the badges, run side: `run_update` frames missed while
   // the stream was down left the page reading "running" under a bell that said
   // "finished".
-  it("reconciles on RE-connect only, before reading frames", () => {
-    const connectStart = GLOBAL_SYNC.indexOf("const connectOnce = async () => {");
-    const readerStart = GLOBAL_SYNC.indexOf("const reader = res.body.getReader();");
-    expect(connectStart).toBeGreaterThan(-1);
-    expect(readerStart).toBeGreaterThan(connectStart);
+  it("reconciles nothing on the first connect, which opens beside the mount's own queries", () => {
+    const { calls, reconcile } = recordingReconciler();
+    reconcile(0);
+    expect(calls).toHaveLength(0);
+  });
 
-    // The guard: the FIRST connect races the mount's own queries, so
-    // reconciling there would double every one of them. Matched on the
-    // identifiers, not a formatted line — prettier reflows the latter.
-    const onConnect = GLOBAL_SYNC.slice(connectStart, readerStart);
-    expect(onConnect).toContain("hasConnectedOnce");
-    expect(onConnect).toContain("reconcileRunQueries(qcRef.current, orgId)");
-    expect(onConnect).toContain("handleConnectionUpdate(qcRef.current)");
-    expect(GLOBAL_SYNC).toContain("let hasConnectedOnce = false;");
+  it("reconciles the run families on a reconnect, at most once per interval", () => {
+    const { keys, calls, reconcile } = recordingReconciler();
+    reconcile(0);
+    reconcile(20_000);
+    for (const key of broadRunKeys("org_1")) expect(keys()).toContain(JSON.stringify(key));
+    expect(keys()).toContain('["run"]');
+
+    // A stream dropped again within the interval still owes the signal-only
+    // families (badges, chat), not a second sweep of the run caches.
+    const afterFirst = calls.length;
+    reconcile(21_000);
+    const second = calls.slice(afterFirst);
+    expect(second.length).toBeGreaterThan(0);
+    expect(second.some((call) => "queryKey" in call && call.queryKey[0] === "run")).toBe(false);
   });
 
   it("covers every run family except the logs, identically on both paths", () => {

@@ -37,7 +37,7 @@ import {
  * the connections page, the agent picker verdict, the integration detail
  * connection list, and the agent status cards. `refetchOnWindowFocus` is
  * globally false (`main.tsx`), so these caches move on exactly two things:
- * a live frame here, and the reconnect reconciliation in `connectOnce`.
+ * a live frame here, and the reconnect reconciliation (`createGapReconciler`).
  *
  * Server-side actor filter in `services/realtime.ts:connection_update`
  * means we only see our own rows; a cross-actor change (e.g. someone else
@@ -240,6 +240,45 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
   }
 }
 
+/**
+ * What a (re)connect owes the caches. The protocol is signal-only: a frame
+ * emitted while the stream was down is lost for good, so every family a frame
+ * would have moved is refetched once the stream is back. That is what lets the
+ * notification and chat polls be slow backstops instead of the freshness
+ * mechanism.
+ *
+ * Only a RE-connect has such a gap. The first connect opens beside the mount's
+ * own queries, and reconciling there issued each of them a second time on every
+ * page load.
+ *
+ * The run families are rate-limited on top: the server writes a frame on every
+ * connection, so a repeatedly dropped stream would reconcile at ~1 Hz and storm
+ * itself. Exported for its test.
+ */
+export function createGapReconciler(
+  getQueryClient: () => QueryClient,
+  orgId: string,
+  runReconcileMinIntervalMs = 10_000,
+): (now: number) => void {
+  let connectedOnce = false;
+  let lastRunReconcileAt = 0;
+  return (now) => {
+    if (!connectedOnce) {
+      connectedOnce = true;
+      return;
+    }
+    const qc = getQueryClient();
+    handleChatSessionUpdate(qc);
+    invalidateNotificationQueries(qc);
+    if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
+      lastRunReconcileAt = now;
+      reconcileRunQueries(qc, orgId);
+      // `connection_update` frames were missed on the same stream.
+      handleConnectionUpdate(qc);
+    }
+  };
+}
+
 function handleSSEMessage(
   qc: QueryClient,
   broad: BroadInvalidator,
@@ -373,10 +412,7 @@ export function useGlobalRunSync() {
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
-    // Only a RE-connect has a gap; the first races the mount's own queries.
-    let hasConnectedOnce = false;
-    let lastReconcileAt = 0;
-    const RECONCILE_MIN_INTERVAL_MS = 10_000;
+    const reconcileGap = createGapReconciler(() => qcRef.current, orgId);
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -415,27 +451,7 @@ export function useGlobalRunSync() {
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
-      // The protocol is signal-only: frames emitted while the stream was down
-      // are lost forever. Reconcile on every (re)connect instead of leaving a
-      // missed frame to a polling safety net.
-      handleChatSessionUpdate(qcRef.current);
-      // Same reconciliation for the notification badges. This is what lets
-      // their `refetchInterval` be a 5-minute backstop instead of a 30-second
-      // poll: a terminal run seen live invalidates them (below), and a terminal
-      // run MISSED while the stream was down is caught here, on reconnect —
-      // seconds after connectivity returns, not at the next poll tick.
-      invalidateNotificationQueries(qcRef.current);
-      // Same reasoning for the run caches, which are patched frame by frame —
-      // rate-limited because the server writes a frame on every connection, so a
-      // repeatedly dropped stream would reconcile at ~1 Hz and storm itself.
-      const now = Date.now();
-      if (hasConnectedOnce && now - lastReconcileAt >= RECONCILE_MIN_INTERVAL_MS) {
-        lastReconcileAt = now;
-        reconcileRunQueries(qcRef.current, orgId);
-        // `connection_update` frames were missed on the same stream.
-        handleConnectionUpdate(qcRef.current);
-      }
-      hasConnectedOnce = true;
+      reconcileGap(Date.now());
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

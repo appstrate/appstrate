@@ -12,7 +12,7 @@ import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
  *
  * Freshness comes from the realtime stream: `use-global-run-sync` invalidates
  * these caches on every terminal run it sees, and re-invalidates them on every
- * (re)connect, which is what covers the frames lost while the stream was down
+ * reconnect, which is what covers the frames lost while the stream was down
  * (the SSE protocol has no replay). With both of those in place the poll only
  * has to cover a client that is somehow neither streaming nor reconnecting, so
  * it runs at 5 minutes instead of 30 seconds — 10× fewer requests per open tab,
