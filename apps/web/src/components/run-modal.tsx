@@ -8,7 +8,7 @@ import { Spinner } from "./spinner";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isModelPinUnavailable, isModelSelectable } from "../lib/model-selectability";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunModalProps {
@@ -149,7 +149,7 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
         {t("input.modelResolved", { name: resolved.label, source })}
       </p>
       {/* The fallback is the server's (`resolveModel`); it must not be a silent one. */}
-      {agentModel?.modelId && !pinned && (
+      {isModelPinUnavailable(orgModels, agentModel?.modelId) && (
         <p className="text-warning text-xs" data-testid="run-model-pin-unavailable">
           {t("input.modelPinUnavailable")}
         </p>

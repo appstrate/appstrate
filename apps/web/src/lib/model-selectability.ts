@@ -24,3 +24,16 @@ import type { OrgModelInfo } from "../hooks/use-models";
 export function isModelSelectable(model: OrgModelInfo): boolean {
   return model.enabled && !model.needs_reconnection;
 }
+
+/**
+ * A model pin (an agent's setting) the server cascade will skip: the row is
+ * gone, or it is listed but not selectable. Runs then use a default model.
+ */
+export function isModelPinUnavailable(
+  orgModels: OrgModelInfo[],
+  pinnedModelId: string | null | undefined,
+): boolean {
+  if (!pinnedModelId) return false;
+  const pinned = orgModels.find((m) => m.id === pinnedModelId);
+  return !pinned || !isModelSelectable(pinned);
+}

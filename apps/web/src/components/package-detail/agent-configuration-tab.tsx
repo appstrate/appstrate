@@ -23,7 +23,7 @@ import {
   useSetAgentModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
-import { isModelSelectable } from "../../lib/model-selectability";
+import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -229,7 +229,7 @@ function ModelSectionEditor({
   initialModelId: string | null;
   initialGeneration: ModelGenerationSettings;
 }) {
-  const { t } = useTranslation(["settings"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
   const [modelId, setModelId] = useState<string | null>(initialModelId);
@@ -283,8 +283,8 @@ function ModelSectionEditor({
           })}
         </SelectContent>
       </Select>
-      {/* A pin naming a deleted model leaves the select blank: say what a run does. */}
-      {modelId && !resolvedModel && (
+      {/* A deleted pin leaves the select blank, a dead one looks chosen: say what a run does. */}
+      {isModelPinUnavailable(orgModels, modelId) && (
         <p className="text-warning text-xs" data-testid="agent-model-pin-unavailable">
           {t("input.modelPinUnavailable", { ns: "agents" })}
         </p>

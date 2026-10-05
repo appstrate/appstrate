@@ -200,9 +200,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is refused five times (an output schema no value satisfies, typically) is
   stopped and its run fails, instead of retrying one paid turn at a time until
   the run timeout — this ships in the runtime image. A run that falls back to
-  the organization default because the model pinned on its agent or schedule
-  was deleted or disabled now says so in its log (`model_fallback`), and the
-  run form and the agent's model setting warn about the unavailable pin.
+  a default model because the one pinned on its agent or schedule is no longer
+  usable now says so in its log (`model_fallback`), and the run form and the
+  agent's model setting warn about the unusable pin.
   On the agent page the two Run buttons share one verdict (the empty-list one
   stayed live for an agent switched off or without a model), a caller with
   `agents:run` but not `agents:read` no longer reads "the prompt is empty",

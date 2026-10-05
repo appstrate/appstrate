@@ -26,21 +26,50 @@ export function resolvesToUsableModel(
   return orgModels.some((m) => m.is_default && isModelSelectable(m));
 }
 
+/**
+ * True when there is nothing this caller could launch: the package has no
+ * published version (`definition === "draft"` is all the detail route could
+ * render) and the working copy is not theirs to run. A launch would send no
+ * selector and the server would answer `404 no_published_version`.
+ */
+export function isNeverPublishedForReader(detail: AgentDetail | undefined): boolean {
+  return !!detail && detail.definition === "draft" && !detail.home_writable;
+}
+
+/** i18n key (namespace `agents`) of the model problem that blocks a run. */
+type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
+
 /** i18n key (namespace `agents`) of the reason a run of an agent cannot start. */
 type AgentRunBlocker =
   | "detail.titleNotActive"
+  | "detail.titleNeverPublished"
   | "detail.titleEmptyPrompt"
   | "detail.titleMissingSkill"
-  | "detail.titleModel"
-  | "detail.titleNoDefaultModel";
+  | AgentModelBlocker;
+
+/**
+ * The model half of the verdict, on its own: it depends on the catalog and the
+ * agent's pin, not on the agent's definition, so the page can state it even
+ * when something else blocks the run first.
+ */
+export function agentModelBlocker(
+  orgModels: OrgModelInfo[] | undefined,
+  agentModelId?: string | null,
+): AgentModelBlocker | null {
+  // Unknown catalog (still loading) is optimistic — don't flash "no model".
+  if (orgModels === undefined || resolvesToUsableModel(orgModels, agentModelId)) return null;
+  // Models the org could run on, none of them the default: a different fix.
+  return orgModels.some(isModelSelectable) ? "detail.titleNoDefaultModel" : "detail.titleModel";
+}
 
 /**
  * What blocks a run of this agent in this space, or `null`. Every launch
- * control of the agent page reads this one verdict, so two buttons cannot
+ * control of the agent page reads this one verdict, so two of them cannot
  * disagree about the same agent.
  *
- * The order is the server's: the run gate refuses an agent that is not active
- * here before it looks at anything else.
+ * The order is the cheapest cure first: switched off HERE is one click away on
+ * this very page, a missing publication is somebody else's act, then what the
+ * definition lacks, then the model.
  *
  * Unfilled parameters are deliberately NOT a gate: an agent declares one
  * `input` schema and every field it does not already decide (author `default`
@@ -56,9 +85,11 @@ export function agentRunBlocker(
   agentModelId?: string | null,
 ): AgentRunBlocker | null {
   if (!detail.active) return "detail.titleNotActive";
-  // A summary read (`agents:run` without `agents:read`) carries no prompt and
-  // no manifest. Absent is unknown, not empty: the server judges at launch.
-  if (detail.prompt !== undefined && isPromptEmpty(detail.prompt)) {
+  if (isNeverPublishedForReader(detail)) return "detail.titleNeverPublished";
+  // A summary read (`agents:run` without `agents:read`) OMITS the prompt:
+  // absent is unknown, and the server judges at launch. A full read of a draft
+  // with no content yet carries `null` (the column is nullable): that is empty.
+  if (detail.prompt !== undefined && isPromptEmpty(detail.prompt ?? "")) {
     return "detail.titleEmptyPrompt";
   }
   const requiredSkills =
@@ -68,12 +99,7 @@ export function agentRunBlocker(
   if (findMissingDependencies(requiredSkills, placedSkills).length > 0) {
     return "detail.titleMissingSkill";
   }
-  // Unknown catalog (still loading) is optimistic — don't flash "no model".
-  if (orgModels !== undefined && !resolvesToUsableModel(orgModels, agentModelId)) {
-    // Models the org could run on, none of them the default: a different fix.
-    return orgModels.some(isModelSelectable) ? "detail.titleNoDefaultModel" : "detail.titleModel";
-  }
-  return null;
+  return agentModelBlocker(orgModels, agentModelId);
 }
 
 /** {@link agentRunBlocker} for the agent a page is showing. */
@@ -81,4 +107,11 @@ export function useAgentRunBlocker(detail: AgentDetail | undefined): AgentRunBlo
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(detail?.id);
   return detail ? agentRunBlocker(detail, orgModels, agentModel?.modelId) : null;
+}
+
+/** {@link agentModelBlocker} for the agent a page is showing. */
+export function useAgentModelBlocker(packageId: string): AgentModelBlocker | null {
+  const { data: orgModels } = useModels();
+  const { data: agentModel } = useAgentModel(packageId);
+  return agentModelBlocker(orgModels, agentModel?.modelId);
 }

@@ -54,7 +54,7 @@ import { AgentConnectionsSection } from "../components/package-detail/agent-conn
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageCard } from "../components/package-card";
-import { useAgentRunBlocker } from "../hooks/use-agent-readiness";
+import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
@@ -74,12 +74,12 @@ type DetailTab =
 /** A version that declares no parameters — distinct from "use the draft". */
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
-function ModelRequiredAlert({ detail }: { detail: AgentDetail | undefined }) {
+function ModelRequiredAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
-  const blocker = useAgentRunBlocker(detail);
+  // The model half of the launch buttons' verdict, read on its own: it holds
+  // whatever else blocks the run, and never names a problem a usable pin solves.
+  const blocker = useAgentModelBlocker(packageId);
 
-  // The same verdict that greys the launch buttons, so the alert never names a
-  // model problem a run of THIS agent does not have (a usable pin, say).
   const copy =
     blocker === "detail.titleModel"
       ? {
@@ -476,7 +476,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         activeUrl={packageDetailPath(type, packageId)}
       />
 
-      {type === "agent" && <ModelRequiredAlert detail={agentDetail} />}
+      {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
 
       {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that

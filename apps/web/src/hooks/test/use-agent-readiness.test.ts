@@ -9,7 +9,8 @@
 
 import { describe, it, expect } from "bun:test";
 import type { AgentDetail } from "@appstrate/shared-types";
-import { agentRunBlocker, resolvesToUsableModel } from "../use-agent-readiness";
+import { agentModelBlocker, agentRunBlocker, resolvesToUsableModel } from "../use-agent-readiness";
+import { isModelPinUnavailable } from "../../lib/model-selectability";
 import type { OrgModelInfo } from "../use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -118,6 +119,28 @@ describe("agentRunBlocker", () => {
     );
   });
 
+  it("reads a null prompt — a draft with no content yet — as empty", () => {
+    // `packages.draft_content` is nullable and reaches the wire as `null`,
+    // which the declared type does not admit.
+    const draft = agent({ prompt: null as unknown as string });
+    expect(agentRunBlocker(draft, [DEFAULT_OK], null)).toBe("detail.titleEmptyPrompt");
+  });
+
+  it("blocks a never-published agent for a reader who cannot run its draft", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false });
+    expect(agentRunBlocker(unpublished, [DEFAULT_OK], null)).toBe("detail.titleNeverPublished");
+    expect(agentRunBlocker({ ...unpublished, active: false }, [DEFAULT_OK], null)).toBe(
+      "detail.titleNotActive",
+    );
+  });
+
+  it("keeps the model verdict readable behind an earlier blocker", () => {
+    // The buttons say "empty prompt"; the page alert still has to say "no model".
+    expect(agentRunBlocker(agent({ prompt: "" }), [], null)).toBe("detail.titleEmptyPrompt");
+    expect(agentModelBlocker([], null)).toBe("detail.titleModel");
+    expect(agentModelBlocker([DEFAULT_OK], null)).toBeNull();
+  });
+
   it("names the activation first, as the run gate does", () => {
     expect(agentRunBlocker(agent({ active: false, prompt: "" }), [], null)).toBe(
       "detail.titleNotActive",
@@ -133,5 +156,20 @@ describe("agentRunBlocker", () => {
 
   it("stays optimistic while the model catalog loads", () => {
     expect(agentRunBlocker(agent(), undefined, null)).toBeNull();
+  });
+});
+
+describe("isModelPinUnavailable", () => {
+  it("is false without a pin, and for a pin that can serve", () => {
+    expect(isModelPinUnavailable([DEFAULT_OK], null)).toBe(false);
+    expect(isModelPinUnavailable([model({ id: "m_pin" })], "m_pin")).toBe(false);
+  });
+
+  it("is true for a pin that is gone, switched off, or on a dead credential", () => {
+    expect(isModelPinUnavailable([DEFAULT_OK], "m_deleted")).toBe(true);
+    expect(isModelPinUnavailable([model({ id: "m_pin", enabled: false })], "m_pin")).toBe(true);
+    expect(isModelPinUnavailable([model({ id: "m_pin", needs_reconnection: true })], "m_pin")).toBe(
+      true,
+    );
   });
 });

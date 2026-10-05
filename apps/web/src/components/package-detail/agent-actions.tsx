@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
+import { useAgentRunBlocker } from "../../hooks/use-agent-readiness";
 import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
@@ -60,6 +61,9 @@ export function AgentActions({
     label: string;
   } | null>(null);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
+  // The verdict the page's Run buttons read: "run with options" is the same
+  // launch, so it is refused for the same reason, said the same way.
+  const runBlocker = useAgentRunBlocker(detail);
 
   if (!detail) return null;
 
@@ -71,17 +75,7 @@ export function AgentActions({
   // about (a `runner` holds `agents:run` and no `agents:read`, so the space
   // library lists no agents at all) still gets a verdict here.
   const activeHere = detail.active;
-  // Two refusals the launcher would otherwise discover by round trip. Being
-  // switched off HERE comes first, because the cure is one item away in this
-  // very menu ("Activer dans cet espace") while publishing is somebody else's
-  // act. The second is a package with nothing published whose working copy is
-  // not this caller's: a launch that names no version gets `404
-  // no_published_version`.
-  const runBlockedReason = !activeHere
-    ? t("detail.titleNotActive")
-    : detail.definition === "draft" && !detail.home_writable
-      ? t("detail.titleNeverPublished")
-      : undefined;
+  const runBlockedReason = runBlocker ? t(runBlocker) : undefined;
 
   const handleConfirm = () => {
     if (!confirmState) return;
