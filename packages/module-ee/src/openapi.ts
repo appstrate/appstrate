@@ -523,11 +523,11 @@ export function openApiPaths(): Record<string, unknown> {
           },
           "400": {
             description: "Missing or invalid Stripe signature",
-            content: { "text/plain": { schema: { type: "string" } } },
+            content: { "application/problem+json": { schema: errorProblemRef } },
           },
           "500": {
             description: "Webhook processing error",
-            content: { "text/plain": { schema: { type: "string" } } },
+            content: { "application/problem+json": { schema: errorProblemRef } },
           },
         },
       },

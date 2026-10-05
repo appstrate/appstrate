@@ -184,14 +184,14 @@ describe("Me API (/api/me)", () => {
       const body = (await res.json()) as {
         user: { id: string; name: string | null; email: string | null };
         org: { id: string; role: string };
-        connections: { integration_id: string; name: string; source: string }[];
+        connections: { integration_package_id: string; name: string; source: string }[];
       };
 
       expect(body.user.id).toBe(ctx.user.id);
       expect(body.org.id).toBe(ctx.orgId);
       expect(body.org.role).toBe("owner");
 
-      const byId = new Map(body.connections.map((c) => [c.integration_id, c]));
+      const byId = new Map(body.connections.map((c) => [c.integration_package_id, c]));
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-space")).toBe(false);

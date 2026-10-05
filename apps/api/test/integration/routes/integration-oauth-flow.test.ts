@@ -22,7 +22,12 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  orgOnlyHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
@@ -31,7 +36,12 @@ import {
   type StrictAuthorizationServer,
   type StrictAuthorizationServerOptions,
 } from "../../helpers/strict-authorization-server.ts";
-import { auditEvents, spacePackages, integrationConnections } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  spacePackages,
+  integrationConnections,
+  integrationOauthClients,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import {
@@ -39,6 +49,7 @@ import {
   forceRefreshIntegrationConnection,
 } from "../../../src/services/integration-token-refresh.ts";
 import { readIntegrationAuth } from "../../../src/services/integration-connections.ts";
+import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
 const app = getTestApp();
@@ -69,6 +80,7 @@ async function setup(
     refreshTokenIssuance?: "default" | "not_supported";
   },
   client: { clientId: string; clientSecret: string },
+  tier: "space" | "org" = "space",
 ): Promise<void> {
   await seedPackage({
     id: INTEGRATION,
@@ -106,10 +118,13 @@ async function setup(
   // missing/blank `client_secret` under any other method rather than inferring
   // "public" from the absence, which is what the admin form's checkbox sends.
   const res = await app.request(
-    `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
+    `/api/${tier === "space" ? "integrations" : "org-integrations"}/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
     {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: {
+        ...(tier === "space" ? authHeaders(ctx) : orgOnlyHeaders(ctx)),
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(
         client.clientSecret === ""
           ? { client_id: client.clientId, token_endpoint_auth_method: "none" }
@@ -288,6 +303,30 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
     ]);
     expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
+  });
+
+  it("keeps the client secret out of the stored state and resolves an org client at callback", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "org-secret",
+      acceptedAuthMethods: ["client_secret_basic"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_basic" },
+      { clientId: "cid", clientSecret: "org-secret" },
+      "org",
+    );
+    const authUrl = await beginConnect(ctx);
+    const state = new URL(authUrl).searchParams.get("state")!;
+    const stored = await (await getCache()).get(`oauth-state:${state}`);
+    expect(stored).toContain(state);
+    expect(stored).not.toContain("org-secret");
+
+    await consentAndCallback(authUrl);
+    expect(await storedConnection()).not.toBeNull();
+    expect(provider.tokenRequests[0]!.status).toBe(200);
   });
 
   it("connects with a manifest-declared public client (none)", async () => {
@@ -505,6 +544,28 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(replay.status).toBe(200);
     expect(await replay.text()).toMatch(/Could not complete the connection|try again/i);
     expect(provider.tokenRequests.length).toBe(before);
+  });
+
+  it("names the missing OAuth client when it is deleted between start and callback", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const authUrl = await beginConnect(ctx);
+    await db.delete(integrationOauthClients);
+    const html = await consentAndCallback(authUrl);
+
+    expect(html).toContain("is no longer available");
+    expect(html).not.toContain("expired");
+    expect(provider.tokenRequests).toHaveLength(0);
+    expect(await storedConnection()).toBeNull();
   });
 
   it("surfaces the provider's error code when client credentials are wrong", async () => {

@@ -66,6 +66,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
+    disabled_reason: row.disabledReason,
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
@@ -184,8 +185,14 @@ export async function assertScheduleActorValid(
 async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
   await db
     .update(schedules)
-    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
-    .where(eq(schedules.id, scheduleId));
+    .set({
+      enabled: false,
+      disabledReason: "actor_invalid",
+      nextRunAt: null,
+      updatedAt: new Date(),
+    })
+    // A schedule paused while this fire ran is not relabelled.
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
   await removeScheduleJobs([scheduleId]);
 }
 
@@ -990,6 +997,7 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
+  if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.

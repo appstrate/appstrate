@@ -65,7 +65,7 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
-import { asString, RESOURCE_BLOB_MAX_BYTES, textResult } from "./tool-results.ts";
+import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 
@@ -414,7 +414,7 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     const bestMatch =
       tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
 
-    return textResult({
+    return jsonResult({
       total: granted.length,
       operations: shown.map((op) => ({
         operation_id: op.operationId,
@@ -498,7 +498,7 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
       operationId,
     });
 
-    return textResult(describePayload(op, componentSchemas, ctx));
+    return jsonResult(describePayload(op, componentSchemas, ctx));
   };
 
   return { descriptor, handler };
@@ -578,7 +578,7 @@ export async function readResponse(
   const isError = response.status >= 400;
 
   if (contentType.includes("text/event-stream")) {
-    return textResult(
+    return jsonResult(
       {
         status: response.status,
         error:
@@ -598,7 +598,7 @@ export async function readResponse(
   const isTextual = contentType === "" || isTextShapedContentType(contentType);
   if (!isTextual) {
     const len = response.headers.get("content-length");
-    return textResult(
+    return jsonResult(
       {
         status: response.status,
         note: "Non-text response body omitted.",
@@ -628,7 +628,7 @@ export async function readResponse(
 
   // The version to send back as `if_match` on the next write to this resource.
   const etag = response.headers.get("etag");
-  return textResult(
+  return jsonResult(
     {
       status: response.status,
       ...(etag ? { etag } : {}),
@@ -753,7 +753,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult(
+      return jsonResult(
         { error: `Missing path_params. Required: ${op.pathParams.join(", ")}` },
         true,
       );
@@ -770,7 +770,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult({ error: `Invalid header name or value: ${name}` }, true);
+      return jsonResult({ error: `Invalid header name or value: ${name}` }, true);
     };
     const headers = new Headers(ctx.authHeaders);
     const ifMatch = asString(args.if_match);
@@ -815,7 +815,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return textResult({ error: "`body` must be a JSON object." }, true);
+      return jsonResult({ error: "`body` must be a JSON object." }, true);
     }
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
@@ -1064,8 +1064,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
             "apart, so read them rather than listing connections separately. Each key is the " +
             "integration id itself (`@scope/integration`) — NOT the " +
-            "`integrations.<id>` field path the error reports it under, which matches no " +
-            "integration and is ignored. TOP-LEVEL argument, " +
+            "`integrations.<id>` field path the error reports it under. A key naming an " +
+            "integration the agent does not declare is refused (400). TOP-LEVEL argument, " +
             (inline ? "alongside `manifest`/`input`" : "alongside `input`") +
             " — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
@@ -1141,7 +1141,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      return textResult(launched.step.payload, true);
+      return jsonResult(launched.step.payload, true);
     }
 
     const runId = launched.launch.runId;
@@ -1189,16 +1189,11 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         signal,
       });
       if (files.length > 0) {
-        return {
-          content: [
-            { type: "text", text: JSON.stringify({ ...final.payload, files }, null, 2) },
-            ...files.map(fileResourceLink),
-          ],
-          isError: false,
-        };
+        const result = jsonResult({ ...final.payload, files });
+        return { ...result, content: [...result.content, ...files.map(fileResourceLink)] };
       }
     }
-    return textResult(final.payload, final.isError);
+    return jsonResult(final.payload, final.isError);
   };
 
   return { descriptor, handler };
@@ -1316,7 +1311,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       durationMs: performance.now() - start,
       shownCount: files.length,
     });
-    return textResult({ files, hasMore: body?.hasMore === true });
+    return jsonResult({ files, hasMore: body?.hasMore === true });
   };
 
   return { descriptor, handler };
@@ -1608,6 +1603,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     buildReadFileTool(ctx),
     buildReadSkillTool({
       readSkill: ctx.readSkill,
+      origin: ctx.origin,
       requestId: ctx.requestId,
       observe: (event) => emit(ctx, event),
     }),

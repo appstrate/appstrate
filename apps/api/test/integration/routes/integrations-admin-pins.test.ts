@@ -41,8 +41,8 @@ import {
 } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { eq } from "drizzle-orm";
-import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
+import { asc, eq } from "drizzle-orm";
+import { auditEvents, integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -191,9 +191,9 @@ describe("/api/integrations/:packageId admin surface", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      integrations: Array<{ integration_id: string; resolution: AgentResolutionDTO }>;
+      integrations: Array<{ integration_package_id: string; resolution: AgentResolutionDTO }>;
     };
-    const entry = body.integrations.find((i) => i.integration_id === integrationId);
+    const entry = body.integrations.find((i) => i.integration_package_id === integrationId);
     if (!entry) throw new Error(`integration ${integrationId} not in readiness`);
     return entry.resolution;
   }
@@ -262,7 +262,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     // Regression (#576 follow-up): an INERT integration entry (declared with an
     // auth_key but no tools/scopes) is still listed in the bulk readiness with a
     // resolution (includeInert), and that resolution must honour the member pin —
-    // otherwise a PUT /me/integration-pins succeeds (200) but the verdict stays
+    // otherwise a PUT /me/integration-pins/… succeeds (200) but the verdict stays
     // `must_choose_connection` and the picker can never reflect the selection.
     it("honours the member pin on an INERT integration (no tools/scopes)", async () => {
       const INERT_AGENT = "@adminorg/agent-inert";
@@ -293,15 +293,14 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(before.resolved_connection_ids).toEqual([]);
 
       // Member pins connection B via the same endpoint the picker calls.
-      const pinRes = await app.request("/api/me/integration-pins", {
-        method: "PUT",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_package_id: INERT_AGENT,
-          integration_package_id: INTEGRATION,
-          connection_ids: [connB],
-        }),
-      });
+      const pinRes = await app.request(
+        `/api/me/integration-pins/${INERT_AGENT}/integrations/${INTEGRATION}`,
+        {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: [connB] }),
+        },
+      );
       expect(pinRes.status).toBe(200);
 
       const after = await getResolution(INERT_AGENT, INTEGRATION);
@@ -367,7 +366,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       const body = (await res.json()) as {
         blocks_run: boolean;
         errors: Array<{ field: string; code: string; message: string }>;
-        integrations: Array<{ integration_id: string; resolution: AgentResolutionDTO }>;
+        integrations: Array<{ integration_package_id: string; resolution: AgentResolutionDTO }>;
       };
       expect(body.blocks_run).toBe(true);
       const err = body.errors.find((e) => e.field === `integrations.${INTEGRATION}`)!;
@@ -384,15 +383,14 @@ describe("/api/integrations/:packageId admin surface", () => {
     it("a colleague's member pin never blocks the owner's delete — that member's run fails by name", async () => {
       const shared = await seedSharedConnection();
       const bob = await memberContext(ctx, "member");
-      const pinned = await app.request("/api/me/integration-pins", {
-        method: "PUT",
-        headers: { ...authHeaders(bob), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_package_id: AGENT,
-          integration_package_id: INTEGRATION,
-          connection_ids: [shared],
-        }),
-      });
+      const pinned = await app.request(
+        `/api/me/integration-pins/${AGENT}/integrations/${INTEGRATION}`,
+        {
+          method: "PUT",
+          headers: { ...authHeaders(bob), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: [shared] }),
+        },
+      );
       expect(pinned.status).toBe(200);
 
       const del = await app.request(`/api/me/connections/${shared}`, {
@@ -532,6 +530,50 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(res.status).toBe(204);
     });
 
+    it("audits upsert and delete with the set before and after, under the member pins' resource id", async () => {
+      const first = await seedSharedConnection();
+      const second = await seedSharedConnection();
+      expect((await putPin([first])).status).toBe(200);
+      expect((await putPin([second])).status).toBe(200);
+      const del = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const rows = await db
+        .select({
+          action: auditEvents.action,
+          resourceId: auditEvents.resourceId,
+          before: auditEvents.before,
+          after: auditEvents.after,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.resourceType, "integration_pin"))
+        .orderBy(asc(auditEvents.id));
+      const resourceId = `${INTEGRATION}#${AGENT}`;
+      expect(rows).toEqual([
+        {
+          action: "integration.pin.upserted",
+          resourceId,
+          before: null,
+          after: { connectionIds: [first] },
+        },
+        {
+          action: "integration.pin.upserted",
+          resourceId,
+          before: { connectionIds: [first] },
+          after: { connectionIds: [second] },
+        },
+        {
+          action: "integration.pin.deleted",
+          resourceId,
+          before: { connectionIds: [second] },
+          after: null,
+        },
+      ]);
+    });
+
     it("returns 204 when the pin doesn't exist (idempotent)", async () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "DELETE",
@@ -587,10 +629,10 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ packageId: string; connection_ids: string[] }>;
+        data: Array<{ agent_package_id: string; connection_ids: string[] }>;
       };
       expect(body.data).toHaveLength(2);
-      const agentIds = new Set(body.data.map((p) => p.packageId));
+      const agentIds = new Set(body.data.map((p) => p.agent_package_id));
       expect(agentIds.has(AGENT)).toBe(true);
       expect(agentIds.has(SECOND_AGENT)).toBe(true);
     });
@@ -630,10 +672,10 @@ describe("/api/integrations/:packageId admin surface", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ packageId: string; display_name: string }>;
+        data: Array<{ agent_package_id: string; display_name: string }>;
       };
       expect(body.data.length).toBeGreaterThanOrEqual(2);
-      const agentIds = new Set(body.data.map((a) => a.packageId));
+      const agentIds = new Set(body.data.map((a) => a.agent_package_id));
       expect(agentIds.has(AGENT)).toBe(true);
       expect(agentIds.has(SECOND_AGENT)).toBe(true);
       // Wire shape: snake_case display_name.

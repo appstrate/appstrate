@@ -283,7 +283,10 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "primary",
       declaredUris: ["https://api.example.com/**"],
     });
-    const result = await adapter.refreshCredentials("@scope/integ");
+    const result = await adapter.refreshCredentials(
+      "@scope/integ",
+      await adapter.fetchCredentials("@scope/integ"),
+    );
     expect(refreshed).toBe(true);
     expect(result?.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
   });
@@ -310,7 +313,12 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "session",
       declaredUris: ["https://api.example.com/**"],
     });
-    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+    expect(
+      await adapter.refreshCredentials(
+        "@scope/integ",
+        await adapter.fetchCredentials("@scope/integ"),
+      ),
+    ).toBeNull();
   });
 
   it("refreshCredentials returns null when the credential was NOT rotated", async () => {
@@ -325,7 +333,12 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "primary",
       declaredUris: ["https://api.example.com/**"],
     });
-    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+    expect(
+      await adapter.refreshCredentials(
+        "@scope/integ",
+        await adapter.fetchCredentials("@scope/integ"),
+      ),
+    ).toBeNull();
   });
 });
 

@@ -86,7 +86,14 @@ export const mcpPaths = {
       responses: {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "405": { description: "Method Not Allowed — stateless server has no GET stream." },
+        "405": {
+          description:
+            "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+          headers: { Allow: { schema: { type: "string", example: "POST" } } },
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
   },

@@ -28,7 +28,7 @@ import each module by subpath.
 | `./unzip-bounded`                    | Memory-bounded ZIP decompression for untrusted archives (AFPS bundles, package ZIPs, integration bundles).                                                  |
 | `./integrity`                        | Package integrity digests.                                                                                                                                  |
 | `./companion-files`                  | Companion-file enforcement, shared between the platform ZIP-import path and the runtime bundle loader.                                                      |
-| `./credential-template`              | Credential-template placeholder substitution.                                                                                                               |
+| `./credential-template`              | `{$credential.<field>}` template rendering; any other `{$…}` expression throws.                                                                             |
 | `./delivery-http`                    | Shared HTTP delivery contract.                                                                                                                              |
 | `./semver-resolve`                   | Version-range resolution against a published version list.                                                                                                  |
 | `./api-tool-naming` · `./mcp-naming` | Deterministic tool and MCP-server naming.                                                                                                                   |
@@ -36,6 +36,7 @@ import each module by subpath.
 | `./token-usage`                      | Token-usage accounting shapes.                                                                                                                              |
 | `./backoff`                          | Retry backoff computation.                                                                                                                                  |
 | `./jsonpath`                         | The single-value RFC 9535 JSONPath subset every integration-manifest path field is read with (`identity_claims`, login-engine selectors).                   |
+| `./runtime-expression`               | The Arazzo runtime expressions a `connect.login` block reads its response with (`$statusCode`, `$response.body[#ptr]`, `$response.header.<name>`).          |
 
 ```ts
 import { guardedFetch } from "@appstrate/afps-shared/guarded-fetch";

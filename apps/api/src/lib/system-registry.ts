@@ -2,6 +2,18 @@
 
 import { z } from "zod";
 import { logger } from "./logger.ts";
+import { isUuid } from "./db-helpers.ts";
+
+/**
+ * A system entry's id. System ids resolve before the organization's own rows,
+ * whose ids are UUIDs, so a UUID-shaped system id would shadow one.
+ */
+export const systemIdSchema = z
+  .string()
+  .refine(
+    (id) => !isUuid(id),
+    "id must not be UUID-shaped: an organization's own ids are UUIDs, and a system id would shadow one",
+  );
 
 /**
  * Shared skeleton for the env-sourced "system registries" that back the

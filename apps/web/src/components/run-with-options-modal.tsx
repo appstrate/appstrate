@@ -11,6 +11,7 @@ import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
 import { RunOverridesPanel } from "./run-overrides-panel";
 import type { RunOverridesValue } from "../lib/schedule-payload";
+import { withDeclaredConnections } from "../lib/connection-set";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
@@ -126,8 +127,17 @@ function RunWithOptionsForm({
       ...(s.name ? { name: s.name } : {}),
     }));
 
+  // Picks made under another version may name an integration this one does not declare.
   const fire = (input: Record<string, unknown>) =>
-    onSubmit({ input, version, overrides, dependencyOverrides });
+    onSubmit({
+      input,
+      version,
+      overrides: withDeclaredConnections(
+        overrides,
+        (deps?.agentIntegrations ?? []).map((i) => i.id),
+      ),
+      dependencyOverrides,
+    });
 
   return (
     <div className="space-y-5">

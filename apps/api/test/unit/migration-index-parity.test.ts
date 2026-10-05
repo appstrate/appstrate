@@ -34,8 +34,8 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { applyCorePGliteMigrations } from "../../src/lib/pglite-migrate.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 import {
   PUBLIC_INDEXES_QUERY,
   declaredIndexes,
@@ -61,7 +61,7 @@ const RESTORED = ["idx_runs_package_started", "idx_runs_schedule_id"] as const;
  * its subject from the migrations alone, so it cannot borrow a database whose
  * shape someone else already decided.
  */
-const pg = new PGlite();
+let pg: PGlite;
 
 let journal: DrizzleJournal;
 let declared: Set<string>;
@@ -87,16 +87,17 @@ async function execMigrationFile(path: string): Promise<void> {
   await pg.exec(sql.replaceAll("--> statement-breakpoint", ""));
 }
 
-// No timing assertion here on purpose: `bunfig.toml` sets `timeout = 15000`
-// and bun applies it to hooks, so a replay that ever grows that slow kills
-// this file outright. A softer ceiling of our own could never fire.
+// No timing assertion here on purpose: the suite runs with a 15 s per-test
+// timeout (`--timeout`) and bun applies it to hooks, so a replay that ever grows that slow
+// (the dump is rebuilt on a cold cache) kills this file outright. A softer
+// ceiling of our own could never fire.
 beforeAll(async () => {
   journal = await Bun.file(`${META_DIR}/_journal.json`).json();
   const snapshotName = latestSnapshotName(journal);
   const snapshot: DrizzleSnapshot = await Bun.file(`${META_DIR}/${snapshotName}`).json();
   declared = declaredIndexes(snapshot);
 
-  await applyCorePGliteMigrations(MIGRATIONS_DIR, pg);
+  pg = await journalPGlite({ ledger: true });
   actual = await readIndexNames();
 });
 

@@ -26,7 +26,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { decryptCredentialsToStringMap, encryptCredentialEnvelope } from "@appstrate/connect";
 import { forceRefreshIntegrationConnection } from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
 
@@ -185,6 +185,61 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .where(eq(integrationConnections.id, connId));
     // Untouched — `scope` was absent on the wire so the high-water-mark stays.
     expect(row!.scopesGranted).toEqual(["read", "send"]);
+  });
+
+  it("keeps the outputs a refresh response does not send again, and takes those it does", async () => {
+    const connId = await seedConnection(["read", "send"]);
+    await db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({
+          outputs: {
+            access_token: "old-access",
+            refresh_token: "rt-1",
+            token_type: "Bearer",
+            id_token: "idt-1",
+            scope: "read send",
+          },
+        }),
+      })
+      .where(eq(integrationConnections.id, connId));
+    const refresh = async () =>
+      (
+        await forceRefreshIntegrationConnection(
+          connId,
+          PACKAGE_ID,
+          "primary",
+          (await fetchEncrypted(connId))!,
+          { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+        )
+      ).fields;
+
+    token.setResponse({ access_token: "access-2", expires_in: 3600 });
+    const kept = {
+      access_token: "access-2",
+      refresh_token: "rt-1",
+      token_type: "Bearer",
+      id_token: "idt-1",
+      scope: "read send",
+    };
+    expect(await refresh()).toEqual(kept);
+    expect(decryptCredentialsToStringMap((await fetchEncrypted(connId))!)).toEqual(kept);
+
+    token.setResponse({
+      access_token: "access-3",
+      refresh_token: "rt-2",
+      token_type: "DPoP",
+      id_token: "idt-2",
+      scope: "read",
+      expires_in: 3600,
+    });
+    expect(await refresh()).toEqual({
+      access_token: "access-3",
+      refresh_token: "rt-2",
+      token_type: "DPoP",
+      id_token: "idt-2",
+      scope: "read",
+    });
   });
 
   it("writes back scopesGranted unchanged when the IdP echoes the same set", async () => {
@@ -449,7 +504,8 @@ describe("integration refresh-failure escalation", () => {
     const connId = await seedConn({ expiresAt: new Date(Date.now() + HOUR_MS) });
 
     // Drive the streak to (and past) the threshold.
-    for (let i = 0; i < 4; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+    for (let i = 0; i < 4; i++)
+      await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(4);
@@ -460,7 +516,8 @@ describe("integration refresh-failure escalation", () => {
     // Expired 10 min ago; grace is 1h → not yet escalatable.
     const connId = await seedConn({ expiresAt: new Date(Date.now() - 10 * 60_000) });
 
-    for (let i = 0; i < 5; i++) await recordIntegrationRefreshFailure(connId, 3, 3600);
+    for (let i = 0; i < 5; i++)
+      await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(5);
@@ -471,11 +528,11 @@ describe("integration refresh-failure escalation", () => {
     // Expired 2h ago, grace 1h → past grace.
     const connId = await seedConn({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) });
 
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 1 — below threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 1 — below threshold
     expect((await readRow(connId)).needsReconnection).toBe(false);
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 2 — below threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 2 — below threshold
     expect((await readRow(connId)).needsReconnection).toBe(false);
-    await recordIntegrationRefreshFailure(connId, 3, 3600); // 3 — hits threshold
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 }); // 3 — hits threshold
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(3);
@@ -488,7 +545,7 @@ describe("integration refresh-failure escalation", () => {
       needsReconnection: true, // but already flagged (e.g. revoke)
     });
 
-    await recordIntegrationRefreshFailure(connId, 3, 3600);
+    await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
 
     expect((await readRow(connId)).needsReconnection).toBe(true);
   });

@@ -19,7 +19,7 @@ import {
   preflightBundleImport,
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
-import { asString, textResult } from "./tool-results.ts";
+import { asString, jsonResult } from "./tool-results.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -143,7 +143,7 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
         ctx.scope,
         ctx.authorizeBundle,
       );
-      return textResult({
+      return jsonResult({
         valid: true,
         importable: conflicts.length === 0,
         file: {
@@ -164,7 +164,7 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
       });
     } catch (err) {
       if (err instanceof McpError) throw err;
-      return textResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
+      return jsonResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
     }
   };
   return { descriptor, handler };
@@ -215,10 +215,10 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
           after: audit.after,
         });
       }
-      return textResult({ ...result, file_uri: fileUri(file.fileId) });
+      return jsonResult({ ...result, file_uri: fileUri(file.fileId) });
     } catch (err) {
       if (err instanceof McpError) throw err;
-      return textResult({ error: getErrorMessage(err) }, true);
+      return jsonResult({ error: getErrorMessage(err) }, true);
     }
   };
   return { descriptor, handler };
@@ -270,7 +270,7 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
   const handler = async (): Promise<CallToolResult> =>
-    textResult({
+    jsonResult({
       archive_required: true,
       package_archive_max_bytes: PACKAGE_ZIP_MAX_COMPRESSED_BYTES,
       schema_version: AFPS_SCHEMA_VERSION,

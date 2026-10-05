@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [14.0.0] — 2026-10-05
+
+### Added
+
+- **`findUnboundedInjectedCredentials`**, **`findUnevaluableExpressions`**
+  and **`AuthManifestIssue`** (`@appstrate/core/integration`): two
+  manifest-level finders returning `AuthManifestIssue[]`, each issue located
+  per auth (`authKey`, `path`, `message`). The first is the write-path rule
+  listing each auth that injects a credential under `allow_all_uris`, with no
+  `authorized_uris`, or with an entry that leaves the host to the caller
+  (malformed included); it needs `@appstrate/afps-shared`
+  `isHostUnboundedUriPattern` / `injectsHttpCredential`. The second is the
+  write-path rule listing each expression the platform does not evaluate: in
+  a delivery template (`http`, `env`, `files`) or in `authorized_uris`, any
+  `{$…}` but `{$credential.<field>}`; in `connect.login`, what
+  `loginBlockIssues` refuses. It needs `@appstrate/afps-shared`
+  `./runtime-expression` and `./credential-template`.
+  `integrationManifestSchema` runs neither. (#1641)
+- **The connection-resolution vocabulary is exported as runtime values**
+  (`@appstrate/core/integration`): `CONNECTION_RESOLUTION_SOURCES` and
+  `CONNECTION_RESOLUTION_ERROR_CODES`, from which the
+  `ConnectionResolutionSource` / `ConnectionResolutionErrorCode` unions now
+  derive, and `resolvedConnectionMapSchema`, the Zod schema of the persisted
+  `ResolvedConnectionMap` snapshot. (#1641)
+- **`./ssrf` re-exports two new `GuardedFetchOptions` and one
+  `SsrfBlockedError` field**, through `@appstrate/afps-shared` 0.10.0:
+  `forwardCredentials(url)` keeps the credential headers, Cookie and body
+  across an origin change it approves (default: stripped);
+  `followRedirects: false` returns the first response even when it is a
+  redirect; `SsrfBlockedError.hop` is the refused hop of the chain (0 = the
+  initial URL). Additive. (#1641)
+
+### Changed
+
+- **`@appstrate/afps-shared` range moves from `^0.9.2` to `^0.10.0`**, which
+  carries the exports below (published first). (#1641)
+
+### Fixed
+
+- **`encodePairingToken` and `decodePairingToken` (`./pairing-token`) accept
+  a loopback `platformUrl` under any `*.localhost` name and `http://[::1]`**
+  (RFC 6761 §6.3). Plain HTTP was let through for `localhost`, `127.0.0.1`
+  and `0.0.0.0` only; the `::1` comparison never matched a bracketed IPv6
+  hostname. A trailing-dot name (`foo.localhost.`) is still refused. (#1648)
+
+### Security
+
+- **BREAKING: `isBlockedHost` (`./ssrf`) blocks more IPv6**, through
+  `@appstrate/afps-shared` 0.10.0. An IPv4 embedded in NAT64 `64:ff9b::/96`
+  (RFC 6052), 6to4 `2002::/16` (RFC 3056) or the SIIT IPv4-translated form
+  `::ffff:0:0:0/96` (RFC 2765) is judged as that IPv4, like an IPv4-mapped
+  one; the local-use NAT64 prefix `64:ff9b:1::/48` (RFC 8215), site-local
+  `fec0::/10`, multicast `ff00::/8`, and an IPv6 literal that does not expand
+  to eight groups are blocked. (#1641)
+
 ## [13.0.0] — 2026-09-30
 
 ### Added

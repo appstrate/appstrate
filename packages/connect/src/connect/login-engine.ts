@@ -11,13 +11,8 @@
  * following. Stateful flows (multi-cookie sessions, TLS impersonation, refresh,
  * redirect chains) belong on the Orchestrated `connect.tool` path, not here.
  *
- * The `connect` block is consumed in AFPS shape (snake_case). Each
- * `outputs[name]` is one of:
- *   - an Arazzo runtime-expression string (`$response.body#/<json-pointer>`,
- *     `$response.header.<name>`, `$statusCode`);
- *   - an AFPS extractor object (`{ from: "cookie"|"jwt"|"regex", ... }`);
- *   - an Arazzo Selector Object
- *     (`{ context, selector, type: "jsonpath"|"xpath"|"jsonpointer" }`).
+ * The `connect` block (AFPS, snake_case) is checked up front by `loginBlockIssues`
+ * (`@appstrate/afps-shared/runtime-expression`), as at import: a refusal is `invalid_config`.
  *
  * KNOWN LIMITATIONS (documented for manifest authors). The xpath ones are
  * import-time warnings (`apps/api/src/services/integration-import-warnings.ts`),
@@ -53,16 +48,19 @@
  * Pure: no DB / Redis / sidecar. `fetchImpl` + `now` are injectable for tests.
  */
 
-import {
-  substituteVars,
-  findUnresolvedPlaceholders,
-  matchesAuthorizedUriSpec,
-} from "../proxy-primitives.ts";
+import { substituteVars, matchesAuthorizedUriSpec } from "../proxy-primitives.ts";
+import { unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {
   evaluateJsonPath as evaluateManifestJsonPath,
   JsonPathSyntaxError,
 } from "@appstrate/afps-shared/jsonpath";
+import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
+import {
+  loginBlockIssues,
+  parseResponseExpression,
+  simpleCriterionOperands,
+} from "@appstrate/afps-shared/runtime-expression";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
@@ -86,7 +84,7 @@ type LoginOutput =
   | string
   | { from: "cookie"; name: string }
   | { from: "jwt"; token: string; path: string }
-  | { from: "regex"; source?: string; pattern: string; group?: number }
+  | { from: "regex"; source: string; pattern: string; group?: number }
   | ArazzoSelectorObject;
 
 /**
@@ -188,6 +186,7 @@ export class LoginError extends Error {
 /**
  * Resolve an Arazzo runtime-expression operand to a comparable value.
  *  - `$statusCode` → numeric status
+ *  - `$response.body` → the body text
  *  - `$response.body#/<json-pointer>` → JSON-pointer read against the parsed body
  *  - `$response.header.<name>` → header value (string)
  *  - literal numbers / quoted strings (`"foo"` / `'foo'`) / `true|false|null`
@@ -204,9 +203,11 @@ function evaluateRuntimeOperand(
   parsedBodySlot: { parsed?: unknown; tried?: boolean },
 ): unknown {
   const expr = raw.trim();
-  if (expr === "$statusCode") return status;
-  if (expr.startsWith("$response.body#")) {
-    const pointer = expr.slice("$response.body#".length);
+  if (expr.startsWith("$")) {
+    const parsed = parseResponseExpression(expr)!;
+    if (parsed.kind === "status") return status;
+    if (parsed.kind === "header") return headers.get(parsed.name) ?? undefined;
+    if (parsed.pointer === undefined) return bodyText();
     if (!parsedBodySlot.tried) {
       parsedBodySlot.tried = true;
       try {
@@ -215,11 +216,7 @@ function evaluateRuntimeOperand(
         parsedBodySlot.parsed = undefined;
       }
     }
-    return readJsonPointer(parsedBodySlot.parsed, pointer);
-  }
-  if (expr.startsWith("$response.header.")) {
-    const headerName = expr.slice("$response.header.".length);
-    return headers.get(headerName) ?? undefined;
+    return readJsonPointer(parsedBodySlot.parsed, parsed.pointer);
   }
   // Literals.
   if (/^-?\d+(\.\d+)?$/.test(expr)) return Number(expr);
@@ -273,29 +270,15 @@ function evaluateCriterion(
     // Equality only — Arazzo's simple criterion grammar includes more
     // operators but the AFPS profile (§7.7) treats `simple` as the legacy
     // shape; equality covers `$statusCode == 200` and richer body checks.
-    const eqIdx = condition.indexOf("==");
-    if (eqIdx === -1) return false;
-    const lhs = evaluateRuntimeOperand(
-      condition.slice(0, eqIdx),
-      status,
-      headers,
-      bodyText,
-      parsedBodySlot,
-    );
-    const rhs = evaluateRuntimeOperand(
-      condition.slice(eqIdx + 2),
-      status,
-      headers,
-      bodyText,
-      parsedBodySlot,
+    const operands = simpleCriterionOperands(condition);
+    if (!operands) return false;
+    const [lhs, rhs] = operands.map((operand) =>
+      evaluateRuntimeOperand(operand, status, headers, bodyText, parsedBodySlot),
     );
     return arazzoEquals(lhs, rhs);
   }
 
   if (type === "jsonpath") {
-    // Default context: $response.body (Arazzo §10.5.3.4).
-    const ctxExpr = criterion.context ?? "$response.body";
-    if (ctxExpr !== "$response.body") return false;
     if (!parsedBodySlot.tried) {
       parsedBodySlot.tried = true;
       try {
@@ -318,15 +301,7 @@ function evaluateCriterion(
   }
 
   if (type === "regex") {
-    const ctxExpr = criterion.context ?? "$response.body";
-    let target: string;
-    if (ctxExpr === "$response.body") {
-      target = bodyText();
-    } else if (ctxExpr.startsWith("$response.header.")) {
-      target = headers.get(ctxExpr.slice("$response.header.".length)) ?? "";
-    } else {
-      return false;
-    }
+    const target = regexSubject(criterion.context ?? "$response.body", bodyText, headers);
     let re: RegExp;
     try {
       re = new RegExp(condition);
@@ -450,18 +425,10 @@ async function readBoundedText(res: Response, maxBytes: number): Promise<string>
   return new TextDecoder().decode(merged);
 }
 
-/** A `{$credential.<field>}` template referencing exactly one output field. */
-const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
-
-/**
- * Resolve a jwt extractor's `token` reference. AFPS expresses it as a
- * `{$credential.<field>}` template (a reference to another extracted output);
- * a bare field name is also accepted for resilience.
- */
-function resolveTokenRef(token: string, scope: Record<string, string>): string | undefined {
-  const m = SINGLE_CREDENTIAL_REF.exec(token);
-  const field = m ? m[1]! : token;
-  return scope[field];
+/** The text a regex criterion or extractor runs on: the whole body or one header. */
+function regexSubject(expr: string, bodyText: () => string, headers: Headers): string {
+  const parsed = parseResponseExpression(expr)!;
+  return parsed.kind === "header" ? (headers.get(parsed.name) ?? "") : bodyText();
 }
 
 /** Type guard for the Arazzo Selector Object form. */
@@ -479,32 +446,17 @@ function isSelectorObject(out: LoginOutput): out is ArazzoSelectorObject {
 function outputNeedsBody(out: LoginOutput): boolean {
   if (typeof out === "string") return out.startsWith("$response.body");
   if (isSelectorObject(out)) return out.context.startsWith("$response.body");
-  return out.from === "regex"; // jwt resolves from another (already-extracted) value
+  // jwt resolves from another (already-extracted) value
+  return out.from === "regex" && out.source === "$response.body";
 }
 
-/**
- * Resolve an Arazzo runtime-expression `context` against the response.
- * Today we only resolve `$response.body` (consumers MAY extend to
- * `$response.headers.<name>`, etc.).
- */
-function resolveSelectorContext(context: string, bodyText: string, name: string): unknown {
-  if (context === "$response.body") {
-    try {
-      return JSON.parse(bodyText);
-    } catch (err) {
-      // "json parse failed" is the same sentence whether the provider returned
-      // an HTML login wall, an empty body or truncated JSON. The SyntaxError
-      // is what distinguishes them, and a connect debug session has nothing
-      // else to go on — the body itself is not logged.
-      throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
-    }
+/** The response body as JSON; the only document a selector or body pointer reads. */
+function parseBodyJson(bodyText: string, name: string): unknown {
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
   }
-  // Bare runtime expressions other than $response.body are intentionally
-  // unsupported in this engine — fail closed.
-  throw new LoginError(
-    `'${name}' selector context '${context}' is not yet supported (only $response.body)`,
-    "invalid_config",
-  );
 }
 
 /** The shared manifest JSONPath subset; an unsupported form is the author's `invalid_config`. */
@@ -534,26 +486,12 @@ function applyOutput(
   name: string,
 ): string | undefined {
   if (typeof out === "string") {
-    // Arazzo runtime expressions.
-    if (out === "$statusCode") return String(status);
-    if (out.startsWith("$response.body#")) {
-      const pointer = out.slice("$response.body#".length);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(bodyText);
-      } catch (err) {
-        // Same reasoning as `resolveSelectorContext` above.
-        throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
-      }
-      const v = readJsonPointer(parsed, pointer);
-      return v === undefined ? undefined : stringifyValue(v);
-    }
-    if (out.startsWith("$response.header.")) {
-      const headerName = out.slice("$response.header.".length);
-      return headers.get(headerName) ?? undefined;
-    }
-    // Unrecognised runtime expression → fail closed.
-    throw new LoginError(`'${name}' unsupported output expression`, "invalid_config");
+    const expr = parseResponseExpression(out)!;
+    if (expr.kind === "status") return String(status);
+    if (expr.kind === "header") return headers.get(expr.name) ?? undefined;
+    if (expr.pointer === undefined) return bodyText;
+    const v = readJsonPointer(parseBodyJson(bodyText, name), expr.pointer);
+    return v === undefined ? undefined : stringifyValue(v);
   }
 
   // Arazzo Selector Object form (`{ context, selector, type }`).
@@ -567,7 +505,7 @@ function applyOutput(
         "invalid_config",
       );
     }
-    const doc = resolveSelectorContext(out.context, bodyText, name);
+    const doc = parseBodyJson(bodyText, name);
     if (out.type === "jsonpointer") {
       const v = readJsonPointer(doc, out.selector);
       return v === undefined ? undefined : stringifyValue(v);
@@ -583,7 +521,7 @@ function applyOutput(
     case "cookie":
       return parseSetCookie(headers, out.name);
     case "jwt": {
-      const token = resolveTokenRef(out.token, scope);
+      const token = scope[parseCredentialRef(out.token)!];
       if (!token) {
         throw new LoginError(`'${name}' jwt token '${out.token}' not in scope`, "extract_failed");
       }
@@ -608,7 +546,7 @@ function applyOutput(
           "invalid_config",
         );
       }
-      const m = re.exec(bodyText);
+      const m = re.exec(regexSubject(out.source, () => bodyText, headers));
       if (!m) return undefined;
       return m[out.group ?? 1] ?? undefined;
     }
@@ -637,6 +575,13 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   if (!login) {
     throw new LoginError("connect.login declared no login request", "invalid_config");
   }
+  const [issue] = loginBlockIssues(login);
+  if (issue) {
+    throw new LoginError(
+      `connect.login.${issue.path.join(".")}: ${issue.message}`,
+      "invalid_config",
+    );
+  }
 
   const vars = { ...ctx.inputs };
   const url = substituteVars(login.request.url, vars);
@@ -649,13 +594,13 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     headers["Content-Type"] = login.request.content_type;
   }
 
-  // Fail closed on any unresolved `{{...}}` (a typo'd placeholder must never
+  // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never
   // be sent literally upstream).
   const unresolved = [
-    ...findUnresolvedPlaceholders(url),
-    ...(body ? findUnresolvedPlaceholders(body) : []),
-    ...Object.values(headers).flatMap(findUnresolvedPlaceholders),
-  ];
+    login.request.url,
+    login.request.body ?? "",
+    ...Object.values(login.request.headers ?? {}),
+  ].flatMap((template) => unresolvedPlaceholders(template, vars));
   if (unresolved.length > 0) {
     throw new LoginError(
       `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,

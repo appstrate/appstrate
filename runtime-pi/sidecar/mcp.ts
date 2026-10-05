@@ -85,7 +85,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
@@ -199,13 +199,12 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
  * the MCP layer deliberately does not expose),
  * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
  * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Integration` and `X-Target`
+ * the response truncation budget. The `X-Integration-Id` and `X-Target`
  * routing headers are also stripped so the LLM can't redirect the
  * request post-validation. Header names are matched case-insensitively
  * (HTTP header semantics).
  */
 const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-integration",
   "x-integration-id",
   "x-target",
   "x-substitute-body",
@@ -620,7 +619,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  */
 function upstreamFetchErrorText(tool: string, err: unknown): string {
   if (err instanceof Error && err.name === "TimeoutError") {
-    return `${tool}: upstream fetch timed out after ${OUTBOUND_TIMEOUT_MS}ms`;
+    return `${tool}: upstream fetch timed out after ${API_CALL_TIMEOUT_MS}ms`;
   }
   if (err instanceof Error && err.name === "AbortError") {
     return `${tool}: upstream fetch aborted`;
@@ -649,7 +648,8 @@ function buildSidecarTools(options: MountMcpOptions): {
   makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
-  const { config, fetchFn } = proxyDeps;
+  const { config } = proxyDeps;
+  const fetchFn = proxyDeps.fetchFn ?? fetch;
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
   // integration identifier (just target + method + headers + body).
@@ -674,7 +674,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         type: "object",
         description:
           "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-          "headers (X-Integration, X-Target, X-Substitute-Body, …) are filtered " +
+          "headers (X-Integration-Id, X-Target, X-Substitute-Body, …) are filtered " +
           "server-side.",
         additionalProperties: { type: "string" },
       },
@@ -858,6 +858,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         declaredUris: integ.declaredUris,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
+        reportUpstreamSuccess: integ.reportUpstreamSuccess,
       },
       integrationId: integ.integrationId,
       connectionId: integ.connectionId,
@@ -1150,7 +1151,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    *
    * Cancellation and deadline are composed: `callerSignal` is the MCP
    * request's own abort (client gone, transport closed) and must keep working,
-   * `OUTBOUND_TIMEOUT_MS` is the same bound every other outbound call in the
+   * `API_CALL_TIMEOUT_MS` is the same bound every other outbound call in the
    * sidecar already carries. `/mcp` has no server-side deadline of its own, so
    * without it a platform that accepts the connection and never answers hangs
    * this tool call — and with it the agent — for the rest of the run.
@@ -1180,7 +1181,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     try {
       const res = await fetchFn(url, {
         headers: { Authorization: `Bearer ${config.runToken}` },
-        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
+        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(API_CALL_TIMEOUT_MS)]),
       });
       return await responseToToolResult(res, {
         source: tool,
@@ -1707,6 +1708,8 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /** See {@link ApiCallDeps.reportUpstreamSuccess}. */
+  reportUpstreamSuccess?: ApiCallDeps["reportUpstreamSuccess"];
   /**
    * Resumable-upload protocols this integration auth declared under
    * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. When non-empty the sidecar

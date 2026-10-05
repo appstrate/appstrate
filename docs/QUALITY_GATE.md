@@ -15,11 +15,11 @@ Public exports of the **published** packages are out of scope by design — thei
 tree — and exactly two scoped packages here are published on an ongoing basis: `@appstrate/core` and
 `@appstrate/afps-shared`, the only two SCOPED packages with a publish
 workflow (`.github/workflows/publish-core.yml`, `publish-afps-shared.yml`) — `apps/cli` publishes
-too, but unscoped as `appstrate`, through `publish-cli.yml`. `@appstrate/afps-runtime` carries
-`publishConfig` but is **not** published (no workflow, no tag, a `0.0.0` npm placeholder) and stays
-private by decision; `@appstrate/runner-pi` and the `@appstrate/module-*` packages are absent from
-npm entirely — `@appstrate/module-ee` is additionally `"private": true` and source-available, never
-published anywhere; `@appstrate/ui` is the inverse case — `"private": true` here, yet `ui@1.0.0` and
+too, but unscoped as `appstrate`, through `publish-cli.yml`. `@appstrate/afps-runtime` is
+`"private": true` and **not** published (no workflow, no tag, a `0.0.0` npm placeholder);
+`@appstrate/runner-pi` (`"private": true` too) and the `@appstrate/module-*` packages are absent from
+npm entirely — `@appstrate/module-chat` and `@appstrate/module-ee` are `"private": true`, the
+latter also source-available, never published anywhere; `@appstrate/ui` is the inverse case — `"private": true` here, yet `ui@1.0.0` and
 `ui@1.0.1` tags exist and 1.0.1 sits on npm, both left over from before that flag. There is no
 `publish-ui.yml`, nothing republishes it, and it is treated as private. So a release tag alone
 proves nothing — the live signal is the workflow, and the ground truth is `npm view <pkg> versions`,

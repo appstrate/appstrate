@@ -56,7 +56,7 @@ describe("credential rejection signal", () => {
       calls.push({ url, init });
       return new Response(null, { status: 502 });
     }) as unknown as typeof fetch;
-    await postIntegrationCredentialsRefresh("@appstrate/ssh", "conn-web", {
+    await postIntegrationCredentialsRefresh("@appstrate/ssh", "conn-web", undefined, {
       platformApiUrl: "http://platform",
       runToken: "rt",
       fetchFn,

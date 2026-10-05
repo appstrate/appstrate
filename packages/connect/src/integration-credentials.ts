@@ -45,6 +45,8 @@ export interface ResolvedAuthCredentials {
 export interface IntegrationCredentialsPayload {
   /** One entry per declared auth that has been connected. */
   auths: ResolvedAuthCredentials[];
+  /** {@link IntegrationCredentialsWire.credentialRevision} of the credential these auths carry. */
+  credentialRevision?: string;
 }
 
 /**
@@ -74,6 +76,16 @@ export interface IntegrationCredentialsWire {
   auths: ReadonlyArray<ResolvedAuthCredentials>;
   deliveryPlans: Readonly<Record<string, HttpDeliveryPlan>>;
   expiresAtEpochMs: Readonly<Record<string, number | null>>;
+  /**
+   * Consecutive upstream rejections counted against this non-OAuth2 connection; absent when none.
+   * The sidecar reports the next successful call, which ends the streak.
+   */
+  rejectionStreak?: number;
+  /**
+   * Opaque revision of the stored credential this payload carries; absent on a connect run's empty
+   * payload. Sent back on refresh and success reports so they act on this credential only.
+   */
+  credentialRevision?: string;
 }
 
 /**

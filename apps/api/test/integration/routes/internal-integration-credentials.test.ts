@@ -25,6 +25,7 @@
  * `?connection_id=` and the snapshot is the third authorization layer.
  */
 
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -111,11 +112,13 @@ async function bindConnectionsToRun(
   runIdToBind: string,
   bindings: Record<string, string[]>,
 ): Promise<void> {
-  const resolved: Record<string, { connectionId: string; source: "member_pin" }[]> = {};
+  const resolved: ResolvedConnectionMap = {};
   for (const [integrationId, ids] of Object.entries(bindings)) {
     resolved[integrationId] = ids.map((connectionId) => ({
       connectionId,
       source: "member_pin" as const,
+      label: connectionId,
+      accountId: connectionId,
     }));
   }
   await db.update(runs).set({ resolvedConnections: resolved }).where(eq(runs.id, runIdToBind));
@@ -469,7 +472,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
-      resolvedConnections: { [INTEGRATION]: [{ connectionId, source: "member_pin" }] },
+      resolvedConnections: {
+        [INTEGRATION]: [{ connectionId, source: "member_pin", label: "conn", accountId: "acct" }],
+      },
     });
 
     const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
@@ -542,7 +547,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     }
   }
 
-  async function seedConnection(integrationId: string): Promise<string> {
+  async function seedConnection(
+    integrationId: string,
+    owner: { userId: string; sharedWithOrg: boolean } = {
+      userId: ctx.user.id,
+      sharedWithOrg: false,
+    },
+  ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     const [row] = await db
       .insert(integrationConnections)
@@ -552,14 +563,53 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         accountId: "acct-test",
         label: "acct-test",
         spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
+        ...owner,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
   }
+
+  /** The `credential_revision` the GET hands the sidecar for this connection. */
+  async function heldRevision(connectionId: string, runToken = token): Promise<string> {
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
+      headers: { Authorization: `Bearer ${runToken}` },
+    });
+    const body = (await res.json()) as { credential_revision?: string };
+    return body.credential_revision!;
+  }
+
+  const reportSuccess = (connectionId: string, revision: string, runToken = token) =>
+    app.request(
+      `/internal/integration-credentials/${INTEGRATION}/upstream-success` +
+        `?connection_id=${connectionId}&credential_revision=${revision}`,
+      { method: "POST", headers: { Authorization: `Bearer ${runToken}` } },
+    );
+
+  async function streakOf(connectionId: string): Promise<number> {
+    const [row] = await db
+      .select({ count: integrationConnections.refreshFailureCount })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    return row!.count;
+  }
+
+  const setStreak = (connectionId: string, refreshFailureCount: number) =>
+    db
+      .update(integrationConnections)
+      .set({ refreshFailureCount })
+      .where(eq(integrationConnections.id, connectionId));
+
+  /** What a reconnect leaves behind: another ciphertext under the same connection. */
+  const replaceCredential = (connectionId: string) =>
+    db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "replaced" } }),
+      })
+      .where(eq(integrationConnections.id, connectionId));
 
   beforeEach(async () => {
     await truncateAll();
@@ -681,6 +731,158 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       .where(eq(integrationConnections.id, connectionId));
     // A refused request must not have touched the credential it never read.
     expect(row!.needsReconnection).toBe(false);
+  });
+
+  it("upstream-success ends the streak the refreshes counted, which the GET announced", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const auth = { Authorization: `Bearer ${token}` };
+    const streak = async () =>
+      (
+        (await (
+          await app.request(credentialsUrl(INTEGRATION, connectionId), { headers: auth })
+        ).json()) as {
+          rejection_streak?: number;
+        }
+      ).rejection_streak;
+
+    for (let i = 0; i < 2; i++) {
+      await app.request(credentialsUrl(INTEGRATION, connectionId, true), {
+        method: "POST",
+        headers: auth,
+      });
+    }
+    expect(await streak()).toBe(2);
+
+    const res = await reportSuccess(connectionId, await heldRevision(connectionId));
+    expect(res.status).toBe(204);
+    expect(await streak()).toBeUndefined();
+  });
+
+  it("upstream-success on a credential the connection no longer holds resets nothing", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const held = await heldRevision(connectionId);
+    await replaceCredential(connectionId);
+    await setStreak(connectionId, 2);
+
+    expect((await reportSuccess(connectionId, held)).status).toBe(204);
+    expect(await streakOf(connectionId)).toBe(2);
+  });
+
+  it("DENY: upstream-success without `credential_revision` is a 400", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("DENY: a malformed or empty `credential_revision` is a 400 on both routes, counting nothing", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    for (const revision of ["", "not-a-revision", "ABCDEF0123456789"]) {
+      const refresh = await app.request(
+        `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${revision}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(refresh.status).toBe(400);
+      expect((await reportSuccess(connectionId, revision)).status).toBe(400);
+    }
+    expect(await streakOf(connectionId)).toBe(0);
+  });
+
+  it("upstream-success resets nothing once the run's actor can no longer reach the connection", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const colleague = await memberContext(ctx, "member");
+    const connectionId = await seedConnection(INTEGRATION, {
+      userId: colleague.user.id,
+      sharedWithOrg: true,
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const held = await heldRevision(connectionId);
+    await db
+      .update(integrationConnections)
+      .set({ sharedWithOrg: false, refreshFailureCount: 2 })
+      .where(eq(integrationConnections.id, connectionId));
+
+    expect((await reportSuccess(connectionId, held)).status).toBe(204);
+    expect(await streakOf(connectionId)).toBe(2);
+  });
+
+  it("upstream-success from a run with no actor resets nothing", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const held = await heldRevision(connectionId);
+    const actorless = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      status: "running",
+    });
+    await bindConnectionsToRun(actorless.id, { [INTEGRATION]: [connectionId] });
+    await setStreak(connectionId, 2);
+
+    const res = await reportSuccess(connectionId, held, signRunToken(actorless.id));
+    expect(res.status).toBe(204);
+    expect(await streakOf(connectionId)).toBe(2);
+  });
+
+  it("a 401 on a credential the connection no longer holds is not counted: 200 with the current one", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const held = await heldRevision(connectionId);
+    await replaceCredential(connectionId);
+
+    const res = await app.request(
+      `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${held}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      auths: Array<{ fields: Record<string, string> }>;
+      credential_revision?: string;
+    };
+    expect(body.auths[0]!.fields.api_key).toBe("replaced");
+    expect(body.credential_revision).not.toBe(held);
+    expect(await streakOf(connectionId)).toBe(0);
+
+    const counted = await app.request(
+      `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${body.credential_revision}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(counted.status).toBe(502);
+    expect(await streakOf(connectionId)).toBe(1);
+  });
+
+  it("DENY: upstream-success for a connection the run did not bind is a 400", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await db
+      .update(integrationConnections)
+      .set({ refreshFailureCount: 2 })
+      .where(eq(integrationConnections.id, connectionId));
+
+    const res = await app.request(
+      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(400);
+    const [row] = await db
+      .select({ count: integrationConnections.refreshFailureCount })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.count).toBe(2);
   });
 });
 

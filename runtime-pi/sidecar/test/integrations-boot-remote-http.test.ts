@@ -90,11 +90,15 @@ function makeDeps(
 ) {
   let captured: typeof fetch | undefined;
   let refreshCalls = 0;
+  let successReports = 0;
   const source = {
     snapshot: () => initial,
     refreshOnUnauthorized: async (_authKey: string) => {
       refreshCalls += 1;
       return refresh();
+    },
+    reportUpstreamSuccess: () => {
+      successReports += 1;
     },
   } as unknown as IntegrationCredentialsSource;
   const deps: ConnectRemoteHttpDeps = {
@@ -104,7 +108,13 @@ function makeDeps(
     }) as unknown as ConnectRemoteHttpDeps["createClient"],
     resolveHost,
   };
-  return { deps, source, getFetch: () => captured!, getRefreshCalls: () => refreshCalls };
+  return {
+    deps,
+    source,
+    getFetch: () => captured!,
+    getRefreshCalls: () => refreshCalls,
+    getSuccessReports: () => successReports,
+  };
 }
 
 async function withGlobalFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
@@ -147,6 +157,88 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     // Cast: TS narrows a `let` assigned only inside a closure back to its
     // initializer type (`null`); the global fetch stub mutates it at runtime.
     expect(seen as string | null).toBe("Bearer TOKEN");
+  });
+
+  it("reports a 2xx on the injected credential, never one on a caller override", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: {
+        headerName: "X-Api-Key",
+        headerPrefix: "",
+        value: "K",
+        allowServerOverride: true,
+      },
+    });
+    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      async () => {
+        await getFetch()(SERVER_URL, { method: "POST" });
+        await getFetch()(SERVER_URL, { method: "POST", headers: { "x-api-key": "CALLER" } });
+      },
+    );
+    expect(getSuccessReports()).toBe(1);
+  });
+
+  it("reports a 2xx only from the origin the credential was sent to, not past a cross-origin redirect", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
+    });
+    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    const redirectingTo = (location: string) =>
+      (async (input: string) =>
+        new URL(input).pathname === "/mcp/v1"
+          ? new Response(null, { status: 307, headers: { location } })
+          : new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+    await withGlobalFetch(redirectingTo("https://elsewhere.example.org/landing"), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getSuccessReports()).toBe(0);
+
+    await withGlobalFetch(redirectingTo("/mcp/v2"), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getSuccessReports()).toBe(1);
+  });
+
+  it("judges nothing once a hop stripped the credential, even back on its origin", async () => {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
+    });
+    const { deps, source, getFetch, getRefreshCalls, getSuccessReports } = makeDeps(
+      initial,
+      async () => true,
+    );
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    // A → B (strip) → A/terminal.
+    const roundTrip = (terminalStatus: number) =>
+      (async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === "/mcp/v1") {
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://elsewhere.example.org/bounce" },
+          });
+        }
+        if (url.pathname === "/bounce") {
+          return new Response(null, { status: 307, headers: { location: `${SERVER_URL}/back` } });
+        }
+        return new Response("{}", { status: terminalStatus });
+      }) as unknown as typeof fetch;
+
+    await withGlobalFetch(roundTrip(401), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+    });
+    await withGlobalFetch(roundTrip(200), async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+    });
+    expect(getRefreshCalls()).toBe(0);
+    expect(getSuccessReports()).toBe(0);
   });
 
   it("preserves an allowed caller override and does not refresh it on 401", async () => {

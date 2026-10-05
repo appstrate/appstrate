@@ -185,6 +185,17 @@ const REASONS = {
  * it cannot lift one major without dragging a consumer of another.
  */
 const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
+  // ── braces — no patched release exists (latest is 3.0.3) ──
+  {
+    id: 1240992,
+    packageName: "braces",
+    reason:
+      "Dev tree only — micromatch ← fast-glob ← type-coverage-core ← type-coverage, the " +
+      "`verify:type-coverage` gate. The patterns it expands are that script's own arguments " +
+      "and apps/web's tsconfig `include`, never untrusted input; stack-exhaustion DoS only.",
+    expires: "2026-12-31",
+  },
+
   // ── browserslist ──
   {
     id: 1153171,

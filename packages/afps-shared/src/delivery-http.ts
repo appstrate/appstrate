@@ -16,11 +16,9 @@
  *
  * The value is a TEMPLATE referencing credential fields via the
  * `{$credential.<field>}` syntax. This module is a pure shape projection: it
- * maps the AFPS snake_case block onto the resolver `HttpDeliveryConfig` shape
- * (lowering `{$credential.<field>}` references to the resolver's
- * `valueFrom` field name / `{{field}}` template syntax). The per-auth-type
- * default table, the `basic → base64(user:pass)` fallback, and the base64
- * encoding branch all live in the resolver engine
+ * maps the AFPS snake_case block onto the resolver `HttpDeliveryConfig` shape,
+ * carrying the template verbatim (`./credential-template` renders it). The per-auth-type
+ * default table is below; the rendering and the base64 encoding live in the resolver engine
  * (`@appstrate/afps-runtime/resolvers:resolveHttpDelivery`) — they are NOT
  * re-implemented here.
  */
@@ -33,7 +31,8 @@
 export interface HttpDeliveryConfig {
   headerName?: string;
   headerPrefix?: string;
-  valueFrom?: string | { template: string; encoding?: "base64" };
+  /** A `{$credential.<field>}` template, base64-encoded after rendering when asked. */
+  valueFrom?: { template: string; encoding?: "base64" };
   allowServerOverride?: boolean;
 }
 
@@ -57,19 +56,10 @@ export interface AfpsHttpDelivery {
   allow_server_override?: boolean;
 }
 
-/** A single `{$credential.<field>}` reference spanning the whole string. */
-const SINGLE_CREDENTIAL_REF = /^\{\$credential\.([A-Za-z0-9_]+)\}$/;
-
 /**
  * Project an AFPS `delivery.http` block (snake_case) onto the resolver's
- * {@link HttpDeliveryConfig}. A single `{$credential.<field>}` value (with no
- * encoding) lowers to the bare `valueFrom` field name; anything richer is
- * rewritten to the resolver's `{{field}}` template syntax. Both forms resolve
- * the SAME credential bag with the same "missing field → empty" policy through
- * `resolveHttpDelivery`, so the projection is semantics-preserving.
- *
- * Returns `undefined` when no `delivery.http` block is declared, so the
- * resolver applies its own per-auth-type defaults.
+ * {@link HttpDeliveryConfig}. Returns `undefined` when no `delivery.http` block
+ * is declared, so the resolver applies its own per-auth-type defaults.
  */
 export function projectHttpDeliveryConfig(
   http: AfpsHttpDelivery | undefined,
@@ -81,20 +71,49 @@ export function projectHttpDeliveryConfig(
   if (typeof http.allow_server_override === "boolean") {
     cfg.allowServerOverride = http.allow_server_override;
   }
-  const value = typeof http.value === "string" ? http.value : undefined;
-  if (value !== undefined) {
-    const single = value.match(SINGLE_CREDENTIAL_REF);
-    if (single && http.encoding === undefined) {
-      cfg.valueFrom = single[1]!;
-    } else {
-      const template = value.replace(
-        /\{\$credential\.([A-Za-z0-9_]+)\}/g,
-        (_m, field: string) => `{{${field}}}`,
-      );
-      cfg.valueFrom = http.encoding === "base64" ? { template, encoding: "base64" } : { template };
-    }
+  if (typeof http.value === "string") {
+    cfg.valueFrom =
+      http.encoding === "base64"
+        ? { template: http.value, encoding: "base64" }
+        : { template: http.value };
   }
   return cfg;
+}
+
+/** Auth-type defaults for `delivery.http` (AFPS §4.1.4), in manifest form. */
+export const AUTH_TYPE_HTTP_DEFAULTS: Readonly<
+  Record<
+    string,
+    Required<Pick<HttpDeliveryConfig, "headerName" | "headerPrefix">> & HttpDeliveryConfig
+  >
+> = {
+  oauth2: {
+    headerName: "Authorization",
+    headerPrefix: "Bearer ",
+    valueFrom: { template: "{$credential.access_token}" },
+  },
+  api_key: {
+    headerName: "X-Api-Key",
+    headerPrefix: "",
+    valueFrom: { template: "{$credential.api_key}" },
+  },
+  basic: {
+    headerName: "Authorization",
+    headerPrefix: "Basic ",
+    valueFrom: { template: "{$credential.username}:{$credential.password}", encoding: "base64" },
+  },
+};
+
+/**
+ * Whether an auth's HTTP delivery names a header the proxy fills with a credential
+ * itself: an explicit `delivery.http.name`, else its type's default.
+ */
+export function injectsHttpCredential(
+  authType: string,
+  http: AfpsHttpDelivery | undefined,
+): boolean {
+  const name = projectHttpDeliveryConfig(http)?.headerName;
+  return (name ?? AUTH_TYPE_HTTP_DEFAULTS[authType]?.headerName ?? "").length > 0;
 }
 
 /**
@@ -127,4 +146,28 @@ const BARE_AUTH_SCHEME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
  */
 export function isBareAuthSchemePrefix(headerName: string, prefix: string): boolean {
   return AUTH_SCHEME_HEADERS.has(headerName.toLowerCase()) && BARE_AUTH_SCHEME.test(prefix);
+}
+
+/** RFC 9110 §5.5 `field-value`: HTAB, SP, VCHAR and obs-text (0x80-0xFF), nothing else. */
+const HTTP_FIELD_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
+/** Whether `value` can be sent as an HTTP header value (no CR, LF, NUL, other control, > U+00FF). */
+export function isHttpFieldValue(value: string): boolean {
+  return HTTP_FIELD_VALUE.test(value);
+}
+
+/**
+ * A header value that is not an HTTP field value. Names the header, never the value: the
+ * runtime's own `Headers` TypeError quotes the value in full, and a header value is often a secret.
+ */
+export class InvalidHeaderValueError extends Error {
+  constructor(readonly header: string) {
+    super(`Header "${header}" is not a valid HTTP field value`);
+    this.name = "InvalidHeaderValueError";
+  }
+}
+
+/** Throws {@link InvalidHeaderValueError} unless `value` is an HTTP field value. */
+export function assertHttpFieldValue(header: string, value: string): void {
+  if (!isHttpFieldValue(value)) throw new InvalidHeaderValueError(header);
 }

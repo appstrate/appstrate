@@ -34,7 +34,7 @@ const PATH_PARAM_RE = /\{[^{}]+\}/g;
  * (Hono `:packageId{@[^/]+/[^/]+}` routes; `%2F` never matches). Each `@scope`
  * and `name` segment is encoded individually with the `@` kept literal.
  */
-const SCOPED_PACKAGE_ID_PARAMS = new Set(["packageId", "agentPackageId"]);
+const SCOPED_PACKAGE_ID_PARAMS = new Set(["packageId", "agentPackageId", "integrationPackageId"]);
 
 /**
  * Path params that carry a bare scope segment (`@scope`) — the leading `@`

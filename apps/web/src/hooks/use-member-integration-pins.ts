@@ -22,6 +22,9 @@ import { useMutation } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { onMutationError } from "../lib/mutation-error";
 
+const MEMBER_PIN_PATH =
+  "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}";
+
 interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
@@ -31,12 +34,14 @@ interface UpsertMemberPinInput {
 export function useUpsertMemberIntegrationPin() {
   return useMutation({
     mutationFn: async (input: UpsertMemberPinInput) => {
-      const { data } = await client.PUT("/api/me/integration-pins", {
-        body: {
-          agent_package_id: input.agentPackageId,
-          integration_package_id: input.integrationId,
-          connection_ids: input.connectionIds,
+      const { data } = await client.PUT(MEMBER_PIN_PATH, {
+        params: {
+          path: {
+            agentPackageId: input.agentPackageId,
+            integrationPackageId: input.integrationId,
+          },
         },
+        body: { connection_ids: input.connectionIds },
       });
       return data;
     },
@@ -52,11 +57,11 @@ interface DeleteMemberPinInput {
 export function useDeleteMemberIntegrationPin() {
   return useMutation({
     mutationFn: async (input: DeleteMemberPinInput) => {
-      await client.DELETE("/api/me/integration-pins", {
+      await client.DELETE(MEMBER_PIN_PATH, {
         params: {
-          query: {
-            agent_package_id: input.agentPackageId,
-            integration_package_id: input.integrationId,
+          path: {
+            agentPackageId: input.agentPackageId,
+            integrationPackageId: input.integrationId,
           },
         },
       });

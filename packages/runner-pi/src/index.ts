@@ -54,7 +54,12 @@ export {
 // chat turn onto `runPiChat`, and no consumer has imported them from this
 // barrel since. They remain in `pi-sdk.ts` for in-package use — re-add a line
 // here only when something outside the package actually imports it.
-export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
+export {
+  InMemoryCredentialStore,
+  Type,
+  loadPiCodingAgentSdk,
+  type PiCodingAgentSdk,
+} from "./pi-sdk.ts";
 export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
 export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } from "./pi-sdk.ts";
 

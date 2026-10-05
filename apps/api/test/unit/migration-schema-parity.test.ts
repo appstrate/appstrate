@@ -71,14 +71,11 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { is } from "drizzle-orm";
 import { getTableConfig, isPgEnum, PgTable } from "drizzle-orm/pg-core";
 import * as schema from "@appstrate/db/schema";
-import { applyCorePGliteMigrations } from "../../src/lib/pglite-migrate.ts";
-
-const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
+import { journalPGlite } from "../helpers/journal.ts";
 
 /** Postgres' NAMEDATALEN - 1. An identifier past this is truncated at creation. */
 const MAX_IDENTIFIER_BYTES = 63;
@@ -88,7 +85,7 @@ const MAX_IDENTIFIER_BYTES = 63;
  * its subject from the migrations alone, so it cannot borrow a database whose
  * shape someone else already decided.
  */
-const pg = new PGlite();
+let pg: PGlite;
 
 interface DeclaredTable {
   name: string;
@@ -204,7 +201,7 @@ function missing(a: Iterable<string>, b: ReadonlySet<string> | Map<string, unkno
 }
 
 beforeAll(async () => {
-  await applyCorePGliteMigrations(MIGRATIONS_DIR, pg);
+  pg = await journalPGlite({ ledger: true });
   for (const [name, table] of declaredTables()) declared.set(name, table);
 });
 

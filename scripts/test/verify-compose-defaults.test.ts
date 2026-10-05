@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// @run-tests exclusive — deletes the tracked `docker-compose.yml` and restores
+// it, so `scripts/run-tests.ts` keeps it away from processes that read it.
+
 /**
  * The compose-drift gate's THIRD class of finding: a variable the schema gives
  * a default to that `CODE_DEFAULTS` does not name.

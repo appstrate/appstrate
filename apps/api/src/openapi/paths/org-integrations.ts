@@ -39,7 +39,7 @@ export const orgIntegrationsPaths = {
       summary: "List the org-level OAuth clients of an integration auth",
       description:
         "Returns the org's own clients (`org`, oldest first) plus the default it " +
-        "inherits, the platform-provided system client (`built-in`), if any. " +
+        "inherits, the platform-provided system client (`system`), if any. " +
         "`is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths " +
         "whose client is not auto-provisioned (DCR/CIMD) have an org tier; " +
         `any other auth is a 400. ${PERMISSION_NOTE}`,
@@ -105,16 +105,17 @@ export const orgIntegrationsPaths = {
     },
   },
   "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
-    put: {
-      operationId: "rotateOrgIntegrationOAuthClient",
+    patch: {
+      operationId: "updateOrgIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Rotate an org-level OAuth client's credentials",
-      description: `Rotates one org-level client in place, by its id (a space client id is a 404 here). ${PERMISSION_NOTE}`,
+      summary:
+        "Update an org-level OAuth client (rotate its secret, change its redirect URI or method)",
+      description: `Updates one org-level client in place, by its id (a space client id is a 404 here). Its \`client_id\` cannot change. ${PERMISSION_NOTE}`,
       parameters: [...packageParams, clientIdParam],
       requestBody: jsonBody(oauthClientUpdateBodySchema),
       responses: {
         "200": {
-          description: "Rotated",
+          description: "Updated",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },

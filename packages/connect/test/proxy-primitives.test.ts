@@ -10,16 +10,15 @@
 import { describe, it, expect } from "bun:test";
 import {
   substituteVars,
-  findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
-  HOP_BY_HOP_HEADERS,
-  filterHeaders,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
+  credentialCarryingHeader,
   normalizeAuthSchemeTemplate,
   normalizeAuthSchemeTemplates,
 } from "../src/proxy-primitives.ts";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 describe("substituteVars", () => {
   it("replaces known placeholders", () => {
@@ -54,25 +53,6 @@ describe("substituteVars", () => {
 
   it("permits empty-string credential values", () => {
     expect(substituteVars("X={{empty}}", { empty: "" })).toBe("X=");
-  });
-});
-
-describe("findUnresolvedPlaceholders", () => {
-  it("returns [] when every placeholder resolves", () => {
-    const substituted = substituteVars("{{a}}{{b}}", { a: "1", b: "2" });
-    expect(findUnresolvedPlaceholders(substituted)).toEqual([]);
-  });
-
-  it("lists placeholder names that remain", () => {
-    expect(findUnresolvedPlaceholders("{{a}}/{{b}}")).toEqual(["a", "b"]);
-  });
-
-  it("returns duplicates as they appear (caller dedups if needed)", () => {
-    expect(findUnresolvedPlaceholders("{{x}}{{x}}")).toEqual(["x", "x"]);
-  });
-
-  it("tolerates whitespace", () => {
-    expect(findUnresolvedPlaceholders("{{ a }}")).toEqual(["a"]);
   });
 });
 
@@ -130,58 +110,6 @@ describe("matchesAuthorizedUriSpec (AFPS semantics)", () => {
     expect(
       matchesAuthorizedUriSpec("https://api.example.com/v1", "https://api.example.com/v1/foo"),
     ).toBe(false);
-  });
-});
-
-describe("HOP_BY_HOP_HEADERS + filterHeaders", () => {
-  it("includes the canonical RFC 7230 hop-by-hop set", () => {
-    for (const h of [
-      "connection",
-      "keep-alive",
-      "proxy-connection",
-      "proxy-authenticate",
-      "proxy-authorization",
-      "te",
-      "trailer",
-      "transfer-encoding",
-      "upgrade",
-    ]) {
-      expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
-    }
-  });
-
-  it("strips host and content-length", () => {
-    const out = filterHeaders({
-      host: "x",
-      "content-length": "10",
-      "x-keep": "yes",
-    });
-    expect(out).toEqual({ "x-keep": "yes" });
-  });
-
-  it("strips hop-by-hop headers regardless of casing", () => {
-    const out = filterHeaders({
-      Connection: "close",
-      "Keep-Alive": "timeout=5",
-      "X-Keep": "yes",
-    });
-    expect(out).toEqual({ "X-Keep": "yes" });
-  });
-
-  it("honours extraSkip (lowercase keys)", () => {
-    const out = filterHeaders(
-      {
-        "x-integration": "gmail",
-        "x-keep": "yes",
-      },
-      new Set(["x-integration"]),
-    );
-    expect(out).toEqual({ "x-keep": "yes" });
-  });
-
-  it("preserves original casing of kept headers", () => {
-    const out = filterHeaders({ Authorization: "Bearer abc" });
-    expect(out).toEqual({ Authorization: "Bearer abc" });
   });
 });
 
@@ -284,6 +212,25 @@ describe("applyInjectedCredentialHeader (record)", () => {
   });
 });
 
+describe("credentialCarryingHeader", () => {
+  const creds = {
+    credentials: { access_token: "server" },
+    credentialHeaderName: "X-Token",
+    credentialFieldName: "access_token",
+  };
+
+  it("names the injected header, or the caller's allowed override, never a no-op", () => {
+    expect(credentialCarryingHeader(applyInjectedCredentialHeader({}, creds))).toBe("X-Token");
+    const override = applyInjectedCredentialHeader(
+      { "x-token": "caller" },
+      { ...creds, credentialAllowServerOverride: true },
+    );
+    expect(credentialCarryingHeader(override)).toBe("X-Token");
+    const none = applyInjectedCredentialHeader({}, { ...creds, credentialHeaderName: undefined });
+    expect(credentialCarryingHeader(none)).toBeUndefined();
+  });
+});
+
 describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
   it("adds the header when absent", () => {
     const headers = new Headers();
@@ -318,6 +265,35 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     });
     expect(headers.get("authorization")).toBe("Bearer caller");
     expect(decision).toEqual({ kind: "caller_override", headerName: "Authorization" });
+  });
+});
+
+describe("injecting a credential that is no HTTP field value", () => {
+  const secret = "SECRETKEY";
+  const creds = (value: string) => ({
+    credentials: { api_key: value },
+    credentialHeaderName: "X-Api-Key",
+    credentialHeaderPrefix: "",
+    credentialFieldName: "api_key",
+  });
+
+  // Bun's `Headers` TypeError quotes the value: the injector refuses before it can be raised.
+  it("throws an error naming the header, never the value", () => {
+    for (const value of [`${secret}\r\nX-Evil: 1`, `${secret}\u20ac`, `${secret}\u0000`]) {
+      for (const inject of [
+        () => applyInjectedCredentialHeaderToHeaders(new Headers(), creds(value)),
+        () => applyInjectedCredentialHeader({}, creds(value)),
+      ]) {
+        let caught: unknown;
+        try {
+          inject();
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(InvalidHeaderValueError);
+        expect((caught as Error).message).not.toContain(secret);
+      }
+    }
   });
 });
 

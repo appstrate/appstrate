@@ -55,12 +55,7 @@ export async function getOrgDefault(
   const [row] = await db
     .select()
     .from(integrationOrgDefaults)
-    .where(
-      and(
-        eq(integrationOrgDefaults.spaceId, scope.spaceId),
-        eq(integrationOrgDefaults.integrationId, integrationId),
-      ),
-    )
+    .where(orgDefaultKey(scope, integrationId))
     .limit(1);
   return row ? toSummary(row) : null;
 }
@@ -85,16 +80,28 @@ export async function listOrgDefaultsForResolver(
   );
 }
 
-/** Set or replace the org default for (space, integration). */
+function orgDefaultKey(scope: SpaceScope, integrationId: string) {
+  return and(
+    eq(integrationOrgDefaults.spaceId, scope.spaceId),
+    eq(integrationOrgDefaults.integrationId, integrationId),
+  );
+}
+
+/** Set or replace the org default for (space, integration); `previous` is the one it replaced. */
 export async function upsertOrgDefault(
   scope: SpaceScope,
   integrationId: string,
   input: UpsertOrgDefaultInput,
-): Promise<OrgDefaultSummary> {
+): Promise<{ previous: OrgDefaultSummary | null; orgDefault: OrgDefaultSummary }> {
   await validatePinTargets(scope, integrationId, input.connectionIds);
   const now = new Date();
+  const [previous] = await db
+    .select()
+    .from(integrationOrgDefaults)
+    .where(orgDefaultKey(scope, integrationId))
+    .limit(1);
   // Atomic upsert on the (space, integration) unique index: two concurrent first writers cannot
-  // both miss a SELECT and have the loser's INSERT throw a raw unique violation.
+  // have the loser's INSERT throw a raw unique violation.
   const [row] = await db
     .insert(integrationOrgDefaults)
     .values({
@@ -116,21 +123,17 @@ export async function upsertOrgDefault(
       },
     })
     .returning();
-  return toSummary(row!);
+  return { previous: previous ? toSummary(previous) : null, orgDefault: toSummary(row!) };
 }
 
+/** Delete the org default; `previous` is the one removed, `null` when none was set. */
 export async function deleteOrgDefault(
   scope: SpaceScope,
   integrationId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
+): Promise<{ previous: OrgDefaultSummary | null }> {
+  const [row] = await db
     .delete(integrationOrgDefaults)
-    .where(
-      and(
-        eq(integrationOrgDefaults.spaceId, scope.spaceId),
-        eq(integrationOrgDefaults.integrationId, integrationId),
-      ),
-    )
-    .returning({ id: integrationOrgDefaults.id });
-  return { deleted: result.length > 0 };
+    .where(orgDefaultKey(scope, integrationId))
+    .returning();
+  return { previous: row ? toSummary(row) : null };
 }

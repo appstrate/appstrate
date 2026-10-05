@@ -2,11 +2,12 @@
 
 import { describe, expect, it } from "bun:test";
 import { render } from "../../test/render.tsx";
-import { i18nReady } from "../../i18n.ts";
+import i18n, { i18nReady } from "../../i18n.ts";
 import { SpaceAssignmentsField } from "../space-assignments-field.tsx";
 import { hasUnavailableAssignments } from "../../lib/space-assignments.ts";
 
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 const spaces = [{ id: "spc_support", name: "Assistance clients Europe et Amérique" }];
 const roles = [{ value: "custom:srl_support", label: "Responsable assistance" }];

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 
 /**
  * DOM-less bun runtime: install Map-backed sessionStorage and a minimal
@@ -28,6 +28,21 @@ class FakeStorage {
     return [...this.m.keys()][i] ?? null;
   }
 }
+
+// Every global below is process-wide: `bun test` runs many files in one
+// process, so what this file installs is put back when it is done — a stubbed
+// `fetch` left behind answers every later file's requests.
+const originals = {
+  fetch: globalThis.fetch,
+  window: (globalThis as { window?: unknown }).window,
+  sessionStorage: (globalThis as { sessionStorage?: Storage }).sessionStorage,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(originals)) {
+    if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+    else (globalThis as Record<string, unknown>)[key] = value;
+  }
+});
 
 const fakeSession = new FakeStorage();
 (globalThis as { sessionStorage?: Storage }).sessionStorage = fakeSession;

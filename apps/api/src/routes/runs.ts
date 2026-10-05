@@ -32,7 +32,10 @@ import {
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
-import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
+import {
+  assertConnectionOverrideKeysDeclared,
+  connectionOverridesSchema,
+} from "../lib/launch-schemas.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
@@ -319,6 +322,10 @@ export function createRunsRouter() {
           dependencyOverrides,
         } = inputResult;
 
+        assertConnectionOverrideKeysDeclared(
+          effectiveAgent.manifest as unknown as Record<string, unknown>,
+          connectionOverrides,
+        );
         // A dependency opted into its working copy is the same act as
         // `version=draft` on the agent, one package down: the authority that
         // decides is the OVERRIDDEN package's, so ask it per entry — after the

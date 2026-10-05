@@ -44,7 +44,7 @@ bun run dev
 | `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                        |
 | `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                          |
 | `bun test`               | Run all tests (bun:test). Docker-dependent tests skip unless `TEST_DOCKER=1` — always on in CI                                              |
-| `bun run check`          | The quality gate — 21 task names in one turbo invocation. The list, and the steps that lie: § "Quality Gate — and the signals it lies with" |
+| `bun run check`          | The quality gate — 22 task names in one turbo invocation. The list, and the steps that lie: § "Quality Gate — and the signals it lies with" |
 | `bun run build`          | Build everything (turbo build)                                                                                                              |
 | `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                             |
 | `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                          |
@@ -320,7 +320,7 @@ Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) �
   justification `knip.config.ts` demands at the call site — never to make a finding go away. What
   is out of scope, what knip derives on its own, and the ~161-finding false red the rule came out
   of: `docs/QUALITY_GATE.md`.
-- **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
+- **Tests**: `bun test` from root runs all packages in one process; `bun run test:tier0` runs them over several. See **Testing** below.
 
 ### Migrations
 
@@ -347,15 +347,16 @@ runbook Phase 2a).
 its steps report false green or false red locally, and each one below has cost
 real time. Establish which you are looking at BEFORE changing code.
 
-The tasks, in the order `package.json` lists them — **21 task names** in one turbo invocation, and
+The tasks, in the order `package.json` lists them — **22 task names** in one turbo invocation, and
 this is the copy kept in step with it: `turbo typecheck lint format:check` plus
 `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
 `verify:release-version`, `verify:env-docs`, `verify:workflows`, `detect:breaking`,
 `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
 `verify:module-isolation`, `verify:module-sql-boundary`, `verify:license-boundary`,
-`typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`.
-turbo fans those out to **42** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
-with `bunx turbo run <the 21 names> --dry=json`, never by reading this line.
+`typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`,
+`verify:overrides`.
+turbo fans those out to **43** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
+with `bunx turbo run <the 22 names> --dry=json`, never by reading this line.
 There is no `turbo check` task — the root script drives turbo directly.
 
 Two steps surprise people. `verify:release-version` fails when the `${APPSTRATE_VERSION:-…}`
@@ -402,6 +403,7 @@ The skill **`testing`** (`.claude/skills/testing/SKILL.md`) owns the full guide 
 ### Running Tests
 
 ```sh
+bun run test:tier0                # Full suite on PGlite, over several processes (no Docker)
 bun test                          # Full suite; Docker tests skip unless TEST_DOCKER=1
 bun test apps/api/test/unit/      # API unit tests only (fast, no DB)
 bun test apps/api/test/           # API unit + integration
@@ -410,7 +412,7 @@ bun test packages/core/           # Core library tests (no DB)
 bun test packages/afps-runtime/   # AFPS bundle runtime tests
 ```
 
-**Locally, run only the tests your change touches** — the test files you edited plus the ones covering the code you changed (`bun test <file-or-dir>`). Do not run the full `bun test` suite locally to validate a change: CI (`.github/workflows/test.yml`) runs every tier on each PR, in parallel, against the merge with `main`. A local full run is slow and not a reliable signal anyway (shared test DB across sessions, port contention, filesystem ordering). `bun run check` runs no tests at all.
+**Locally, run only the tests your change touches** — the test files you edited plus the ones covering the code you changed (`bun test <file-or-dir>`). When you do want the whole suite locally, use `bun run test:tier0` (`scripts/run-tests.ts`): it splits the files across processes, each on its own throwaway PGlite, so it neither shares a database with other sessions nor runs on one core — a plain full `bun test` does both. CI (`.github/workflows/test.yml`) runs every tier on each PR against the merge with `main`. `bun run check` runs no tests at all.
 
 ### Test Conventions
 
@@ -522,7 +524,7 @@ rather than any doc, this one included.
 - **Extension return type**: `{ content: [{ type: "text", text: "..." }] }` — NOT a plain string.
 - **Extension failure = throw**: Pi ignores an `isError` on a value returned from `execute`; a throw is what flags the call as failed (`tool_execution_end.isError`, run log `Tool error`). Runner tools return through `piToolResultOrThrow` (`@appstrate/runner-pi`). A throw keeps only the message — a tool whose failures must keep `details` flags them from a `tool_result` handler instead.
 - **Skills**: YAML frontmatter (`name`, `description`) in `SKILL.md`, parsed with the **`yaml` library at the same major the skill runtime uses** (`@earendil-works/pi-coding-agent`) so the gate and the consumer never disagree. Both fields are REQUIRED on every path that WRITES skill content (editor create/save, publish, restore, ZIP/GitHub import, bundle/MCP import — ROOT package only) via `checkSkillMarkdown` (`@appstrate/afps-shared/companion-files`), wired once as `validateContent` on `CONFIG_BY_TYPE` and applied through `assertContentConforms` / `assertArchiveContentConforms` (`services/package-items/config.ts`): `name` is the bare [Agent Skills](https://agentskills.io/specification) slug (1-64 code points of lowercase `a-z`/`0-9`/`-`, no leading, trailing or doubled hyphen) written INLINE on one line, a DIFFERENT namespace from the `@scope/name` package id; `description` non-empty, ≤1024 code points; a leading BOM is refused — Pi strips one from 0.85 on, but a minted version is immutable and must load on every runtime image the platform ships, including the 0.84.x ones that read no frontmatter behind a BOM — so write paths starting from BYTES decode via `decodeSkillMarkdown`. READING stays lenient — `checkCompanionFiles` (the loader) still asks only for an inline `name`, because published bundles are immutable and a run must not fail on a skill nobody can fix; the gate must therefore accept a SUBSET of what the loader accepts, and `packages/runner-pi/test/skill-frontmatter-parity.test.ts` runs the real Pi loader to keep the asymmetry one-directional. Container path `.pi/skills/{id}/SKILL.md`.
-- **Integration manifests** follow the same write-strict / read-lenient split: `checkManifest` on `CONFIG_BY_TYPE` (`findNonSnakeCaseIdentityClaimKeys`, `@appstrate/core/integration`) refuses a non-snake_case `identity_claims` key or `connect.login.identity_outputs` entry on those write paths — fork included, since a fork mints a draft every connect reads — never in `integrationManifestSchema`, so a published manifest predating the rule still loads.
+- **Integration manifests** follow the same write-strict / read-lenient split: `checkManifest` on `CONFIG_BY_TYPE` (`findNonSnakeCaseIdentityClaimKeys`, `@appstrate/core/integration`) refuses a non-snake_case `identity_claims` key or `connect.login.identity_outputs` entry on those write paths — fork included, since a fork mints a draft every connect reads — never in `integrationManifestSchema`, so a published manifest predating the rule still loads. The second write-path rule, `findUnboundedInjectedCredentials`, refuses an auth whose credential the proxy injects over HTTP while it sets `allow_all_uris: true`, declares no `authorized_uris`, or lists an `authorized_uris` entry whose host the caller picks; the proxies refuse the same calls at run time (`credentialUrlPolicy`). The third, `findUnevaluableExpressions`, refuses every template or runtime expression the platform cannot evaluate (any `{$…}` but `{$credential.<field>}` in a delivery template or in `authorized_uris`, `{$…}` in a login request, an unsupported login response expression); rendering and the login engine refuse the same at run time.
 - **Proxy system**: org-level CRUD `/api/proxies` (admin). System proxies from `SYSTEM_PROXIES` env at boot. Agent override `GET/PUT /api/agents/{scope}/{name}/proxy`. Cascade: agent → org default → `PROXY_URL`.
 - **Space-scoped input defaults**: an agent's stored input values and its per-field locks live together in one jsonb column, `space_packages.input_settings` (`{ values, locked }`), per-space. Its single write path is `PUT /api/agents/{scope}/{name}/input-settings`; on the wire the pair is `{ values, locked_fields }`. `package_persistence` (memory archive + pinned slots) also space-scoped, row-partitioned by `(actor_type, actor_id)` (members + end-users never read each other's state).
 - **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Transitions via `updateRun()` in `services/state/runs.ts`. `pg_notify` on every change → SSE. Concurrent runs per agent supported (`run-tracker.ts`).

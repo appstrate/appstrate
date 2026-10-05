@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Types
-export type { Actor, OAuthStateRecord, OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
+export type {
+  Actor,
+  OAuthClientResolver,
+  OAuthStateRecord,
+  OAuthStateStore,
+  ResolvedOAuthClient,
+  TokenEndpointAuthMethod,
+} from "./types.ts";
 // Encryption
 export {
   encrypt,
@@ -35,12 +42,10 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // its binary does not pull this barrel's credentials module (transitively
 // `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
 // consumer actually imports is re-exported here; the sidecar-only half
-// (`HOP_BY_HOP_HEADERS`, `filterHeaders`, `applyInjectedCredentialHeader`,
-// `normalizeAuthSchemeTemplates`) and the in-package-only
-// `buildInjectedCredentialHeader` are reached through the subpath.
+// (`applyInjectedCredentialHeader`, `normalizeAuthSchemeTemplates`) and the
+// in-package-only `buildInjectedCredentialHeader` are reached through the subpath.
 export {
   substituteVars,
-  findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,

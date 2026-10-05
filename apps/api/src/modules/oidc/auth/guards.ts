@@ -61,10 +61,9 @@ import {
 } from "./realm-check.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-// The categories below have no upstream rule, and Better Auth answers a 429
-// with `{ message }` + `X-Retry-After` where these answer the RFC 8628 /
-// RFC 6749 `{ error, error_description }` + `Retry-After` the CLI parses
-// (`apps/cli/src/lib/device-flow.ts`), so they stay local.
+// The categories below have no upstream rule, so they stay local. They answer
+// the RFC 6749 `{ error, error_description }` + `Retry-After` shape the
+// Better Auth limiter's refusals are restated in (`oauthRateLimitResponse`).
 //
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;

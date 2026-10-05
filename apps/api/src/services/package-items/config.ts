@@ -6,7 +6,11 @@ import {
   decodeSkillMarkdown,
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
-import { findNonSnakeCaseIdentityClaimKeys } from "@appstrate/core/integration";
+import {
+  findNonSnakeCaseIdentityClaimKeys,
+  findUnboundedInjectedCredentials,
+  findUnevaluableExpressions,
+} from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { validationFailed } from "../../lib/errors.ts";
 
@@ -70,7 +74,11 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "integration",
     storageFolder: "integrations",
     labelSingular: "Integration",
-    checkManifest: findNonSnakeCaseIdentityClaimKeys,
+    checkManifest: (manifest) => [
+      ...findNonSnakeCaseIdentityClaimKeys(manifest),
+      ...findUnboundedInjectedCredentials(manifest),
+      ...findUnevaluableExpressions(manifest),
+    ],
     manifestIsStoredFile: true,
   },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an

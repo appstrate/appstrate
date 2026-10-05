@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import {
   makeApiCallTool,
   matchesAuthorizedUriSpec,
@@ -36,7 +37,7 @@ function makeCtx(): { ctx: ToolContext; events: RunEvent[] } {
 
 describe("makeApiCallTool", () => {
   it("produces a {name}_call tool with JSON-schema parameters", () => {
-    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@afps/gmail" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 200,
       headers: {},
@@ -50,7 +51,7 @@ describe("makeApiCallTool", () => {
   });
 
   it("honours a toolName override (the {ns}__api_call shape integrations use)", () => {
-    const meta: ApiCallMeta = { name: "@afps/gmail", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@afps/gmail" };
     const tool = makeApiCallTool(
       meta,
       async () => ({ status: 200, headers: {}, body: { kind: "text", text: "" } }),
@@ -59,24 +60,8 @@ describe("makeApiCallTool", () => {
     expect(tool.name).toBe("afps_gmail__api_call");
   });
 
-  it("enforces authorizedUris when allowAllUris is not set", async () => {
-    const meta: ApiCallMeta = {
-      name: "@acme/scoped",
-      authorizedUris: ["https://api.acme.com/**"],
-    };
-    const tool = makeApiCallTool(meta, async () => ({
-      status: 200,
-      headers: {},
-      body: { kind: "text", text: "" },
-    }));
-    const { ctx } = makeCtx();
-    await expect(
-      tool.execute({ method: "GET", target: "https://evil.example.com/x" }, ctx),
-    ).rejects.toThrow(/not in authorized_uris/);
-  });
-
   it("emits api_call.called with status + duration on success", async () => {
-    const meta: ApiCallMeta = { name: "@acme/ok", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@acme/ok" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 201,
       headers: {},
@@ -91,7 +76,7 @@ describe("makeApiCallTool", () => {
   });
 
   it("marks tool results as isError on 4xx/5xx", async () => {
-    const meta: ApiCallMeta = { name: "@acme/err", allowAllUris: true };
+    const meta: ApiCallMeta = { name: "@acme/err" };
     const tool = makeApiCallTool(meta, async () => ({
       status: 404,
       headers: {},
@@ -354,6 +339,25 @@ describe("matchesAuthorizedUriSpec", () => {
       ).toBe(true);
     });
 
+    it("a globbed scheme stays a scheme: it cannot match a host named inside a query", () => {
+      const pat = "**://api.example.com/**";
+      expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x?y=://api.example.com/")).toBe(false);
+      expect(
+        matchesAuthorizedUriSpec("*://api.example.com/**", "https://evil.com/?://api.example.com/"),
+      ).toBe(false);
+      expect(matchesAuthorizedUriSpec(pat, "https://api.example.com/v1?q=1")).toBe(true);
+      expect(matchesAuthorizedUriSpec("*://**", "http://any.example/a")).toBe(true);
+    });
+
+    it("normalisation never moves a wildcard into an empty authority", () => {
+      expect(matchesAuthorizedUriSpec("https:///**", "https://evil.com/")).toBe(false);
+      expect(matchesAuthorizedUriSpec("https:///*", "https://evil.com/")).toBe(false);
+      // An empty authority is malformed, even when WHATWG would read a host after it.
+      expect(
+        matchesAuthorizedUriSpec("https:///api.example.com/x", "https://api.example.com/x"),
+      ).toBe(false);
+    });
+
     it("a pattern that already contains the wildcard placeholder still compiles", () => {
       // The masking placeholder is chosen to be absent from the pattern, so a
       // pattern spelling it literally cannot have a wildcard forged into it.
@@ -396,5 +400,55 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec(pat, "https://attacker.example/services/data/v59.0")).toBe(
       false,
     );
+  });
+  it("a malformed authority matches nothing, however WHATWG would rewrite it", () => {
+    for (const pattern of [
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://*.example.com@**/**",
+      "https://%2A.example.com/**",
+      "https://*.example.com\\.evil.test/**",
+      "https://ａpi.example.com/**",
+    ]) {
+      expect([pattern, matchesAuthorizedUriSpec(pattern, "https://attacker.test/steal")]).toEqual([
+        pattern,
+        false,
+      ]);
+    }
+  });
+
+  it("agrees with isHostUnboundedUriPattern: a host-bound entry never reaches another host", () => {
+    const targets = [
+      "https://attacker.test/steal",
+      "https://a.attacker.test/steal",
+      "https://[::ffff:5db8:d822]/steal",
+      "https://45.33.0.1/steal",
+      "https://0x2d210001/steal",
+      "https://8.168.1.1/steal",
+    ];
+    for (const pattern of [
+      "https://*.example.com/**",
+      "https://api.example.com:*/**",
+      "https://*.example.com./**",
+      "HTTPS://*.EXAMPLE.com:443/**",
+      "https://%2A%2A\\**",
+      "https://@x:y@**/**",
+      "https://[::**/**",
+      "https://*:x.example.com/**",
+      "https:///**",
+      "**://api.example.com/**",
+      "https://**/**",
+      "https://*.0.1/**",
+      "https://*.168.1.1/**",
+      "https://[::ffff:*.2.3.4]/**",
+    ]) {
+      const reaches = targets.some((t) => matchesAuthorizedUriSpec(pattern, t));
+      expect([pattern, reaches && !isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+    // Control: the table does reach other hosts, through entries the rule calls unbounded.
+    expect(matchesAuthorizedUriSpec("https://**/**", targets[0]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://[::**/**", targets[2]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.0.1/**", "https://0x2d210001/steal")).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.168.1.1/**", "https://8.168.1.1/steal")).toBe(true);
   });
 });

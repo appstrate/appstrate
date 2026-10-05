@@ -598,7 +598,6 @@ export interface SidecarRuntimeDeps {
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 
 export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
-  const fetchFn = deps.fetchFn ?? fetch;
   const blobStore = new BlobStore(deps.runId ?? "unknown", {
     maxTotalBytes: RUN_BLOB_STORE_MAX_BYTES,
   });
@@ -629,10 +628,11 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const apiCallLimit: LimitFunction = pLimit(
     readPositiveIntEnv("SIDECAR_API_CALL_CONCURRENCY", DEFAULT_API_CALL_CONCURRENCY),
   );
+  // No global-fetch default: an absent `fetchFn` is what gives api_call its pinned transport.
   const proxyDeps: ApiCallBaseDeps = {
     config: deps.config,
     cookieJar: deps.cookieJar,
-    fetchFn,
+    ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}),
     reportedAuthFailures: new Set<string>(),
   };
   return { blobStore, tokenBudget, apiCallLimit, proxyDeps };

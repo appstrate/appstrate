@@ -14,7 +14,7 @@
 
 // Type-only (erased at emit), so the "no runtime imports" rule above holds.
 import type { ModelCost } from "@appstrate/core/module";
-import type { InferenceRoute } from "@appstrate/db/schema";
+import type { CredentialSource, InferenceRoute } from "@appstrate/db/schema";
 
 /**
  * Narrow projection of the `runs` row used for signature verification +
@@ -43,7 +43,7 @@ export interface RunSinkContext {
    * models, `"org"` for BYOK). Forwarded to the `onRunStatusChange` event so
    * module listeners can distinguish billable from non-billable runs.
    */
-  modelSource: string | null;
+  modelSource: CredentialSource | null;
   /** Who serves the run's inference (`runs.inference_route`) — decides whether it has a runner ledger row. */
   inferenceRoute: InferenceRoute | null;
   /**

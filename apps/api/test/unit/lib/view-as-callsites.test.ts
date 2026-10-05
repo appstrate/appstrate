@@ -139,20 +139,33 @@ describe("persona-sensitive call sites", () => {
       })
       .join("\n");
 
-  it.each(SWEEPS)("$what is read only where the allowlist says", async (sweep: Sweep) => {
-    const root = `${import.meta.dir}/../../../../..`;
-    const found: string[] = [];
-    for (const area of ["apps/api/src", "packages"]) {
-      const glob = area === "packages" ? "*/src/**/*.ts" : "**/*.ts";
-      for await (const relative of new Bun.Glob(glob).scan({ cwd: `${root}/${area}` })) {
-        // Tests are not production call sites — the oidc module keeps its own
-        // under `src/`, so they have to be excluded by path.
-        if (relative.includes("/test/") || relative.endsWith(".test.ts")) continue;
-        const path = `${area}/${relative}`;
-        const source = stripCommentLines(await Bun.file(`${root}/${path}`).text());
-        if (sweep.pattern.test(source)) found.push(path);
+  /** Every production source the sweeps read, comment lines blanked — read once for all of them. */
+  let sources: Promise<Array<[path: string, source: string]>> | undefined;
+  const readSources = (): Promise<Array<[string, string]>> =>
+    (sources ??= (async () => {
+      const root = `${import.meta.dir}/../../../../..`;
+      const paths: string[] = [];
+      for (const area of ["apps/api/src", "packages"]) {
+        const glob = area === "packages" ? "*/src/**/*.ts" : "**/*.ts";
+        for await (const relative of new Bun.Glob(glob).scan({ cwd: `${root}/${area}` })) {
+          // Tests are not production call sites — the oidc module keeps its own
+          // under `src/`, so they have to be excluded by path.
+          if (relative.includes("/test/") || relative.endsWith(".test.ts")) continue;
+          paths.push(`${area}/${relative}`);
+        }
       }
-    }
+      return Promise.all(
+        paths.map(async (path): Promise<[string, string]> => [
+          path,
+          stripCommentLines(await Bun.file(`${root}/${path}`).text()),
+        ]),
+      );
+    })());
+
+  it.each(SWEEPS)("$what is read only where the allowlist says", async (sweep: Sweep) => {
+    const found = (await readSources())
+      .filter(([, source]) => sweep.pattern.test(source))
+      .map(([path]) => path);
     // Positive control: a pattern that matched nothing would pass an empty
     // allowlist just as happily.
     expect(found).toContain(sweep.control);

@@ -23,30 +23,6 @@ import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
 
-/** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
-function readRuntimeToolsFromEnv(): string[] {
-  const raw = process.env.RUNTIME_TOOLS_JSON;
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Parse the output schema forwarded as `OUTPUT_SCHEMA` (for the `output` tool). */
-function readOutputSchemaFromEnv(): Record<string, unknown> | null {
-  const raw = process.env.OUTPUT_SCHEMA;
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Validate the parsed credential config crossing into the sidecar (the
  * credential-handling process). A blind `as` cast would let drift (a renamed
@@ -175,17 +151,9 @@ const config = {
 // base64(iv‖authTag‖ciphertext). Error messages are NOT secrets and stay
 // plaintext so a boot failure is diagnosable from logs.
 if (connectLoginJson) {
-  const resultKeyB64 = process.env.CONNECT_RESULT_KEY || "";
+  // `parseSidecarEnv` refused a connect mode without a valid key.
+  const resultKey = env.connectResultKey!;
   try {
-    // Fail closed: without the ephemeral key we cannot emit the bundle without
-    // leaking it, so refuse rather than fall back to a plaintext sentinel.
-    if (!resultKeyB64) {
-      throw new Error("connect-run: CONNECT_RESULT_KEY missing — refusing to emit bundle");
-    }
-    const resultKey = Buffer.from(resultKeyB64, "base64");
-    if (resultKey.length !== 32) {
-      throw new Error("connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)");
-    }
     const spec = JSON.parse(connectLoginJson) as IntegrationSpawnSpec;
     const bundle = await runConnectOnce(spec, {
       platformApiUrl: env.platformApiUrl,
@@ -214,6 +182,7 @@ let peerAttribution: PeerAttribution = noRunnerPeers;
 const proxy = createForwardProxy({
   config,
   listenPort: env.forwardProxyPort,
+  listenHost: env.listenHost,
   isPeerAllowed: (peer) => admitsAgentProxyPeer(peerAttribution, peer),
 });
 // The platform notices a sidecar that EXITS (#1561), not one alive without its
@@ -261,8 +230,8 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 const runtimeEventJournal = new RuntimeEventJournal();
 const runtimeToolDefs = journalRuntimeToolDefs(
   buildRuntimeToolDefs({
-    runtimeTools: readRuntimeToolsFromEnv(),
-    outputSchema: readOutputSchemaFromEnv(),
+    runtimeTools: env.runtimeToolNames,
+    outputSchema: env.outputSchema ?? null,
   }),
   runtimeEventJournal,
 ) as unknown as AppstrateToolDefinition[];
@@ -348,4 +317,9 @@ logger.info("Sidecar proxy listening", {
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
 // without booting this entry point (which has port-binding side effects).
 // See issue #426.
-export default { port: env.port, fetch: app.fetch, idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS };
+export default {
+  port: env.port,
+  hostname: env.listenHost,
+  fetch: app.fetch,
+  idleTimeout: SIDECAR_IDLE_TIMEOUT_SECONDS,
+};

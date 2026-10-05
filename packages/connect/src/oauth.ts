@@ -19,11 +19,17 @@ import { type TokenErrorKind } from "./token-utils.ts";
  *   OAuth error codes). The authorization code might still be valid on retry
  *   for some classes of failure; the user should be told to retry the request,
  *   not the entire OAuth flow.
+ *
+ * - `"client_unavailable"`: the OAuth client the flow was started with no
+ *   longer resolves (deleted, out of reach, undecryptable), so no exchange was
+ *   attempted. Retrying cannot help until an admin restores or re-registers it.
  */
+type OAuthCallbackErrorKind = TokenErrorKind | "client_unavailable";
+
 export class OAuthCallbackError extends Error {
   constructor(
     message: string,
-    public readonly kind: TokenErrorKind,
+    public readonly kind: OAuthCallbackErrorKind,
     public readonly subjectId: string,
     public readonly status?: number,
     public readonly body?: string,

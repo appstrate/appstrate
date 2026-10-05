@@ -25,6 +25,8 @@
  *    some router, or listed in SPEC_ONLY_ALLOWLIST. Replaces the hand-typed 242-entry
  *    `expectedEndpoints` array, whose only unique signal this was.
  * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
+ * 6b. Error response bodies — every 4xx/5xx/`default` response declares application/problem+json
+ *    → ProblemDetail, or the media type its NON_PROBLEM_ERROR_BODIES exemption names
  * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
  *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts the two agree on which
  *    fields are guaranteed, in BOTH directions: every type-required field is required in the
@@ -42,6 +44,7 @@ import { dirname, join, normalize, relative } from "node:path";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
+import { resolveRef } from "./lib/openapi-pointer.ts";
 import {
   buildZodSchemaRegistry,
   EXEMPT_REQUEST_BODIES,
@@ -63,6 +66,10 @@ import {
   type ProxiedApiShape,
 } from "../packages/runner-pi/src/llm-proxy-routes.ts";
 import { validateOpenApiStructure } from "./lib/openapi-structure.ts";
+import {
+  checkErrorResponseBodies,
+  type ErrorBodyExemptions,
+} from "./lib/openapi-error-responses.ts";
 import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
@@ -270,22 +277,6 @@ try {
 console.log(`\n  4. Zod <> OpenAPI Request Body Comparison`);
 console.log(`  -------------------------------------------`);
 
-/**
- * Resolve a `$ref` pointer (e.g. "#/components/schemas/Foo") against the spec.
- * Returns the referenced object, or undefined if the path is invalid.
- */
-function resolveRef(ref: string): Record<string, unknown> | undefined {
-  if (!ref.startsWith("#/")) return undefined;
-  const parts = ref.slice(2).split("/");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let current: any = openApiSpec;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = current[part];
-  }
-  return current as Record<string, unknown> | undefined;
-}
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Deref (`$ref`) and merge (`allOf`) a spec schema node into a normalized view
@@ -305,7 +296,7 @@ function normalizeSpecSchema(
   if (!schema || typeof schema !== "object" || depth > 12) return null;
   let s = schema;
   if (typeof s.$ref === "string") {
-    const r = resolveRef(s.$ref);
+    const r = resolveRef(openApiSpec, s.$ref);
     if (!r) return null;
     s = r;
   }
@@ -611,7 +602,7 @@ function unionBranches(
   if (!Array.isArray(branches)) return undefined;
   return branches.map((branch) => {
     const obj = asSchemaObject(branch);
-    if (obj && typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? obj;
+    if (obj && typeof obj.$ref === "string") return resolveRef(openApiSpec, obj.$ref) ?? obj;
     return obj ?? {};
   });
 }
@@ -740,7 +731,7 @@ function objectProperties(
 function derefSchema(value: unknown): Record<string, unknown> | undefined {
   const obj = asSchemaObject(value);
   if (!obj) return undefined;
-  if (typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? undefined;
+  if (typeof obj.$ref === "string") return resolveRef(openApiSpec, obj.$ref) ?? undefined;
   return obj;
 }
 
@@ -814,7 +805,7 @@ function getOpenApiRequestBodySchema(
 
   // Resolve top-level $ref
   if (schema && typeof schema.$ref === "string") {
-    schema = resolveRef(schema.$ref);
+    schema = resolveRef(openApiSpec, schema.$ref);
   }
 
   return schema;
@@ -829,7 +820,7 @@ function normalizeType(schema: Record<string, unknown>): {
   nullable: boolean;
 } {
   if (typeof schema.$ref === "string") {
-    const resolved = resolveRef(schema.$ref);
+    const resolved = resolveRef(openApiSpec, schema.$ref);
     return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
   }
 
@@ -2171,7 +2162,7 @@ for (const [specPath, pathItem] of Object.entries(
 
       let resp = rawResp as Record<string, unknown>;
       if (typeof resp.$ref === "string") {
-        resp = resolveRef(resp.$ref) ?? {};
+        resp = resolveRef(openApiSpec, resp.$ref) ?? {};
       }
       const content = resp.content as Record<string, Record<string, unknown>> | undefined;
       if (!content || Object.keys(content).length === 0) {
@@ -2227,6 +2218,81 @@ if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
 }
 
 // ═══════════════════════════════════════════════════
+// 6b. Error Response Bodies
+// ═══════════════════════════════════════════════════
+// Rule: scripts/lib/openapi-error-responses.ts.
+
+console.log(`\n  6b. Error Response Bodies`);
+console.log(`  --------------------------`);
+
+// Error responses the platform's `ApiError` does not author (key format: `ErrorBodyExemptions`).
+const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
+  // Better Auth's OAuth / OIDC / device / CLI endpoints: RFC 6749 §5.2
+  // `{ error, error_description }`, `oauthRateLimitResponse`'s 429 included.
+  "GET /api/auth/oauth2/authorize": "application/json",
+  "POST /api/auth/oauth2/token": "application/json",
+  "GET /api/auth/oauth2/userinfo": "application/json",
+  "POST /api/auth/oauth2/introspect": "application/json",
+  "POST /api/auth/device/code": "application/json",
+  "POST /api/auth/cli/token": "application/json",
+  "POST /api/auth/cli/revoke": "application/json",
+  "GET /api/auth/cli/sessions": "application/json",
+  "POST /api/auth/cli/sessions/revoke": "application/json",
+  "POST /api/auth/cli/sessions/revoke-all": "application/json",
+  // Better Auth's account endpoints: its own `APIError` body, `{ code, message }`.
+  "POST /api/auth/sign-up/email": "application/json",
+  "POST /api/auth/sign-in/email": "application/json",
+  // Browser navigations: every refusal renders an HTML page.
+  "GET /activate": "text/html",
+  "POST /activate": "text/html",
+  "POST /activate/approve": "text/html",
+  "POST /activate/deny": "text/html",
+  "GET /api/integrations/connect/start": "text/html",
+  // The health report: the 503 is the 200's document with `status: unhealthy`.
+  "GET /health 503": "application/json",
+  // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.
+  ...Object.fromEntries(
+    ["GET", "POST", "PUT", "PATCH", "DELETE"].map((verb) => [
+      `${verb} /api/credential-proxy/proxy default`,
+      "*/*",
+    ]),
+  ),
+  ...Object.fromEntries(
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).flatMap((shape) =>
+      [LLM_PROXY_MOUNT, RUN_LLM_PROXY_MOUNT].map((mount) => [
+        `POST ${mount}${llmProxyUrlPath(shape)} default`,
+        "application/json",
+      ]),
+    ),
+  ),
+};
+
+const errorBodies = checkErrorResponseBodies(openApiSpec, NON_PROBLEM_ERROR_BODIES);
+if (errorBodies.gaps.length === 0 && errorBodies.stale.length === 0) {
+  console.log(
+    `  OK — all ${errorBodies.checked} error responses declare a ProblemDetail body ` +
+      `(exemptions: ${Object.keys(NON_PROBLEM_ERROR_BODIES).length}, all live).`,
+  );
+} else {
+  exitCode = 1;
+  if (errorBodies.gaps.length > 0) {
+    console.log(`\n  Error responses without a ProblemDetail body (${errorBodies.gaps.length}):`);
+    for (const gap of errorBodies.gaps) console.log(`    - ${gap}`);
+    console.log(
+      `\n  An \`ApiError\` answers application/problem+json: \`$ref\` the matching ` +
+        `#/components/responses/* or declare that content. A response another component ` +
+        `authors goes in NON_PROBLEM_ERROR_BODIES in this file, with a reason.`,
+    );
+  }
+  if (errorBodies.stale.length > 0) {
+    console.log(
+      `\n  Stale NON_PROBLEM_ERROR_BODIES entries — they excuse no response (${errorBodies.stale.length}):`,
+    );
+    for (const key of errorBodies.stale) console.log(`    - ${key}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════
 // 7. Shared-Type ↔ OpenAPI Response Required-Field Comparison
 // ═══════════════════════════════════════════════════
 //
@@ -2276,11 +2342,11 @@ for (const entry of responseTypeRegistry) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const op = pathObj?.[entry.method.toLowerCase()] as any;
     let resp = op?.responses?.[entry.status] as Record<string, unknown> | undefined;
-    if (resp && typeof resp.$ref === "string") resp = resolveRef(resp.$ref);
+    if (resp && typeof resp.$ref === "string") resp = resolveRef(openApiSpec, resp.$ref);
     let schema = (resp?.content as Record<string, Record<string, unknown>> | undefined)?.[
       "application/json"
     ]?.schema as Record<string, unknown> | undefined;
-    if (schema && typeof schema.$ref === "string") schema = resolveRef(schema.$ref);
+    if (schema && typeof schema.$ref === "string") schema = resolveRef(openApiSpec, schema.$ref);
     specSchema = schema;
   } else {
     responseDrifts.push({

@@ -2,7 +2,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { asc, eq } from "drizzle-orm";
+import { auditEvents } from "@appstrate/db/schema";
 import {
   createTestContext,
   createTestUser,
@@ -21,6 +23,10 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  seedConnectionTestIntegration,
+  seedIntegrationConnection,
+} from "../../helpers/run-connection-fixtures.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
@@ -54,6 +60,38 @@ describe("Schedules API", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
+  }
+
+  /**
+   * A published agent declaring one integration, and `count` of the caller's
+   * own connections on it — what a `connection_overrides` write may name: its
+   * keys must be declared integrations.
+   */
+  async function agentWithConnections(name: string, count: number) {
+    const integration = agentId("svc");
+    await seedConnectionTestIntegration(ctx, integration);
+    const fid = agentId(name);
+    const agent = await seedAgent({
+      id: fid,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: fid,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Connection Agent",
+        dependencies: { integrations: { [integration]: "^1.0.0" } },
+        integrations_configuration: { [integration]: { tools: ["search"] } },
+      },
+      draftContent: "Search for something.",
+    });
+    await publish(fid);
+    const ids = await Promise.all(
+      Array.from({ length: count }, () => seedIntegrationConnection(ctx, integration)),
+    );
+    return { agent, integration, ids };
   }
 
   describe("GET /api/schedules", () => {
@@ -371,22 +409,14 @@ describe("Schedules API", () => {
   describe("connection_overrides shape (per-integration connection SETS)", () => {
     // The wire shape is `Record<integrationId, connectionId[]>`, the run route's
     // (`connectionOverridesSchema`, `lib/launch-schemas.ts`); a nested object or a
-    // string where a set belongs is a 400. Connection ids need not resolve to real
-    // rows: the route validates the shape and stores the map; resolution happens
-    // at fire time.
+    // string where a set belongs is a 400. Its keys must be integrations the
+    // fired agent declares, so the round-trips name real own connections.
 
     it("accepts a connection_overrides map of sets on create and round-trips it", async () => {
-      const fid = agentId("co-create");
-      await seedAgent({
-        id: fid,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await publish(fid);
+      const { agent, integration, ids } = await agentWithConnections("co-create", 2);
 
-      const overrides = { "@runorg/svc": [crypto.randomUUID(), crypto.randomUUID()] };
-      const res = await app.request(`/api/agents/${fid}/schedules`, {
+      const overrides = { [integration]: ids };
+      const res = await app.request(`/api/agents/${agent.id}/schedules`, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -423,14 +453,7 @@ describe("Schedules API", () => {
     });
 
     it("updates connection_overrides via PUT and round-trips the map of sets", async () => {
-      const fid = agentId("co-update");
-      const agent = await seedAgent({
-        id: fid,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      await publish(fid);
+      const { agent, integration, ids } = await agentWithConnections("co-update", 1);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -440,7 +463,7 @@ describe("Schedules API", () => {
         name: "co-sched",
       });
 
-      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
+      const overrides = { [integration]: ids };
       const res = await app.request(`/api/schedules/${schedule.id}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -483,9 +506,7 @@ describe("Schedules API", () => {
     });
 
     it("merges (RFC 7396): an absent field is kept, `null` clears a nullable one", async () => {
-      const fid = agentId("merge-agent");
-      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-      await publish(fid);
+      const { agent, integration, ids } = await agentWithConnections("merge-agent", 1);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -500,7 +521,7 @@ describe("Schedules API", () => {
           body: JSON.stringify(body),
         });
 
-      const overrides = { "@runorg/svc": [crypto.randomUUID()] };
+      const overrides = { [integration]: ids };
       expect((await patch({ connection_overrides: overrides })).status).toBe(200);
       const cleared = await patch({ connection_overrides: null });
       expect(cleared.status).toBe(200);
@@ -583,6 +604,75 @@ describe("Schedules API", () => {
         code: "invalid_request",
         param: "generation_config_override",
         detail: "A model must be configured before generation settings can be saved",
+      });
+    });
+  });
+
+  describe("audit trail", () => {
+    async function scheduleAudits(scheduleId: string) {
+      return db
+        .select({
+          action: auditEvents.action,
+          before: auditEvents.before,
+          after: auditEvents.after,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.resourceId, scheduleId))
+        .orderBy(asc(auditEvents.id));
+    }
+
+    it("schedule.created records the overrides the row was frozen with", async () => {
+      const { agent, integration, ids } = await agentWithConnections("audit-create", 1);
+      const res = await app.request(`/api/agents/${agent.id}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          connection_overrides: { [integration]: ids },
+          proxy_id_override: "none",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+
+      const [created] = await scheduleAudits(id);
+      expect(created!.action).toBe("schedule.created");
+      expect(created!.after).toMatchObject({
+        packageId: agent.id,
+        cronExpression: "0 9 * * *",
+        connectionOverrides: { [integration]: ids },
+        proxyIdOverride: "none",
+        modelIdOverride: null,
+        dependencyOverrides: null,
+        actorType: "user",
+        actorId: ctx.user.id,
+      });
+    });
+
+    it("schedule.updated records the override reset an actor change implies", async () => {
+      const { agent, integration, ids } = await agentWithConnections("audit-actor", 1);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        connectionOverrides: { [integration]: ids },
+      });
+      const other = await createTestUser();
+      await addOrgMember(ctx.orgId, other.id, "member");
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: { userId: other.id } }),
+      });
+      expect(res.status).toBe(200);
+
+      const [updated] = await scheduleAudits(schedule.id);
+      expect(updated).toEqual({
+        action: "schedule.updated",
+        before: { connectionOverrides: { [integration]: ids }, actorId: ctx.user.id },
+        after: { connectionOverrides: null, actorId: other.id },
       });
     });
   });
@@ -1397,7 +1487,7 @@ describe("Schedules API", () => {
         const res = await put(scheduleId, { enabled: false });
 
         expect(res.status).toBe(200);
-        expect(((await res.json()) as any).enabled).toBe(false);
+        expect(await res.json()).toMatchObject({ enabled: false, disabled_reason: null });
       });
 
       it("can still be renamed and rescheduled", async () => {

@@ -10,8 +10,8 @@
  * the platform's shared limiter (`infra/rate-limit/better-auth-storage.ts`),
  * and keys each bucket on the client IP the platform resolved
  * (`lib/client-ip.ts`) — so `TRUST_PROXY` decides whether a forwarded chain
- * buys a caller its own budget. Refusals carry `X-Retry-After`, not the
- * `Retry-After` the local device/CLI limiters emit.
+ * buys a caller its own budget. The mount restates each refusal as RFC 6749
+ * JSON under `Retry-After` (`oauthRateLimitResponse`).
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -90,17 +90,15 @@ describe("oauth2-token rate limit", () => {
 
     const refused = await postToken("203.0.113.10");
     expect(refused.status).toBe(429);
-    // Better Auth hands the runtime a string body and names no media type, so
-    // the refusal carries no `Content-Type` — the JSON is parsed unnegotiated.
-    expect(refused.headers.get("content-type")).toBeNull();
-    const body = (await refused.json()) as { message?: unknown };
-    expect(typeof body.message).toBe("string");
+    expect(refused.headers.get("content-type")).toStartWith("application/json");
+    const body = (await refused.json()) as { error?: unknown; error_description?: unknown };
+    expect(body.error).toBe("temporarily_unavailable");
+    expect(typeof body.error_description).toBe("string");
 
-    // Better Auth answers `X-Retry-After` in seconds — the local device/CLI
-    // limiters are the ones emitting `Retry-After`.
-    const retryAfter = Number(refused.headers.get("X-Retry-After"));
+    const retryAfter = Number(refused.headers.get("Retry-After"));
     expect(Number.isInteger(retryAfter)).toBe(true);
     expect(retryAfter).toBeGreaterThan(0);
+    expect(refused.headers.get("X-Retry-After")).toBeNull();
   });
 
   it("gives a different forwarded client IP its own budget", async () => {

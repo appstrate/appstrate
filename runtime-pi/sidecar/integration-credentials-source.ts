@@ -86,6 +86,8 @@ export type { IntegrationCredentialsWire };
  *   expires_at            → expiresAt
  *   delivery_plans        → deliveryPlans
  *   expires_at_epoch_ms   → expiresAtEpochMs
+ *   rejection_streak      → rejectionStreak
+ *   credential_revision   → credentialRevision
  *   header_name           → headerName           (per delivery plan)
  *   header_prefix         → headerPrefix         (per delivery plan)
  *   allow_server_override → allowServerOverride  (per delivery plan)
@@ -124,11 +126,23 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
 
   const expiresAtEpochMs = (r.expires_at_epoch_ms ?? {}) as Record<string, number | null>;
 
-  return { auths, deliveryPlans, expiresAtEpochMs };
+  return {
+    auths,
+    deliveryPlans,
+    expiresAtEpochMs,
+    ...(typeof r.rejection_streak === "number" ? { rejectionStreak: r.rejection_streak } : {}),
+    ...(typeof r.credential_revision === "string"
+      ? { credentialRevision: r.credential_revision }
+      : {}),
+  };
 }
 
-function connectionQuery(connectionId: string | undefined): string {
-  return connectionId === undefined ? "" : `?connection_id=${encodeURIComponent(connectionId)}`;
+function credentialsQuery(connectionId: string | undefined, credentialRevision?: string): string {
+  const query = new URLSearchParams();
+  if (connectionId !== undefined) query.set("connection_id", connectionId);
+  if (credentialRevision !== undefined) query.set("credential_revision", credentialRevision);
+  const qs = query.toString();
+  return qs ? `?${qs}` : "";
 }
 
 interface CreateIntegrationCredentialsSourceOptions {
@@ -243,7 +257,9 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * the platform refresh POST). Callers holding the concrete source type can
    * invoke it without a presence check.
    */
-  refreshOnUnauthorized(authKey: string): Promise<boolean>;
+  refreshOnUnauthorized(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
+  /** Required here: this factory always reports ({@link MitmCredentialSource.reportUpstreamSuccess}). */
+  reportUpstreamSuccess(credentialRevision: string | undefined): void;
 }
 
 /**
@@ -325,9 +341,38 @@ export function createIntegrationCredentialsSource(
     string,
     { handler: () => Promise<boolean>; reauthStatuses: ReadonlySet<number> }
   >();
+  // The platform holds a rejection streak on this connection that no success has ended yet: the
+  // boot payload announced one, or a rejection was counted during this run (the 502 below).
+  let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
+
+  const reportUpstreamSuccess = (revision: string | undefined): void => {
+    if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
+    // A verdict on a superseded credential leaves the held one's streak pending.
+    if (revision === payload.credentialRevision) rejectionPending = false;
+    postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, revision, {
+      ...options,
+      fetchFn,
+    }).then(
+      (res) => {
+        if (!res.ok)
+          logger.warn("integration upstream success report refused", {
+            ...logCtx,
+            status: res.status,
+          });
+      },
+      (err: unknown) =>
+        logger.warn("integration upstream success report failed", {
+          ...logCtx,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+  };
 
   const current = (): IntegrationCredentialsPayload => ({
     auths: [...payload.auths],
+    ...(payload.credentialRevision !== undefined
+      ? { credentialRevision: payload.credentialRevision }
+      : {}),
   });
 
   const deliveryPlans = () => {
@@ -344,7 +389,10 @@ export function createIntegrationCredentialsSource(
     return rest;
   };
 
-  const refreshOnUnauthorized = async (authKey: string): Promise<boolean> => {
+  const refreshOnUnauthorized = async (
+    authKey: string,
+    credentialRevision: string | undefined,
+  ): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
     // separately on the network side — the platform refreshes the named
     // connection in one call — but we DO want to suppress duplicates per
@@ -370,7 +418,9 @@ export function createIntegrationCredentialsSource(
     // platform refresh endpoint. Reuses the same cooldown + in-flight dedup so
     // a hot-looping reauth status can't hammer the login tool.
     const relogin = reloginHandlers.get(authKey);
-    const promise = relogin ? runRelogin(authKey, relogin.handler) : doRefresh(authKey);
+    const promise = relogin
+      ? runRelogin(authKey, relogin.handler)
+      : doRefresh(authKey, credentialRevision);
     inflight.set(authKey, promise);
     try {
       return await promise;
@@ -403,13 +453,18 @@ export function createIntegrationCredentialsSource(
     return ok;
   }
 
-  async function doRefresh(authKey: string): Promise<boolean> {
+  async function doRefresh(
+    authKey: string,
+    rejectedRevision: string | undefined,
+  ): Promise<boolean> {
     let res: Response;
     try {
-      res = await postIntegrationCredentialsRefresh(options.integrationId, options.connectionId, {
-        ...options,
-        fetchFn,
-      });
+      res = await postIntegrationCredentialsRefresh(
+        options.integrationId,
+        options.connectionId,
+        rejectedRevision,
+        { ...options, fetchFn },
+      );
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
         ...logCtx,
@@ -442,6 +497,7 @@ export function createIntegrationCredentialsSource(
       // any other auth it is expected — nothing to refresh, the platform counts
       // the upstream rejection toward the reconnect threshold (then 410, above).
       const authType = payload.auths.find((a) => a.authKey === authKey)?.authType;
+      if (res.status === 502 && authType !== "oauth2") rejectionPending = true;
       if (res.status !== 502 || authType === "oauth2") {
         logger.warn("integration credential refresh non-OK status", {
           ...logCtx,
@@ -464,8 +520,10 @@ export function createIntegrationCredentialsSource(
     }
     // Replace the payload in place — the listener reads `current()` /
     // `deliveryPlans()` on every request, so the next inbound request
-    // automatically sees the new credentials.
+    // automatically sees the new credentials. A 200 can also hand back a
+    // credential that replaced the one held: its own streak is what is pending.
     payload = next;
+    rejectionPending = (next.rejectionStreak ?? 0) > 0;
     lastRefreshAt.set(authKey, Date.now());
     logger.info("integration credentials refreshed", {
       ...logCtx,
@@ -485,6 +543,7 @@ export function createIntegrationCredentialsSource(
     // captured auth's delivery plan + expiry are keyed by authKey so the
     // planner / listener / api_call adapter pick them up on the next request.
     payload = {
+      ...payload,
       auths: [...payload.auths.filter((a) => a.authKey !== auth.authKey), auth],
       deliveryPlans: { ...payload.deliveryPlans, [auth.authKey]: plan },
       expiresAtEpochMs: {
@@ -502,6 +561,7 @@ export function createIntegrationCredentialsSource(
     current,
     deliveryPlans,
     refreshOnUnauthorized,
+    reportUpstreamSuccess,
     snapshot: () => payload,
     setSessionOutputs,
     setActiveInputs: (
@@ -550,15 +610,36 @@ export function createIntegrationCredentialsSource(
 /**
  * The single report path for "the upstream rejected this credential": the
  * platform refreshes what it can, else counts it toward a reconnect flag (410).
+ * `credentialRevision` names the rejected credential; a superseded one gets the
+ * current credential back (200) and counts nothing. Without it (a local server
+ * with no credentials source) the rejection is counted against the current one.
  */
 export function postIntegrationCredentialsRefresh(
   integrationId: string,
   connectionId: string | undefined,
+  credentialRevision: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${connectionQuery(connectionId)}`,
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${credentialsQuery(connectionId, credentialRevision)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.runToken}` },
+    },
+  );
+}
+
+/** A call with `credentialRevision` succeeded upstream: end the connection's rejection streak. */
+function postIntegrationUpstreamSuccess(
+  integrationId: string,
+  connectionId: string,
+  credentialRevision: string,
+  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  return fetchFn(
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/upstream-success${credentialsQuery(connectionId, credentialRevision)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
@@ -608,7 +689,7 @@ export async function fetchInitialIntegrationCredentials(
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
 ): Promise<IntegrationCredentialsWire> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${connectionQuery(connectionId)}`;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}${credentialsQuery(connectionId)}`;
   const res = await fetchFn(url, {
     headers: { Authorization: `Bearer ${opts.runToken}` },
   });

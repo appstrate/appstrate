@@ -36,7 +36,7 @@ Use the [feature request template](https://github.com/appstrate/appstrate/issues
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (v1.3+) — that's it for Tier 0
+- [Bun](https://bun.sh/) (v1.3.14+) — that's it for Tier 0
 - [Docker](https://docs.docker.com/get-docker/) (with Compose v2) — only needed for Tier 1+ or testing Docker agent execution
 
 ### Development Setup
@@ -87,6 +87,7 @@ stamps disagree.
 | `bun run dev`                  | Start API + web (turbo, hot-reload)                            |
 | `bun run check`                | The full quality gate — task list in `AGENTS.md`               |
 | `bun test`                     | All tests (~11,400 `it()` across ~875 files) — requires Docker |
+| `bun run test:tier0`           | All tests on PGlite, split across processes — no Docker        |
 | `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                                  |
 | `bun run build`                | Build frontend + shared packages                               |
 | `bun run db:migrate`           | Apply database migrations                                      |

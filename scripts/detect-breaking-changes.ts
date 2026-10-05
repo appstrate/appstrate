@@ -24,6 +24,7 @@
 import { resolve } from "node:path";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { collectModuleOpenApi, stripModuleContributions } from "./lib/module-openapi.ts";
+import { OPERATION_VERBS, resolveRef } from "./lib/openapi-pointer.ts";
 import { format, resolveConfig } from "prettier";
 
 const BASELINE_PATH = resolve(import.meta.dir, "../apps/api/src/openapi/baseline.json");
@@ -75,21 +76,10 @@ type PathsObj = Record<string, Record<string, unknown>>;
 // Helpers
 // ═══════════════════════════════════════════════════
 
-/** Resolve a JSON Pointer ($ref like "#/components/schemas/Foo") against a spec. */
-function resolveRef(ref: string, spec: Spec): Spec | undefined {
-  if (!ref.startsWith("#/")) return undefined;
-  let current: unknown = spec;
-  for (const part of ref.slice(2).split("/")) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current as Spec | undefined;
-}
-
 /** Dereference a schema — if it has $ref, resolve it. */
 function deref(schema: Spec | undefined, spec: Spec): Spec | undefined {
   if (!schema) return undefined;
-  if (typeof schema.$ref === "string") return resolveRef(schema.$ref, spec);
+  if (typeof schema.$ref === "string") return resolveRef(spec, schema.$ref);
   return schema;
 }
 
@@ -235,13 +225,11 @@ function compareSpecs(baseline: Spec, current: Spec): Change[] {
   const baselinePaths = (baseline.paths || {}) as PathsObj;
   const currentPaths = (current.paths || {}) as PathsObj;
 
-  const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "options", "head", "trace"];
-
   // 1. Check each baseline endpoint
   for (const [path, baselineMethods] of Object.entries(baselinePaths)) {
     const currentMethods = currentPaths[path];
 
-    for (const method of HTTP_METHODS) {
+    for (const method of OPERATION_VERBS) {
       const baselineOp = baselineMethods[method] as Spec | undefined;
       if (!baselineOp) continue;
 
@@ -412,7 +400,7 @@ function compareSpecs(baseline: Spec, current: Spec): Change[] {
   for (const [path, currentMethods] of Object.entries(currentPaths)) {
     const baselineMethods = baselinePaths[path];
 
-    for (const method of HTTP_METHODS) {
+    for (const method of OPERATION_VERBS) {
       if (!(currentMethods as Record<string, unknown>)[method]) continue;
 
       if (!baselineMethods || !(baselineMethods as Record<string, unknown>)[method]) {

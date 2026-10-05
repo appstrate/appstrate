@@ -182,7 +182,9 @@ describe("/internal/* — connect-run grant authorization", () => {
       .update(runs)
       .set({
         resolvedConnections: {
-          [integrationId]: [{ connectionId, source: "member_pin" as const }],
+          [integrationId]: [
+            { connectionId, source: "member_pin" as const, label: "conn", accountId: "acct" },
+          ],
         },
       })
       .where(eq(runs.id, runId));
@@ -572,6 +574,15 @@ describe("/internal/* — connect-run grant authorization", () => {
       expect(res.status).toBe(409);
       const body = (await res.json()) as { code: string };
       expect(body.code).toBe("connect_run_no_refresh");
+    });
+
+    it("POST /upstream-success is refused for a connect token like /refresh, not 'Run not found'", async () => {
+      const res = await app.request(
+        `/internal/integration-credentials/${INTEGRATION}/upstream-success`,
+        { method: "POST", headers: { Authorization: `Bearer ${connectToken}` } },
+      );
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("connect_run_no_refresh");
     });
 
     it("POST /refresh still works for a real run token", async () => {

@@ -440,9 +440,9 @@ describe("runner preset", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       blocks_run: boolean;
-      integrations: { integration_id: string }[];
+      integrations: { integration_package_id: string }[];
     };
-    expect(body.integrations.map((i) => i.integration_id)).toEqual([INTEGRATION_ID]);
+    expect(body.integrations.map((i) => i.integration_package_id)).toEqual([INTEGRATION_ID]);
     expect(await res.clone().text()).not.toContain(SKILL_ID);
   });
 

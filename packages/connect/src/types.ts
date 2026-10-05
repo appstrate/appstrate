@@ -49,19 +49,11 @@ export interface OAuthStateRecord {
     tokenEndpoint: string;
     /** Optional RFC 8707 `resource` parameter (`auths.{key}.resource`) for the token exchange. */
     resource?: string;
-    /** OAuth2 token endpoint client auth method (`token_endpoint_auth_method`) declared on the auth. */
-    tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
-    /** Optional explicit client_id (DCR or user-supplied). */
-    clientId?: string;
-    /** Optional explicit client_secret (omitted for `none`). */
-    clientSecret?: string;
     /**
-     * Which registered client minted this connection — a flat client id (system
-     * env id or custom `integration_oauth_clients.id`). Carried into the state so
-     * the callback stamps it on the connection row; token refresh later resolves
-     * the same credentials by it.
+     * The registered client that minted this connection. The state carries this
+     * reference, never the client's credentials ({@link OAuthClientResolver}).
      */
-    clientRef?: string;
+    clientRef: string;
     /**
      * Reconnect / upgrade-scopes target. When set, the callback hands
      * this id to `saveIntegrationConnection` so the existing row is
@@ -72,6 +64,23 @@ export interface OAuthStateRecord {
     connectionId?: string;
   };
 }
+
+/** The credentials of a registered OAuth client, as the token request uses them. */
+export interface ResolvedOAuthClient {
+  clientId: string;
+  /** Empty for a public client (`token_endpoint_auth_method=none`). */
+  clientSecret: string;
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+}
+
+/** A `clientRef` → its current credentials within the state's space; `null` = gone. */
+export type OAuthClientResolver = (ref: {
+  clientRef: string;
+  packageId: string;
+  authKey: string;
+  orgId: string;
+  spaceId: string;
+}) => Promise<ResolvedOAuthClient | null>;
 
 /**
  * Ephemeral OAuth state store — keyed by `state` (OAuth2).
