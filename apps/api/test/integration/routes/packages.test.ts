@@ -836,9 +836,10 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
       const body = (await res.json()) as any;
       expect(body.code).toBe("name_collision");
+      expect(body.detail).toBe("A package with identifier '@pkgorg/dup-agent' already exists");
     });
 
     it("returns 401 without authentication", async () => {

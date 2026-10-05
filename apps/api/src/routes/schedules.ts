@@ -112,7 +112,13 @@ function scheduleInputInvalid(errors: { field: string; message: string }[]): Api
  */
 function assertFirable(cronExpression: string, timezone: string): void {
   if (!isValidCron(cronExpression)) {
-    throw invalidRequest("Invalid cron expression", "cron_expression");
+    throw new ApiError({
+      status: 400,
+      code: "invalid_cron_expression",
+      title: "Invalid Request",
+      detail: "Invalid cron expression",
+      param: "cron_expression",
+    });
   }
   if (computeNextRun(cronExpression, timezone) === null) {
     throw invalidRequest(`Invalid timezone '${timezone}'`, "timezone");

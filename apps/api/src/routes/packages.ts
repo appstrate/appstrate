@@ -761,12 +761,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
       if (existingIds.includes(packageId)) {
-        throw new ApiError({
-          status: 400,
-          code: "name_collision",
-          title: "Name Collision",
-          detail: `A ${rcfg.cfg.type} with identifier '${packageId}' already exists`,
-        });
+        // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
+        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
       }
 
       draft = {

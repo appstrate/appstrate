@@ -244,6 +244,7 @@ describe("Organizations API", () => {
             body: JSON.stringify({ name: "Blocked Org", slug: "blocked-org" }),
           });
           expect(res.status).toBe(403);
+          expect(((await res.json()) as { code?: string }).code).toBe("org_creation_disabled");
         } finally {
           for (const [k, v] of Object.entries(SNAPSHOT)) {
             if (v === undefined) delete process.env[k];

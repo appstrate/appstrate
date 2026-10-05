@@ -500,7 +500,8 @@ describe("schedule writes for another actor — only what both reach", () => {
       body: JSON.stringify({ cron_expression: "0 9 * * *", actor: { userId: guest.user.id } }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { param?: string; errors?: unknown };
+    const body = (await res.json()) as { code?: string; param?: string; errors?: unknown };
+    expect(body.code).toBe("schedule_actor_invalid");
     expect(body.param).toBe("actor");
     expect(body.errors).toBeUndefined();
     expect(await db.select().from(schedules)).toHaveLength(0);
