@@ -24,7 +24,6 @@ import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { toast } from "sonner";
 import { hasFullOrgAccess } from "../../lib/org-role";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
@@ -77,17 +76,12 @@ export function OrgSettingsMembersPage() {
     void invalidateIntegrationQueries(queryClient);
   };
 
-  const toastMemberError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: toastMemberError,
   });
 
   const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: toastMemberError,
   });
 
   if (isLoading) return <LoadingState />;

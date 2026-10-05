@@ -23,6 +23,7 @@ import { RunAgentButton } from "../run-agent-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
+import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 
 export function AgentRunsTab({
   packageId,
@@ -187,7 +188,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
 
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
 
   if (!detail || !currentOrg) return null;
 
@@ -224,11 +225,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const curlExample = buildCurlExample(curlParams);
   const curlMultipart = hasFileInput ? buildCurlMultipartExample(curlParams) : null;
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const handleCopy = (text: string) => void copy(text);
 
   const handleKeyCreated = (key: string) => {
     setRawKey(key);

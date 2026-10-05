@@ -64,7 +64,6 @@ function useUpdateModel() {
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("delete", "/api/models/{id}", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

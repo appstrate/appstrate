@@ -31,6 +31,7 @@ import {
   type ToolExecutionStatus,
 } from "./log-utils";
 import { Modal } from "./modal";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -180,7 +181,7 @@ export function LogViewer({ entries }: LogViewerProps) {
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [showTools, setShowTools] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
   const visibleEntries = useMemo(
     () => (showTools ? entries : entries.filter((entry) => entry.kind !== "tool")),
@@ -238,9 +239,7 @@ export function LogViewer({ entries }: LogViewerProps) {
         return `${ts}${e.message}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copy(text);
   };
 
   return (

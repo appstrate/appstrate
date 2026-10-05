@@ -86,20 +86,6 @@ const orgContext: Middleware = {
   },
 };
 
-/** The members RFC 9457 and this API define; anything else is a per-code extension. */
-const STANDARD_PROBLEM_MEMBERS: ReadonlySet<string> = new Set<keyof ProblemDetail>([
-  "type",
-  "title",
-  "status",
-  "detail",
-  "instance",
-  "code",
-  "request_id",
-  "param",
-  "retry_after",
-  "errors",
-]);
-
 /**
  * Normalizes a non-2xx response into the error the caller sees. A body with an
  * RFC 9457 `code` becomes an `ApiError` carrying the problem details; anything
@@ -113,21 +99,34 @@ export async function toApiError(response: Response): Promise<Error> {
     .json()
     .catch(() => ({ detail: response.statusText }));
   if (body.code) {
-    // The machine-readable half of a refusal: validation failures list field
-    // errors under `errors`, every other code merges its own members into the
-    // problem body (RFC 9457 §3.2 extensions — `member_count`, `invitation_id`).
-    const extensions = Object.fromEntries(
-      Object.entries(body).filter(([member]) => !STANDARD_PROBLEM_MEMBERS.has(member)),
-    );
+    const {
+      type: _type,
+      title: _title,
+      status: _status,
+      detail,
+      instance: _instance,
+      code,
+      request_id,
+      param,
+      retry_after: _retryAfter,
+      errors,
+      ...extensions
+    } = body;
     return new ApiError(
-      body.code,
-      body.detail || `API Error: ${response.status}`,
+      code,
+      detail || `API Error: ${response.status}`,
       response.status,
-      // An open record on purpose: consumers narrow per `code`.
-      (body.errors ?? (Object.keys(extensions).length > 0 ? extensions : undefined)) as
-        Record<string, unknown> | undefined,
-      body.request_id,
-      body.param,
+      // `ApiError.details` is an open record, polymorphic by `code`, so
+      // consumers narrow per `code`: a validation problem carries its `errors`
+      // array (the cast bridges the spec's array type), any other problem its
+      // RFC 9457 §3.2 extension members — the code-specific half the server
+      // writes beside the standard fields (`member_count`, `active_version`).
+      // `errors` wins when a problem carries both: it is the typed standard
+      // field, and its consumers index it as an array.
+      (errors as unknown as Record<string, unknown> | undefined) ??
+        (Object.keys(extensions).length > 0 ? extensions : undefined),
+      request_id,
+      param,
     );
   }
   return new Error(body.detail || `API Error: ${response.status}`);

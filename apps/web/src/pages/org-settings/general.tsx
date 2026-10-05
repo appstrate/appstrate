@@ -77,9 +77,6 @@ export function OrgSettingsGeneralPage() {
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
       setEditingName(false);
     },
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
@@ -90,12 +87,10 @@ export function OrgSettingsGeneralPage() {
 
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
       // The server is the real guard (owners may have changed meanwhile).
@@ -240,9 +235,6 @@ export function OrgSettingsGeneralPage() {
                           : t("orgSettings.restrictCopyDisabled"),
                       );
                     },
-                    onError: (err) => {
-                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-                    },
                   },
                 )
               }
@@ -288,9 +280,6 @@ export function OrgSettingsGeneralPage() {
                             ? t("orgSettings.dashboardSsoEnabled")
                             : t("orgSettings.dashboardSsoDisabled"),
                         );
-                      },
-                      onError: (err) => {
-                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                       },
                     },
                   )

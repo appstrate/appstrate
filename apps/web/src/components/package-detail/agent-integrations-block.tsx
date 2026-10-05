@@ -142,7 +142,6 @@ function IntegrationConnectionCard({
                 {
                   onSuccess: () =>
                     toast.success(t("integrations.activate.success", { ns: "settings" })),
-                  onError: () => toast.error(t("integrations.activate.error", { ns: "settings" })),
                 },
               );
             }}

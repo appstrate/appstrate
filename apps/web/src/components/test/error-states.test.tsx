@@ -76,31 +76,57 @@ describe("ResourceErrorState", () => {
   });
 });
 
+// The harness has no DOM renderer and `renderToStaticMarkup` cannot run an
+// error boundary, so the class is driven through the lifecycle React would
+// call, with a `setState` that applies the update like React does.
 describe("ErrorBoundary", () => {
-  const crashed = (resetKey: string) => {
-    const boundary = new ErrorBoundary({ children: null, resetKey });
-    boundary.state = ErrorBoundary.getDerivedStateFromError(
-      new TypeError("o?.map is not a function"),
-    );
+  type BoundaryProps = ConstructorParameters<typeof ErrorBoundary>[0];
+  const page = <p>routed-content</p>;
+
+  const mount = (resetKey: string) => {
+    const boundary = new ErrorBoundary({ children: page, resetKey });
+    boundary.setState = (next) => {
+      boundary.state = { ...boundary.state, ...(next as typeof boundary.state) };
+    };
     return boundary;
   };
+  /** One commit: optionally catch a crash, move to `resetKey`, run the update hook. */
+  const commit = (
+    boundary: InstanceType<typeof ErrorBoundary>,
+    resetKey: string,
+    crash = false,
+  ) => {
+    const prevProps: BoundaryProps = boundary.props;
+    const prevState = boundary.state;
+    if (crash) {
+      boundary.state = ErrorBoundary.getDerivedStateFromError(
+        new TypeError("o?.map is not a function"),
+      );
+    }
+    (boundary as { props: BoundaryProps }).props = { children: page, resetKey };
+    boundary.componentDidUpdate(prevProps, prevState);
+    return render(<>{boundary.render()}</>);
+  };
 
-  it("does not show the exception text", () => {
-    const html = render(<>{crashed("/agents").render()}</>);
+  it("replaces a crashed page with a retry panel that hides the exception text", () => {
+    const html = commit(mount("/agents"), "/agents", true);
 
     expect(html).toContain(t("error.unexpected"));
     expect(html).not.toContain("o?.map is not a function");
+    expect(html).not.toContain("routed-content");
   });
 
-  it("clears the error when the route changes, and only then", () => {
-    const boundary = crashed("/runs");
-    const updates: unknown[] = [];
-    boundary.setState = (next) => updates.push(next);
+  it("keeps the panel while the route stays, and shows the page again once it changes", () => {
+    const boundary = mount("/agents");
+    commit(boundary, "/agents", true);
 
-    boundary.componentDidUpdate({ children: null, resetKey: "/runs" });
-    expect(updates).toEqual([]);
+    expect(commit(boundary, "/agents")).toContain(t("error.unexpected"));
+    expect(commit(boundary, "/runs")).toBe("<p>routed-content</p>");
+  });
 
-    boundary.componentDidUpdate({ children: null, resetKey: "/agents" });
-    expect(updates).toEqual([{ hasError: false, reloading: false }]);
+  it("does not clear a crash caught in the very commit that changed the route", () => {
+    const html = commit(mount("/agents"), "/runs", true);
+
+    expect(html).toContain(t("error.unexpected"));
   });
 });

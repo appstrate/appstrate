@@ -100,7 +100,6 @@ export function useDeleteSpace() {
 export function useConvertSpaceToTeam() {
   const invalidate = useInvalidateSpaces();
   return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }
@@ -109,7 +108,6 @@ export function useConvertSpaceToTeam() {
 export function useSweepPersonalSpace() {
   const invalidate = useInvalidateSpaces();
   return $api.useMutation("post", "/api/spaces/{id}/sweep-now", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

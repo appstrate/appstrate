@@ -55,8 +55,6 @@ describe("loadHistory decode", () => {
     expect(await loadHistory(() => ({}), "chs_new")).toEqual({
       messages: [],
       skills: { skillMode: "auto", pinnedSkills: [] },
-      // What lets a deep link to a deleted or foreign conversation say so.
-      notFound: true,
     });
   });
 

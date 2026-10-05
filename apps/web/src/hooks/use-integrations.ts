@@ -58,7 +58,6 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
-import { onMutationError } from "../lib/mutation-error";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
@@ -262,6 +261,7 @@ export function useIntegrationRunBlocking(
 export function useInitiateIntegrationConnect() {
   const { t } = useTranslation("settings");
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
       body: {
@@ -450,7 +450,6 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
       }
     },
     onSuccess,
-    onError: onMutationError,
   });
 }
 
@@ -534,7 +533,6 @@ export function useUpsertIntegrationPin() {
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -553,7 +551,6 @@ export function useDeleteIntegrationPin() {
       toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -596,7 +593,6 @@ export function useUpsertIntegrationOrgDefault() {
       // invalidate every integrations read, not just the default itself.
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -613,7 +609,6 @@ export function useDeleteIntegrationOrgDefault() {
       toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -638,6 +633,5 @@ export function useUpdateIntegrationConnection() {
       // A label shows on every picker and readiness view, not just the connection list.
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }

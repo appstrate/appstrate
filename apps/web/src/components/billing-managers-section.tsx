@@ -101,8 +101,6 @@ export function BillingManagersSection() {
           void queryClient.invalidateQueries({ queryKey: managersKey });
           toast.success(t("billingManagers.saveSuccess"));
         },
-        onError: (err) =>
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

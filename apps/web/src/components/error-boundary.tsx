@@ -56,8 +56,10 @@ export class ErrorBoundary extends Component<Props, State> {
     // Non-chunk errors are already surfaced via getDerivedStateFromError → ErrorFallback.
   }
 
-  override componentDidUpdate(prev: Props) {
-    if (this.state.hasError && prev.resetKey !== this.props.resetKey) {
+  override componentDidUpdate(prev: Props, prevState: State) {
+    // `prevState.hasError`: only an error that was already on screen when the
+    // key changed is stale. One caught in the same commit belongs to the new page.
+    if (prevState.hasError && this.state.hasError && prev.resetKey !== this.props.resetKey) {
       this.setState({ hasError: false, reloading: false });
     }
   }

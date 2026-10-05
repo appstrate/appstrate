@@ -196,8 +196,8 @@ export function ResourceSection({
         if (prev.some((e) => e.id === newId)) return prev;
         return [...prev, { id: newId, version: caretRange(newVersion) }];
       });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("error.unknown"));
+    } catch {
+      // Reported by the mutation cache.
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -342,8 +342,6 @@ export function ResourceSection({
                       {
                         onSuccess: () =>
                           toast.success(t("integrations.activate.success", { ns: "settings" })),
-                        onError: () =>
-                          toast.error(t("integrations.activate.error", { ns: "settings" })),
                       },
                     );
                   }}

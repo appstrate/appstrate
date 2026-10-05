@@ -214,7 +214,6 @@ function useUploadPackage(type: PackageType) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
       const fd = new FormData();
       fd.append("file", file);
@@ -243,7 +242,6 @@ function useDeletePackage(type: PackageType) {
   const navigate = useNavigate();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (id: string) => {
       await client.DELETE(`/api/packages/${segment}/{scope}/{name}`, {
         params: { path: splitPackageRef(id) },
@@ -268,7 +266,6 @@ function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       id,
       homeSpaceId,
@@ -437,6 +434,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     /** `version` overrides the manifest's; `etag` refuses (412) a draft moved since it was read. */
     mutationFn: async ({
       version,
@@ -467,6 +465,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
+    // Reporting the refusal is the callers' (`meta`): the publish form names it inline.
     onError: (err) => {
       if (
         err instanceof ApiError &&
@@ -484,7 +483,6 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (version: string) => {
       await client.DELETE(`/api/packages/${segment}/{scope}/{name}/versions/{version}`, {
         params: { path: { ...splitPackageRef(packageId), version } },

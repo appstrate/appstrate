@@ -6,14 +6,20 @@
  * the space scope are derived from.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage();
 
 const { queryClient } = await import("../query-client.ts");
 const { orgKeys } = await import("../query-keys.ts");
-const { noteStaleAuthority, setSessionRefusedHandler } = await import("../stale-authority.ts");
+const {
+  AUTHORITY_REREAD_INTERVAL_MS,
+  createSessionRefusedHandler,
+  noteStaleAuthority,
+  setSessionRefusedHandler,
+} = await import("../stale-authority.ts");
+const { authStore } = await import("../../stores/auth-store.ts");
 const { client } = await import("../../api/client.ts");
 const { ApiError } = await import("../../api/errors.ts");
 
@@ -23,18 +29,30 @@ const refusal = (status: number) =>
 const request = (path: string) => new Request(`http://localhost${path}`);
 const isInvalidated = (key: readonly unknown[]) =>
   queryClient.getQueryState(key)?.isInvalidated ?? false;
+const seedListings = () => {
+  queryClient.setQueryData(orgKeys.all, []);
+  queryClient.setQueryData(SPACES_KEY, { data: [] });
+};
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("noteStaleAuthority", () => {
   let sessionRefusals: number;
+  let now: Mock<typeof Date.now>;
+  // Each test starts a full window after the previous one's last re-read.
+  let clock = 1_000_000;
 
   beforeEach(() => {
+    clock += 10 * AUTHORITY_REREAD_INTERVAL_MS;
+    now = spyOn(Date, "now").mockImplementation(() => clock);
     queryClient.clear();
-    queryClient.setQueryData(orgKeys.all, []);
-    queryClient.setQueryData(SPACES_KEY, { data: [] });
+    seedListings();
     sessionRefusals = 0;
     setSessionRefusedHandler(() => {
       sessionRefusals += 1;
     });
+  });
+  afterEach(() => {
+    now.mockRestore();
   });
 
   it("hands a 401 to the auth seam", () => {
@@ -46,8 +64,8 @@ describe("noteStaleAuthority", () => {
 
   it("re-reads the org and space listings on a 403 and on a 404", () => {
     for (const status of [403, 404]) {
-      queryClient.setQueryData(orgKeys.all, []);
-      queryClient.setQueryData(SPACES_KEY, { data: [] });
+      clock += AUTHORITY_REREAD_INTERVAL_MS;
+      seedListings();
 
       noteStaleAuthority(request("/api/runs?limit=15"), refusal(status));
 
@@ -55,6 +73,24 @@ describe("noteStaleAuthority", () => {
       expect(isInvalidated(SPACES_KEY)).toBe(true);
     }
     expect(sessionRefusals).toBe(0);
+  });
+
+  it("re-reads once per window, however many refusals arrive in it", () => {
+    const invalidate = spyOn(queryClient, "invalidateQueries");
+    try {
+      for (let i = 0; i < 20; i++) noteStaleAuthority(request("/api/runs/run_x"), refusal(404));
+      clock += AUTHORITY_REREAD_INTERVAL_MS - 1;
+      noteStaleAuthority(request("/api/runs/run_x"), refusal(404));
+
+      // One re-read = the two listings.
+      expect(invalidate).toHaveBeenCalledTimes(2);
+
+      clock += 1;
+      noteStaleAuthority(request("/api/runs/run_x"), refusal(404));
+      expect(invalidate).toHaveBeenCalledTimes(4);
+    } finally {
+      invalidate.mockRestore();
+    }
   });
 
   it("does not re-read a listing because that listing was refused", () => {
@@ -80,5 +116,87 @@ describe("noteStaleAuthority", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect(sessionRefusals).toBe(1);
+  });
+});
+
+describe("createSessionRefusedHandler", () => {
+  const signedIn = { id: "usr_1", email: "olivia@test.com", emailVerified: true };
+  let ended: number;
+  let checks: number;
+
+  /** A handler whose session check answers `verdict` — after running `during`, mid-check. */
+  const handlerFor = (verdict: boolean | null | Error, during?: () => void) => {
+    const handler = createSessionRefusedHandler({
+      hasSession: async () => {
+        checks += 1;
+        during?.();
+        if (verdict instanceof Error) throw verdict;
+        return verdict;
+      },
+      endSession: async () => {
+        ended += 1;
+        authStore.setState({ user: null });
+      },
+    });
+    return handler;
+  };
+
+  beforeEach(() => {
+    ended = 0;
+    checks = 0;
+    authStore.setState({ user: signedIn, profile: null, loading: false });
+    queryClient.clear();
+    queryClient.setQueryData<string[]>(["runs"], ["cached"]);
+  });
+
+  it("ends the session and clears the cache when Better Auth says there is none", async () => {
+    handlerFor(false)();
+    await tick();
+
+    expect(ended).toBe(1);
+    expect(authStore.getState().user).toBeNull();
+    expect(queryClient.getQueryData(["runs"])).toBeUndefined();
+  });
+
+  it("checks once for a burst of 401s, including the ones its own check provokes", async () => {
+    const handler: () => void = handlerFor(true, () => handler());
+    for (let i = 0; i < 5; i++) handler();
+    await tick();
+
+    expect(checks).toBe(1);
+
+    // The flight is over: a later 401 is checked again.
+    handler();
+    await tick();
+    expect(checks).toBe(2);
+  });
+
+  it("keeps the session and the cache when the session is confirmed", async () => {
+    handlerFor(true)();
+    await tick();
+
+    expect(ended).toBe(0);
+    expect(queryClient.getQueryData<string[]>(["runs"])).toEqual(["cached"]);
+  });
+
+  it("revokes nothing when the session could not be checked", async () => {
+    for (const verdict of [null, new TypeError("Failed to fetch")]) {
+      handlerFor(verdict)();
+      await tick();
+    }
+
+    expect(ended).toBe(0);
+    expect(authStore.getState().user).toEqual(signedIn);
+    expect(queryClient.getQueryData<string[]>(["runs"])).toEqual(["cached"]);
+  });
+
+  it("does nothing when nobody is signed in", async () => {
+    authStore.setState({ user: null });
+
+    handlerFor(false)();
+    await tick();
+
+    expect(checks).toBe(0);
+    expect(queryClient.getQueryData<string[]>(["runs"])).toEqual(["cached"]);
   });
 });

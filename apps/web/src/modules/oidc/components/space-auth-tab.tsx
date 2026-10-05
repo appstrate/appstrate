@@ -96,7 +96,6 @@ function SmtpSection() {
           toast.success(t("settings:spaceAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
-        onError: (err) => toast.error(err.message),
       },
     );
   }
@@ -244,7 +243,6 @@ function SmtpSection() {
               toast.success(t("settings:spaceAuth.smtpTestOk"));
               setTestOpen(false);
             },
-            onError: (err) => toast.error(err.message),
           })
         }
       />
@@ -331,7 +329,6 @@ function SocialSection({
           toast.success(t("settings:spaceAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
-        onError: (err) => toast.error(err.message),
       },
     );
   }

@@ -6,7 +6,6 @@
   "composer.readOnly": "Your role can read conversations, not write them.",
   "threads.empty": "Send a message! Your conversation history will appear here.",
   "threads.emptyReadOnly": "No conversations to read yet.",
-  "conversation.unavailable": "This conversation was not found or is not accessible. It may have been deleted.",
   "context.label": "Conversation context",
   "context.collapse": "Collapse conversation context",
   "context.loading": "Loading context…",

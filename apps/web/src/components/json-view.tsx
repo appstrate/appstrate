@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { useMemo } from "react";
 import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
 import { Copy, Check } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface JsonViewProps {
   data: unknown;
@@ -33,21 +34,8 @@ const jsonStyles = {
 };
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 2000);
-  }, [text]);
+  const { copied, copy } = useCopyToClipboard();
+  const handleCopy = () => void copy(text);
 
   return (
     <Button

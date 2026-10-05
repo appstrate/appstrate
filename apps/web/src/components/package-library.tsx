@@ -268,12 +268,7 @@ function ActivationCheckbox({
       title={title}
       onCheckedChange={() => {
         if (blocked) return;
-        setActive.mutate(
-          { spaceId: space.id, packageId: pkg.id, active: !active },
-          {
-            onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")),
-          },
-        );
+        setActive.mutate({ spaceId: space.id, packageId: pkg.id, active: !active });
       }}
     />
   );
@@ -478,17 +473,14 @@ function PlacementMap({
                             aria-label={t("library.revokeShare")}
                             disabled={revoke.isPending}
                             onClick={() =>
-                              revoke.mutate(
-                                {
-                                  params: {
-                                    path: {
-                                      ...splitPackageRef(pkg.id),
-                                      target: placement.space_id,
-                                    },
+                              revoke.mutate({
+                                params: {
+                                  path: {
+                                    ...splitPackageRef(pkg.id),
+                                    target: placement.space_id,
                                   },
                                 },
-                                { onError: (err) => toast.error(getErrorMessage(err)) },
-                              )
+                              })
                             }
                           >
                             <X size={10} />

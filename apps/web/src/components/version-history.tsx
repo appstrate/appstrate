@@ -100,11 +100,7 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
             });
           } else {
             deleteVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-              onError: (err) => {
-                setConfirmState(null);
-                toast.error(getErrorMessage(err));
-              },
+              onSettled: () => setConfirmState(null),
             });
           }
         }}

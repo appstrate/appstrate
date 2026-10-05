@@ -118,9 +118,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     { enabled: canSeeInvitations && !!currentOrg?.id },
   );
 
-  const onError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-
   /**
    * One control, two routes: an explicit row is PATCHed, an implicit member
    * (open space) has no row yet, so picking a role CREATES one. `PATCH` 404s
@@ -138,13 +135,13 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     if (member.source === "explicit") {
       updateMember.mutate(
         { params: { path: { id: spaceId, userId: member.userId } }, body },
-        { onError, onSuccess },
+        { onSuccess },
       );
       return;
     }
     addMember.mutate(
       { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
-      { onError, onSuccess },
+      { onSuccess },
     );
   };
 
@@ -163,7 +160,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               : t("spaceMembers.removedNone", { name: memberLabel(member) }),
           );
         },
-        onError,
       },
     );
   };
@@ -389,7 +385,7 @@ function AddSpaceMemberModal({
     error: rolesError,
     refetch: refetchRoles,
   } = useSpaceRoleOptions(spaceId);
-  const addMember = useAddSpaceMember();
+  const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canInviteExternal = can("members:invite");
@@ -406,6 +402,7 @@ function AddSpaceMemberModal({
   // one (add this space), never a second token — the server refuses with 409.
   const [pendingConflict, setPendingConflict] = useState(false);
   const inviteGuest = $api.useMutation("post", "/api/orgs/{orgId}/members", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (invitation) => {
       setInvitationToken(invitation.token);
       void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });

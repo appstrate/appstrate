@@ -1746,8 +1746,6 @@ export function IntegrationDetailPage() {
           );
           onSuccess?.();
         },
-        onError: () =>
-          toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
       },
     );
   };
@@ -2064,8 +2062,6 @@ export function IntegrationDetailPage() {
         onConfirm={() =>
           deletePkg.mutate(packageId, {
             onSuccess: () => setConfirmDelete(false),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
           })
         }
       />

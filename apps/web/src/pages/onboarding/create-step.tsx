@@ -86,6 +86,7 @@ export function OnboardingCreateStep() {
   }, [fromSwitcher, orgs, user, i18n.language, reset]);
 
   const createMutation = $api.useMutation("post", "/api/orgs", {
+    meta: { errorHandledByCaller: true },
     onSuccess: async (data) => {
       // The org list is served solely by the legacy ["orgs"] key (use-org.ts).
       await queryClient.invalidateQueries({ queryKey: orgKeys.all });

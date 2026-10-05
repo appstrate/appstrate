@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "bun:test";
 import { toast } from "sonner";
 import { ApiError } from "../../api/errors.ts";
-import { queryClient, reportsMutationError, shouldRetryQuery } from "../query-client.ts";
+import { queryClient, shouldRetryQuery } from "../query-client.ts";
 import { i18nReady } from "../../i18n.ts";
 
 await i18nReady;
@@ -40,13 +40,13 @@ describe("failed mutations", () => {
     queryClient.getMutationCache().clear();
   });
 
-  const fail = (options: Parameters<typeof reportsMutationError>[0] = {}) =>
+  const fail = (options: { onError?: () => void; meta?: { errorHandledByCaller: true } } = {}) =>
     queryClient
       .getMutationCache()
       .build(queryClient, {
         ...options,
         mutationFn: () => Promise.reject(new ApiError("blocked_url", "URL is blocked", 400)),
-      } as never)
+      })
       .execute(undefined)
       .catch(() => undefined);
 
@@ -57,10 +57,12 @@ describe("failed mutations", () => {
     expect(String(toastError.mock.calls[0]![0])).toContain("URL is blocked");
   });
 
-  it("stays quiet when the hook reports the failure itself", async () => {
+  // An `onError` rolls a cache back or invalidates far more often than it
+  // reports: inferring "handled" from it left a refused deactivation silent.
+  it("still toasts when the hook has an onError of its own", async () => {
     await fail({ onError: () => {} });
 
-    expect(toastError).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledTimes(1);
   });
 
   it("stays quiet when the hook hands the failure to its callers", async () => {

@@ -54,7 +54,6 @@ export function useSharePackage() {
 export function useRevokePackageShare() {
   const invalidate = useInvalidateShares();
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

@@ -30,7 +30,6 @@ import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
@@ -39,6 +38,7 @@ import {
 } from "../hooks/use-model-provider-pairing";
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface OAuthPairingBodyProps {
   providerId: string;
@@ -66,7 +66,7 @@ export function OAuthPairingBody({
 }: OAuthPairingBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const createPairing = useCreateModelProviderPairing();
@@ -144,10 +144,8 @@ export function OAuthPairingBody({
         addPendingPairing({ id: res.id, providerId, expiresAt: res.expiresAt, orgId });
         registeredRef.current = true;
       }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? getErrorMessage(err) : t("credentials.oauth.pairingCreateFailed"),
-      );
+    } catch {
+      // Reported by the mutation cache.
     }
   }
 
@@ -156,15 +154,7 @@ export function OAuthPairingBody({
     await generatePairing();
   }
 
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error(t("credentials.oauth.copyFailed"));
-    }
-  }
+  const handleCopy = () => void copy(command);
 
   return (
     <div className="flex flex-col gap-4 text-sm">

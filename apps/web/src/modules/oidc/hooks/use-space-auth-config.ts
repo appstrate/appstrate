@@ -72,7 +72,6 @@ export function useUpsertSmtpConfig() {
   const qc = useQueryClient();
   const spaceId = useCurrentSpaceId();
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (data: UpsertSmtpInput) => {
       const parsed = upsertSmtpSchema.parse(data);
       const { data: saved } = await client.PUT("/api/spaces/{id}/smtp-config", {
@@ -108,7 +107,6 @@ export function useTestSmtp() {
   const spaceId = useCurrentSpaceId();
   const toSchema = z.email("Invalid email address");
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (to: string) => {
       const parsed = toSchema.parse(to);
       const { data } = await client.POST("/api/spaces/{id}/smtp-config/test", {
@@ -152,7 +150,6 @@ export function useUpsertSocialProvider(provider: SocialProviderId) {
   const qc = useQueryClient();
   const spaceId = useCurrentSpaceId();
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (data: UpsertSocialInput) => {
       const parsed = upsertSocialSchema.parse(data);
       const { data: saved } = await client.PUT("/api/spaces/{id}/social-providers/{provider}", {

@@ -127,7 +127,6 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           setPending(null);
           toast.success(t("spaces.personal.converted"));
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
       });
       return;
     }
@@ -141,7 +140,6 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           }),
         );
       },
-      onError: (error) => toast.error(getErrorMessage(error)),
     });
   };
 

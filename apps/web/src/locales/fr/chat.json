@@ -6,7 +6,6 @@
   "composer.readOnly": "Votre rôle permet de lire les conversations, pas d’en écrire.",
   "threads.empty": "Envoie un message ! Ton historique de conversations apparaîtra ici.",
   "threads.emptyReadOnly": "Aucune conversation à consulter pour l’instant.",
-  "conversation.unavailable": "Cette conversation est introuvable ou inaccessible. Elle a peut-être été supprimée.",
   "context.label": "Contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",
   "context.loading": "Chargement du contexte…",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -23,10 +23,11 @@ export function useSpaceMembers(spaceId: string, enabled = true) {
   );
 }
 
-export function useAddSpaceMember() {
+/** `meta`: the add and share dialogs show a refusal on themselves; the role picker leaves it to the cache. */
+export function useAddSpaceMember(meta?: MutationMeta) {
   const invalidate = useInvalidateRoles();
   return $api.useMutation("post", "/api/spaces/{id}/members", {
-    meta: { errorHandledByCaller: true },
+    meta,
     onSuccess: invalidate,
   });
 }
@@ -34,7 +35,6 @@ export function useAddSpaceMember() {
 export function useUpdateSpaceMember() {
   const invalidate = useInvalidateRoles();
   return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }
@@ -43,7 +43,6 @@ export function useRemoveSpaceMember() {
   const invalidate = useInvalidateRoles();
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/spaces/{id}/members/{userId}", {
-    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       invalidate();
       // The removal unshares the member's connections here once they lose access.
