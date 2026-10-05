@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InvalidateOptions } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
@@ -74,10 +74,13 @@ export function useUnreadCountsByAgent() {
 }
 
 /** Notification list + badge counters — no run-list invalidation. */
-export function invalidateNotificationQueries(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["get", "/api/notifications"] });
-  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] });
-  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] });
+export function invalidateNotificationQueries(
+  qc: ReturnType<typeof useQueryClient>,
+  options?: InvalidateOptions,
+) {
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications"] }, options);
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-count"] }, options);
+  qc.invalidateQueries({ queryKey: ["get", "/api/notifications/unread-counts-by-agent"] }, options);
 }
 
 function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClient>) {

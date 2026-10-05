@@ -10,7 +10,13 @@
  * of serving another scope's cached page.
  */
 
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InvalidateOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
@@ -92,25 +98,31 @@ export type {
  * Typed keys are `[method, "/api/integrations…", init]` — a key-prefix
  * invalidation can't span sibling path strings, so match on the path element.
  */
-export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
-  return qc.invalidateQueries({
-    predicate: (query) => {
-      const path = query.queryKey[1];
-      if (typeof path !== "string") return false;
-      // The integration index is keyed `["packages","integrations",…]` and lists
-      // the ACTIVE set, which is exactly what activation changes — so a row that
-      // just got switched on (or off) has to stop being served from cache.
-      // Without this, activating left every index still omitting it.
-      if (query.queryKey[0] === "packages" && path === "integrations") return true;
-      return (
-        path.startsWith("/api/integrations") ||
-        path === "/api/me/connections" ||
-        // The per-agent connection-readiness query lives under /api/agents but
-        // is driven entirely by connection state, so refresh it here too.
-        path === "/api/agents/{scope}/{name}/connection-readiness"
-      );
+export function invalidateIntegrationQueries(
+  qc: QueryClient,
+  options?: InvalidateOptions,
+): Promise<void> {
+  return qc.invalidateQueries(
+    {
+      predicate: (query) => {
+        const path = query.queryKey[1];
+        if (typeof path !== "string") return false;
+        // The integration index is keyed `["packages","integrations",…]` and lists
+        // the ACTIVE set, which is exactly what activation changes — so a row that
+        // just got switched on (or off) has to stop being served from cache.
+        // Without this, activating left every index still omitting it.
+        if (query.queryKey[0] === "packages" && path === "integrations") return true;
+        return (
+          path.startsWith("/api/integrations") ||
+          path === "/api/me/connections" ||
+          // The per-agent connection-readiness query lives under /api/agents but
+          // is driven entirely by connection state, so refresh it here too.
+          path === "/api/agents/{scope}/{name}/connection-readiness"
+        );
+      },
     },
-  });
+    options,
+  );
 }
 
 // ─────────────────────────────────────────────

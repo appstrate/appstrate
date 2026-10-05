@@ -27,7 +27,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { broadRunKeys, trackStreamGaps } from "../../hooks/use-global-run-sync.ts";
 import { removeOrgScopedQueries } from "../../lib/query-keys.ts";
 
@@ -216,6 +216,36 @@ describe("run cache reconciliation on reconnect", () => {
     removeOrgScopedQueries(qc);
     open("org_1/spc_1").connected(1_000);
     expect(calls).toHaveLength(0);
+  });
+
+  // Seen in the browser on a switch back to a space: the mount read of each
+  // badge was cancelled by the reconciliation and issued a second time.
+  it("lets a read already in flight finish instead of issuing it again", async () => {
+    const qc = new QueryClient();
+    const key = ["get", "/api/notifications/unread-count", { params: {} }];
+    let fetches = 0;
+    let settle: (count: number) => void = () => {};
+    new QueryObserver(qc, {
+      queryKey: key,
+      queryFn: () => {
+        fetches++;
+        return new Promise<number>((resolve) => (settle = resolve));
+      },
+    }).subscribe(() => {});
+    const reopen = () => {
+      const stream = trackStreamGaps(() => qc, "org_1", "org_1/spc_1");
+      stream.missed();
+      stream.connected(0);
+    };
+
+    reopen();
+    expect(fetches).toBe(1);
+
+    // Once that read has landed, the next gap does refetch it.
+    settle(3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    reopen();
+    expect(fetches).toBe(2);
   });
 
   // The mount's queries are as old as the whole backoff by the time a stream

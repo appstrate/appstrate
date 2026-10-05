@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef } from "react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InvalidateOptions, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -44,14 +44,14 @@ import {
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
-function handleConnectionUpdate(qc: QueryClient) {
+function handleConnectionUpdate(qc: QueryClient, options?: InvalidateOptions) {
   // Connections page (`/preferences/connections`, whose orange "Reconnection
   // required" badge reads off `/api/me/connections`), integration list
   // (sidebar status, integrations page count) + detail subtree (auth
   // statuses, connection lists, agent-resolution verdicts, the resolution
   // verdict that powers the agent picker dropdown) — all refreshed by the
   // shared helper, which matches on the typed key's path element.
-  void invalidateIntegrationQueries(qc);
+  void invalidateIntegrationQueries(qc, options);
 }
 
 /**
@@ -121,9 +121,12 @@ function readContextChatSessionId(init: unknown): unknown {
  * schema pass (`{ sessionId, orgId, userId }`, `services/realtime.ts`).
  * `raw` undefined = reconnect reconciliation → unscoped.
  */
-function handleChatSessionUpdate(qc: QueryClient, raw?: string) {
+function handleChatSessionUpdate(qc: QueryClient, raw?: string, options?: InvalidateOptions) {
   const sessionId = raw === undefined ? undefined : parseChatSessionId(raw);
-  void qc.invalidateQueries({ predicate: (q) => matchesChatSessionQuery(q.queryKey, sessionId) });
+  void qc.invalidateQueries(
+    { predicate: (q) => matchesChatSessionQuery(q.queryKey, sessionId) },
+    options,
+  );
 }
 
 function parseChatSessionId(raw: string): string | undefined {
@@ -231,11 +234,11 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
  * the run-detail page appends live frames into that cache and a refetch would
  * drop the per-turn breadcrumbs it holds (see `invalidateRunLogs`).
  */
-function reconcileRunQueries(qc: QueryClient, orgId: string) {
+function reconcileRunQueries(qc: QueryClient, orgId: string, options: InvalidateOptions) {
   // Run detail/list caches are patched in place by live frames, so only a gap
   // needs them refetched — they are not part of the per-event throttle.
   for (const queryKey of [runKeys.all, ...broadRunKeys(orgId)]) {
-    qc.invalidateQueries({ queryKey });
+    qc.invalidateQueries({ queryKey }, options);
   }
 }
 
@@ -260,6 +263,11 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
  * speaks for: an org switch or a role preview wipes both, a layout remount over
  * surviving caches finds both, and garbage collection drops both. A stream
  * aborted before it connected (StrictMode's first effect run) leaves no trace.
+ *
+ * A read already in flight when the stream connects is left to finish rather
+ * than cancelled and issued again (`KEEP_IN_FLIGHT`): it left after the gap it
+ * would be reconciled for — typically the mount read of the scope just
+ * switched back to — so restarting it buys nothing but a second request.
  *
  * Residual race, accepted: a frame emitted between a query's read and the
  * stream's subscription is seen by neither. The window is the stream's own
@@ -290,17 +298,19 @@ export function trackStreamGaps(
         gap = true;
         return;
       }
-      handleChatSessionUpdate(qc);
-      invalidateNotificationQueries(qc);
+      handleChatSessionUpdate(qc, undefined, KEEP_IN_FLIGHT);
+      invalidateNotificationQueries(qc, KEEP_IN_FLIGHT);
       if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
         lastRunReconcileAt = now;
-        reconcileRunQueries(qc, orgId);
+        reconcileRunQueries(qc, orgId, KEEP_IN_FLIGHT);
         // `connection_update` frames were missed on the same stream.
-        handleConnectionUpdate(qc);
+        handleConnectionUpdate(qc, KEEP_IN_FLIGHT);
       }
     },
   };
 }
+
+const KEEP_IN_FLIGHT: InvalidateOptions = { cancelRefetch: false };
 
 const streamCoverageKey = (scope: string) => ["realtime-covered", scope] as const;
 
