@@ -88,8 +88,8 @@ export function enterableSpaceId(
 
 /**
  * The only path from the space remembered for the current organization to a
- * scope: requests carry no space until `GET /api/spaces` proves one enterable, and lose it the moment the
- * listing stops listing it. Render inside MainLayout.
+ * scope: requests carry no space until `GET /api/spaces` proves one enterable,
+ * and lose it the moment the listing stops listing it. Render inside MainLayout.
  */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
