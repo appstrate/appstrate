@@ -14,6 +14,7 @@ import { describe, it, expect } from "bun:test";
 import {
   derivePiCompactionSettings,
   installSessionBridge,
+  MAX_TERMINAL_TOOL_REJECTIONS,
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
@@ -1103,6 +1104,58 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     // The retry that succeeds still triggers the early stop.
     session.emit({ type: "tool_execution_end", toolName: "output", result: "ok" });
     expect(calls).toBe(1);
+  });
+
+  it("fails the run once the terminal tool has refused its budget of calls", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    let exhausted = 0;
+    const bridge = installSessionBridge(session, sink, RUN_ID, {
+      terminalTools: ["output"],
+      onTerminalToolExhausted: () => {
+        exhausted += 1;
+      },
+    });
+    const refuse = () =>
+      session.emit({
+        type: "tool_execution_end",
+        toolName: "output",
+        result: "Output validation failed",
+        isError: true,
+      });
+
+    for (let i = 1; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) refuse();
+    expect(exhausted).toBe(0);
+    expect(bridge.getTerminalError()).toBeUndefined();
+
+    refuse();
+    // A call still in flight when the loop is aborted does not fire it twice.
+    refuse();
+    expect(exhausted).toBe(1);
+    expect(bridge.getTerminalError()).toMatchObject({ code: "terminal_tool_rejected" });
+
+    // The abort the runner raced is not reported as a provider failure.
+    session.pushMessage({
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+      content: [],
+    });
+    session.emit({ type: "message_end" });
+    expect(sink.events.find((e) => e.type === "appstrate.error")).toBeUndefined();
+    expect(bridge.getLastUpstreamError()).toBeUndefined();
+    expect(bridge.getTerminalError()).toMatchObject({ code: "terminal_tool_rejected" });
+  });
+
+  it("does not count a failing non-terminal tool against the budget", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+
+    for (let i = 0; i <= MAX_TERMINAL_TOOL_REJECTIONS; i += 1) {
+      session.emit({ type: "tool_execution_end", toolName: "bash", result: "boom", isError: true });
+    }
+    expect(bridge.getTerminalError()).toBeUndefined();
   });
 
   it("does NOT invoke onTerminalTool for non-terminal tools", () => {

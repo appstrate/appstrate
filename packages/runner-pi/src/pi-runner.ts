@@ -729,6 +729,10 @@ export class PiRunner {
       onTerminalTool: () => {
         void session.abort().catch(() => {});
       },
+      // Same stop, opposite verdict: the tool refused every attempt it was given.
+      onTerminalToolExhausted: () => {
+        void session.abort().catch(() => {});
+      },
     });
     // Hand the bridge to `run()` immediately so a throw from
     // `session.prompt()` further down does not lose the accumulator.
@@ -1370,9 +1374,9 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 
 /**
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
- * runner's OWN early-stop rather than a failure: the run already produced a
- * successful terminal tool, and `onTerminalTool` aborted the SDK loop to stop
- * paying for turns nobody will read. Extracted so all three readers — the live
+ * runner's OWN stop rather than a provider failure: a terminal tool either
+ * succeeded or ran out of attempts ({@link MAX_TERMINAL_TOOL_REJECTIONS}), and
+ * the runner aborted the SDK loop to stop paying for turns nobody will read. Extracted so all three readers — the live
  * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
  * — apply one definition instead of copies that can drift apart: they must
  * agree on what is NOT a failure.
@@ -1380,12 +1384,21 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 function isRunnerEarlyStopAbort(
   stopReason: string | undefined,
   errorMessage: string | undefined,
-  terminalToolCompleted: boolean,
+  runnerStoppedLoop: boolean,
 ): boolean {
-  return (
-    terminalToolCompleted && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage))
-  );
+  return runnerStoppedLoop && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
 }
+
+/**
+ * How many calls a terminal tool may refuse before the run is failed.
+ *
+ * A refused `output` call hands the model its validation errors and asks for
+ * another attempt, which is right for a slip and unbounded for a payload the
+ * model cannot fix — an output schema no value satisfies kept an agent
+ * re-submitting the same object, one paid turn at a time, until the run
+ * timeout (#1674). Five leaves room for genuine corrections on a large schema.
+ */
+export const MAX_TERMINAL_TOOL_REJECTIONS = 5;
 
 interface SessionBridgeOptions {
   /**
@@ -1398,6 +1411,12 @@ interface SessionBridgeOptions {
    * error. The runner uses this to abort the SDK loop early.
    */
   onTerminalTool?: () => void;
+  /**
+   * Invoked once, synchronously, when a terminal tool has refused
+   * {@link MAX_TERMINAL_TOOL_REJECTIONS} calls. The runner aborts the SDK loop;
+   * the bridge then reports the run as failed ({@link SessionBridgeHandle.getTerminalError}).
+   */
+  onTerminalToolExhausted?: () => void;
   /**
    * Context window (tokens) the session actually runs against, straight off
    * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
@@ -1426,6 +1445,13 @@ export function installSessionBridge(
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
+  // Refused terminal-tool calls so far, and the verdict once they run out.
+  let terminalToolRejections = 0;
+  let terminalToolExhausted: RunError | undefined;
+  // Either way the runner aborted the loop itself: the trailing `aborted`
+  // turn is its own doing, not a provider failure to report.
+  const runnerStoppedLoop = (): boolean =>
+    terminalToolCompleted || terminalToolExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
@@ -1552,7 +1578,7 @@ export function installSessionBridge(
         // 503 latched earlier in the run — which a read-time guard would do.
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
         ) {
           lastUpstreamStopReason = last.stopReason;
           lastUpstreamErrorMessage = last.errorMessage;
@@ -1617,7 +1643,7 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
         ) {
           // The classification rides the event's `data`, which the platform
           // writes to `run_logs.data` (jsonb) — the same route the watchdog's
@@ -1743,6 +1769,19 @@ export function installSessionBridge(
           terminalToolCompleted = true;
           options.onTerminalTool?.();
         }
+        // …and stop retrying once it has refused its budget of attempts.
+        if (!runnerStoppedLoop() && e.isError === true && terminalTools.includes(tool)) {
+          terminalToolRejections += 1;
+          if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
+            terminalToolExhausted = {
+              code: "terminal_tool_rejected",
+              message:
+                `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
+                "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
+            };
+            options.onTerminalToolExhausted?.();
+          }
+        }
         break;
       }
 
@@ -1767,6 +1806,7 @@ export function installSessionBridge(
       return reportedCost();
     },
     getTerminalError(): RunError | undefined {
+      if (terminalToolExhausted) return terminalToolExhausted;
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
       // `terminalErrorMessage` are shared with the live `appstrate.error`
       // emit above, so the stamped status and the `run_logs` trail can
