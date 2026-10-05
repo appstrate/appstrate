@@ -66,7 +66,7 @@ export function enableSmtpForSuite(): void {
   });
 }
 
-export interface CapturedMail {
+interface CapturedMail {
   to: string;
   subject: string;
   html: string;
