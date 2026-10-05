@@ -1333,6 +1333,14 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     expect(hits).toEqual([]);
   });
 
+  it("reaches a literal host resolving into a private range: the network is the caller's own", async () => {
+    const { call, hits } = await toolFor(["https://intranet.corp/**"], {}, async () => [
+      "10.0.0.5",
+    ]);
+    await call("https://intranet.corp/x");
+    expect(hits).toEqual(["https://intranet.corp/x"]);
+  });
+
   it("refuses a {{field}} the credential bag does not hold, naming it, unsent", async () => {
     const { call, hits } = await toolFor(["https://api.acme.com/**"], {});
     await expect(call("https://api.acme.com/{{tenant}}/x")).rejects.toThrow("{{tenant}}");

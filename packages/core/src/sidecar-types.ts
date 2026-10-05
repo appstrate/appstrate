@@ -233,8 +233,8 @@ export interface ApiCallSpec {
   toolName: string;
   /**
    * `auths.{authKey}.authorized_uris` as DECLARED (unrendered). Matching uses the connection's
-   * rendered list from the credentials source; this one decides which hosts are pinned literally
-   * (SSRF exemption, cookie siblings), which a `{$credential.<field>}` entry never is.
+   * rendered list from the credentials source; this one decides which hosts are named literally
+   * (cookie siblings, eligible for the SSRF exemption), which a `{$credential.<field>}` entry never is.
    */
   authorizedUris: readonly string[];
   /**

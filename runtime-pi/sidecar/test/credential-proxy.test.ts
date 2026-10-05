@@ -2029,29 +2029,35 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
-    // On-prem case: the operator explicitly named the host; it resolving
-    // into a private range is their declared network, not an agent pivot.
-    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
-    const result = await call(
-      makeDeps({
-        fetchFn: fetchFn as unknown as typeof fetch,
-        declaredUris: ["https://intranet.corp.example/**"],
-        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
-          credentials: { access_token: "tok" },
-          authorizedUris: ["https://intranet.corp.example/**"],
-          allowAllUris: false,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          credentialFieldName: "access_token",
-        })),
-        resolveHost: async () => ["10.0.0.5"],
-      }),
-      "https://intranet.corp.example/api/x",
-    );
-    expect(result.ok).toBe(true);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
+  // `intranet.corp` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS; `.example` is not.
+  it.each([
+    ["intranet.corp", true],
+    ["intranet.corp.example", false],
+  ])(
+    "a literal authorized_uris host resolving into a private range: %s reached = %p",
+    async (host, reached) => {
+      const fetchFn = mock(async () => new Response("ok", { status: 200 }));
+      const result = await call(
+        makeDeps({
+          fetchFn: fetchFn as unknown as typeof fetch,
+          declaredUris: [`https://${host}/**`],
+          fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+            credentials: { access_token: "tok" },
+            authorizedUris: [`https://${host}/**`],
+            allowAllUris: false,
+            credentialHeaderName: "Authorization",
+            credentialHeaderPrefix: "Bearer ",
+            credentialFieldName: "access_token",
+          })),
+          resolveHost: async () => ["10.0.0.5"],
+        }),
+        `https://${host}/api/x`,
+      );
+      expect(result.ok).toBe(reached);
+      if (!result.ok) expect(result.status).toBe(403);
+      expect(fetchFn).toHaveBeenCalledTimes(reached ? 1 : 0);
+    },
+  );
 
   it("glob allowlist + IP-literal internal target is literal-blocked before DNS", async () => {
     // `https://**` matches `https://169.254.169.254/...` in the allowlist

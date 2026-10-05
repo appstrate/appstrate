@@ -344,7 +344,7 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
 
 /**
  * The adapter feeding `executeApiCall` (#1627): the list the platform renders for the connection
- * decides what matches; only the DECLARED list pins the SSRF gate or shares cookies.
+ * decides what matches; only the DECLARED list shares cookies or can skip the SSRF gate.
  */
 describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declared authorized_uris", () => {
   function run(

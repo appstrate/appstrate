@@ -44,7 +44,8 @@ describe("sidecar runtime deps — api_call transport", () => {
       },
       {
         ...productionDeps().proxyDeps,
-        // A glob host: a declared literal host would skip the SSRF gate, and with it the pin.
+        // A glob host: `api.example.com` named literally would skip the SSRF gate (the test
+        // preload lists it in EGRESS_ALLOW_INTERNAL_HOSTS), and with it the pin.
         declaredUris: ["https://*.example.com/**"],
         resolveHost: async () => ["203.0.113.9"],
         fetchCredentials: async () => ({

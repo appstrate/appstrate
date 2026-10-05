@@ -37,6 +37,7 @@ import {
   type HostResolver,
   type SidecarConfig,
 } from "./helpers.ts";
+import { isOperatorTrustedEgressHost } from "./ssrf.ts";
 import {
   classifyApiCallFailure,
   cookieScope,
@@ -174,8 +175,8 @@ export interface ApiCallBaseDeps {
 export interface ApiCallDeps extends ApiCallBaseDeps {
   /**
    * The manifest's declared (unrendered) `authorized_uris`. Matching uses the connection's
-   * rendered `CredentialsResponse.authorizedUris`; only a host written literally HERE pins the
-   * SSRF gate or shares cookies, so a connection-supplied host never does.
+   * rendered `CredentialsResponse.authorizedUris`; only a host written literally HERE shares
+   * cookies or can skip the SSRF gate, so a connection-supplied host never does.
    */
   declaredUris: readonly string[];
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
@@ -461,6 +462,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // The 4 policy, not the raw flag: a templated credential must not leave the allowlist.
       allowAllUris: policy.allowAllUris,
       credentialHeaders,
+      // The sidecar's network is not the manifest author's to declare: a literal `authorized_uris`
+      // host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
+      internalHost: isOperatorTrustedEgressHost,
       cookies,
       integrationId,
       ...(fetchFn ? { fetchFn } : {}),

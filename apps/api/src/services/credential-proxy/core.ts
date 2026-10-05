@@ -367,9 +367,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         declaredUris,
         allowAllUris: policy.allowAllUris,
         credentialHeaders: [...sensitiveHeaderNames],
-        // The platform's network is not the manifest author's to declare: only the operator's
-        // `EGRESS_ALLOW_INTERNAL_HOSTS` skips the SSRF gate here.
-        trustedHost: isAllowedInternalIdpHost,
+        // The platform's network is not the manifest author's to declare: a literal
+        // `authorized_uris` host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
+        internalHost: isAllowedInternalIdpHost,
         ...(cookies ? { cookies } : {}),
         integrationId: input.integrationId,
         ...(input.fetch ? { fetchFn: input.fetch } : {}),

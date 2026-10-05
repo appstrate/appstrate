@@ -525,6 +525,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
           credentialHeaders: injectedCredentialHeader
             ? [...credentialHeaders, injectedCredentialHeader]
             : credentialHeaders,
+          // The caller's own machine and network: a host the manifest names literally is theirs.
+          internalHost: () => true,
           integrationId: meta.name,
           ...(this.fetchImpl ? { fetchFn: this.fetchImpl } : {}),
           ...(this.resolveHost ? { resolveHost: this.resolveHost } : {}),

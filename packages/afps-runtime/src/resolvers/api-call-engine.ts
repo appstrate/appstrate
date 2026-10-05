@@ -185,17 +185,20 @@ export interface FetchApiCallOptions {
   init: RequestInit;
   /** The connection's rendered `authorized_uris`: what a target and every hop must match. */
   authorizedUris: readonly string[];
-  /** The manifest's declared (unrendered) list: only its literal hosts share cookies or skip SSRF. */
+  /** The manifest's declared (unrendered) list: only its literal hosts share cookies or can skip SSRF. */
   declaredUris: readonly string[];
   /** `credentialUrlPolicy(...).allowAllUris` — never the raw manifest flag. */
   allowAllUris: boolean;
   /** Names of the headers that carry a credential (injected or substituted). */
   credentialHeaders: readonly string[];
   /**
-   * Hosts exempt from the SSRF gate. Omitted = the hosts `declaredUris` names literally (the
-   * manifest's topology), none under `allowAllUris`, where the caller picks the host.
+   * Whether the operator of the network this call leaves from lets it reach an internal address
+   * behind `hostname`. A host skips the SSRF gate only when this accepts it AND `declaredUris`
+   * names it literally, never under `allowAllUris`: the operator vouches for the host, the
+   * manifest for the call. Same rule on a redirect hop. A host only a glob or a rendered entry
+   * matches is always gated.
    */
-  trustedHost?: (hostname: string) => boolean;
+  internalHost: (hostname: string) => boolean;
   /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
   cookies?: CookieScope;
   integrationId: string;
@@ -266,10 +269,10 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
               forwardCredentials: inAllowlist,
             }
           : {}),
-        allowHost:
-          opts.trustedHost ??
-          ((hostname: string) =>
-            !allowAllUris && hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris)),
+        allowHost: (hostname: string) =>
+          !allowAllUris &&
+          hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris) &&
+          opts.internalHost(hostname),
         sensitiveHeaders: opts.credentialHeaders,
         cookies:
           opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),
@@ -302,6 +305,8 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
       warn("Redirect refused (SSRF)", err.hop, host);
       throw redirectRefused("ssrf", host);
     }
+    // Operators read this to find the host an internal API needs listed (`internalHost`).
+    warn("Target refused (SSRF)", 0, opts.targetHost);
     throw new ApiCallRefusedError("ssrf", "URL targets a blocked network range");
   }
 }
