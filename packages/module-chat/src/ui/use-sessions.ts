@@ -31,8 +31,8 @@ export { SESSIONS_QUERY_KEY } from "./sessions.ts";
 export const SAFETY_NET_REFETCH_MS = 60_000;
 /**
  * Backstop while a turn is generating. The `generating` flips are announced by
- * the `chat_session_update` frames the server emits on `setActiveStream` /
- * `clearActiveStream` — that push is the primary signal, and it is what makes
+ * the `chat_session_update` frames the server emits when a turn is claimed
+ * (`claimTurn`) and on `clearActiveStream` — that push is the primary signal, and it is what makes
  * the spinner react within a round trip. This interval only covers a LOST
  * frame (SSE reconnect window, dropped NOTIFY): the next poll reads the row's
  * real state. A marker whose producer died is cleared by the resume route
