@@ -144,6 +144,13 @@ export async function buildRunContext(params: {
    * these — see {@link recordDroppedGenerationSettings}.
    */
   droppedGenerationSettings: DroppedGenerationSetting[];
+  /**
+   * Id of the stored model pin (space setting, a schedule's override) this run
+   * could NOT use: `modelLabel` is then the org default it fell back to. `null`
+   * when the run uses what was asked. The caller MUST surface it — see
+   * {@link recordModelFallback}.
+   */
+  unavailablePinnedModelId: string | null;
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
@@ -224,6 +231,12 @@ export async function buildRunContext(params: {
   if (!modelCredentialIsPresent(modelResult)) {
     throw new ModelCredentialMissingError(modelResult.label);
   }
+
+  // `resolveModel` falls back to the org default when the pin names a model
+  // that was deleted or disabled since. The run is legitimate; running it on
+  // another model without a word is not.
+  const unavailablePinnedModelId =
+    effectiveModelId && modelResult.aliasId !== effectiveModelId ? effectiveModelId : null;
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
@@ -357,6 +370,7 @@ export async function buildRunContext(params: {
     generationConfig,
     droppedIntegrations,
     droppedGenerationSettings,
+    unavailablePinnedModelId,
   };
 }
 
@@ -451,6 +465,30 @@ export async function recordDroppedGenerationSettings(
       { setting, value, model, reason: "refused_by_model" },
     );
   }
+}
+
+/** Run-log `event` name for a run that fell back from its pinned model. */
+export const MODEL_FALLBACK_EVENT = "model_fallback";
+
+/**
+ * Same marker as {@link recordDroppedGenerationSettings}, for the pinned model
+ * {@link buildRunContext} could not use. A no-op when the pin resolved.
+ */
+export async function recordModelFallback(
+  scope: OrgScope,
+  runId: string,
+  model: string,
+  unavailablePinnedModelId: string | null,
+): Promise<void> {
+  if (!unavailablePinnedModelId) return;
+  await appendDropMarker(
+    scope,
+    runId,
+    MODEL_FALLBACK_EVENT,
+    `the model set for this run ('${unavailablePinnedModelId}') was deleted or disabled — ` +
+      `the run uses the organization default '${model}' instead`,
+    { pinnedModelId: unavailablePinnedModelId, model, reason: "pinned_model_unavailable" },
+  );
 }
 
 /** Best-effort `warn` system row: a failed write is logged, never thrown. */
