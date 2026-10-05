@@ -40,6 +40,17 @@ describe("classifyModelError", () => {
     ).toEqual({ category: "credential_unavailable", retryable: false });
   });
 
+  it("keeps a failed OAuth refresh transient when the token endpoint is down or silent", () => {
+    const refresh = "OAuth refresh failed for anthropic: Anthropic token refresh request failed. ";
+    expect(
+      classifyModelError({ message: `${refresh}details=Error: HTTP request failed. status=503` }),
+    ).toEqual({ category: "upstream_unavailable", retryable: true });
+    expect(
+      classifyModelError({ message: `${refresh}details=TimeoutError: The operation timed out.` })
+        .category,
+    ).toBe("unknown");
+  });
+
   it("classifies throttling as retryable", () => {
     expect(classifyModelError({ message: "429 rate limit from hidden-backend" })).toEqual({
       category: "rate_limited",

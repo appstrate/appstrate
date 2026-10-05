@@ -154,11 +154,12 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
     normalized.includes("unauthorized") ||
     normalized.includes("forbidden") ||
     normalized.includes("credential") ||
-    // The agent SDK's wording when a stored OAuth credential cannot be
-    // renewed (`resolveStoredOAuth`, pi-ai `auth/resolve.js`). Its text carries
-    // the token endpoint's `status=400`, which must not read as a bad request:
-    // the connection is dead until someone reconnects it.
-    normalized.includes("oauth refresh failed")
+    // The agent SDK's wording when a stored OAuth credential cannot be renewed
+    // (`resolveStoredOAuth`, pi-ai `auth/resolve.js`), with the token endpoint's
+    // 400 (`invalid_grant`): the connection is dead until someone reconnects it,
+    // not a bad request. The same wording wraps a timeout or a 5xx of that
+    // endpoint, which stay what their status says.
+    (status === 400 && normalized.includes("oauth refresh failed"))
   ) {
     category = "credential_unavailable";
   } else if (status === 429 || normalized.includes("rate limit")) {

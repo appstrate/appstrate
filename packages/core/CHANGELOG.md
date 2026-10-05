@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`classifyModelError` (`./model-error`) reads a failed OAuth refresh
+  answered `400` as `credential_unavailable`**, not `invalid_request`: the
+  agent SDK's `OAuth refresh failed for <provider>` text carries the token
+  endpoint's status, and a refused grant means the subscription must be
+  reconnected. A timeout or a 5xx of that endpoint keeps its own category.
+  (#1644)
+
 ## [14.0.0] — 2026-10-05
 
 ### Added
