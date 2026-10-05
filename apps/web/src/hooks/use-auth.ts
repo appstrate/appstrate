@@ -76,12 +76,13 @@ async function syncAuth(expected: boolean) {
   else clearSession();
 }
 
-let boot: Promise<void> | null = null;
-function initAuth(): Promise<void> {
-  boot ??= syncAuth(sessionExpected(localStorage)).catch(() => {
+let initialized = false;
+function initAuth() {
+  if (initialized) return;
+  initialized = true;
+  syncAuth(sessionExpected(localStorage)).catch(() => {
     clearSession();
   });
-  return boot;
 }
 
 /**
@@ -89,10 +90,10 @@ function initAuth(): Promise<void> {
  * render. Called from `main.tsx` before `createRoot`, so the session/profile
  * round-trip overlaps the locale fetch and the first render instead of
  * queueing behind them. Idempotent — `useAuth()` still calls the same
- * initializer — and resolves once that one boot read has settled.
+ * initializer, which no-ops once this has run.
  */
-export function startAuthBootstrap(): Promise<void> {
-  return initAuth();
+export function startAuthBootstrap(): void {
+  initAuth();
 }
 
 /**
@@ -158,7 +159,7 @@ export async function refreshAuth(): Promise<void> {
 }
 
 export function useAuth() {
-  void initAuth();
+  initAuth();
 
   const state = useStore(authStore);
 

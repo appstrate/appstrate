@@ -54,7 +54,7 @@ window.addEventListener("vite:preloadError", (event) => {
 // confirms the membership, still ahead of the layout, and every space-scoped
 // read waits on it (`useSpaceResolver`). Any other browser is a visitor's until
 // the session read says otherwise, and issues that read alone.
-void startAuthBootstrap();
+startAuthBootstrap();
 if (sessionExpected(localStorage)) primeSpaceList(primeOrgList());
 
 // Warm the chat route's chunk on the same idle window. `ChatModulePage` is

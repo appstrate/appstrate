@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
-import { startAuthBootstrap, refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
+import { refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
 import { authStore } from "../../../stores/auth-store";
 import { Spinner } from "../../../components/spinner";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -43,14 +43,14 @@ export function AuthCallbackPage() {
     (async () => {
       try {
         const { redirectTo } = await handleOidcCallback();
-        // The BA session cookie was set before this page loaded, so its
-        // boot read is the read of that session: only when it found none
-        // does `refreshAuth` run, dropping the cookie that failed and
-        // throwing `AuthRefreshError` (stale cookie, session gone). The
+        // The BA session cookie was set before this page loaded, and the
+        // page cannot mount before the boot read settles (`App` holds the
+        // boot screen until then): that read is the read of this session.
+        // Only when it found none does `refreshAuth` run, dropping the
+        // cookie that failed and throwing `AuthRefreshError`. The
         // catch below turns that into an inline error rather than letting
         // us navigate onto a protected page → catch-all → /login → OIDC
         // re-redirect → back here in a tight loop with no error UI.
-        await startAuthBootstrap();
         if (!authStore.getState().user) await refreshAuth();
         // Server-rendered pages outside the SPA (e.g. `/activate` for
         // the CLI device-flow consent) need a real browser navigation

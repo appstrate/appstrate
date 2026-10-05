@@ -10,10 +10,9 @@ import { QueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/errors";
 
 /**
- * One retry, for a failure that could go the other way next time: a network
- * error, a 5xx, a timeout (408) or a rate limit (429). Any other 4xx is the
- * server's answer to this very request — a missing resource, a refused read, an
- * expired session — and asking again only repeats it. Exported for its test.
+ * A 4xx is the server's answer, not a hiccup: asking again returns the same
+ * refusal after the retry delay, which is how a missing run sat behind a
+ * spinner for seconds. 408 and 429 are the two that a second attempt can change.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   if (failureCount >= 1) return false;
