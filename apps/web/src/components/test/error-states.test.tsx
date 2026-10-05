@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const { RunList } = await import("../run-list.tsx");
 const { ResourceErrorState } = await import("../page-states.tsx");
 const { ErrorBoundary } = await import("../error-boundary.tsx");
-const { settledWhileOpen } = await import("../../lib/confirm-settle.ts");
+const { trackConfirm } = await import("../../lib/confirm-settle.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { paginatedRunsKeys } = await import("../../lib/query-keys.ts");
 const { render } = await import("../../test/render.tsx");
@@ -138,23 +138,99 @@ describe("ErrorBoundary", () => {
   });
 });
 
-// The effect that applies this cannot run without a DOM; the rule it applies is
-// the whole decision, and `ConfirmModal` only feeds it its refs and props.
-describe("ConfirmModal: a refused confirmation closes its dialog", () => {
-  const settled = { confirmed: true, wasPending: true, isPending: false, open: true };
+// `ConfirmModal` cannot be clicked without a DOM; what it does on a click is
+// `trackConfirm` over the real mutation cache, driven here exactly as the
+// component drives it (one in-flight flag, released when the action settles).
+describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  it("closes when the confirmed action settles on a dialog still open", () => {
-    expect(settledWhileOpen(settled)).toBe(true);
+  /** A dialog whose confirm action runs one mutation the test settles by hand. */
+  const dialog = () => {
+    const queryClient = new QueryClient();
+    const requests: ReturnType<typeof deferred>[] = [];
+    const observer = new MutationObserver(queryClient, {
+      mutationFn: () => {
+        const request = deferred();
+        requests.push(request);
+        return request.promise;
+      },
+    });
+    const settled: boolean[] = [];
+    let confirming = false;
+    const click = () => {
+      if (confirming) return;
+      confirming = true;
+      trackConfirm(
+        queryClient.getMutationCache(),
+        () => void observer.mutate().catch(() => undefined),
+        (refused) => {
+          confirming = false;
+          settled.push(refused);
+        },
+      );
+    };
+    return { click, requests, settled };
+  };
+
+  it("sends one request for two clicks in the same tick", async () => {
+    const d = dialog();
+    d.click();
+    d.click();
+    await flush();
+
+    expect(d.requests).toHaveLength(1);
+    expect(d.settled).toEqual([]);
   });
 
-  it("leaves the dialog alone in every other state", () => {
-    // Still running.
-    expect(settledWhileOpen({ ...settled, isPending: true })).toBe(false);
-    // Already closed by the caller's onSuccess.
-    expect(settledWhileOpen({ ...settled, open: false })).toBe(false);
-    // An unrelated mutation behind the same `isPending` settled: nobody confirmed here.
-    expect(settledWhileOpen({ ...settled, confirmed: false })).toBe(false);
-    // Nothing was pending.
-    expect(settledWhileOpen({ ...settled, wasPending: false })).toBe(false);
+  it("reports a refusal without ever having rendered a pending state", async () => {
+    const d = dialog();
+    d.click();
+    await flush();
+    d.requests[0]!.reject(new ApiError("space_has_running_runs", "runs in progress", 409));
+    await flush();
+
+    expect(d.settled).toEqual([true]);
+  });
+
+  it("reports a success as not refused", async () => {
+    const d = dialog();
+    d.click();
+    await flush();
+    d.requests[0]!.resolve();
+    await flush();
+
+    expect(d.settled).toEqual([false]);
+  });
+
+  it("accepts a new confirm once the previous one settled (reopened, or kept open after a refusal)", async () => {
+    const d = dialog();
+    d.click();
+    await flush();
+    d.requests[0]!.reject(new Error("refused"));
+    await flush();
+
+    d.click();
+    await flush();
+    expect(d.requests).toHaveLength(2);
+  });
+
+  it("settles at once when the confirm action starts no mutation", () => {
+    const settled: boolean[] = [];
+    trackConfirm(
+      new QueryClient().getMutationCache(),
+      () => {},
+      (refused) => settled.push(refused),
+    );
+
+    expect(settled).toEqual([false]);
   });
 });

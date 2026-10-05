@@ -24,14 +24,28 @@ declare module "@tanstack/react-query" {
 }
 
 /**
+ * What `requirePermission` and the org/space context guards answer. It is also
+ * what makes the API client re-read the caller's permissions
+ * (`lib/stale-authority.ts`) — and the gates that flip as a result unmount the
+ * very dialog that had promised to show the failure.
+ */
+export function isPermissionRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === "forbidden";
+}
+
+/**
  * Every failed mutation is toasted here, once, through `onMutationError` (which
  * translates the refusals it knows). The one way out is the explicit
  * `meta.errorHandledByCaller`: an `onError` is NOT one, since most of them roll
- * a cache back or invalidate and report nothing.
+ * a cache back or invalidate and report nothing. A permission refusal is
+ * toasted even then: the caller that opted out may be gone before it can
+ * render anything, and a lost right said twice beats one said by nobody.
  */
 const mutationCache = new MutationCache({
   onError: (error, _variables, _context, mutation) => {
-    if (!mutation.meta?.errorHandledByCaller) onMutationError(error);
+    if (!mutation.meta?.errorHandledByCaller || isPermissionRefusal(error)) {
+      onMutationError(error);
+    }
   },
 });
 

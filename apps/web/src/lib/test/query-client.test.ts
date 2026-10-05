@@ -40,12 +40,15 @@ describe("failed mutations", () => {
     queryClient.getMutationCache().clear();
   });
 
-  const fail = (options: { onError?: () => void; meta?: { errorHandledByCaller: true } } = {}) =>
+  const fail = (
+    options: { onError?: () => void; meta?: { errorHandledByCaller: true } } = {},
+    error = new ApiError("blocked_url", "URL is blocked", 400),
+  ) =>
     queryClient
       .getMutationCache()
       .build(queryClient, {
         ...options,
-        mutationFn: () => Promise.reject(new ApiError("blocked_url", "URL is blocked", 400)),
+        mutationFn: () => Promise.reject(error),
       })
       .execute(undefined)
       .catch(() => undefined);
@@ -70,6 +73,26 @@ describe("failed mutations", () => {
 
   it("stays quiet when the hook hands the failure to its callers", async () => {
     await fail({ meta: { errorHandledByCaller: true } });
+
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  // DRT-60: an admin demoted while the invite dialog is open. The 403 re-reads
+  // the permissions, the gate unmounts the dialog, and its inline error with it.
+  it("toasts a permission refusal even when the hook opted out", async () => {
+    await fail(
+      { meta: { errorHandledByCaller: true } },
+      new ApiError("forbidden", "Insufficient permissions: members:invite required", 403),
+    );
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the opt-out for a 403 that is not about permissions", async () => {
+    await fail(
+      { meta: { errorHandledByCaller: true } },
+      new ApiError("storage_limit_exceeded", "Storage quota exceeded", 403),
+    );
 
     expect(toastError).not.toHaveBeenCalled();
   });
