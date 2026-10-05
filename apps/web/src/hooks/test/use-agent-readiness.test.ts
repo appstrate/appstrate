@@ -9,7 +9,12 @@
 
 import { describe, it, expect } from "bun:test";
 import type { AgentDetail } from "@appstrate/shared-types";
-import { agentModelBlocker, agentRunBlocker, resolvesToUsableModel } from "../use-agent-readiness";
+import {
+  agentLaunchRefusal,
+  agentModelBlocker,
+  agentRunBlocker,
+  resolvesToUsableModel,
+} from "../use-agent-readiness";
 import { isModelPinUnavailable } from "../../lib/model-selectability";
 import type { OrgModelInfo } from "../use-models";
 
@@ -119,13 +124,6 @@ describe("agentRunBlocker", () => {
     );
   });
 
-  it("reads a null prompt — a draft with no content yet — as empty", () => {
-    // `packages.draft_content` is nullable and reaches the wire as `null`,
-    // which the declared type does not admit.
-    const draft = agent({ prompt: null as unknown as string });
-    expect(agentRunBlocker(draft, [DEFAULT_OK], null)).toBe("detail.titleEmptyPrompt");
-  });
-
   it("blocks a never-published agent for a reader who cannot run its draft", () => {
     const unpublished = agent({ definition: "draft", home_writable: false });
     expect(agentRunBlocker(unpublished, [DEFAULT_OK], null)).toBe("detail.titleNeverPublished");
@@ -156,6 +154,27 @@ describe("agentRunBlocker", () => {
 
   it("stays optimistic while the model catalog loads", () => {
     expect(agentRunBlocker(agent(), undefined, null)).toBeNull();
+  });
+});
+
+describe('agentLaunchRefusal — the gate of "run with options"', () => {
+  it("refuses what no option cures, activation first", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false });
+    expect(agentLaunchRefusal(agent({ active: false }))).toBe("detail.titleNotActive");
+    expect(agentLaunchRefusal(unpublished)).toBe("detail.titleNeverPublished");
+    expect(agentLaunchRefusal({ ...unpublished, active: false })).toBe("detail.titleNotActive");
+  });
+
+  it("stays open for what the options modal can still change", () => {
+    // No usable default (a model override cures it) and an empty draft prompt
+    // (another version may not be): a plain run is blocked, this launch is not.
+    const curable = agent({ prompt: "" });
+    expect(agentRunBlocker(curable, [], null)).toBe("detail.titleEmptyPrompt");
+    expect(agentRunBlocker(agent(), [model({ id: "m_other" })], null)).toBe(
+      "detail.titleNoDefaultModel",
+    );
+    expect(agentLaunchRefusal(curable)).toBeNull();
+    expect(agentLaunchRefusal(agent())).toBeNull();
   });
 });
 

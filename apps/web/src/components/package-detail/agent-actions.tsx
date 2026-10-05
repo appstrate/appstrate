@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useAgentRunBlocker } from "../../hooks/use-agent-readiness";
+import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
@@ -61,9 +61,6 @@ export function AgentActions({
     label: string;
   } | null>(null);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
-  // The verdict the page's Run buttons read: "run with options" is the same
-  // launch, so it is refused for the same reason, said the same way.
-  const runBlocker = useAgentRunBlocker(detail);
 
   if (!detail) return null;
 
@@ -75,7 +72,10 @@ export function AgentActions({
   // about (a `runner` holds `agents:run` and no `agents:read`, so the space
   // library lists no agents at all) still gets a verdict here.
   const activeHere = detail.active;
-  const runBlockedReason = runBlocker ? t(runBlocker) : undefined;
+  // Only what no option can cure: the modal this opens picks the model and
+  // the version, so a missing default or an empty draft is not its refusal.
+  const refusal = agentLaunchRefusal(detail);
+  const runBlockedReason = refusal ? t(refusal) : undefined;
 
   const handleConfirm = () => {
     if (!confirmState) return;
