@@ -66,19 +66,3 @@ export async function readSession<User, Profile>(
   }
   return { user, profile };
 }
-
-/**
- * Assert the session a full-page redirect was meant to leave behind. The
- * cookie was set before the document loaded, so its boot read IS the read of
- * that session and a second one would only repeat it. When the boot found
- * none it may not have been expecting one, so the resync that does — and that
- * drops the cookie that failed — runs then, and only then.
- */
-export async function sessionAfterBoot(
-  boot: Promise<void>,
-  hasUser: () => boolean,
-  resync: () => Promise<void>,
-): Promise<void> {
-  await boot;
-  if (!hasUser()) await resync();
-}

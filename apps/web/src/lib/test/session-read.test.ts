@@ -7,12 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  readSession,
-  rememberSignedIn,
-  sessionAfterBoot,
-  sessionExpected,
-} from "../session-read.ts";
+import { readSession, rememberSignedIn, sessionExpected } from "../session-read.ts";
 
 const USER = { id: "usr_1" };
 const PROFILE = { id: "usr_1", language: "fr" };
@@ -90,37 +85,5 @@ describe("the signed-in hint", () => {
     expect(sessionExpected(storage)).toBe(true);
     rememberSignedIn(storage, false);
     expect(sessionExpected(storage)).toBe(false);
-  });
-});
-
-describe("sessionAfterBoot", () => {
-  it("settles on the boot read when it established a user", async () => {
-    let resyncs = 0;
-    await sessionAfterBoot(
-      Promise.resolve(),
-      () => true,
-      async () => void resyncs++,
-    );
-    expect(resyncs).toBe(0);
-  });
-
-  it("resyncs, expecting a session, when the boot found none", async () => {
-    let resyncs = 0;
-    await sessionAfterBoot(
-      Promise.resolve(),
-      () => false,
-      async () => void resyncs++,
-    );
-    expect(resyncs).toBe(1);
-  });
-
-  it("surfaces the resync's refusal to the caller", async () => {
-    const refusal = new Error("no session");
-    const outcome = sessionAfterBoot(
-      Promise.resolve(),
-      () => false,
-      () => Promise.reject(refusal),
-    );
-    expect(outcome).rejects.toBe(refusal);
   });
 });

@@ -6,12 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
-import {
-  readSession,
-  rememberSignedIn,
-  sessionAfterBoot,
-  sessionExpected,
-} from "../lib/session-read";
+import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -57,7 +52,7 @@ function clearSession() {
 
 function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
-  profile: AuthProfile,
+  profile: AuthProfile | null,
 ) {
   rememberSignedIn(localStorage, true);
   authStore.setState({
@@ -67,17 +62,15 @@ function setAuthenticatedUser(
   });
 }
 
-// Best-effort: a failing sign-out (network blip, cookie already gone) must not
-// strand the user — `clearSession` still resets the SPA stores.
-async function dropCookies() {
-  await authClient.signOut().catch(() => {});
-}
-
 async function syncAuth(expected: boolean) {
   const session = await readSession(expected, {
     getSession: async () => (await authClient.getSession()).data?.user ?? null,
     getProfile: fetchProfile,
-    dropCookies,
+    // Best-effort: a failing sign-out (network blip, cookie already gone) must
+    // not strand the user — `clearSession` still resets the SPA stores.
+    dropCookies: async () => {
+      await authClient.signOut().catch(() => {});
+    },
   });
   if (session) setAuthenticatedUser(session.user, session.profile);
   else clearSession();
@@ -96,10 +89,20 @@ function initAuth(): Promise<void> {
  * render. Called from `main.tsx` before `createRoot`, so the session/profile
  * round-trip overlaps the locale fetch and the first render instead of
  * queueing behind them. Idempotent — `useAuth()` still calls the same
- * initializer, which no-ops once this has run.
+ * initializer — and resolves once that one boot read has settled.
  */
-export function startAuthBootstrap(): void {
-  void initAuth();
+export function startAuthBootstrap(): Promise<void> {
+  return initAuth();
+}
+
+/**
+ * Called just before any sign-in attempt that can end in a new session or a
+ * new document. Whatever the attempt leaves behind, the next boot then expects
+ * a session and drops a cookie that fails to yield one, instead of treating
+ * the browser as a visitor's and leaving a dead cookie to shadow the next try.
+ */
+function expectSessionNextBoot(): void {
+  rememberSignedIn(localStorage, true);
 }
 
 /**
@@ -139,7 +142,8 @@ export class EmailChangeError extends Error {
 /**
  * Resync auth state from the server cookie and assert that a user was
  * established. Use after a flow that changed the session IN PLACE (an email
- * change). On the no-user path the read already best-effort clears the stale
+ * change), or when the boot found none where one must exist (the OIDC
+ * callback). On the no-user path the read already best-effort clears the stale
  * cookie; this throw lets the caller surface the failure in the UI rather than
  * silently navigating onwards on a null user.
  */
@@ -151,30 +155,6 @@ export async function refreshAuth(): Promise<void> {
       "Authentication did not complete — the session could not be established.",
     );
   }
-}
-
-/** {@link sessionAfterBoot} for the OIDC callback, over this document's boot read. */
-export function requireBootSession(): Promise<void> {
-  return sessionAfterBoot(initAuth(), () => authStore.getState().user !== null, refreshAuth);
-}
-
-/**
- * Finish a sign-in the server just accepted. A session whose profile cannot be
- * read is not one, exactly as at boot (`readSession`): a dead cookie still
- * shadowing the new one would otherwise render the app signed in over requests
- * that answer 401.
- */
-async function establishSession(user: Parameters<typeof setAuthenticatedUser>[0]) {
-  const profile = await fetchProfile();
-  if (!profile) {
-    await dropCookies();
-    clearSession();
-    throw new AuthRefreshError(
-      "no_session",
-      "Authentication did not complete — the session could not be established.",
-    );
-  }
-  setAuthenticatedUser(user, profile);
 }
 
 export function useAuth() {
@@ -189,9 +169,13 @@ export function useAuth() {
    * there is no redirect variant here — the gate owns that path.
    */
   const login = useCallback(async (email: string, password: string) => {
+    expectSessionNextBoot();
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
-    if (result.data?.user) await establishSession(result.data.user);
+    const profile = await fetchProfile();
+    if (result.data?.user) {
+      setAuthenticatedUser(result.data.user, profile);
+    }
   }, []);
 
   const signup = useCallback(
@@ -203,6 +187,7 @@ export function useAuth() {
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
       // page first — so signup has no OIDC branch; the gate owns that path.
+      expectSessionNextBoot();
       const result = await authClient.signUp.email({
         email,
         password,
@@ -213,7 +198,8 @@ export function useAuth() {
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
       }
-      await establishSession(result.data.user);
+      const profile = await fetchProfile();
+      setAuthenticatedUser(result.data.user, profile);
       return { emailVerificationRequired: false };
     },
     [],
@@ -256,6 +242,7 @@ export function useAuth() {
 
   const signInWithSocial = useCallback(
     async (provider: "google" | "github", callbackURL?: string) => {
+      expectSessionNextBoot();
       await authClient.signIn.social({
         provider,
         callbackURL: callbackURL ?? "/",
@@ -320,6 +307,7 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
+    expectSessionNextBoot();
     const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
     if (result.error) throw new Error(result.error.message);
   }, []);
