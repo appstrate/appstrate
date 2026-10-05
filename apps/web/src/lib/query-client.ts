@@ -29,7 +29,7 @@ declare module "@tanstack/react-query" {
  * (`lib/stale-authority.ts`) — and the gates that flip as a result unmount the
  * very dialog that had promised to show the failure.
  */
-export function isPermissionRefusal(error: unknown): boolean {
+function isPermissionRefusal(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403 && error.code === "forbidden";
 }
 
