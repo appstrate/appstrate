@@ -27,28 +27,28 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { QueryClient } from "@tanstack/react-query";
-import { broadRunKeys, createGapReconciler } from "../../hooks/use-global-run-sync.ts";
+import { QueryClient } from "@tanstack/react-query";
+import { broadRunKeys, trackStreamGaps } from "../../hooks/use-global-run-sync.ts";
+import { removeOrgScopedQueries } from "../../lib/query-keys.ts";
 
 type InvalidateCall = { queryKey: readonly unknown[] } | { predicate: unknown };
 
-/** A reconciler over a client that records what it is asked to refetch. */
+/** A real cache whose invalidations are recorded instead of run. */
 function recordingReconciler() {
   const calls: InvalidateCall[] = [];
-  const qc = {
-    invalidateQueries: (filters: InvalidateCall) => {
-      calls.push(filters);
-      return Promise.resolve();
-    },
-  } as unknown as QueryClient;
-  const reconciler = createGapReconciler(() => qc, 10_000);
+  const qc = new QueryClient();
+  qc.invalidateQueries = ((filters: InvalidateCall) => {
+    calls.push(filters);
+    return Promise.resolve();
+  }) as QueryClient["invalidateQueries"];
   return {
+    qc,
     calls,
     /** Every key-addressed call, serialized. */
     keys: () =>
       calls.flatMap((call) => ("queryKey" in call ? [JSON.stringify(call.queryKey)] : [])),
     /** Open a stream over `scope`, as one run of the hook's effect does. */
-    open: (scope = "org_1/spc_1") => reconciler.open("org_1", scope),
+    open: (scope = "org_1/spc_1") => trackStreamGaps(() => qc, "org_1", scope, 10_000),
   };
 }
 
@@ -176,20 +176,46 @@ describe("run cache reconciliation on reconnect", () => {
   // A switch of org, space or persona creates its caches beside the new
   // stream, exactly as a page load does: reconciling there refetched everything
   // the switch had just fetched.
-  it("reconciles nothing on the first connect after a change of scope", () => {
+  it("reconciles nothing on the first connect over a scope no stream covered yet", () => {
     const { calls, open } = recordingReconciler();
     open("org_1/spc_1").connected(0);
     open("org_1/spc_2").connected(1_000);
     expect(calls).toHaveLength(0);
   });
 
-  // The effect also reopens the stream when only the grants changed: the
-  // caches are the same ones, and nothing listened for them in between.
+  // Back on a scope within `staleTime`, its caches are served as they were
+  // left, and no stream listened for them meanwhile.
+  it("reconciles a scope a stream covered, left, and comes back to", () => {
+    const { keys, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    open("org_1/spc_2").connected(1_000);
+    open("org_1/spc_1").connected(2_000);
+    expect(keys()).toContain(BADGE);
+  });
+
   it("reconciles on the first connect of a stream reopened over the same scope", () => {
     const { keys, open } = recordingReconciler();
     open("org_1/spc_1").connected(0);
     open("org_1/spc_1").connected(1_000);
     expect(keys()).toContain(BADGE);
+  });
+
+  // StrictMode's first effect run, or a switch faster than the round trip.
+  it("keeps no trace of a stream aborted before it connected", () => {
+    const { calls, open } = recordingReconciler();
+    open("org_1/spc_1");
+    open("org_1/spc_1").connected(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  // The memory lives in the cache it speaks for: an org switch or a role
+  // preview removes every query, and the scope is new again.
+  it("forgets a scope whose caches were wiped", () => {
+    const { qc, calls, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    removeOrgScopedQueries(qc);
+    open("org_1/spc_1").connected(1_000);
+    expect(calls).toHaveLength(0);
   });
 
   // The mount's queries are as old as the whole backoff by the time a stream
