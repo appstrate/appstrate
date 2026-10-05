@@ -13,12 +13,8 @@ installFakeStorage();
 
 const { queryClient } = await import("../query-client.ts");
 const { orgKeys } = await import("../query-keys.ts");
-const {
-  AUTHORITY_REREAD_INTERVAL_MS,
-  createSessionRefusedHandler,
-  noteStaleAuthority,
-  setSessionRefusedHandler,
-} = await import("../stale-authority.ts");
+const { AUTHORITY_REREAD_INTERVAL_MS, noteStaleAuthority, registerSessionCheck } =
+  await import("../stale-authority.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { client } = await import("../../api/client.ts");
 const { ApiError } = await import("../../api/errors.ts");
@@ -34,6 +30,7 @@ const seedListings = () => {
   queryClient.setQueryData(SPACES_KEY, { data: [] });
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const SIGNED_IN = { id: "usr_1", email: "olivia@test.com", emailVerified: true };
 
 describe("noteStaleAuthority", () => {
   let sessionRefusals: number;
@@ -47,8 +44,13 @@ describe("noteStaleAuthority", () => {
     queryClient.clear();
     seedListings();
     sessionRefusals = 0;
-    setSessionRefusedHandler(() => {
-      sessionRefusals += 1;
+    authStore.setState({ user: SIGNED_IN, profile: null, loading: false });
+    registerSessionCheck({
+      hasSession: async () => {
+        sessionRefusals += 1;
+        return true;
+      },
+      endSession: async () => {},
     });
   });
   afterEach(() => {
@@ -133,14 +135,14 @@ describe("noteStaleAuthority", () => {
   });
 });
 
-describe("createSessionRefusedHandler", () => {
-  const signedIn = { id: "usr_1", email: "olivia@test.com", emailVerified: true };
+describe("registerSessionCheck", () => {
+  const signedIn = SIGNED_IN;
   let ended: number;
   let checks: number;
 
   /** A handler whose session check answers `verdict` — after running `during`, mid-check. */
   const handlerFor = (verdict: boolean | null | Error, during?: () => void) => {
-    const handler = createSessionRefusedHandler({
+    registerSessionCheck({
       hasSession: async () => {
         checks += 1;
         during?.();
@@ -152,7 +154,7 @@ describe("createSessionRefusedHandler", () => {
         authStore.setState({ user: null });
       },
     });
-    return handler;
+    return () => noteStaleAuthority(request("/api/runs"), refusal(401));
   };
 
   beforeEach(() => {

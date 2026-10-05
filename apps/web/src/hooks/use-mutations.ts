@@ -154,8 +154,6 @@ export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    // The import dialog answers every refusal itself: an overwrite or integrity
-    // confirmation, or the form error.
     meta: { errorHandledByCaller: true },
     mutationFn: async ({
       file,
@@ -216,7 +214,6 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
-    // The import dialog shows the refusal on its form.
     meta: { errorHandledByCaller: true },
     mutationFn: async (url: string) => {
       const { data } = await client.POST("/api/packages/import-github", { body: { url } });
@@ -319,7 +316,6 @@ export function useDeleteAllMemories(packageId: string) {
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
-    // The editor shows the refusal inline (`use-editor-state.ts`).
     meta: { errorHandledByCaller: true },
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
@@ -372,7 +368,6 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    // The editor shows the refusal inline (`use-editor-state.ts`).
     meta: { errorHandledByCaller: true },
     mutationFn: async ({
       etag,

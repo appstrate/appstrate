@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -236,7 +236,7 @@ export function useSetChatEnforced() {
  * leaves the row — the model, proxy and generation settings chosen here are
  * still there when it comes back on.
  */
-export function useSetPackageActive(meta?: MutationMeta) {
+export function useSetPackageActive() {
   const qc = useQueryClient();
   const invalidate = useInvalidatePackageActivation();
   const scope = useOrgOnlyScope();
@@ -252,8 +252,6 @@ export function useSetPackageActive(meta?: MutationMeta) {
   }).queryKey;
 
   return useMutation({
-    // Set by the callers that say the refusal in a sentence of their own.
-    meta,
     mutationFn: async ({
       spaceId,
       packageId,

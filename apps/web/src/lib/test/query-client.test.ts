@@ -74,9 +74,9 @@ describe("failed mutations", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  // DRT-60: an admin demoted while the invite dialog is open. The 403 re-reads
-  // the permissions, the gate unmounts the dialog, and its inline error with it.
-  it("toasts a permission refusal even when the hook opted out", async () => {
+  // An admin demoted while the invite dialog is open: the 403 re-reads the
+  // permissions, the gate unmounts the dialog, and its inline error with it.
+  it("toasts a forbidden even when the hook opted out", async () => {
     await fail(
       { meta: { errorHandledByCaller: true } },
       new ApiError("forbidden", "Insufficient permissions: members:invite required", 403),
@@ -85,7 +85,7 @@ describe("failed mutations", () => {
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the opt-out for a 403 that is not about permissions", async () => {
+  it("keeps the opt-out for a 403 with another code", async () => {
     await fail(
       { meta: { errorHandledByCaller: true } },
       new ApiError("storage_limit_exceeded", "Storage quota exceeded", 403),

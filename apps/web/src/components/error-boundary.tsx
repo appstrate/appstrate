@@ -57,8 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidUpdate(prev: Props, prevState: State) {
-    // `prevState.hasError`: only an error that was already on screen when the
-    // key changed is stale. One caught in the same commit belongs to the new page.
+    // `prevState`: a crash caught in the commit that changed the key is the new page's.
     if (prevState.hasError && this.state.hasError && prev.resetKey !== this.props.resetKey) {
       this.setState({ hasError: false, reloading: false });
     }

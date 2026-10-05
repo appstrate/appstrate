@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const { RunList } = await import("../run-list.tsx");
 const { ResourceErrorState } = await import("../page-states.tsx");
 const { ErrorBoundary } = await import("../error-boundary.tsx");
-const { trackConfirm } = await import("../../lib/confirm-settle.ts");
+const { createConfirmer } = await import("../../lib/confirm-settle.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { paginatedRunsKeys } = await import("../../lib/query-keys.ts");
 const { render } = await import("../../test/render.tsx");
@@ -132,9 +132,8 @@ describe("ErrorBoundary", () => {
   });
 });
 
-// `ConfirmModal` cannot be clicked without a DOM; what it does on a click is
-// `trackConfirm` over the real mutation cache, driven here exactly as the
-// component drives it (one in-flight flag, released when the action settles).
+// `ConfirmModal` cannot be clicked without a DOM; a click there is one call of
+// the function below, over the real mutation cache.
 describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => {
   const deferred = () => {
     let resolve!: () => void;
@@ -158,21 +157,16 @@ describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => 
         return request.promise;
       },
     });
-    const settled: boolean[] = [];
-    let confirming = false;
-    const click = () => {
-      if (confirming) return;
-      confirming = true;
-      trackConfirm(
-        queryClient.getMutationCache(),
+    const runConfirm = createConfirmer(queryClient.getMutationCache());
+    let refusals = 0;
+    const click = () =>
+      runConfirm(
         () => void observer.mutate().catch(() => undefined),
-        (refused) => {
-          confirming = false;
-          settled.push(refused);
+        () => {
+          refusals += 1;
         },
       );
-    };
-    return { click, requests, settled };
+    return { click, requests, refusals: () => refusals };
   };
 
   it("sends one request for two clicks in the same tick", async () => {
@@ -182,7 +176,6 @@ describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => 
     await flush();
 
     expect(d.requests).toHaveLength(1);
-    expect(d.settled).toEqual([]);
   });
 
   it("reports a refusal without ever having rendered a pending state", async () => {
@@ -192,20 +185,20 @@ describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => 
     d.requests[0]!.reject(new ApiError("space_has_running_runs", "runs in progress", 409));
     await flush();
 
-    expect(d.settled).toEqual([true]);
+    expect(d.refusals()).toBe(1);
   });
 
-  it("reports a success as not refused", async () => {
+  it("does not report a success", async () => {
     const d = dialog();
     d.click();
     await flush();
     d.requests[0]!.resolve();
     await flush();
 
-    expect(d.settled).toEqual([false]);
+    expect(d.refusals()).toBe(0);
   });
 
-  it("accepts a new confirm once the previous one settled (reopened, or kept open after a refusal)", async () => {
+  it("accepts a new confirm once the previous one settled", async () => {
     const d = dialog();
     d.click();
     await flush();
@@ -217,14 +210,19 @@ describe("ConfirmModal: one confirmation at a time, closed on a refusal", () => 
     expect(d.requests).toHaveLength(2);
   });
 
-  it("settles at once when the confirm action starts no mutation", () => {
-    const settled: boolean[] = [];
-    trackConfirm(
-      new QueryClient().getMutationCache(),
-      () => {},
-      (refused) => settled.push(refused),
-    );
+  it("accepts the next click at once when the confirm action starts no mutation", () => {
+    const runConfirm = createConfirmer(new QueryClient().getMutationCache());
+    let runs = 0;
+    const click = () =>
+      runConfirm(
+        () => {
+          runs += 1;
+        },
+        () => {},
+      );
+    click();
+    click();
 
-    expect(settled).toEqual([false]);
+    expect(runs).toBe(2);
   });
 });

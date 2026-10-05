@@ -477,7 +477,6 @@ export function OrgSettingsModelsPage() {
         ? t("credentials.deleteRefused")
         : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
     );
-    closeConfirm();
   };
 
   return (
@@ -600,7 +599,7 @@ export function OrgSettingsModelsPage() {
           if (!confirmState) return;
           const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate({ params }, { onSettled: closeConfirm });
+            deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
           } else {
             deletePkMutation.mutate(
               { params },

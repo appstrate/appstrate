@@ -138,11 +138,10 @@ router.post("/:token/accept", async (c) => {
     // since the initial token lookup. Never apply that earlier snapshot.
     const invitedRole = current.role as AssignableOrgRole;
     const { created } = await provisionMember(tx, current.orgId, session.user.id, invitedRole);
-    // An existing member keeps their role (no silent downgrade or promotion by
-    // a stray invitation), so the answer must name THAT role, not the invited one.
-    const role = created
-      ? invitedRole
-      : ((await getOrgMember(current.orgId, session.user.id, tx))?.role ?? invitedRole);
+    // An existing member keeps their role: the answer names that one.
+    const member = created ? null : await getOrgMember(current.orgId, session.user.id, tx);
+    if (!created && !member) throw new Error("Membership vanished while accepting an invitation");
+    const role = member?.role ?? invitedRole;
     const assignments = await applySpaceAssignments(tx, {
       orgId: current.orgId,
       userId: session.user.id,
@@ -200,7 +199,6 @@ router.post("/:token/accept", async (c) => {
     slug: org.slug,
     role: claimed.role,
     permissions: listedOrgPermissions(claimed.role),
-    // False for a caller who was already a member: their role was left as it was.
     created: claimed.created,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,

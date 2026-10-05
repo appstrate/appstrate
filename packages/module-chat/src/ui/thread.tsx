@@ -242,11 +242,7 @@ function SentAttachmentChip() {
   return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
 }
 
-/**
- * Why a picked file did not become a chip. The adapter refuses an over-cap file
- * before any attachment exists, so assistant-ui's event is the only trace of it:
- * without a listener the file picker closes on nothing.
- */
+/** Why a picked file did not become a chip: a refused file has no attachment to carry the error. */
 function ComposerAttachmentError() {
   const [message, setMessage] = React.useState<string | null>(null);
   useAuiEvent("composer.attachmentAddError", (event) => setMessage(event.message));

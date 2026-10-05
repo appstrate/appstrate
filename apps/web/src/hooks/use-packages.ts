@@ -465,7 +465,6 @@ export function useCreateVersion(type: PackageType, packageId: string) {
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
-    // Reporting the refusal is the callers' (`meta`): the publish form names it inline.
     onError: (err) => {
       if (
         err instanceof ApiError &&

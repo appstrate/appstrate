@@ -99,15 +99,11 @@ export function useDeleteSpace() {
 /** The transfer: an orphaned personal space becomes a team space. */
 export function useConvertSpaceToTeam() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", {
-    onSuccess: invalidate,
-  });
+  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", { onSuccess: invalidate });
 }
 
 /** Run the offboarding routine on one orphaned personal space immediately. */
 export function useSweepPersonalSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", {
-    onSuccess: invalidate,
-  });
+  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", { onSuccess: invalidate });
 }

@@ -260,7 +260,6 @@ export function useIntegrationRunBlocking(
  */
 export function useInitiateIntegrationConnect() {
   return useMutation({
-    // `useIntegrationOAuthPopup` reports a failed mint with the popup's own outcomes.
     meta: { errorHandledByCaller: true },
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
