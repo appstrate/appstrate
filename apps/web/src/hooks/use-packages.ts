@@ -16,7 +16,12 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
-import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
+import {
+  packageKeys,
+  agentsKeys,
+  invalidateAfterDelete,
+  invalidatePackageFiles,
+} from "../lib/query-keys";
 import type {
   OrgPackageItem,
   OrgPackageItemDetail,
@@ -247,8 +252,9 @@ function useDeletePackage(type: PackageType) {
         params: { path: splitPackageRef(id) },
       });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+    onSuccess: (_data, id) => {
+      // Detail keys are `["packages", segment, orgId, spaceId, id, version]`.
+      invalidateAfterDelete(qc, packageKeys.family(segment), (key) => key[4] === id);
       navigate("/");
     },
   });

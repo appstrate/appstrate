@@ -11,8 +11,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
-import { runKeys, invalidateRunDetails, invalidateRunLogs } from "../query-keys.ts";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import {
+  runKeys,
+  packageKeys,
+  invalidateAfterDelete,
+  invalidateRunDetails,
+  invalidateRunLogs,
+} from "../query-keys.ts";
 
 const ORG = "org_1";
 const SPACE = "spc_1";
@@ -66,5 +72,46 @@ describe("run detail cache invalidation", () => {
     const qc = seededClient();
     await invalidateRunDetails(qc);
     expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, RUN))).toBe(false);
+  });
+});
+
+describe("invalidation after a delete (#1678)", () => {
+  const list = packageKeys.list("skills", ORG, SPACE);
+  const deleted = packageKeys.detail("skills", ORG, SPACE, "@acme/gone");
+  const kept = packageKeys.detail("skills", ORG, SPACE, "@acme/kept");
+
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** A client with all three reads MOUNTED, counting the requests each one issues. */
+  async function mounted() {
+    const qc = new QueryClient();
+    const fetches = new Map<string, number>();
+    for (const queryKey of [list, deleted, kept]) {
+      const id = JSON.stringify(queryKey);
+      const observer = new QueryObserver(qc, {
+        queryKey,
+        queryFn: () => {
+          fetches.set(id, (fetches.get(id) ?? 0) + 1);
+          return Promise.resolve(id);
+        },
+        staleTime: Infinity,
+      });
+      observer.subscribe(() => {});
+    }
+    await settled();
+    return { qc, count: (key: readonly unknown[]) => fetches.get(JSON.stringify(key)) };
+  }
+
+  it("refetches the family but not the reads of the deleted resource", async () => {
+    const { qc, count } = await mounted();
+    expect([count(list), count(deleted), count(kept)]).toEqual([1, 1, 1]);
+
+    invalidateAfterDelete(qc, packageKeys.family("skills"), (key) => key[4] === "@acme/gone");
+    await settled();
+
+    // The page still mounted on the deleted package would only fetch a 404.
+    expect([count(list), count(deleted), count(kept)]).toEqual([2, 1, 2]);
+    // …but its cached answer is stale: the next visit asks the server.
+    expect(isInvalidated(qc, deleted)).toBe(true);
   });
 });
