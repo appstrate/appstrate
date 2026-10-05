@@ -10,6 +10,8 @@ import { spaceStore } from "../stores/space-store";
 import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
+import { shouldRetryQuery } from "../lib/query-client";
+import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 // Reactive hook for query key usage — re-renders when org changes
 export function useCurrentOrgId(): string | null {
@@ -72,6 +74,13 @@ function orgListQueryFn() {
   return primed ?? fetchOrgs();
 }
 
+/** A refused role preview is ended by the middleware: asked again, without it, the list answers. */
+export function shouldRetryOrgList(failureCount: number, error: unknown): boolean {
+  return (
+    failureCount < 1 && (viewAsRefusalCode(error) !== null || shouldRetryQuery(failureCount, error))
+  );
+}
+
 export function useOrg() {
   const queryClient = useQueryClient();
   const currentOrgId = useStore(orgStore, (s) => s.id);
@@ -82,6 +91,7 @@ export function useOrg() {
     // client's [method, path, init] one.
     queryKey: orgKeys.all,
     queryFn: orgListQueryFn,
+    retry: shouldRetryOrgList,
   });
 
   const setOrgId = useCallback((id: string) => orgStore.getState().setId(id), []);
