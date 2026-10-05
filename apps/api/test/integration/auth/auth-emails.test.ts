@@ -6,7 +6,7 @@
  * that the link does what the message says.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
@@ -42,27 +42,52 @@ describe("platform auth e-mails (SMTP on)", () => {
   });
 
   describe("magic link without the OIDC module", () => {
-    it("emails a link that signs the recipient in", async () => {
-      const oidcHook = _swapMagicLinkIssuedHookForTesting(null);
-      try {
-        const email = `magic-${crypto.randomUUID()}@example.test`;
-        const mails = await captureMails(async () => {
-          const res = await postAuth("/sign-in/magic-link", { email, callbackURL: "/" });
-          expect(res.status).toBe(200);
+    let oidcHook: ReturnType<typeof _swapMagicLinkIssuedHookForTesting>;
+    beforeEach(() => {
+      oidcHook = _swapMagicLinkIssuedHookForTesting(null);
+    });
+    afterEach(() => {
+      _swapMagicLinkIssuedHookForTesting(oidcHook);
+    });
+
+    async function requestLink(email: string): Promise<URL> {
+      const mails = await captureMails(async () => {
+        const res = await postAuth("/sign-in/magic-link", {
+          email,
+          callbackURL: "/",
+          errorCallbackURL: "/magic-link",
         });
+        expect(res.status).toBe(200);
+      });
+      expect(mails).toHaveLength(1);
+      expect(mails[0]!.to).toBe(email);
+      expect(mails[0]!.html).toContain("Ce lien expire dans 15 minutes.");
+      return firstLink(mails[0]!);
+    }
 
-        expect(mails).toHaveLength(1);
-        expect(mails[0]!.to).toBe(email);
-        const link = firstLink(mails[0]!);
-        expect(link.pathname).toBe("/api/auth/magic-link/verify");
+    it("emails the dashboard's confirmation page, not the endpoint that spends the token", async () => {
+      const link = await requestLink(`magic-${crypto.randomUUID()}@example.test`);
 
-        const verifyRes = await app.request(`${link.pathname}${link.search}`);
-        expect(verifyRes.status).toBe(302);
-        expect(new URL(verifyRes.headers.get("location")!).pathname).toBe("/");
-        expect(verifyRes.headers.get("set-cookie")).toContain("session_token=");
-      } finally {
-        _swapMagicLinkIssuedHookForTesting(oidcHook);
-      }
+      expect(link.pathname).toBe("/magic-link/confirm");
+      expect(link.searchParams.get("token")).toBeTruthy();
+    });
+
+    it("signs in when the page hands its query to the verify endpoint, once", async () => {
+      const link = await requestLink(`magic-${crypto.randomUUID()}@example.test`);
+      const verify = `/api/auth/magic-link/verify${link.search}`;
+
+      const first = await app.request(verify);
+      expect(first.status).toBe(302);
+      expect(new URL(first.headers.get("location")!).pathname).toBe("/");
+      expect(first.headers.get("set-cookie")).toContain("session_token=");
+
+      // Spent: back to the page that can send another link, with the reason.
+      const second = await app.request(verify);
+      expect(second.status).toBe(302);
+      const location = new URL(second.headers.get("location")!);
+      expect(location.pathname).toBe("/magic-link");
+      expect(location.searchParams.get("error")).toBeTruthy();
+      expect(second.headers.get("set-cookie") ?? "").not.toContain("session_token=");
     });
   });
 
@@ -92,6 +117,24 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(verifyRes.headers.get("set-cookie")).toContain("session_token=");
     });
 
+    it("sign-in to an unverified account re-sends the link with the caller's callbackURL", async () => {
+      const account = await createTestUser({ emailVerified: false, password: PASSWORD });
+      let res!: Response;
+      const mails = await captureMails(async () => {
+        res = await postAuth("/sign-in/email", {
+          email: account.email,
+          password: PASSWORD,
+          callbackURL: "/invite/some-token",
+        });
+      });
+
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe("EMAIL_NOT_VERIFIED");
+      expect(mails).toHaveLength(1);
+      expect(mails[0]!.to).toBe(account.email);
+      expect(firstLink(mails[0]!).searchParams.get("callbackURL")).toBe("/invite/some-token");
+    });
+
     it("on a taken address, emails the account's owner instead of nobody", async () => {
       const owner = await createTestUser({ emailVerified: true });
       const mails = await captureMails(async () => {
@@ -115,8 +158,11 @@ describe("platform auth e-mails (SMTP on)", () => {
       const account = await createTestUser({ emailVerified: true });
       const newEmail = `new-${crypto.randomUUID()}@example.test`;
 
+      // The shape the settings page sends (`emailChangeCallbackURL`).
+      const callbackURL = `/preferences?${new URLSearchParams({ email_change: newEmail })}`;
+
       const toCurrent = await captureMails(async () => {
-        const res = await postAuth("/change-email", { newEmail }, account.cookie);
+        const res = await postAuth("/change-email", { newEmail, callbackURL }, account.cookie);
         expect(res.status).toBe(200);
       });
       expect(toCurrent).toHaveLength(1);
@@ -131,6 +177,7 @@ describe("platform auth e-mails (SMTP on)", () => {
           headers: { Cookie: account.cookie },
         });
         expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toBe(callbackURL);
       });
       expect(toNew).toHaveLength(1);
       expect(toNew[0]!.to).toBe(newEmail);
@@ -142,7 +189,29 @@ describe("platform auth e-mails (SMTP on)", () => {
         headers: { Cookie: account.cookie },
       });
       expect(verifyRes.status).toBe(302);
+      expect(verifyRes.headers.get("location")).toBe(callbackURL);
       expect(await sessionEmail(account.cookie)).toBe(newEmail);
+    });
+
+    it("a link that cannot be honoured returns to the settings page with the error", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const newEmail = `new-${crypto.randomUUID()}@example.test`;
+      const callbackURL = `/preferences?${new URLSearchParams({ email_change: newEmail })}`;
+      const [mail] = await captureMails(() =>
+        postAuth("/change-email", { newEmail, callbackURL }, account.cookie),
+      );
+      const approve = firstLink(mail!);
+      approve.searchParams.set("token", "tampered");
+
+      const res = await app.request(`${approve.pathname}${approve.search}`, {
+        headers: { Cookie: account.cookie },
+      });
+
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.get("location")!, "http://x");
+      expect(location.pathname).toBe("/preferences");
+      expect(location.searchParams.get("email_change")).toBe(newEmail);
+      expect(location.searchParams.get("error")).toBe("INVALID_TOKEN");
     });
   });
 

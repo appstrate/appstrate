@@ -83,4 +83,15 @@ describe("EE platform email overrides", () => {
     expect(renderers["magic-link"]!("en").html).toContain("This link expires in 15 minutes.");
     expect(renderers["reset-password"]!("fr").html).toContain("Ce lien expire dans 1 heure.");
   });
+
+  // The same template verifies a new address after an email change, so it
+  // must not greet an existing user as if they had just signed up.
+  it("verification does not assume the recipient just signed up", () => {
+    for (const locale of LOCALES) {
+      const { html } = renderers.verification!(locale);
+      expect(html).not.toMatch(
+        /Bienvenue|Welcome|créé de compte|create an account|vos agents|your agents/,
+      );
+    }
+  });
 });

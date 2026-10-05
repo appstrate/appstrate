@@ -225,9 +225,9 @@ export function setRealmResolver(resolver: RealmResolver): void {
 //   - return the URL to email instead: its confirmation interstitial, which
 //     keeps mail scanners from burning the one-shot token.
 //
-// The interstitial is a route of that module, so the URL that points at it
+// That interstitial is a route of the module, so the URL that points at it
 // is decided there. Without the module the hook is unset and the email
-// carries Better Auth's own verify URL, which is the only one that exists.
+// links to the dashboard's own confirmation page (`spaMagicLinkConfirmUrl`).
 //
 // FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
 // surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
@@ -486,10 +486,27 @@ export function shouldAutoVerifyEmailOnCreate(
 }
 
 // How long each emailed link stays valid. Each constant is both what Better
-// Auth enforces and what the email tells its reader.
-const MAGIC_LINK_TTL_SECONDS = 15 * 60;
+// Auth enforces and what the email (and the "check your inbox" page) says.
+export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
 const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
 const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
+
+const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
+
+/**
+ * The dashboard page a magic-link email points at: `/magic-link/confirm`,
+ * carrying the verify URL's own query. Better Auth's verify endpoint spends
+ * the token on its first GET, and mail scanners open the links they see — the
+ * page is inert until its reader presses the button that goes to the verify
+ * endpoint.
+ */
+function spaMagicLinkConfirmUrl(verifyUrl: string): string {
+  const url = new URL(verifyUrl);
+  // Unknown shape (a Better Auth upgrade moved the route): leave it alone.
+  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) return verifyUrl;
+  url.pathname = "/magic-link/confirm";
+  return url.toString();
+}
 
 /** Send an auth email through the tenant transport when one is active, else the instance one. */
 async function sendAuthMail(
@@ -522,17 +539,17 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
             // recipient's inbox (forwarded mail, shared/compromised mailbox,
             // mail-archive breach) replay the link and take over the account.
             // 15 minutes is enough for a human to click through immediately
-            // while closing the replay window. `allowedAttempts` still lets
-            // email prefetchers hit the URL without burning the token early.
+            // while closing the replay window. The token is spent by the
+            // first request to the verify endpoint, which is why the email
+            // never links to it directly (see `spaMagicLinkConfirmUrl`).
             expiresIn: MAGIC_LINK_TTL_SECONDS,
-            allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
                 // See `setMagicLinkIssuedHook`. A throw here aborts the send
                 // via the surrounding catch — fail closed.
-                let url = rawUrl;
+                let url = spaMagicLinkConfirmUrl(rawUrl);
                 if (_magicLinkIssuedHook) {
                   // `EndpointContext.headers` is typed `HeadersInit` — copy
                   // into a real `Headers` so the hook contract stays uniform

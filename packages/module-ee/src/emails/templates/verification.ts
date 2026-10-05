@@ -6,16 +6,16 @@ import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
 const strings = {
   fr: {
     subject: "Vérifiez votre adresse email",
-    heading: "Bienvenue sur Appstrate",
-    body: "Cliquez sur le bouton ci-dessous pour vérifier votre adresse email et commencer à créer vos agents :",
+    heading: "Vérifiez votre adresse email",
+    body: "Cliquez sur le bouton ci-dessous pour vérifier votre adresse email :",
     button: "Vérifier mon email",
     fallback: "Ou copiez ce lien dans votre navigateur :",
     footer: "Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.",
   },
   en: {
     subject: "Verify your email address",
-    heading: "Welcome to Appstrate",
-    body: "Click the button below to verify your email address and start building your agents:",
+    heading: "Verify your email address",
+    body: "Click the button below to verify your email address:",
     button: "Verify my email",
     fallback: "Or copy this link into your browser:",
     footer: "If you did not request this, ignore this email.",

@@ -32,20 +32,17 @@ export function linkValiditySentence(expiresInMinutes: number, locale: Supported
 
 /**
  * Factory for the link-based email renderers, which all share one HTML
- * structure: body text, a link, and a footer. A link that expires says when.
+ * structure: body text, a link, how long the link stays valid, and a footer.
  */
 export function createSimpleEmailRenderer(
   strings: Record<SupportedLocale, SimpleEmailStrings>,
-): (data: { url: string; locale: SupportedLocale; expiresInMinutes?: number }) => RenderedEmail {
+): (data: { url: string; locale: SupportedLocale; expiresInMinutes: number }) => RenderedEmail {
   return (data) => {
     const s = strings[data.locale] ?? strings.fr;
-    const expiry =
-      data.expiresInMinutes === undefined
-        ? ""
-        : `\n<p>${linkValiditySentence(data.expiresInMinutes, data.locale)}</p>`;
 
     const html = `<p>${s.body}</p>
-<p><a href="${escapeHtml(data.url)}">${escapeHtml(data.url)}</a></p>${expiry}
+<p><a href="${escapeHtml(data.url)}">${escapeHtml(data.url)}</a></p>
+<p>${linkValiditySentence(data.expiresInMinutes, data.locale)}</p>
 <p>${s.footer}</p>`;
 
     return { subject: s.subject, html };
