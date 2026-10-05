@@ -37,6 +37,11 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
   const [chosenLevel, setChosenLevel] = useState<Level>("space");
+  // Keys spelled out: the locale-key scan cannot follow a template literal.
+  const levelLabels: Record<Level, string> = {
+    space: t("settings:webhooks.level.space"),
+    org: t("settings:webhooks.level.org"),
+  };
   // A caller holding one grant only has no choice to make.
   const level = levels.includes(chosenLevel) ? chosenLevel : levels[0]!;
 
@@ -139,7 +144,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
         {levels.length === 1 && level === "org" && (
           <div className="space-y-2">
             <Label>{t("settings:webhooks.levelLabel")}</Label>
-            <p className="text-sm">{t("settings:webhooks.level.org")}</p>
+            <p className="text-sm">{levelLabels.org}</p>
           </div>
         )}
 
@@ -151,7 +156,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
                 <div key={l} className="flex items-center gap-2">
                   <RadioGroupItem value={l} id={`create-level-${l}`} />
                   <Label htmlFor={`create-level-${l}`} className="cursor-pointer font-normal">
-                    {t(`settings:webhooks.level.${l}`)}
+                    {levelLabels[l]}
                   </Label>
                 </div>
               ))}
