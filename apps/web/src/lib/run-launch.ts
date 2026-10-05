@@ -39,20 +39,49 @@ export interface RunLaunch {
 }
 
 /**
- * Lets one launch through at a time. The mutation's `isPending` cannot do it:
- * it is render state, so two clicks landing in the same frame both read it
- * `false` and both create a run.
+ * Lets one launch through at a time, and reports its outcome to whoever started
+ * it. The mutation's `isPending` cannot do the first: it is render state, so two
+ * clicks landing in the same frame both read it `false` and both create a run.
+ *
+ * The slot follows the launch's own promise, never a subscription to it: it is
+ * freed when the request settles, whatever happened to its listeners meanwhile.
  */
-export function launchGate(): { tryEnter: () => boolean; leave: () => void } {
+export function launchFlight<T>(): {
+  /** Starts the launch, or returns `false` while another one is in flight. */
+  run: (
+    start: () => Promise<T>,
+    handlers: { onSuccess?: (value: T) => void; onError?: (error: Error) => void },
+  ) => boolean;
+  /**
+   * Stop reporting the launch in flight (its surface was dismissed). It keeps
+   * the slot until it settles: the run is still being created.
+   */
+  forget: () => void;
+} {
   let busy = false;
+  let reported: object | null = null;
   return {
-    tryEnter: () => {
+    run: (start, handlers) => {
       if (busy) return false;
       busy = true;
+      const flight = {};
+      reported = flight;
+      void start()
+        .then(
+          (value) => {
+            if (reported === flight) handlers.onSuccess?.(value);
+          },
+          (error: Error) => {
+            if (reported === flight) handlers.onError?.(error);
+          },
+        )
+        .finally(() => {
+          busy = false;
+        });
       return true;
     },
-    leave: () => {
-      busy = false;
+    forget: () => {
+      reported = null;
     },
   };
 }

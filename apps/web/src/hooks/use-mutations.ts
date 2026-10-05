@@ -19,7 +19,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { launchGate, retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
@@ -118,23 +118,28 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
-  const [gate] = useState(launchGate);
+  const [flight] = useState(() => launchFlight<unknown>());
 
   /** One run per click: a second call while one is in flight is dropped. */
   const send = (launch: RunLaunch, onSuccess?: () => void) => {
-    if (!gate.tryEnter()) return;
-    lastLaunch.current = { launch, onSuccess };
-    runAgent.mutate(launch, {
-      onSuccess: () => {
-        setMissingErrors(null);
-        onSuccess?.();
+    flight.run(
+      () => {
+        lastLaunch.current = { launch, onSuccess };
+        return runAgent.mutateAsync(launch);
       },
-      onError: (err: Error) => {
-        const errors = missingConnectionErrors(err);
-        if (errors) setMissingErrors(errors);
+      {
+        onSuccess: () => {
+          setMissingErrors(null);
+          onSuccess?.();
+        },
+        // Every failure is already reported by the mutation's own `onError`;
+        // only the 409 this launcher can answer is picked up here.
+        onError: (err) => {
+          const errors = missingConnectionErrors(err);
+          if (errors) setMissingErrors(errors);
+        },
       },
-      onSettled: gate.leave,
-    });
+    );
   };
 
   return {
@@ -147,6 +152,8 @@ export function useRunLauncher(packageId: string) {
       send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
     },
     dismiss: () => {
+      // A retry may still be in flight: its answer must not reopen the modal.
+      flight.forget();
       setMissingErrors(null);
       runAgent.reset();
     },
