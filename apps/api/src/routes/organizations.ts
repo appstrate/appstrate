@@ -329,8 +329,6 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // `deleting_at` under the per-org lock run admission takes, so a repeat of
     // this DELETE resumes and the hooks tolerate a second `onOrgDelete`.
     //
-    // Both calls refuse a busy organization with their own 400 `delete_failed`;
-    // anything else they throw lands on the one below, cause attached.
     await reserveOrgDeletion(orgId);
 
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)

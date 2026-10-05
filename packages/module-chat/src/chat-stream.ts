@@ -167,13 +167,7 @@ export const chatStreamSchema = z
     path: ["pinned_skills"],
   });
 
-/**
- * The stream's `onError`: an exception that escaped the engine's `execute`
- * becomes the same failed-turn marker a model error does. Only the marker
- * crosses the stream (and the persistence drain ignores it), so the raw error
- * is logged here or nowhere — at `error`, the engine's own catch missed it.
- */
-function clientErrorMessage(error: unknown): string {
+function logAndMarkStreamError(error: unknown): string {
   logger.error("chat turn stream failed", { err: String(error) });
   return clientTurnErrorMarker(classifyClientTurnError(error));
 }
@@ -418,8 +412,6 @@ export async function handleChatStream(
   try {
     chosen = pickModel(models, modelId);
   } catch (error) {
-    // A 400 the user is shown as a generic failed turn: this line is the only
-    // place the actual reason (no model, a dead one, an unknown id) is named.
     logger.info("chat turn refused: no usable model", {
       orgId,
       requested: modelId ?? null,
@@ -703,7 +695,7 @@ export async function handleChatStream(
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
-        onError: clientErrorMessage,
+        onError: logAndMarkStreamError,
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
           void deps.recordChatUsage(record).catch((err) => {

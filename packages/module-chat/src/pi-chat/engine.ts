@@ -606,9 +606,6 @@ export function runPiChat(input: PiChatInput): Response {
         const stepCount = mapper.stepCount();
         const turnError =
           meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
-        // The only server-side record of the raw cause: the stream carries its
-        // category alone. `warn` — the model answered with an error (a refused
-        // key, a provider outage); the platform itself did not fail.
         if (turnError !== undefined) {
           logger.warn("Pi chat turn ended on a model error", {
             err: turnError,

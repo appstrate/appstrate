@@ -23,7 +23,7 @@
  * pi-ai's own request shape — that is the SDK's contract, not ours.
  */
 
-import { describe, it, expect, afterAll, afterEach, mock } from "bun:test";
+import { describe, it, expect, afterAll, afterEach, mock, spyOn } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
@@ -188,16 +188,13 @@ const MODEL_ERROR_LOG = "Pi chat turn ended on a model error";
 
 /** Run `act` with `logger.warn` / `logger.error` recorded instead of written. */
 async function recordingWarnAndError<T>(act: () => Promise<T>) {
-  const warn = mock((..._args: unknown[]) => {});
-  const error = mock((..._args: unknown[]) => {});
-  const original = { warn: logger.warn, error: logger.error };
-  logger.warn = warn as unknown as typeof logger.warn;
-  logger.error = error as unknown as typeof logger.error;
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const error = spyOn(logger, "error").mockImplementation(() => {});
   try {
-    return { result: await act(), warn: warn.mock.calls, error: error.mock.calls };
+    return { result: await act(), warn: [...warn.mock.calls], error: [...error.mock.calls] };
   } finally {
-    logger.warn = original.warn;
-    logger.error = original.error;
+    warn.mockRestore();
+    error.mockRestore();
   }
 }
 

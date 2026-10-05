@@ -86,8 +86,7 @@ app.use("*", requestId());
 // chain. Pass-through no-op when no provider is installed.
 app.use("*", telemetry());
 
-// Access log — one `debug` line per request (`LOG_LEVEL=debug` to see them).
-// Inside the telemetry frame, so the line carries the span's trace ids.
+// Access log — one `debug` line per request; after `telemetry()` for its trace ids.
 app.use("*", accessLog());
 
 // Client IP — captures `getConnInfo(c).remote.address` into a per-Request

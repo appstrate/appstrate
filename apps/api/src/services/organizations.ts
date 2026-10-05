@@ -660,11 +660,7 @@ export async function updateMemberRole(
   });
 }
 
-/**
- * The refusal an organization deletion meets while runs are in progress. Typed
- * and cause-free: it is an answer the caller is expected to get, so it must not
- * reach the log as a failure the way the route's catch-all `delete_failed` does.
- */
+/** An expected refusal: no `cause`, so the error handler writes no error line. */
 function orgHasActiveRuns(): ApiError {
   return new ApiError({
     status: 400,

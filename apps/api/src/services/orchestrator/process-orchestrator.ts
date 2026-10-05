@@ -189,10 +189,6 @@ interface ProcessHandle {
    * upstream (the platform's `pi.ts` error log only reads stdout).
    */
   stderrTail?: string[];
-  /**
-   * This orchestrator signalled the process (cancel, timeout, teardown). Its
-   * non-zero exit is then the answer to that signal, not a crash to report.
-   */
   stopRequested?: boolean;
 }
 
@@ -614,10 +610,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // `Bun.Subprocess.exited` never rejects and the handler only sleeps and logs.
     void proc.exited.then(async (code) => {
       if (code === 0) return;
-      // Read at exit time, before the flush below: `removeWorkload` runs in the
-      // `finally` of every run, and a stop arriving after a crash must not
-      // relabel it.
-      const stopped = ph.stopRequested === true;
+      // Read before the flush: a stop arriving after a crash must not relabel it.
+      const stopped = ph.stopRequested;
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
       await new Promise((r) => setTimeout(r, 100));

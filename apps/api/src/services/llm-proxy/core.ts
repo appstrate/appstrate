@@ -330,9 +330,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         : (err as { name?: unknown } | null)?.name === "TimeoutError"
           ? "upstream_timeout"
           : "upstream_unreachable";
-    // A provider that accepted the connection and stayed silent is its own
-    // slowness: `warn`. Failing to resolve or reach it may just as well be this
-    // platform's egress, and an operator alerting on `error` must see that.
+    // A silent provider is a `warn`; one we cannot reach may be our own egress.
     logger[code === "upstream_timeout" ? "warn" : "error"]("llm-proxy: upstream fetch failed", {
       presetId,
       upstreamUrl,

@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Log levels and messages changed; update any alert that matches them**
+  (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
+  (method, matched route pattern, status, duration, `Request-Id`). No longer at
+  `error`: a refused organization delete (no line), a subprocess the platform
+  stopped itself (`Subprocess stopped`, info), a chat turn the model failed
+  (`Pi chat turn ended on a model error`, warn; it used to be logged as
+  `chat ui stream processing failed`), and an LLM upstream timeout
+  (`llm-proxy: upstream fetch failed`, warn). The three draft-lookup lines
+  about a referenced mcp-server are now `debug`.
 - **An integration calling an internal API needs its host in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
   reach a private, loopback or link-local address as soon as the

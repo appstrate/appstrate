@@ -122,13 +122,8 @@ async function fetchIntegrationManifestUncached(
  * Resolve an `mcp-server` package's MCPB manifest from the package store.
  *
  * An integration whose `source.kind: "local"` references a SEPARATE
- * `mcp-server` package via `source.server.name`. This reads that package's
- * DRAFT (unscoped — internal callers already hold an auth context), for the
- * surfaces that show or check an integration being edited: the tool catalog of
- * the editor and connect pages, and draft-time scope validation. A run never
- * comes through here — the spawn path resolves a published version through
- * {@link resolveMcpServerForSpawn}. Returns `null` when the package is absent,
- * is not an mcp-server, or fails MCPB manifest validation.
+ * `mcp-server` package via `source.server.name`. Reads that package's DRAFT; runs
+ * go through {@link resolveMcpServerForSpawn}. Returns `null` when it does not resolve.
  */
 export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
   const [pkgRow] = await db
@@ -136,9 +131,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
-  // `debug` throughout: this is the best-effort lookup behind every read of an
-  // integration's draft, so a reference that does not resolve would repeat its
-  // line on each page load. The run-time resolver below is the one that warns.
+  // `debug`: every read of an integration's draft comes through here.
   if (!pkgRow) {
     logger.debug("referenced mcp-server package not found", { packageId });
     return null;

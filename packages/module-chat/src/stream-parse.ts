@@ -111,8 +111,7 @@ export async function extractAssistantMessage(
   // a failure of the processor pipe through its own `onError`; both land here.
   let loggedProcessError = false;
   const reportProcessError = (err: unknown): void => {
-    // The engine's own failed-turn marker is the turn's outcome, logged where
-    // its raw cause is known (`pi-chat/engine.ts`) — not a broken stream.
+    // The engine's failed-turn marker is an outcome it logged, not a broken stream.
     if (clientTurnErrorFromMarker(err)) return;
     if (loggedProcessError) return;
     loggedProcessError = true;

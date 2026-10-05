@@ -24,8 +24,9 @@ async function runChild(script: string): Promise<{ out: string; code: number; er
       env: { ...process.env, DATABASE_URL: "", PGLITE_DATA_DIR: dataDir },
       stdout: "pipe",
       stderr: "pipe",
-      // A child that never settles is the failure one of these cases exists for.
-      timeout: 20_000,
+      // A child that never settles is the failure one of these cases exists
+      // for; just under the 30 s test timeout so it is never left orphaned.
+      timeout: 28_000,
     });
     const [out, err, code] = await Promise.all([
       new Response(child.stdout).text(),
