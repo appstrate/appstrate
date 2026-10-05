@@ -20,7 +20,10 @@
  * narrows to the one combination it is probing.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { auditEvents, webhookDeliveries } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -36,6 +39,8 @@ import {
   type PermissionDenialContext,
 } from "@appstrate/core/permissions";
 import webhooksModule from "../../../index.ts";
+import { initWebhookWorker, shutdownWebhookWorker } from "../../../service.ts";
+import { seedWebhook } from "../../helpers/seed.ts";
 
 let currentCtx: TestContext | null = null;
 
@@ -293,6 +298,94 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
     const res = await app.request("/api/webhooks/wh_00000000-0000-0000-0000-000000000000", {
       headers: inDefaultSpace("webhooks:read,org-webhooks:read"),
     });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/webhooks/{id}/test — a real, signed, outbound delivery", () => {
+  let spaceWebhookId: string;
+  let orgWebhookId: string;
+
+  // The route queues a delivery; the worker makes it a row. DNS is injected so
+  // every target is unresolvable and nothing leaves the process.
+  beforeAll(async () => {
+    await shutdownWebhookWorker();
+    await initWebhookWorker({
+      resolve: async () => {
+        throw new Error("ENOTFOUND (injected)");
+      },
+    });
+  });
+  afterAll(async () => {
+    await shutdownWebhookWorker();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    currentCtx = await createTestContext({ orgSlug: "testping" });
+    const { orgId, defaultSpaceId } = currentCtx;
+    spaceWebhookId = (await seedWebhook({ orgId, spaceId: defaultSpaceId })).id;
+    orgWebhookId = (await seedWebhook({ orgId, level: "org" })).id;
+  });
+  afterEach(() => setPermissionDenialHandler(null));
+
+  const ping = (webhookId: string, perms: string) =>
+    app.request(`/api/webhooks/${webhookId}/test`, {
+      method: "POST",
+      headers: { "X-Test-Perms": perms, "X-Space-Id": currentCtx!.defaultSpaceId },
+    });
+
+  const deliveries = (webhookId: string) =>
+    db
+      .select({ eventType: webhookDeliveries.eventType, attempt: webhookDeliveries.attempt })
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.webhookId, webhookId));
+
+  /** Long enough for a queued delivery to have been attempted (drain tick: 500 ms). */
+  const settle = () => new Promise((r) => setTimeout(r, 1_200));
+
+  it("a writer gets 200, one test.ping attempt in the history, and an audit entry", async () => {
+    const res = await ping(spaceWebhookId, "webhooks:read,webhooks:write");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { eventId: string; payload: { type: string } };
+    expect(body.payload.type).toBe("test.ping");
+
+    await settle();
+    expect(await deliveries(spaceWebhookId)).toEqual([{ eventType: "test.ping", attempt: 1 }]);
+
+    const audit = await db
+      .select({ resourceId: auditEvents.resourceId, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "webhook.test_sent"));
+    expect(audit).toEqual([{ resourceId: spaceWebhookId, after: { eventId: body.eventId } }]);
+  });
+
+  it("a reader is refused and nothing is sent", async () => {
+    const res = await ping(spaceWebhookId, "webhooks:read");
+    expect(res.status).toBe(403);
+
+    await settle();
+    expect(await deliveries(spaceWebhookId)).toEqual([]);
+  });
+
+  it("the space grant does not reach an org-level webhook", async () => {
+    // `webhooks:write` administers this space's webhooks; an org-level one
+    // fans out across every space and is `org-webhooks:write`'s.
+    const res = await ping(orgWebhookId, "webhooks:read,webhooks:write");
+    expect(res.status).toBe(403);
+
+    await settle();
+    expect(await deliveries(orgWebhookId)).toEqual([]);
+
+    // Control: the org half sends it.
+    expect((await ping(orgWebhookId, "org-webhooks:read,org-webhooks:write")).status).toBe(200);
+  });
+
+  it("an id that does not exist is a 404 for a writer", async () => {
+    const res = await ping(
+      "wh_00000000-0000-0000-0000-000000000000",
+      "webhooks:read,webhooks:write",
+    );
     expect(res.status).toBe(404);
   });
 });

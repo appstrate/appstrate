@@ -348,7 +348,16 @@ export function createWebhooksRouter() {
 
   // POST /api/webhooks/:id/test — deliver a synthetic test.ping event
   router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
-    return c.json(await sendTestPing(await loadWebhookForAction(c, "write")));
+    const webhook = await loadWebhookForAction(c, "write");
+    const result = await sendTestPing(webhook);
+    // An outbound signed request on the caller's say-so, like a rotation.
+    await recordAuditFromContext(c, {
+      action: "webhook.test_sent",
+      resourceType: "webhook",
+      resourceId: webhook.id,
+      after: { eventId: result.eventId },
+    });
+    return c.json(result);
   });
 
   // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.
