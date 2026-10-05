@@ -62,9 +62,11 @@ type WebhookEventType = z.infer<typeof webhookEventSchema>;
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
 const MAX_ATTEMPTS = 8;
 /**
- * Attempts granted to a hostname that does not resolve (now, +30 s, +5 min).
- * Enough to ride out a resolver hiccup or a record still propagating; the full
- * schedule would keep knocking on a lapsed or mistyped domain for half a day.
+ * A DNS miss is retried only while the delivery is on one of its first three
+ * attempts (now, +30 s, +5 min). The bound is on the delivery's TOTAL attempt
+ * number, not on a count of misses: a first miss on attempt 3 or later is
+ * final. Enough to ride out a resolver hiccup or a record still propagating;
+ * the full schedule would keep knocking on a lapsed domain for half a day.
  */
 const MAX_UNRESOLVED_ATTEMPTS = 3;
 const DELIVERY_TIMEOUT_MS = 15_000;
@@ -681,10 +683,12 @@ export async function sendTestPing(
  * Process a single webhook delivery attempt.
  * Throws on failure — queue handles retry scheduling via backoffStrategy.
  * Throws PermanentJobError for permanent failures (4xx except 408/429, a
- * target the SSRF guard blocks, or a hostname still unresolved after
- * MAX_UNRESOLVED_ATTEMPTS).
+ * target the SSRF guard blocks, or a hostname that does not resolve on attempt
+ * MAX_UNRESOLVED_ATTEMPTS or later).
+ *
+ * Exported for its tests; `resolve` is their seam, production passes none.
  */
-async function processDelivery(
+export async function processDelivery(
   job: QueueJob<DeliveryJobData>,
   resolve?: HostResolver,
 ): Promise<void> {
@@ -782,8 +786,8 @@ async function processDelivery(
     } else if (err instanceof SsrfBlockedError && err.reason === "resolution-failed") {
       // DNS did not answer. Nothing was reached, so nothing was blocked: a
       // resolver hiccup or a record still propagating is as transient as a
-      // 503, and dropping the event on the first miss loses it for good. Capped
-      // below at MAX_UNRESOLVED_ATTEMPTS.
+      // 503, and dropping the event on the first miss loses it for good. Final
+      // below once the delivery has reached attempt MAX_UNRESOLVED_ATTEMPTS.
       errorMessage = "Delivery target hostname could not be resolved";
       unresolved = true;
     } else if (err instanceof SsrfBlockedError) {
@@ -863,22 +867,18 @@ async function processDelivery(
 /**
  * Initialize the webhook delivery worker. Called at boot.
  *
- * `deps` is the test seam: a resolver so a delivery's DNS outcome does not
- * depend on the host's, and a backoff so a retry schedule can be watched to
- * its end. Production passes neither.
+ * `deps.resolve` is the test seam: a delivery's DNS outcome then does not
+ * depend on the host's resolver. Production passes none.
  */
-export async function initWebhookWorker(
-  deps: { resolve?: HostResolver; backoffStrategy?: (attemptsMade: number) => number } = {},
-): Promise<void> {
+export async function initWebhookWorker(deps: { resolve?: HostResolver } = {}): Promise<void> {
   const queue = await getDeliveryQueue();
 
   queue.process((job) => processDelivery(job, deps.resolve), {
     concurrency: 10,
     limiter: { max: 100, duration: 1000 },
-    backoffStrategy:
-      deps.backoffStrategy ??
-      ((attemptsMade: number) =>
-        RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!),
+    backoffStrategy: (attemptsMade: number) => {
+      return RETRY_DELAYS_MS[attemptsMade - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!;
+    },
   });
 
   logger.info("Webhook delivery worker started");

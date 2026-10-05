@@ -135,6 +135,14 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
           )}
         </div>
 
+        {/* Never create an organization-wide webhook without saying so. */}
+        {levels.length === 1 && level === "org" && (
+          <div className="space-y-2">
+            <Label>{t("settings:webhooks.levelLabel")}</Label>
+            <p className="text-sm">{t("settings:webhooks.level.org")}</p>
+          </div>
+        )}
+
         {levels.length > 1 && (
           <div className="space-y-2">
             <Label>{t("settings:webhooks.levelLabel")}</Label>

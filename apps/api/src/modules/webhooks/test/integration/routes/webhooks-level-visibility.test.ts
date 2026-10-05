@@ -363,8 +363,6 @@ describe("POST /api/webhooks/{id}/test — a real, signed, outbound delivery", (
   it("a reader is refused and nothing is sent", async () => {
     const res = await ping(spaceWebhookId, "webhooks:read");
     expect(res.status).toBe(403);
-
-    await settle();
     expect(await deliveries(spaceWebhookId)).toEqual([]);
   });
 
@@ -373,8 +371,6 @@ describe("POST /api/webhooks/{id}/test — a real, signed, outbound delivery", (
     // fans out across every space and is `org-webhooks:write`'s.
     const res = await ping(orgWebhookId, "webhooks:read,webhooks:write");
     expect(res.status).toBe(403);
-
-    await settle();
     expect(await deliveries(orgWebhookId)).toEqual([]);
 
     // Control: the org half sends it.

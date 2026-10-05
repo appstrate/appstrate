@@ -26,11 +26,16 @@ export interface DialogOpener {
 }
 
 /**
- * Record what had focus as the dialog opens. A menu item is unmounted with its
- * menu by the time the dialog closes, so the menu's own trigger is recorded
- * too: Radix labels the menu with it (`aria-labelledby`).
+ * Record what had focus as the dialog opens. `<body>` holding focus means
+ * nothing did, so there is nothing to give it back to. A menu item is
+ * unmounted with its menu by the time the dialog closes, so the menu's own
+ * trigger is recorded too: Radix labels the menu with it (`aria-labelledby`).
  */
-export function captureDialogOpener(active: OpenerElement | null): DialogOpener {
+export function captureDialogOpener(doc: {
+  activeElement: OpenerElement | null;
+  body: unknown;
+}): DialogOpener {
+  const active = doc.activeElement === doc.body ? null : doc.activeElement;
   return {
     element: active,
     menuTriggerId: active?.closest('[role="menu"]')?.getAttribute("aria-labelledby") ?? null,

@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  beforeAll,
+  afterAll,
+  setDefaultTimeout,
+  spyOn,
+} from "bun:test";
 import { eq } from "drizzle-orm";
 import { truncateAll, db } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
@@ -14,10 +23,13 @@ import {
   listDeliveries,
   dispatchWebhookEvents,
   sendTestPing,
+  processDelivery,
   initWebhookWorker,
   shutdownWebhookWorker,
 } from "../../../service.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
+import { LocalQueue } from "../../../../../infra/queue/local-queue.ts";
+import { PermanentJobError } from "../../../../../infra/queue/index.ts";
 
 setDefaultTimeout(30_000);
 
@@ -321,8 +333,7 @@ describe("webhooks service", () => {
 
   describe("dispatchWebhookEvents", () => {
     // DNS is injected: every host is unresolvable whatever the machine's
-    // resolver answers for `.test`, and nothing leaves the process. The backoff
-    // is shortened so a whole retry schedule plays out inside a test.
+    // resolver answers for `.test`, and nothing leaves the process.
     beforeAll(async () => {
       // Replace whatever worker an earlier boot of the module left running.
       await shutdownWebhookWorker();
@@ -330,7 +341,6 @@ describe("webhooks service", () => {
         resolve: async () => {
           throw new Error("ENOTFOUND (injected)");
         },
-        backoffStrategy: () => 10,
       });
     });
 
@@ -351,16 +361,14 @@ describe("webhooks service", () => {
         .orderBy(webhookDeliveries.attempt);
     }
 
-    /** Wait for `count` attempts, then long enough for one more to have shown up. */
-    async function settledDeliveries(webhookId: string, count: number) {
+    async function firstDelivery(webhookId: string) {
       const deadline = Date.now() + 20_000;
-      while ((await deliveriesOf(webhookId)).length < count) {
-        if (Date.now() > deadline) throw new Error(`fewer than ${count} deliveries after 20s`);
+      for (;;) {
+        const [row] = await deliveriesOf(webhookId);
+        if (row) return row;
+        if (Date.now() > deadline) throw new Error("no delivery after 20s");
         await new Promise((r) => setTimeout(r, 50));
       }
-      // Drain tick (500 ms) + the 10 ms backoff: a further retry would be in by now.
-      await new Promise((r) => setTimeout(r, 1_200));
-      return deliveriesOf(webhookId);
     }
 
     it("fires org-level webhook for a run in any app of the org", async () => {
@@ -377,25 +385,41 @@ describe("webhooks service", () => {
         status: "success",
       });
 
-      const [row] = await settledDeliveries(orgWh.id, 1);
-      expect(row?.eventType).toBe("run.success");
+      expect((await firstDelivery(orgWh.id)).eventType).toBe("run.success");
     });
 
-    it("retries an unresolvable host, then gives up after three attempts", async () => {
-      // A DNS miss reached nothing, so it is not the SSRF guard's permanent
+    it("a DNS miss is retryable on attempts 1 and 2, final from attempt 3", async () => {
+      // A miss reached nothing, so it is not the SSRF guard's permanent
       // "blocked address" verdict — but a lapsed domain must not be retried on
-      // the full eight-attempt schedule either.
+      // the full eight-attempt schedule either. The bound is the delivery's
+      // attempt number: the processor is called directly with each.
       const wh = await createWebhook(
         appLevel({ url: "https://unresolvable.example/hook", events: ["run.success"] }),
       );
+      const attempt = (attemptsMade: number) =>
+        processDelivery(
+          {
+            id: `job_${attemptsMade}`,
+            name: "deliver",
+            attemptsMade,
+            data: { webhookId: wh.id, eventId: "evt_dns", eventType: "run.success", payload: "{}" },
+          },
+          async () => {
+            throw new Error("ENOTFOUND (injected)");
+          },
+        ).then(
+          () => null,
+          (err: unknown) => err,
+        );
 
-      await dispatchWebhookEvents({ orgId, spaceId: defaultSpaceId }, "run.success", {
-        id: "run_dns_miss",
-        packageId: "@scope/agent",
-        status: "success",
-      });
+      for (const attemptsMade of [0, 1]) {
+        const err = await attempt(attemptsMade);
+        expect(err).toBeInstanceOf(Error);
+        expect(err).not.toBeInstanceOf(PermanentJobError);
+      }
+      expect(await attempt(2)).toBeInstanceOf(PermanentJobError);
 
-      const rows = await settledDeliveries(wh.id, 3);
+      const rows = await deliveriesOf(wh.id);
       expect(rows.map((r) => r.attempt)).toEqual([1, 2, 3]);
       for (const row of rows) {
         expect(row.status).toBe("failed");
@@ -403,20 +427,31 @@ describe("webhooks service", () => {
       }
     });
 
-    it("sendTestPing delivers a test.ping the webhook is not subscribed to, and never retries it", async () => {
+    it("sendTestPing queues a single-attempt test.ping the webhook is not subscribed to", async () => {
       const wh = await createWebhook(
         appLevel({ url: "https://unresolvable.example/hook", events: ["run.failed"] }),
       );
 
-      const { eventId, payload } = await sendTestPing(wh);
-      expect(payload.type).toBe("test.ping");
+      // Tier 0 runs the in-memory queue; the per-job option is what keeps a
+      // test from being retried for hours, so it is asserted where it is passed.
+      const add = spyOn(LocalQueue.prototype, "add");
+      try {
+        const { eventId, payload } = await sendTestPing(wh);
+        expect(payload.type).toBe("test.ping");
+        expect(add).toHaveBeenCalledTimes(1);
+        expect(add.mock.calls[0]).toEqual([
+          "deliver",
+          expect.objectContaining({ webhookId: wh.id, eventId, eventType: "test.ping" }),
+          { attempts: 1 },
+        ]);
 
-      // The same failing target gets three attempts for a real event (above):
-      // one row here is the single-attempt option, not the absence of a retry window.
-      const rows = await settledDeliveries(wh.id, 1);
-      expect(rows.map((r) => [r.eventType, r.attempt])).toEqual([["test.ping", 1]]);
-      const { data } = await listDeliveries({ orgId }, wh.id);
-      expect(data.map((d) => d.eventId)).toEqual([eventId]);
+        const row = await firstDelivery(wh.id);
+        expect([row.eventType, row.attempt]).toEqual(["test.ping", 1]);
+        const { data } = await listDeliveries({ orgId }, wh.id);
+        expect(data.map((d) => d.eventId)).toEqual([eventId]);
+      } finally {
+        add.mockRestore();
+      }
     });
   });
 });

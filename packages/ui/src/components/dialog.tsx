@@ -39,15 +39,17 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  * there is none: every dialog here is opened by state (`<Dialog open>`), so
  * without this, Escape drops keyboard users on `<body>`.
  *
- * Known limit: an opener wrapped in a Radix `Tooltip` shows its tooltip when
+ * Known limits. An opener wrapped in a Radix `Tooltip` shows its tooltip when
  * refocused (Radix opens on any focus not preceded by a pointer-down), exactly
- * as it would behind a `DialogTrigger`.
+ * as it would behind a `DialogTrigger`. And a dialog that replaces another
+ * (create → secret reveal) captures a control INSIDE the first one, gone by the
+ * time it closes: focus then falls to `<body>`, as before.
  */
 const DialogSurface = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ onCloseAutoFocus, ...props }, ref) => {
-  const [opener] = React.useState(() => captureDialogOpener(document.activeElement));
+  const [opener] = React.useState(() => captureDialogOpener(document));
   return (
     <DialogPrimitive.Content
       ref={ref}

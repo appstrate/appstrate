@@ -134,8 +134,6 @@ export class LocalQueue<T> implements JobQueue<T> {
     private readonly defaultJobOptions?: JobAddOptions,
     /** Injectable for tests; production always uses the app logger. */
     private readonly log: Logger = logger,
-    /** Injectable for tests; production always polls on {@link CRON_POLL_INTERVAL_MS}. */
-    private readonly cronPollIntervalMs: number = CRON_POLL_INTERVAL_MS,
   ) {}
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
@@ -409,7 +407,7 @@ export class LocalQueue<T> implements JobQueue<T> {
 
   /** Delay from `now` to the next wall-clock poll boundary. */
   private cronPollDelay(now: number): number {
-    return this.cronPollIntervalMs - (now % this.cronPollIntervalMs) + CRON_POLL_MARGIN_MS;
+    return CRON_POLL_INTERVAL_MS - (now % CRON_POLL_INTERVAL_MS) + CRON_POLL_MARGIN_MS;
   }
 
   /**

@@ -214,10 +214,11 @@ describe("LocalQueue cron poll alignment", () => {
   });
 
   it("keeps polling after an evaluation throws, and stops at shutdown", async () => {
-    // A 100 ms cadence in place of 30 s; the evaluator is replaced on the
-    // instance so the test counts polls and makes the first one throw.
+    // The delay and the evaluator are replaced on the instance: a 100 ms
+    // cadence in place of 30 s, polls counted, the first one throwing.
     const silent = { debug() {}, info() {}, warn() {}, error() {} };
-    const q = new LocalQueue<unknown>("test-cron-rearm", undefined, silent as any, 100) as any;
+    const q = new LocalQueue<unknown>("test-cron-rearm", undefined, silent as any) as any;
+    q.cronPollDelay = () => 100;
     let polls = 0;
     q.evaluateCron = () => {
       polls++;
