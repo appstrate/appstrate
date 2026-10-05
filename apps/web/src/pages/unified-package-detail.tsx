@@ -203,9 +203,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const {
     data: versionDetail,
-    isLoading: versionLoading,
+    isPending: versionPending,
+    fetchStatus: versionFetchStatus,
     error: versionError,
   } = useVersionDetail(type, packageId, versionParam);
+  // Not `isLoading`: React Query PAUSES a retry while the tab is in the
+  // background, and a paused query is neither loading nor failed — the version
+  // redirect below would then read "no such version" into a request still in
+  // flight, and hide the very error it is about to report.
+  const versionLoading = versionPending && versionFetchStatus !== "idle";
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the

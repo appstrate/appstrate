@@ -2558,9 +2558,11 @@ export function createPackagesRouter() {
             latestDate,
           )
         ) {
+          const activeVersion = asRecord(existing.draftManifest).version;
           throw conflict(
             "draft_overwrite",
             "This package has unpublished changes that will be overwritten by the import.",
+            { packageId, active_version: typeof activeVersion === "string" ? activeVersion : null },
           );
         }
       }
@@ -2575,6 +2577,7 @@ export function createPackagesRouter() {
             throw conflict(
               "integrity_mismatch",
               "This version already exists with different content. Use the force option to replace.",
+              { packageId, version: importedVersion },
             );
           }
         }

@@ -95,7 +95,12 @@ export async function postInstallPackage(params: {
     zipBuffer,
     manifest,
   });
-  if (published?.outcome === "created") {
+  // `exists` settles the draft too: every caller reaches it only with the
+  // content that version holds (identical bytes, or a forced import that
+  // replaces the version right after), so leaving the draft dirty would make
+  // every later import answer `409 draft_overwrite` for edits nobody made.
+  // A version that is not the latest is left alone by the callee.
+  if (published) {
     await finalizeDraftPublication({
       packageId,
       orgId,

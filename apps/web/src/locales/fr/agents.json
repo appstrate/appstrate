@@ -274,6 +274,7 @@
   "editor.breadcrumbEdit": "Modifier",
   "editor.errorRequired": "Le champ identifiant est requis.",
   "editor.errorPrompt": "Le prompt est requis.",
+  "editor.createdUnpublished": "Package créé en brouillon : sa version initiale n'a pas pu être publiée. Vérifiez sa version et la configuration de ses dépendances, puis créez une version.",
   "editor.skillsEmpty": "Aucun skill dans les packages. Ajoutez-en depuis la page Packages.",
   "editor.integrationsEmpty": "Aucune intégration importée. Visitez le marketplace Intégrations pour en importer une.",
   "editor.integrationInactive": "Non active dans cet espace",

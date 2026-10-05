@@ -2722,6 +2722,93 @@ describe("Packages API", () => {
       expect(put.status).toBe(412);
     });
 
+    describe("re-importing over an existing package", () => {
+      const enc = (str: string) => new TextEncoder().encode(str);
+      const id = "@pkgorg/conflicting-skill";
+      const archive = (version: string, body: string) => {
+        const afps = zipSync({
+          "manifest.json": enc(
+            JSON.stringify({
+              name: id,
+              version,
+              type: "skill",
+              schema_version: "0.1",
+              display_name: "Conflicting Skill",
+              description: "A skill.",
+            }),
+          ),
+          "SKILL.md": enc(`---\nname: conflicting-skill\ndescription: A skill.\n---\n\n${body}`),
+        });
+        const form = new FormData();
+        form.append("file", new File([new Uint8Array(afps)], "skill.afps"));
+        return form;
+      };
+      const importArchive = (form: FormData, query = "") =>
+        app.request(`/api/packages/import${query}`, {
+          method: "POST",
+          headers: authHeaders(ctx),
+          body: form,
+        });
+      const hasUnarchivedChanges = async () => {
+        const res = await app.request(`/api/packages/skills/${id}`, { headers: authHeaders(ctx) });
+        return ((await res.json()) as { has_unarchived_changes: boolean }).has_unarchived_changes;
+      };
+
+      it("names the version a forced import would replace (integrity_mismatch)", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+
+        const res = await importArchive(archive("1.0.0", "Different."));
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({
+          code: "integrity_mismatch",
+          packageId: id,
+          version: "1.0.0",
+        });
+      });
+
+      it("names the draft a forced import would overwrite (draft_overwrite)", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        const before = await app.request(`/api/packages/skills/${id}`, {
+          headers: authHeaders(ctx),
+        });
+        const edit = await app.request(`/api/packages/skills/${id}`, {
+          method: "PATCH",
+          headers: authHeaders(ctx, {
+            "Content-Type": "application/json",
+            ...ifMatch(etagVersion(before)),
+          }),
+          body: JSON.stringify({
+            content: "---\nname: conflicting-skill\ndescription: A skill.\n---\n\nEdited.",
+          }),
+        });
+        expect(edit.status).toBe(200);
+
+        const res = await importArchive(archive("1.1.0", "Second."));
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({
+          code: "draft_overwrite",
+          packageId: id,
+          active_version: "1.0.0",
+        });
+      });
+
+      it("leaves a clean draft after a forced replacement, so the next import is not refused", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect((await importArchive(archive("1.0.0", "Replaced."), "?force=true")).status).toBe(
+          201,
+        );
+        expect(await hasUnarchivedChanges()).toBe(false);
+
+        expect((await importArchive(archive("1.1.0", "Next."))).status).toBe(201);
+      });
+
+      it("leaves a clean draft after re-importing identical content", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect(await hasUnarchivedChanges()).toBe(false);
+      });
+    });
+
     // The dashboard's resource-section ".afps import" (useUploadPackage) routes
     // skill/integration/agent ZIPs here — the per-type create endpoints are
     // JSON-only. Cover a non-agent type so type-detection on this path is
