@@ -28,6 +28,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { TestResultSpan } from "./test-result-span";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -335,11 +336,11 @@ function CredentialFormBody({
               {testMutation.isPending ? <Spinner /> : t("credentials.test")}
             </Button>
             {testResult && (
-              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
-                {testResult.ok
-                  ? t("credentials.testSuccess", { latency: testResult.latency })
-                  : t("credentials.testFailed", { message: testResult.message })}
-              </span>
+              <TestResultSpan
+                result={testResult}
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
+              />
             )}
           </div>
           <Button type="button" variant="outline" onClick={onClose}>
