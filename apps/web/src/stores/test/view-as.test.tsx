@@ -440,7 +440,7 @@ function renderBanner(
 describe("banner", () => {
   it("names the role, the space role and the space, with an exit", () => {
     const html = renderBanner(PERSONA, "org_a");
-    expect(html).toContain("Vous voyez l'organisation en tant que");
+    expect(html).toContain("Vous voyez l'organisation avec le rôle");
     expect(html).toContain("Utilisateur standard");
     expect(html).toContain("Lecteur");
     expect(html).toContain("Marketing");
