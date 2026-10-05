@@ -16,7 +16,7 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { clampToBackingLevel, resolveModel } from "./org-models.ts";
+import { clampToBackingLevel, resolveModelCascade } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog, modelSourceOf } from "./state/runs.ts";
@@ -146,7 +146,7 @@ export async function buildRunContext(params: {
   droppedGenerationSettings: DroppedGenerationSetting[];
   /**
    * Id of the stored model pin (space setting, a schedule's override) this run
-   * could NOT use: `modelLabel` is then the org default it fell back to. `null`
+   * could NOT use: `modelLabel` is then the default it fell back to. `null`
    * when the run uses what was asked. The caller MUST surface it — see
    * {@link recordModelFallback}.
    */
@@ -214,14 +214,15 @@ export async function buildRunContext(params: {
   const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
   const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
-  const [proxyResult, modelResult] = await Promise.all([
+  const [proxyResult, modelCascade] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
-    resolveModel(orgId, agent.id, effectiveModelId),
+    resolveModelCascade(orgId, agent.id, effectiveModelId),
   ]);
 
-  if (!modelResult) {
+  if (!modelCascade) {
     throw new ModelNotConfiguredError();
   }
+  const modelResult = modelCascade.model;
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
@@ -232,11 +233,12 @@ export async function buildRunContext(params: {
     throw new ModelCredentialMissingError(modelResult.label);
   }
 
-  // `resolveModel` falls back to the org default when the pin names a model
-  // that was deleted or disabled since. The run is legitimate; running it on
-  // another model without a word is not.
+  // The cascade falls back to a default when the pin no longer loads. The run
+  // is legitimate; running it on another model without a word is not. Read off
+  // the cascade's own step — the pin is free text, so comparing ids would call
+  // a differently-cased UUID that resolved a fallback.
   const unavailablePinnedModelId =
-    effectiveModelId && modelResult.aliasId !== effectiveModelId ? effectiveModelId : null;
+    effectiveModelId && modelCascade.step !== "explicit" ? effectiveModelId : null;
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
@@ -485,8 +487,8 @@ export async function recordModelFallback(
     scope,
     runId,
     MODEL_FALLBACK_EVENT,
-    `the model set for this run ('${unavailablePinnedModelId}') was deleted or disabled — ` +
-      `the run uses the organization default '${model}' instead`,
+    `the model set for this run ('${unavailablePinnedModelId}') is no longer usable — ` +
+      `the run uses the default model '${model}' instead`,
     { pinnedModelId: unavailablePinnedModelId, model, reason: "pinned_model_unavailable" },
   );
 }

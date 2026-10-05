@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * End-to-end: a run whose pinned model was deleted falls back to the org
- * default (`resolveModel`) and says so in `run_logs` (#1674). Without the
+ * End-to-end: a run whose pinned model no longer loads falls back to a default
+ * (`resolveModelCascade`) and says so in `run_logs` (#1674). Without the
  * marker the run is indistinguishable from one that ran on the model its
  * agent or schedule was set to.
  */
@@ -106,6 +106,17 @@ describe("run launch — model-fallback marker in run_logs", () => {
       model: DEFAULT_LABEL,
       reason: "pinned_model_unavailable",
     });
+  });
+
+  it("writes no marker for a pin that resolves under another spelling of its id", async () => {
+    // The pin column is free text and the lookup is on a uuid column: an
+    // upper-cased id finds the same row, so this is not a fallback.
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT, { modelId: pinnedModelId.toUpperCase() });
+
+    const { run, rows } = await launch();
+
+    expect(run.modelLabel).toBe(PINNED_LABEL);
+    expect(rows).toHaveLength(0);
   });
 
   it("writes no marker when the pinned model resolves", async () => {
