@@ -9,6 +9,7 @@ import { bootCritical, bootBackground, probeUsercontentReachability } from "./li
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
+import { accessLog } from "./middleware/access-log.ts";
 import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
@@ -77,6 +78,9 @@ app.onError(errorHandler);
 
 // Request-Id — generates req_ prefixed ID, sets header + context variable
 app.use("*", requestId());
+
+// Access log — one `debug` line per request (`LOG_LEVEL=debug` to see them).
+app.use("*", accessLog());
 
 // Telemetry — delegates to the telemetry provider's HTTP SERVER-span
 // middleware (installed by an observability module at boot, e.g.
