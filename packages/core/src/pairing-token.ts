@@ -66,9 +66,18 @@ function isHttpsOrLoopback(url: string): boolean {
     // Localhost / loopback only allowed over plain HTTP — for self-host dev
     // and the test suite. Anything else MUST be HTTPS so a tampered token
     // can't downgrade us into a clear-text POST that bystanders can sniff.
+    // `*.localhost` is loopback too (RFC 6761 §6.3): the per-worktree dev
+    // hostnames (`http://<name>.localhost:<port>`) resolve to the machine.
     if (parsed.protocol !== "http:") return false;
     const host = parsed.hostname;
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+    return (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "127.0.0.1" ||
+      // WHATWG URL keeps the brackets on an IPv6 hostname.
+      host === "[::1]" ||
+      host === "0.0.0.0"
+    );
   } catch {
     return false;
   }
