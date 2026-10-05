@@ -186,6 +186,53 @@ describe("a pre-selection is always a live model", () => {
   });
 });
 
+describe("the default a new conversation starts on", () => {
+  const withDefault = (id: string) =>
+    ["model-a", "model-b"].map((model) => ({ id: model, is_default: model === id }));
+
+  it("follows the organization's default for a user who never picked a model", () => {
+    const stored = new Map<string, string>();
+    Object.assign(globalThis, {
+      localStorage: {
+        getItem: (k: string) => stored.get(k) ?? null,
+        setItem: (k: string, v: string) => void stored.set(k, v),
+        removeItem: (k: string) => void stored.delete(k),
+      },
+    });
+    try {
+      setModelCatalog(withDefault("model-a"));
+      expect(getSelectedModel()).toBe("model-a");
+      // Not a pick: storing it would pin this browser to today's default.
+      expect(stored.size).toBe(0);
+
+      // An administrator changes the default; the next catalog carries it.
+      setModelCatalog(withDefault("model-b"));
+      expect(getSelectedModel()).toBe("model-b");
+    } finally {
+      Reflect.deleteProperty(globalThis, "localStorage");
+    }
+  });
+
+  it("stays on the user's own pick when the organization's default changes", () => {
+    setModelCatalog(withDefault("model-a"));
+    setSelectedModel("model-a");
+
+    setModelCatalog(withDefault("model-b"));
+    expect(getSelectedModel()).toBe("model-a");
+  });
+
+  it("returns to the organization's default once the picked model is gone", () => {
+    setModelCatalog([...withDefault("model-a"), { id: "picked" }]);
+    setSelectedModel("picked");
+
+    setModelCatalog(withDefault("model-b"));
+    expect(getSelectedModel()).toBe("model-b");
+    // The dead pick is forgotten, not kept in wait for the model's return.
+    setModelCatalog([...withDefault("model-a"), { id: "picked" }]);
+    expect(getSelectedModel()).toBe("model-a");
+  });
+});
+
 describe("the stored preference follows the default model", () => {
   it("drops what a newly picked default does not accept", () => {
     setModelCatalog([

@@ -146,14 +146,14 @@ describe("skillPickerRows", () => {
   it("appends every pin the catalogue no longer lists, so it can be unpinned", () => {
     expect(skillPickerRows([tone], ["@acme/gone", "@acme/tone", "@z/deleted"])).toEqual([
       { skill: tone, available: true },
-      { skill: { packageId: "@acme/gone" }, available: false },
-      { skill: { packageId: "@z/deleted" }, available: false },
+      { skill: { packageId: "@acme/gone", display_name: "gone" }, available: false },
+      { skill: { packageId: "@z/deleted", display_name: "deleted" }, available: false },
     ]);
   });
 
   it("still lists dead pins when the catalogue is empty", () => {
     expect(skillPickerRows([], ["@acme/gone"])).toEqual([
-      { skill: { packageId: "@acme/gone" }, available: false },
+      { skill: { packageId: "@acme/gone", display_name: "gone" }, available: false },
     ]);
   });
 
@@ -163,7 +163,7 @@ describe("skillPickerRows", () => {
       skillPickerRows([policy, tone], ["@acme/policy", "@acme/gone"], new Set(["@acme/policy"])),
     ).toEqual([
       { skill: tone, available: true },
-      { skill: { packageId: "@acme/gone" }, available: false },
+      { skill: { packageId: "@acme/gone", display_name: "gone" }, available: false },
     ]);
     // Enforced but absent from the caller's catalogue: still not a dead pin.
     expect(skillPickerRows([], ["@acme/policy"], new Set(["@acme/policy"]))).toEqual([]);
