@@ -174,6 +174,15 @@ export type RoutePath = keyof typeof ROUTE_ACCESS;
  */
 type RouteVerdict = "absent" | "granted" | "denied";
 
+/**
+ * Where an `absent` route sends its visitor: a space-settings page stays in the
+ * space's settings (picking a personal space on its Members page must not eject
+ * to the dashboard), anything else falls back to the dashboard.
+ */
+export function absentFallback(path: RoutePath): RoutePath {
+  return path.startsWith("/org-settings/space/") ? "/org-settings/space/general" : "/";
+}
+
 export function routeVerdict(
   path: RoutePath,
   can: (permission: Permission) => boolean,
