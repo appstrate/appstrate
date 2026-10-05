@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`@appstrate/afps-shared` range moves from `^0.9.2` to `^0.10.0`**, which
   carries the exports below (published first). (#1641)
 
+### Fixed
+
+- **`encodePairingToken` and `decodePairingToken` (`./pairing-token`) accept
+  a loopback `platformUrl` under any `*.localhost` name and `http://[::1]`**
+  (RFC 6761 §6.3). Plain HTTP was let through for `localhost`, `127.0.0.1`
+  and `0.0.0.0` only; the `::1` comparison never matched a bracketed IPv6
+  hostname. A trailing-dot name (`foo.localhost.`) is still refused. (#1648)
+
 ### Security
 
 - **BREAKING: `isBlockedHost` (`./ssrf`) blocks more IPv6**, through
