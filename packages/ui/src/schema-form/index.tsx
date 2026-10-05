@@ -120,8 +120,9 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
       widgets={widgets}
       templates={templates}
       formContext={ctx}
-      // Each error already sits under its field. The summary list repeated it
-      // and, being refreshed on submit only, outlived the correction.
+      // Each error already sits under its field — a hidden field's included
+      // (`FieldTemplate`). The summary list repeated them and, being refreshed
+      // on submit only, outlived the correction.
       showErrorList={false}
       {...rest}
     />
