@@ -324,7 +324,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       });
       throw blockedUpstream(presetId);
     }
-    logger.error("llm-proxy: upstream fetch failed", {
+    // `warn`, like an upstream HTTP error (`metering.ts`): the provider is
+    // unreachable or silent, the caller is told so (502/504) and may retry.
+    logger.warn("llm-proxy: upstream fetch failed", {
       presetId,
       upstreamUrl,
       error: getErrorMessage(err),

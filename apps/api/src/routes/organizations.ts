@@ -329,8 +329,8 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // `deleting_at` under the per-org lock run admission takes, so a repeat of
     // this DELETE resumes and the hooks tolerate a second `onOrgDelete`.
     //
-    // Both calls throw plain Errors, and both land on the same 400
-    // `delete_failed` below — the wire contract is unchanged.
+    // Both calls refuse a busy organization with their own 400 `delete_failed`;
+    // anything else they throw lands on the one below, cause attached.
     await reserveOrgDeletion(orgId);
 
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
@@ -338,6 +338,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 
     await deleteOrganization(orgId);
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     const msg = err instanceof Error ? err.message : "Failed to delete organization";
     // This catch spans three calls and logs nothing — a `delete_failed` used
     // to produce ZERO log lines, so the only record was a message the client

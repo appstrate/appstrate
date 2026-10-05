@@ -134,12 +134,15 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
+  // `debug` throughout: this is the best-effort lookup behind every read of an
+  // integration's draft, so a reference that does not resolve would repeat its
+  // line on each page load. The run-time resolver below is the one that warns.
   if (!pkgRow) {
-    logger.info("referenced mcp-server package not found", { packageId });
+    logger.debug("referenced mcp-server package not found", { packageId });
     return null;
   }
   if (pkgRow.type !== "mcp-server") {
-    logger.warn("referenced package is not an mcp-server", {
+    logger.debug("referenced package is not an mcp-server", {
       packageId,
       actualType: pkgRow.type,
     });
@@ -147,7 +150,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   }
   const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
   if (!parsed.success) {
-    logger.warn("mcp-server manifest failed validation", { packageId });
+    logger.debug("mcp-server manifest failed validation", { packageId });
     return null;
   }
   return parsed.data;

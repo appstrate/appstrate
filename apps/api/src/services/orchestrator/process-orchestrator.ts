@@ -189,6 +189,11 @@ interface ProcessHandle {
    * upstream (the platform's `pi.ts` error log only reads stdout).
    */
   stderrTail?: string[];
+  /**
+   * This orchestrator signalled the process (cancel, timeout, teardown). Its
+   * non-zero exit is then the answer to that signal, not a crash to report.
+   */
+  stopRequested?: boolean;
 }
 
 interface PendingSpec {
@@ -281,6 +286,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     await Promise.all(
       handles.map(async ([_id, handle]) => {
         if (handle.proc) {
+          handle.stopRequested = true;
           try {
             handle.proc.kill("SIGTERM");
             const exited = await Promise.race([
@@ -611,13 +617,15 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
       await new Promise((r) => setTimeout(r, 100));
-      logger.error("Subprocess exited non-zero", {
+      const fields = {
         label: handle.id,
         runId: handle.runId,
         role: ph.role,
         exitCode: code,
         stderrTail: stderrTail.slice(-50).join("\n"),
-      });
+      };
+      if (ph.stopRequested) logger.info("Subprocess stopped", fields);
+      else logger.error("Subprocess exited non-zero", fields);
     });
   }
 
@@ -625,6 +633,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const ph = this.processes.get(handle.id);
     if (!ph?.proc) return;
 
+    ph.stopRequested = true;
     ph.proc.kill("SIGTERM");
     const killed = await Promise.race([
       ph.proc.exited.then(() => true),
@@ -636,6 +645,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
     const ph = this.processes.get(handle.id);
     if (!ph) return;
+    ph.stopRequested = true;
     try {
       ph.proc?.kill("SIGKILL");
     } catch {

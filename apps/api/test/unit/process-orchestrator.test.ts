@@ -9,6 +9,7 @@ import {
   ProcessOrchestrator,
   _setDataDirForTesting,
 } from "../../src/services/orchestrator/process-orchestrator.ts";
+import { logger } from "../../src/lib/logger.ts";
 
 /**
  * A scratch run-data directory, NOT the live `./data/runs`.
@@ -583,6 +584,47 @@ describe("ProcessOrchestrator", () => {
       expect(env.AGENT_RUN_ID).toBe("test-run-secret-handover");
       expect(env.APPSTRATE_SINK_SECRET).toBeUndefined();
       expect(JSON.parse(stdin)).toEqual({ APPSTRATE_SINK_SECRET: "dummy-sink-secret" });
+    }, 10_000);
+
+    /** The exit observer's lines for one run: it logs ~100 ms after the exit. */
+    async function exitLines(runId: string, act: () => Promise<void>) {
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const error = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        await act();
+        await Bun.sleep(400);
+        const ofRun = (calls: unknown[][]) =>
+          calls.filter(([, data]) => (data as { runId?: string })?.runId === runId).map(([m]) => m);
+        return { info: ofRun(info.mock.calls), error: ofRun(error.mock.calls) };
+      } finally {
+        info.mockRestore();
+        error.mockRestore();
+      }
+    }
+
+    it("does not report a workload it stopped itself as a crash", async () => {
+      const { boundary, handle } = await stageAgent("test-run-stopped");
+      await withFakeEntrypoint(boundary.id, () => orchestrator.startWorkload(handle));
+
+      const lines = await exitLines("test-run-stopped", () => orchestrator.stopWorkload(handle));
+
+      expect(lines).toEqual({ info: ["Subprocess stopped"], error: [] });
+    }, 10_000);
+
+    // CONTROL: an exit nobody asked for is still an error line.
+    it("reports a workload that exits non-zero on its own", async () => {
+      const { boundary, handle } = await stageAgent("test-run-crashed");
+
+      const lines = await exitLines("test-run-crashed", async () => {
+        await withFakeEntrypoint(
+          boundary.id,
+          () => orchestrator.startWorkload(handle),
+          "process.exit(3);",
+        );
+        await orchestrator.waitForExit(handle);
+      });
+
+      expect(lines).toEqual({ info: [], error: ["Subprocess exited non-zero"] });
     }, 10_000);
 
     it("removeWorkload drops the pending spec, not just the process entry", async () => {
