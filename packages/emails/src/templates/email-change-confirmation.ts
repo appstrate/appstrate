@@ -23,7 +23,9 @@ export function renderEmailChangeConfirmationEmail(
   props: EmailPropsMap["email-change-confirmation"],
 ): RenderedEmail {
   const s = strings[props.locale] ?? strings.fr;
-  const body = s.body.replace("{newEmail}", `<strong>${escapeHtml(props.newEmail)}</strong>`);
+  // No emphasis markup: mail clients derive the text part from this HTML and
+  // would wrap the address in asterisks.
+  const body = s.body.replace("{newEmail}", escapeHtml(props.newEmail));
 
   const html = `<p>${body}</p>
 <p><a href="${escapeHtml(props.url)}">${escapeHtml(props.url)}</a></p>

@@ -47,11 +47,12 @@ export function emailWasChanged(requested: string, sessionEmail: string | undefi
 }
 
 /**
- * The page both email-change links (approval, then verification) land on. It
- * names no address: the page shows the account's own, and a crafted link can
+ * The page both email-change links (approval, then verification) land on —
+ * the route that renders the form itself: `/preferences` redirects to it and
+ * drops the query string on the way. It names no address: the page shows the account's own, and a crafted link can
  * make it say nothing false.
  */
-export const EMAIL_CHANGE_CALLBACK_URL = "/preferences?email_change=1";
+export const EMAIL_CHANGE_CALLBACK_URL = "/preferences/general?email_change=1";
 
 /**
  * What the settings page says about the email-change link that led to it:

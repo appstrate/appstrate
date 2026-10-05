@@ -147,7 +147,8 @@ describe("email-change confirmation email", () => {
   it("names the requested address, links the approval and states the validity", () => {
     const result = renderEmail("email-change-confirmation", { ...props, locale: "fr" });
     expect(result.subject).toBe("Confirmez le changement de votre adresse email");
-    expect(result.html).toContain("<strong>new@example.com</strong>");
+    expect(result.html).toContain("vers new@example.com a été demandé");
+    expect(result.html).not.toContain("<strong>");
     expect(result.html).toContain('href="https://app.example.com/api/auth/verify-email?token=abc"');
     expect(result.html).toContain("Ce lien expire dans 1 heure.");
   });

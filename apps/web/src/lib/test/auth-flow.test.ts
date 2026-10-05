@@ -66,6 +66,11 @@ describe("emailChangeLanding", () => {
     expect(emailChangeLanding(`${search}&error=TOKEN_EXPIRED`)).toBe("failed");
   });
 
+  // `/preferences` is an index redirect that drops the query string.
+  it("targets the route that renders the form", () => {
+    expect(new URL(EMAIL_CHANGE_CALLBACK_URL, "http://x").pathname).toBe("/preferences/general");
+  });
+
   it("carries no address", () => {
     expect(EMAIL_CHANGE_CALLBACK_URL).not.toContain("@");
   });
