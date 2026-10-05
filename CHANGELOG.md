@@ -195,6 +195,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Run guard-rails** (#1674). A double click on Run created two runs: the
+  launcher now lets one launch through at a time. An agent whose `output` call
+  is refused five times (an output schema no value satisfies, typically) is
+  stopped and its run fails, instead of retrying one paid turn at a time until
+  the run timeout — this ships in the runtime image. A run that falls back to
+  the organization default because the model pinned on its agent or schedule
+  was deleted or disabled now says so in its log (`model_fallback`), and the
+  run form and the agent's model setting warn about the unavailable pin.
+  On the agent page the two Run buttons share one verdict (the empty-list one
+  stayed live for an agent switched off or without a model), a caller with
+  `agents:run` but not `agents:read` no longer reads "the prompt is empty",
+  "no default model" is told apart from "no model", and the reason a button is
+  disabled shows on hover. The API tab documents the real response (201 and
+  the run, field `id`). Timed-out and cancelled runs show their cause on the
+  run page; an unnamed schedule no longer reads as its raw id; memory rows are
+  deleted behind a confirmation and only by a caller holding
+  `persistence:delete`; integer launch fields are numeric inputs and the
+  duplicated error summary of the launch form is gone.
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in
