@@ -309,7 +309,7 @@ export function InviteAcceptPage() {
             header={null}
             footer={null}
             switchAuthSlot={switchToRegister}
-            socialCallbackURL={`/invite/${token}`}
+            callbackURL={`/invite/${token}`}
           />
         )}
       </div>

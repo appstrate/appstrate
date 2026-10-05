@@ -34,7 +34,6 @@ export interface EmailPropsMap {
   verification: {
     user: { name: string; email: string };
     url: string;
-    /** How long the link stays valid, as configured where the link is minted. */
     expiresInMinutes: number;
     locale: SupportedLocale;
   };
@@ -58,22 +57,17 @@ export interface EmailPropsMap {
     expiresInMinutes: number;
     locale: SupportedLocale;
   };
-  /** Sent to the CURRENT address: approving it is what lets the change proceed. */
+  /** Sent to the CURRENT address. */
   "email-change-confirmation": {
     newEmail: string;
     url: string;
     expiresInMinutes: number;
     locale: SupportedLocale;
   };
-  /**
-   * Sent when someone signs up with an address that already has an account.
-   * No link: the recipient may belong to a tenant application, whose sign-in
-   * page this package does not know.
-   */
+  /** Sign-up attempted on an existing account. No link: the recipient's sign-in page may be a tenant's. */
   "existing-account": {
     locale: SupportedLocale;
   };
-  /** Sent after a password change or reset. No link, for the same reason. */
   "password-changed": {
     locale: SupportedLocale;
   };

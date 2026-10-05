@@ -188,9 +188,8 @@ export function useAuth() {
    * there is no redirect variant here — the gate owns that path.
    */
   const login = useCallback(
-    // `callbackURL` is where the verification link lands when the account
-    // turns out to be unverified (Better Auth re-sends it on this call). Given
-    // one, the Better Auth client navigates there after a successful sign-in.
+    // `callbackURL`: where the re-sent verification link of an unverified
+    // account lands; given one, the client also navigates there on success.
     async (email: string, password: string, callbackURL?: string) => {
       const result = await authClient.signIn.email({ email, password, callbackURL });
       if (result.error) throw toLoginError(result.error);
@@ -207,8 +206,7 @@ export function useAuth() {
       email: string,
       password: string,
       displayName: string | undefined,
-      // Where the verification link lands once the address is verified —
-      // the page that asked for the signup (e.g. an invitation).
+      // Where the verification link lands (e.g. the invitation that asked).
       callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
       // Native email/password signup (OSS). In OIDC mode the register form
@@ -331,8 +329,6 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
-    // A link that is spent or expired comes back to the page that can send
-    // another one.
     const result = await authClient.signIn.magicLink({
       email,
       callbackURL: "/",
@@ -347,10 +343,6 @@ export function useAuth() {
   // inside the dashboard — they are not unauthenticated entry points, so they
   // run natively in both modes. Routed through the seam only for the ban.
 
-  /**
-   * Resolves `"changed"` when the address was replaced at once, and
-   * `"confirmation_sent"` when the change now waits on emailed links (SMTP).
-   */
   const changeEmail = useCallback(
     async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {
       const result = await authClient.changeEmail({
@@ -361,7 +353,6 @@ export function useAuth() {
         throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
       }
       if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
-      // Without email verification the change is immediate.
       await refreshAuth();
       if (!emailWasChanged(newEmail, authStore.getState().user?.email)) {
         throw new EmailChangeError(true, "");

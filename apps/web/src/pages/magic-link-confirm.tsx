@@ -6,14 +6,7 @@ import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { AuthLayout } from "../components/auth-layout";
 
-/**
- * Where a magic-link email lands on an instance without the OIDC module (with
- * it, the module's own hosted interstitial plays this role).
- *
- * Better Auth's verify endpoint spends the one-time token on its first GET,
- * and mail scanners open the links they find. They get this page, which does
- * nothing until its reader presses the button.
- */
+/** Where a magic-link email lands without the OIDC module: inert until the button is pressed. */
 export function MagicLinkConfirmPage() {
   const { t } = useTranslation(["settings"]);
   const { search } = useLocation();

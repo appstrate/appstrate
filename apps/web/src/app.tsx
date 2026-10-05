@@ -574,7 +574,6 @@ export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
   useExternalRedirect(!!user);
-  const { pathname } = useLocation();
 
   if (loading) {
     return <BootScreen />;
@@ -592,10 +591,8 @@ export function App() {
     );
   }
 
-  // A magic link is honoured whoever is signed in: pressing its button
-  // replaces the current session with the link's account. (Only an instance
-  // without the OIDC module emails this URL.)
-  if (pathname === "/magic-link/confirm") {
+  // Honoured whoever is signed in: the link's account replaces the session.
+  if (window.location.pathname === "/magic-link/confirm") {
     return (
       <ErrorBoundary>
         <MagicLinkConfirmPage />

@@ -13,7 +13,7 @@ import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
-import { loginFailureDestination } from "../lib/auth-flow";
+import { EmailNotVerifiedError } from "../lib/auth-errors";
 
 type LoginFormData = {
   email: string;
@@ -26,7 +26,8 @@ interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
   header?: ReactNode | null;
   footer?: ReactNode | null;
   switchAuthSlot?: ReactNode;
-  socialCallbackURL?: string;
+  /** Where a social sign-in, or the verification link of an unverified account, lands. */
+  callbackURL?: string;
 }
 
 export function LoginForm({
@@ -36,7 +37,7 @@ export function LoginForm({
   header,
   footer,
   switchAuthSlot,
-  socialCallbackURL,
+  callbackURL,
   ...props
 }: LoginFormProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -59,14 +60,13 @@ export function LoginForm({
   const onSubmit = async (data: LoginFormData) => {
     const email = fixedEmail ?? data.email;
     try {
-      await login(email, data.password, socialCallbackURL);
+      await login(email, data.password, callbackURL);
       if (onSuccess) {
         await onSuccess();
       }
     } catch (err) {
-      const destination = loginFailureDestination(err, email, socialCallbackURL);
-      if (destination) {
-        navigate(destination.to, { state: destination.state });
+      if (err instanceof EmailNotVerifiedError) {
+        navigate("/verify-email", { state: { email, callbackURL } });
         return;
       }
       setError("root", {
@@ -155,10 +155,10 @@ export function LoginForm({
             </div>
             <div className="flex flex-col gap-2">
               {features.googleAuth && (
-                <SocialSignInButton provider="google" callbackURL={socialCallbackURL} />
+                <SocialSignInButton provider="google" callbackURL={callbackURL} />
               )}
               {features.githubAuth && (
-                <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+                <SocialSignInButton provider="github" callbackURL={callbackURL} />
               )}
               {features.smtp && (
                 <Button

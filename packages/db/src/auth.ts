@@ -217,17 +217,11 @@ export function setRealmResolver(resolver: RealmResolver): void {
 // Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
 // email leaves the transport, with the freshly minted single-use token, the
 // verify URL Better Auth built for it and the request headers of the
-// `sign-in/magic-link` call. The OIDC module uses it for two things:
-//
-//   - persist a server-side `(token → OAuth client)` binding so the later
-//     `/magic-link/verify` leg — driven entirely by Better Auth — can resolve
-//     the user's realm from state the browser cannot strip or forge (CRIT-15);
-//   - return the URL to email instead: its confirmation interstitial, which
-//     keeps mail scanners from burning the one-shot token.
-//
-// That interstitial is a route of the module, so the URL that points at it
-// is decided there. Without the module the hook is unset and the email
-// links to the dashboard's own confirmation page (`spaMagicLinkConfirmUrl`).
+// `sign-in/magic-link` call. The OIDC module uses it to persist a server-side
+// `(token → OAuth client)` binding so the later `/magic-link/verify` leg —
+// driven entirely by Better Auth — can resolve the user's realm from state
+// the browser cannot strip or forge (CRIT-15), and to return the URL of its
+// own confirmation page, which is the one the email then carries.
 //
 // FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
 // surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
@@ -253,10 +247,7 @@ export function setMagicLinkIssuedHook(hook: MagicLinkIssuedHook): void {
   _magicLinkIssuedHook = hook;
 }
 
-/**
- * Test-only: swap the hook and return the previous one, so a test can put the
- * auth layer in the state of an instance that does not run the OIDC module.
- */
+/** Test-only: swap the hook (null = no OIDC module) and return the previous one. */
 export function _swapMagicLinkIssuedHookForTesting(
   hook: MagicLinkIssuedHook | null,
 ): MagicLinkIssuedHook | null {
@@ -485,35 +476,32 @@ export function shouldAutoVerifyEmailOnCreate(
   return undefined;
 }
 
-// How long each emailed link stays valid. Each constant is both what Better
-// Auth enforces and what the email (and the "check your inbox" page) says.
+// How long each emailed link stays valid: enforced by Better Auth, stated in the email.
 export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
 const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
 const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
 
-/** Better Auth's magic-link verify endpoint: the one request that spends a token. */
 export const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
 
 /**
- * The dashboard page a magic-link email points at: `/magic-link/confirm`,
- * carrying the verify URL's own query. Better Auth's verify endpoint spends
- * the token on its first GET, and mail scanners open the links they see — the
- * page is inert until its reader presses the button that goes to the verify
- * endpoint.
+ * Better Auth's verify URL, re-pointed at a confirmation page that keeps its
+ * query. The verify endpoint spends the token on its first GET and mail
+ * scanners open the links they see, so the email carries a page that is inert
+ * until its reader presses the button leading to the verify endpoint.
+ *
+ * `null` when `verifyUrl` is not the verify endpoint (a Better Auth upgrade
+ * moved it): the caller emails the direct link, and the warning says so.
  */
-function spaMagicLinkConfirmUrl(verifyUrl: string): string {
+export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): URL | null {
   const url = new URL(verifyUrl);
   if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) {
-    // A Better Auth upgrade moved the verify route: the email falls back to
-    // the direct link, which a mail scanner can burn. Loud, so it is caught
-    // in ops before users report expired links.
     logger.warn("auth: unexpected magic-link verify path, emailing the direct link", {
       pathname: url.pathname,
     });
-    return verifyUrl;
+    return null;
   }
-  url.pathname = "/magic-link/confirm";
-  return url.toString();
+  url.pathname = pagePath;
+  return url;
 }
 
 /** Send an auth email through the tenant transport when one is active, else the instance one. */
@@ -530,9 +518,8 @@ async function sendAuthMail(
 }
 
 function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transporter | null) {
-  const smtpEnabled = !!smtpTransport;
   return [
-    ...(smtpEnabled
+    ...(smtpTransport
       ? [
           magicLink({
             // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
@@ -547,29 +534,25 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
             // recipient's inbox (forwarded mail, shared/compromised mailbox,
             // mail-archive breach) replay the link and take over the account.
             // 15 minutes is enough for a human to click through immediately
-            // while closing the replay window. The token is spent by the
-            // first request to the verify endpoint, which is why the email
-            // never links to it directly (see `spaMagicLinkConfirmUrl`).
+            // while closing the replay window.
             expiresIn: MAGIC_LINK_TTL_SECONDS,
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
-                // See `setMagicLinkIssuedHook`. A throw here aborts the send
-                // via the surrounding catch — fail closed.
-                let url = spaMagicLinkConfirmUrl(rawUrl);
-                if (_magicLinkIssuedHook) {
-                  // `EndpointContext.headers` is typed `HeadersInit` — copy
-                  // into a real `Headers` so the hook contract stays uniform
-                  // with the other signup-hook channels.
-                  const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
-                  url = await _magicLinkIssuedHook({
-                    token,
-                    email: normalizedEmail,
-                    url: rawUrl,
-                    headers: rawHeaders ? new Headers(rawHeaders) : null,
-                  });
-                }
+                // `EndpointContext.headers` is typed `HeadersInit` — copy
+                // into a real `Headers` so the hook contract stays uniform
+                // with the other signup-hook channels.
+                const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
+                // A throw aborts the send via the surrounding catch — fail closed.
+                const url = _magicLinkIssuedHook
+                  ? await _magicLinkIssuedHook({
+                      token,
+                      email: normalizedEmail,
+                      url: rawUrl,
+                      headers: rawHeaders ? new Headers(rawHeaders) : null,
+                    })
+                  : (magicLinkConfirmPageUrl(rawUrl, "/magic-link/confirm")?.toString() ?? rawUrl);
 
                 // Magic-link is now a pure passwordless-login channel. The
                 // invitation flow no longer rides on magic-link: an invited
@@ -578,7 +561,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
                 // single generic template covers every magic-link send.
                 await sendAuthMail(
                   env,
-                  smtpTransport!,
+                  smtpTransport,
                   email,
                   renderEmail("magic-link", {
                     email: normalizedEmail,
@@ -771,7 +754,7 @@ function buildAuth(options: CreateAuthOptions) {
       // generic `bootstrap_signup_rejected` 400, which names no length.
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
-      requireEmailVerification: smtpEnabled,
+      requireEmailVerification: !!smtpTransport,
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
       // most tests sign up a real user per `beforeEach`. When the test harness
@@ -817,9 +800,8 @@ function buildAuth(options: CreateAuthOptions) {
         onPasswordReset: async ({ user }) => {
           await notifyPasswordChanged(user.email);
         },
-        // With verification required, signing up on a taken address answers
-        // exactly like a fresh signup, so the SPA announces an email. This is
-        // that email — sent to the account's owner, the only party it informs.
+        // The signup answer is the same as for a free address, so the SPA
+        // announces an email: this is it, sent to the account's owner.
         onExistingUserSignUp: async ({ user }) => {
           try {
             await sendAuthMail(
@@ -938,7 +920,7 @@ function buildAuth(options: CreateAuthOptions) {
       },
       changeEmail: {
         enabled: true,
-        updateEmailWithoutVerification: !smtpEnabled,
+        updateEmailWithoutVerification: !smtpTransport,
         // The owner is told at the current address, and must approve there,
         // before anything is sent to the new one.
         ...(smtpTransport && {
