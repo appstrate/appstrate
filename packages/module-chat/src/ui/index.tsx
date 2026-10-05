@@ -34,11 +34,13 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelLeftIcon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
   ChatHostProvider,
   SelectConversationProvider,
+  useChatHost,
 } from "./runtime-context.ts";
 import type {
   ChatCan,
@@ -410,7 +412,8 @@ interface ConversationProps {
  * the history load keeps `useChat`'s initial `messages` correct (the option is
  * read once at mount, not reactive). A not-yet-persisted conversation is
  * known-empty, so we skip the GET entirely (`enabled: false`) and seed `[]`
- * immediately — no speculative 404, no composer flash.
+ * immediately — no speculative 404, no composer flash. A persisted one the
+ * server does not know (404) renders `ConversationNotFound` instead.
  *
  * `memo`: `ChatPage` re-renders on every session-list refetch, and this subtree
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
@@ -486,6 +489,12 @@ const Conversation = memo(function Conversation({
       </div>
     );
   }
+  // The URL names a conversation this caller does not have (deleted, or someone
+  // else's). No runtime is mounted: a composer here would send under that id,
+  // and the server creates a session for any id it does not know.
+  if (history.data === null) {
+    return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
+  }
   return (
     <ConversationInner
       id={id}
@@ -498,6 +507,31 @@ const Conversation = memo(function Conversation({
     />
   );
 });
+
+function ConversationNotFound({
+  canWrite,
+  onNew,
+}: {
+  canWrite: boolean;
+  onNew: SelectConversation | undefined;
+}) {
+  const { t } = useChatHost();
+  return (
+    <div
+      role="status"
+      data-testid="chat-conversation-not-found"
+      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+    >
+      <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
+      <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>
+      {canWrite && onNew ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => onNew(null)}>
+          {t("threads.new")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 function ConversationInner({
   id,
@@ -636,7 +670,7 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        if (cancelled || !fetched || fetched.messages.length <= chatMessages.length) return;
         setMessages(fetched.messages);
       })
       .catch(() => {
