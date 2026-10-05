@@ -11,7 +11,6 @@ import {
   agentAuthoringForTurn,
   bindAgentAuthoringUser,
   getAgentAuthoringEnabled,
-  setAgentAuthoringAvailable,
   setAgentAuthoringEnabled,
   subscribeAgentAuthoring,
 } from "../src/ui/agent-authoring-store.ts";
@@ -85,18 +84,14 @@ describe("the agent-authoring preference", () => {
 });
 
 describe("what a turn sends as agent_authoring", () => {
-  afterEach(() => setAgentAuthoringAvailable(false));
-
-  it("is nothing for a caller with no grant to narrow", () => {
-    // An operator has no switch: the turn must not ask for agent authoring.
-    expect(agentAuthoringForTurn()).toBeUndefined();
-    setAgentAuthoringEnabled(false);
+  it("asks for nothing while the preference is on", () => {
+    // Absent reads as on server-side; a turn must not ASK for agent authoring,
+    // least of all an operator's, who holds no grant for it.
     expect(agentAuthoringForTurn()).toBeUndefined();
   });
 
-  it("is the preference for a caller who may author agents", () => {
-    setAgentAuthoringAvailable(true);
-    expect(agentAuthoringForTurn()).toBe(true);
+  it("always sends an opt-out, whoever the caller is", () => {
+    // Omitting it would fail open: the server would read the turn as "on".
     setAgentAuthoringEnabled(false);
     expect(agentAuthoringForTurn()).toBe(false);
   });

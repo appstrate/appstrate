@@ -82,7 +82,7 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { agentAuthoringForTurn, setAgentAuthoringAvailable } from "./agent-authoring-store.ts";
+import { agentAuthoringForTurn } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
@@ -293,8 +293,6 @@ export function ChatPage({
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
   const authorsAgents = canAuthorAgents(can);
-  // External-store sync, like the catalog above: the transport reads it per request.
-  useEffect(() => setAgentAuthoringAvailable(authorsAgents), [authorsAgents]);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
