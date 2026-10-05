@@ -184,8 +184,8 @@ export function createBroadInvalidator(
 }
 
 /**
- * Single writer of the run-detail cache from a `run_update` frame; returns the
- * patch it applied, or `null` when the frame is dropped:
+ * Single writer of the run-detail cache from a `run_update` frame; `false`
+ * when the frame is dropped:
  * a per-connection snapshot can predate a live frame, and status only moves on.
  */
 export function patchRunDetail(
@@ -193,7 +193,7 @@ export function patchRunDetail(
   orgId: string,
   spaceId: string,
   evt: RunUpdateEvent,
-): Partial<EnrichedRun> | null {
+): boolean {
   const key = runKeys.detail(orgId, spaceId, evt.id);
   const cached = qc.getQueryData<EnrichedRun>(key);
   if (
@@ -201,11 +201,11 @@ export function patchRunDetail(
     TERMINAL_RUN_STATUSES.has(cached.status) &&
     !TERMINAL_RUN_STATUSES.has(evt.status)
   ) {
-    return null;
+    return false;
   }
   const patch = runUpdateToRunPatch(evt);
   qc.setQueryData<EnrichedRun>(key, (prev) => (prev ? { ...prev, ...patch } : prev));
-  return patch;
+  return true;
 }
 
 /**
@@ -240,15 +240,22 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
 }
 
 /**
- * What a (re)connect owes the caches. The protocol is signal-only: a frame
- * emitted while the stream was down is lost for good, so every family a frame
- * would have moved is refetched once the stream is back. That is what lets the
- * notification and chat polls be slow backstops instead of the freshness
+ * What a connection owes the caches. The protocol is signal-only: a frame
+ * emitted while no stream was listening is lost for good, so every family a
+ * frame would have moved is refetched once a stream is back. That is what lets
+ * the notification and chat polls be slow backstops instead of the freshness
  * mechanism.
  *
- * Only a RE-connect has such a gap. The first connect opens beside the mount's
- * own queries, and reconciling there issued each of them a second time on every
- * page load.
+ * Exactly one connection owes nothing: the first attempt of a fresh mount,
+ * when it succeeds. It opens beside the mount's own queries, and reconciling
+ * there issued each of them a second time on every page load. Everything else
+ * follows a gap — a failed attempt (`missed`, the caches then age through the
+ * whole backoff), a stream that ended, or `followsGap`: a previous stream of
+ * the same mount, closed because the scope or the grants changed.
+ *
+ * Residual race, accepted: a frame emitted between a mount query's read and
+ * this stream's subscription is seen by neither. The window is the stream's
+ * own round trip, and the polls are what eventually correct it.
  *
  * The run families are rate-limited on top: the server writes a frame on every
  * connection, so a repeatedly dropped stream would reconcile at ~1 Hz and storm
@@ -257,24 +264,31 @@ function reconcileRunQueries(qc: QueryClient, orgId: string) {
 export function createGapReconciler(
   getQueryClient: () => QueryClient,
   orgId: string,
+  followsGap: boolean,
   runReconcileMinIntervalMs = 10_000,
-): (now: number) => void {
-  let connectedOnce = false;
+): { missed: () => void; connected: (now: number) => void } {
+  let gap = followsGap;
   let lastRunReconcileAt = 0;
-  return (now) => {
-    if (!connectedOnce) {
-      connectedOnce = true;
-      return;
-    }
-    const qc = getQueryClient();
-    handleChatSessionUpdate(qc);
-    invalidateNotificationQueries(qc);
-    if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
-      lastRunReconcileAt = now;
-      reconcileRunQueries(qc, orgId);
-      // `connection_update` frames were missed on the same stream.
-      handleConnectionUpdate(qc);
-    }
+  return {
+    missed() {
+      gap = true;
+    },
+    connected(now) {
+      if (!gap) {
+        // Whatever connects next does so after this stream went away.
+        gap = true;
+        return;
+      }
+      const qc = getQueryClient();
+      handleChatSessionUpdate(qc);
+      invalidateNotificationQueries(qc);
+      if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
+        lastRunReconcileAt = now;
+        reconcileRunQueries(qc, orgId);
+        // `connection_update` frames were missed on the same stream.
+        handleConnectionUpdate(qc);
+      }
+    },
   };
 }
 
@@ -376,6 +390,8 @@ export function useGlobalRunSync() {
     : null;
   const qcRef = useRef(qc);
   qcRef.current = qc;
+  // Whether an earlier effect instance of this mount already opened a stream.
+  const streamOpened = useRef(false);
 
   useEffect(() => {
     if (!orgId || !spaceId || !channels) return;
@@ -391,7 +407,8 @@ export function useGlobalRunSync() {
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
-    const reconcileGap = createGapReconciler(() => qcRef.current, orgId);
+    const reconciler = createGapReconciler(() => qcRef.current, orgId, streamOpened.current);
+    streamOpened.current = true;
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -430,7 +447,7 @@ export function useGlobalRunSync() {
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
-      reconcileGap(Date.now());
+      reconciler.connected(Date.now());
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -467,6 +484,7 @@ export function useGlobalRunSync() {
     };
 
     void reconnectUntilRefused(connectOnce, controller.signal, () => {
+      reconciler.missed();
       // Jitter — de-synchronize reconnect stampedes (every tab reconnects
       // at once after a redeploy).
       const delay =
