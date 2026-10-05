@@ -20,7 +20,8 @@ export function ErrorState({ message }: { message?: string }) {
   return (
     <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
       <p>{t("error.generic")}</p>
-      {message && <p className="mt-1 text-sm">{message}</p>}
+      {/* `errorMessage` answers this same sentence for a failure that says nothing. */}
+      {message && message !== t("error.generic") && <p className="mt-1 text-sm">{message}</p>}
     </div>
   );
 }
