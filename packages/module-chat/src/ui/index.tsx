@@ -82,7 +82,7 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { agentAuthoringForTurn, setAgentAuthoringAvailable } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
@@ -293,6 +293,8 @@ export function ChatPage({
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
   const authorsAgents = canAuthorAgents(can);
+  // External-store sync, like the catalog above: the transport reads it per request.
+  useEffect(() => setAgentAuthoringAvailable(authorsAgents), [authorsAgents]);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
@@ -582,14 +584,15 @@ function ConversationInner({
         headers: buildHeaders,
         prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
           const skills = getChosenSkills();
+          // Read at request time, like the model above, for the same reason.
+          const agentAuthoring = agentAuthoringForTurn();
           return {
             body: {
               ...body,
               id: chatId,
               messages,
               generation: getCompatibleGenerationSettings(),
-              // Read at request time, like the model above, for the same reason.
-              agent_authoring: getAgentAuthoringEnabled(),
+              ...(agentAuthoring !== undefined && { agent_authoring: agentAuthoring }),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,

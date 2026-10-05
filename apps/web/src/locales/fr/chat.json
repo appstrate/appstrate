@@ -7,6 +7,8 @@
   "threads.empty": "Envoie un message ! Ton historique de conversations apparaîtra ici.",
   "threads.emptyReadOnly": "Aucune conversation à consulter pour l’instant.",
   "threads.new": "Nouvelle conversation",
+  "threads.delete.title": "Supprimer cette conversation ?",
+  "threads.delete.description": "« {{title}} » et tous ses messages seront définitivement supprimés.",
   "conversation.notFound.title": "Conversation introuvable",
   "conversation.notFound.hint": "Elle a été supprimée, ou elle appartient à un autre compte ou à un autre espace.",
   "context.label": "Contexte de la conversation",

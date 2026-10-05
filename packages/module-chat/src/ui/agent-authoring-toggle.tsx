@@ -5,9 +5,9 @@
  * published agents instead of creating new ones or composing one on the fly.
  *
  * A PREFERENCE inside the `agents:write` grant: the host renders it only for a
- * caller who may create agents. The chat sends it with every turn
- * (`agent_authoring`) and the server intersects it with the grant: it narrows
- * the turn's authority and can never widen it.
+ * caller who may create agents, and only that caller's turns carry it
+ * (`agent_authoring`). The server intersects it with the grant: it narrows the
+ * turn's authority and can never widen it.
  */
 
 import { BotIcon, BotOffIcon } from "lucide-react";

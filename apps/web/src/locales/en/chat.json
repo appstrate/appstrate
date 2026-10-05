@@ -7,6 +7,8 @@
   "threads.empty": "Send a message! Your conversation history will appear here.",
   "threads.emptyReadOnly": "No conversations to read yet.",
   "threads.new": "New conversation",
+  "threads.delete.title": "Delete this conversation?",
+  "threads.delete.description": "“{{title}}” and all its messages will be permanently deleted.",
   "conversation.notFound.title": "Conversation not found",
   "conversation.notFound.hint": "It was deleted, or it belongs to another account or another space.",
   "context.label": "Conversation context",

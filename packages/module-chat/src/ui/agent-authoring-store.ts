@@ -66,6 +66,22 @@ export function setAgentAuthoringEnabled(enabled: boolean): void {
   notify();
 }
 
+/** Whether the caller holds the grant the switch narrows (`canAuthorAgents`). */
+let available = false;
+
+/** `ChatPage` reports it: the switch exists only for a caller who may author agents. */
+export function setAgentAuthoringAvailable(value: boolean): void {
+  available = value;
+}
+
+/**
+ * What a turn sends as `agent_authoring`. A caller with no grant to narrow has
+ * no switch, so the turn asks for nothing — the server never granted it anyway.
+ */
+export function agentAuthoringForTurn(): boolean | undefined {
+  return available ? cache : undefined;
+}
+
 export function useAgentAuthoringEnabled(): boolean {
   return useSyncExternalStore(subscribeAgentAuthoring, getAgentAuthoringEnabled, () => true);
 }
