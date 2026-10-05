@@ -46,70 +46,19 @@ export function emailWasChanged(requested: string, sessionEmail: string | undefi
   return sessionEmail === requested.trim().toLowerCase();
 }
 
-/** Query parameter the email-change links carry back to the settings page. */
-const EMAIL_CHANGE_PARAM = "email_change";
-
-/** The page both email-change links (approval, then verification) land on. */
-export function emailChangeCallbackURL(newEmail: string): string {
-  return `/preferences?${new URLSearchParams({ [EMAIL_CHANGE_PARAM]: newEmail.trim().toLowerCase() })}`;
-}
+/**
+ * The page both email-change links (approval, then verification) land on. It
+ * names no address: the page shows the account's own, and a crafted link can
+ * make it say nothing false.
+ */
+export const EMAIL_CHANGE_CALLBACK_URL = "/preferences?email_change=1";
 
 /**
- * What an email-change link did, read from the settings page it landed on:
- * - `failed`: the link was invalid, expired or opened under another account;
- * - `approved`: the current address approved, the new one must now verify;
- * - `changed`: the new address verified, the account uses it.
- * `null` for an ordinary visit.
+ * What the settings page says about the email-change link that led to it:
+ * `failed` when Better Auth reports it could not be honoured, `accepted`
+ * otherwise, `null` on an ordinary visit.
  */
-export function emailChangeLanding(
-  search: string,
-  sessionEmail: string,
-): { kind: "failed" | "changed" } | { kind: "approved"; email: string } | null {
-  const requested = new URLSearchParams(search).get(EMAIL_CHANGE_PARAM);
-  if (requested === null) return null;
-  if (hasVerificationLinkError(search)) return { kind: "failed" };
-  return requested === sessionEmail.toLowerCase()
-    ? { kind: "changed" }
-    : { kind: "approved", email: requested };
-}
-
-/**
- * Whether the auth client should navigate the page after a successful call.
- * Better Auth answers `{ redirect: true, url }` to say "go there": that is how
- * a social sign-in reaches its provider. Email sign-in answers the same as
- * soon as it is given a `callbackURL` — which this SPA passes only to aim the
- * verification email — and the SPA routes itself after that sign-in, so a
- * full-page navigation there would reload the screen the user is on.
- */
-export function followsAuthRedirect(
-  requestPath: string,
-  data: { redirect?: unknown; url?: unknown } | null | undefined,
-): data is { redirect: true; url: string } {
-  if (!data || data.redirect !== true || typeof data.url !== "string") return false;
-  if (requestPath.endsWith("/sign-in/email")) return false;
-  try {
-    const { protocol } = new URL(data.url);
-    return protocol === "https:" || protocol === "http:";
-  } catch {
-    // Not absolute: a path on this origin.
-    return true;
-  }
-}
-
-/**
- * Wrap `action` so every call first waits for `gate` to settle.
- *
- * The boot session resync signs out when it finds no session, and that
- * response deletes whatever session cookie exists by the time it lands. A
- * sign-in sent while it is in flight would lose the cookie it was just given,
- * so sign-in and sign-up are gated on it.
- */
-export function afterGate<Args extends unknown[], R>(
-  gate: () => Promise<unknown>,
-  action: (...args: Args) => Promise<R>,
-): (...args: Args) => Promise<R> {
-  return async (...args) => {
-    await gate();
-    return action(...args);
-  };
+export function emailChangeLanding(search: string): "failed" | "accepted" | null {
+  if (!new URLSearchParams(search).has("email_change")) return null;
+  return hasVerificationLinkError(search) ? "failed" : "accepted";
 }

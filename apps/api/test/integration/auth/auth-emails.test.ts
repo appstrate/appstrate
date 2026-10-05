@@ -158,8 +158,8 @@ describe("platform auth e-mails (SMTP on)", () => {
       const account = await createTestUser({ emailVerified: true });
       const newEmail = `new-${crypto.randomUUID()}@example.test`;
 
-      // The shape the settings page sends (`emailChangeCallbackURL`).
-      const callbackURL = `/preferences?${new URLSearchParams({ email_change: newEmail })}`;
+      // What the settings page sends (`EMAIL_CHANGE_CALLBACK_URL`).
+      const callbackURL = "/preferences?email_change=1";
 
       const toCurrent = await captureMails(async () => {
         const res = await postAuth("/change-email", { newEmail, callbackURL }, account.cookie);
@@ -196,7 +196,7 @@ describe("platform auth e-mails (SMTP on)", () => {
     it("a link that cannot be honoured returns to the settings page with the error", async () => {
       const account = await createTestUser({ emailVerified: true });
       const newEmail = `new-${crypto.randomUUID()}@example.test`;
-      const callbackURL = `/preferences?${new URLSearchParams({ email_change: newEmail })}`;
+      const callbackURL = "/preferences?email_change=1";
       const [mail] = await captureMails(() =>
         postAuth("/change-email", { newEmail, callbackURL }, account.cookie),
       );
@@ -210,7 +210,7 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(res.status).toBe(302);
       const location = new URL(res.headers.get("location")!, "http://x");
       expect(location.pathname).toBe("/preferences");
-      expect(location.searchParams.get("email_change")).toBe(newEmail);
+      expect(location.searchParams.get("email_change")).toBe("1");
       expect(location.searchParams.get("error")).toBe("INVALID_TOKEN");
     });
   });

@@ -6,7 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toLoginError, toUnlinkError } from "../lib/auth-errors";
-import { afterGate, emailChangeCallbackURL, emailWasChanged } from "../lib/auth-flow";
+import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -103,14 +103,13 @@ async function syncAuth() {
   }
 }
 
-// The boot resync, run once. Sign-in and sign-up are gated on it — see
-// `afterGate` for what goes wrong otherwise.
-let bootSync: Promise<void> | null = null;
-function initAuth(): Promise<void> {
-  bootSync ??= syncAuth().catch(() => {
+let initialized = false;
+function initAuth() {
+  if (initialized) return;
+  initialized = true;
+  syncAuth().catch(() => {
     clearSession();
   });
-  return bootSync;
 }
 
 /**
@@ -120,20 +119,8 @@ function initAuth(): Promise<void> {
  * queueing behind them. Idempotent — `useAuth()` still calls the same
  * initializer, which no-ops once this has run.
  */
-const signInAfterBoot = afterGate(
-  initAuth,
-  (email: string, password: string, callbackURL: string | undefined) =>
-    authClient.signIn.email({ email, password, callbackURL }),
-);
-
-const signUpAfterBoot = afterGate(
-  initAuth,
-  (email: string, password: string, name: string, callbackURL: string) =>
-    authClient.signUp.email({ email, password, name, callbackURL }),
-);
-
 export function startAuthBootstrap(): void {
-  void initAuth();
+  initAuth();
 }
 
 /**
@@ -190,7 +177,7 @@ export async function refreshAuth(): Promise<void> {
 }
 
 export function useAuth() {
-  void initAuth();
+  initAuth();
 
   const state = useStore(authStore);
 
@@ -202,9 +189,10 @@ export function useAuth() {
    */
   const login = useCallback(
     // `callbackURL` is where the verification link lands when the account
-    // turns out to be unverified (Better Auth re-sends it on this call).
+    // turns out to be unverified (Better Auth re-sends it on this call). Given
+    // one, the Better Auth client navigates there after a successful sign-in.
     async (email: string, password: string, callbackURL?: string) => {
-      const result = await signInAfterBoot(email, password, callbackURL);
+      const result = await authClient.signIn.email({ email, password, callbackURL });
       if (result.error) throw toLoginError(result.error);
       const profile = await fetchProfile();
       if (result.data?.user) {
@@ -226,7 +214,12 @@ export function useAuth() {
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
       // page first — so signup has no OIDC branch; the gate owns that path.
-      const result = await signUpAfterBoot(email, password, displayName || email, callbackURL);
+      const result = await authClient.signUp.email({
+        email,
+        password,
+        name: displayName || email,
+        callbackURL,
+      });
       if (result.error) throw new Error(result.error.message);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
@@ -362,7 +355,7 @@ export function useAuth() {
     async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {
       const result = await authClient.changeEmail({
         newEmail,
-        callbackURL: emailChangeCallbackURL(newEmail),
+        callbackURL: EMAIL_CHANGE_CALLBACK_URL,
       });
       if (result.error) {
         throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");

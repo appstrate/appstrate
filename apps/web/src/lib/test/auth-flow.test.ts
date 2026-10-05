@@ -6,10 +6,8 @@ import {
   signedOutDestination,
   loginFailureDestination,
   emailWasChanged,
-  emailChangeCallbackURL,
+  EMAIL_CHANGE_CALLBACK_URL,
   emailChangeLanding,
-  followsAuthRedirect,
-  afterGate,
 } from "../auth-flow";
 
 describe("signedOutDestination", () => {
@@ -53,89 +51,22 @@ describe("emailWasChanged", () => {
 });
 
 describe("emailChangeLanding", () => {
-  const search = emailChangeCallbackURL("New+tag@Example.com").replace("/preferences", "");
+  const search = new URL(EMAIL_CHANGE_CALLBACK_URL, "http://x").search;
 
   it("is null on an ordinary visit", () => {
-    expect(emailChangeLanding("", "me@example.com")).toBe(null);
-    expect(emailChangeLanding("?error=INVALID_TOKEN", "me@example.com")).toBe(null);
+    expect(emailChangeLanding("")).toBe(null);
+    expect(emailChangeLanding("?error=INVALID_TOKEN")).toBe(null);
   });
 
-  it("reports the approval while the session still has the old address", () => {
-    expect(emailChangeLanding(search, "me@example.com")).toEqual({
-      kind: "approved",
-      email: "new+tag@example.com",
-    });
-  });
-
-  it("reports the change once the session has the new address", () => {
-    expect(emailChangeLanding(search, "new+tag@example.com")).toEqual({ kind: "changed" });
+  it("reports an accepted link", () => {
+    expect(emailChangeLanding(search)).toBe("accepted");
   });
 
   it("reports a link that could not be honoured", () => {
-    expect(emailChangeLanding(`${search}&error=TOKEN_EXPIRED`, "me@example.com")).toEqual({
-      kind: "failed",
-    });
-  });
-});
-
-describe("followsAuthRedirect", () => {
-  const redirect = { redirect: true, url: "https://accounts.example.com/o/oauth2" };
-
-  it("follows a social sign-in to its provider", () => {
-    expect(followsAuthRedirect("/api/auth/sign-in/social", redirect)).toBe(true);
+    expect(emailChangeLanding(`${search}&error=TOKEN_EXPIRED`)).toBe("failed");
   });
 
-  it("never navigates after an email sign-in, callbackURL or not", () => {
-    expect(
-      followsAuthRedirect("/api/auth/sign-in/email", { redirect: true, url: "/invite/tok" }),
-    ).toBe(false);
-  });
-
-  it("follows a path on this origin, and refuses a non-http scheme", () => {
-    expect(
-      followsAuthRedirect("/api/auth/link-social", { redirect: true, url: "/preferences" }),
-    ).toBe(true);
-    expect(
-      followsAuthRedirect("/api/auth/sign-in/social", {
-        redirect: true,
-        url: "javascript:alert(1)",
-      }),
-    ).toBe(false);
-  });
-
-  it("ignores a response that asks for nothing", () => {
-    expect(followsAuthRedirect("/api/auth/sign-in/social", { redirect: false, url: "/x" })).toBe(
-      false,
-    );
-    expect(followsAuthRedirect("/api/auth/sign-in/social", { redirect: true })).toBe(false);
-    expect(followsAuthRedirect("/api/auth/get-session", null)).toBe(false);
-  });
-});
-
-describe("afterGate", () => {
-  it("runs the action only once the gate has settled, with its arguments and result", async () => {
-    const events: string[] = [];
-    let openGate!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      openGate = () => {
-        events.push("gate settled");
-        resolve();
-      };
-    });
-    const signIn = afterGate(
-      () => gate,
-      async (email: string) => {
-        events.push(`sign-in ${email}`);
-        return "ok";
-      },
-    );
-
-    const pending = signIn("a@example.com");
-    await Promise.resolve();
-    expect(events).toEqual([]);
-
-    openGate();
-    expect(await pending).toBe("ok");
-    expect(events).toEqual(["gate settled", "sign-in a@example.com"]);
+  it("carries no address", () => {
+    expect(EMAIL_CHANGE_CALLBACK_URL).not.toContain("@");
   });
 });

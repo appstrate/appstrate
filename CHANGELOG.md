@@ -227,9 +227,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   signing in to an unverified account opens the "check your inbox" screen
   instead of a raw `Email not verified`; a verification link that is invalid
   or expired says so; `/verify-email` opened on its own redirects to
-  `/login`; changing one's e-mail to an address already in use no longer
-  reports success; and a sign-in submitted while the page was still clearing
-  a stale session cookie could lose its session.
+  `/login`; and changing one's e-mail to an address already in use no longer
+  reports success. Signing in from an invitation reloads the invitation page
+  (Better Auth's client follows the `callbackURL` it is given).
 
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the

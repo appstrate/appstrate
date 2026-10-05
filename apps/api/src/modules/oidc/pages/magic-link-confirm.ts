@@ -29,10 +29,10 @@
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedSpaceBranding } from "../services/branding.ts";
+import { BA_MAGIC_LINK_VERIFY_PATH } from "@appstrate/db/auth";
 import { logger } from "../../../lib/logger.ts";
 
 const MAGIC_LINK_CONFIRM_PATH = "/api/oauth/magic-link/confirm";
-const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
 
 /**
  * Turn Better Auth's verify URL into the URL of this interstitial — the one

@@ -89,7 +89,7 @@ function EmailChangeForm() {
   // What the email-change link that led here did — until the form is used again.
   const landing =
     user && !success && !verificationPendingEmail && !errors.root
-      ? emailChangeLanding(search, user.email)
+      ? emailChangeLanding(search)
       : null;
 
   const onSubmit = async (data: { newEmail: string }) => {
@@ -125,21 +125,13 @@ function EmailChangeForm() {
           <Label>{t("preferences.newEmail")}</Label>
           <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
-        {landing?.kind === "failed" && (
+        {landing === "failed" && (
           <div className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</div>
         )}
-        {landing?.kind === "approved" && (
+        {landing === "accepted" && (
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
-            <Trans
-              ns="settings"
-              i18nKey="preferences.emailChangeApproved"
-              values={{ email: landing.email }}
-              components={{ strong: <strong /> }}
-            />
+            {t("preferences.emailChangeLinkAccepted")}
           </div>
-        )}
-        {landing?.kind === "changed" && (
-          <div className="text-success text-sm">{t("preferences.emailChanged")}</div>
         )}
         {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
         {success && <div className="text-success text-sm">{success}</div>}
@@ -147,13 +139,7 @@ function EmailChangeForm() {
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
             <Trans
               ns="settings"
-              // A verified address must approve the change before the new
-              // one is contacted; an unverified one has nothing to approve with.
-              i18nKey={
-                user?.emailVerified
-                  ? "preferences.emailChangeConfirmationSent"
-                  : "preferences.emailChangeVerificationSent"
-              }
+              i18nKey="preferences.emailChangeConfirmationSent"
               values={{ email: verificationPendingEmail }}
               components={{ strong: <strong /> }}
             />

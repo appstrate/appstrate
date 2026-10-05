@@ -93,7 +93,7 @@ import {
 } from "./services/social.ts";
 import { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
-import { withSmtpOverride } from "@appstrate/db/auth";
+import { BA_MAGIC_LINK_VERIFY_PATH, withSmtpOverride } from "@appstrate/db/auth";
 import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
@@ -1867,7 +1867,7 @@ export function createOidcRouter() {
     // Hand off to Better Auth's verify endpoint in the USER's browser — BA
     // consumes the single-use token, sets the session cookie on their origin,
     // and 302s to callbackURL (the authorize endpoint).
-    const verifyUrl = new URL("/api/auth/magic-link/verify", getPublicAppOrigin());
+    const verifyUrl = new URL(BA_MAGIC_LINK_VERIFY_PATH, getPublicAppOrigin());
     verifyUrl.searchParams.set("token", token);
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");

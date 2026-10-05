@@ -491,7 +491,8 @@ export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
 const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
 const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
 
-const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
+/** Better Auth's magic-link verify endpoint: the one request that spends a token. */
+export const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
 
 /**
  * The dashboard page a magic-link email points at: `/magic-link/confirm`,
@@ -502,8 +503,15 @@ const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
  */
 function spaMagicLinkConfirmUrl(verifyUrl: string): string {
   const url = new URL(verifyUrl);
-  // Unknown shape (a Better Auth upgrade moved the route): leave it alone.
-  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) return verifyUrl;
+  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) {
+    // A Better Auth upgrade moved the verify route: the email falls back to
+    // the direct link, which a mail scanner can burn. Loud, so it is caught
+    // in ops before users report expired links.
+    logger.warn("auth: unexpected magic-link verify path, emailing the direct link", {
+      pathname: url.pathname,
+    });
+    return verifyUrl;
+  }
   url.pathname = "/magic-link/confirm";
   return url.toString();
 }
@@ -931,9 +939,8 @@ function buildAuth(options: CreateAuthOptions) {
       changeEmail: {
         enabled: true,
         updateEmailWithoutVerification: !smtpEnabled,
-        // The current address approves the change before anything is sent to
-        // the new one: a hijacked session alone cannot move the account to
-        // another mailbox, and the owner learns of the attempt.
+        // The owner is told at the current address, and must approve there,
+        // before anything is sent to the new one.
         ...(smtpTransport && {
           sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
             try {

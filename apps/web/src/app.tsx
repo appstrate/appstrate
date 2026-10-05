@@ -574,6 +574,7 @@ export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
   useExternalRedirect(!!user);
+  const { pathname } = useLocation();
 
   if (loading) {
     return <BootScreen />;
@@ -587,6 +588,17 @@ export function App() {
     return (
       <ErrorBoundary>
         <HostedConnectPage />
+      </ErrorBoundary>
+    );
+  }
+
+  // A magic link is honoured whoever is signed in: pressing its button
+  // replaces the current session with the link's account. (Only an instance
+  // without the OIDC module emails this URL.)
+  if (pathname === "/magic-link/confirm") {
+    return (
+      <ErrorBoundary>
+        <MagicLinkConfirmPage />
       </ErrorBoundary>
     );
   }
@@ -705,8 +717,6 @@ export function App() {
            * signup) and login-hint derived from that data. Same seam, dynamic
            * inputs — see invite-accept.tsx.
            */}
-          {/* Not gated: only an instance without the OIDC module emails this link. */}
-          <Route path="/magic-link/confirm" element={<MagicLinkConfirmPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<SignedOutFallback />} />
         </Routes>
@@ -737,7 +747,6 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
-          <Route path="/magic-link/confirm" element={<Navigate to="/" replace />} />
           {/*
            * `/auth/callback` must be reachable while authenticated too: by
            * the time the browser lands here, the BA session cookie is
