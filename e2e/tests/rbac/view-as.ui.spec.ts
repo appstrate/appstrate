@@ -81,8 +81,8 @@ test.describe("View as role", () => {
     await expect(banner(page)).toContainText("Lecteur");
     // Landed in the persona's space.
     await expect
-      .poll(() => page.evaluate(() => localStorage.getItem("appstrate_current_space")))
-      .toBe(browserCtx.org.defaultSpaceId);
+      .poll(() => page.evaluate(() => localStorage.getItem("appstrate_last_space_by_org")))
+      .toBe(JSON.stringify({ [browserCtx.org.orgId]: browserCtx.org.defaultSpaceId }));
     await expect(banner(page)).not.toContainText(/espace ouvert|open space/);
 
     await page.goto(agentUrl);

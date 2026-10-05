@@ -142,7 +142,7 @@ Two consequences the routes enforce explicitly:
 
 - **SSE** cannot send headers, so the realtime routes take `?spaceId=` for cookie auth and resolve it through `loadSpaceAccess`, the space and the caller's row in one statement (`apps/api/src/routes/realtime.ts`); API-key SSE uses the key's own space. Both parameters are declared in the spec as `SseSpaceId` / `XSpaceId` (`apps/api/src/openapi/parameters.ts`).
 - **CLI** pins the space per profile (`spaceId` in `config.toml`) and manages it with `appstrate space` (`apps/cli/src/commands/space.ts`); headless callers set `APPSTRATE_SPACE_ID` (`apps/cli/src/commands/run.ts`).
-- **SPA** keeps the active space in `localStorage` under `appstrate_current_space` (`apps/web/src/stores/space-store.ts`), and the typed API client's middleware injects it as `X-Space-Id` on every request.
+- **SPA** remembers the last space chosen in each organization in `localStorage` under `appstrate_last_space_by_org` (a JSON map `orgId → spaceId`, `apps/web/src/stores/space-store.ts`); it survives an organization switch and a sign-out, and is only a candidate — the scope is set once `GET /api/spaces` lists it as enterable. From there the typed API client's middleware injects it as `X-Space-Id` on every request.
 
 ## HTTP surface
 

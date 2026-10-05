@@ -31,11 +31,11 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 
 /**
  * Centralized session teardown. Resets the auth store AND the org/space scope
- * stores (clearing their persisted localStorage ids) so a subsequent login
- * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
- * the previous user — the scoping-header builder reads straight off these
- * stores, so leaving them set would leak the old scope onto the first
- * requests after re-login.
+ * so a subsequent login can never carry over a stale `X-Org-Id` / `X-Space-Id`
+ * header from the previous user — the scoping-header builder reads straight off
+ * these stores. The space each organization was last left in stays remembered:
+ * it is a candidate `useSpaceResolver` only promotes once the next session's
+ * own space list proves it enterable.
  */
 function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });

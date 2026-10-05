@@ -101,7 +101,7 @@ export async function openBrowser(repoRoot: string): Promise<Browser> {
       );
       await context.addInitScript({
         content: `localStorage.setItem("appstrate_current_org", ${JSON.stringify(user.orgId)});
-localStorage.setItem("appstrate_current_space", ${JSON.stringify(user.spaceId)});
+localStorage.setItem("appstrate_last_space_by_org", ${JSON.stringify(JSON.stringify({ [user.orgId]: user.spaceId }))});
 ${instrument}`,
       });
       const page = await context.newPage();

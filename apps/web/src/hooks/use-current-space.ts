@@ -3,6 +3,7 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { useSpaces } from "./use-spaces";
 
@@ -86,14 +87,15 @@ export function enterableSpaceId(
 }
 
 /**
- * The only path from the remembered space to a scope: requests carry no space
- * until `GET /api/spaces` proves one enterable, and lose it the moment the
+ * The only path from the space remembered for the current organization to a
+ * scope: requests carry no space until `GET /api/spaces` proves one enterable, and lose it the moment the
  * listing stops listing it. Render inside MainLayout.
  */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
   const current = useStore(spaceStore, (s) => s.id);
-  const remembered = useStore(spaceStore, (s) => s.remembered);
+  const orgId = useStore(orgStore, (s) => s.id);
+  const remembered = useStore(spaceStore, (s) => (orgId && s.remembered[orgId]) || null);
   const { data: spaces } = useSpaces();
 
   useEffect(() => {
