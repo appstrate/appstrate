@@ -70,9 +70,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is now a named 409.
 - **`GET /api/orgs` and `GET /api/spaces` have a defined order** (#1680).
   Organizations are listed oldest membership first (there was no order: a
-  rename moved an organization). Spaces are listed default first, then the
-  caller's personal space, then team spaces oldest first (the personal space
-  was ranked by its creation date, a different place for each member).
+  rename moved an organization). Spaces are listed default first, then
+  personal spaces, then team spaces, each oldest first (a personal space was
+  ranked by its creation date, a different place for each member).
 - **`GET /api/profile` reports `can_create_org`** (#1680): whether
   `POST /api/orgs` would accept the user — true on an open instance, and for
   platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard

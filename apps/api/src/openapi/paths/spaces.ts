@@ -88,7 +88,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "List spaces",
       description:
-        "List the spaces of the organization the caller reaches: the default space first, then the caller's personal space, then team spaces oldest first.",
+        "List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XViewAs" },

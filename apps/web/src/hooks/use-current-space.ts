@@ -66,22 +66,35 @@ export function useSpaceSwitcher() {
 interface ResolvableSpace {
   id: string;
   isDefault: boolean;
+  personal: boolean;
   access: string;
 }
 
 /**
+ * Whether the caller may stand in a listed space. Only `member` access enters:
+ * a `closed` space or an orphaned personal one is listed with `access: "none"`,
+ * and scoping to it would 403 every space-scoped request.
+ */
+export function isSpaceEnterable(space: { access: string }): boolean {
+  return space.access === "member";
+}
+
+/**
  * The space to stand in: the remembered one while it is still enterable, else
- * the default, else any enterable one; null when none is. Only `member` access
- * enters — scoping to a `closed` space would 403 every space-scoped request.
+ * the default, else a team space, else the caller's personal one; null when
+ * none is. Team before personal whatever the listing order: a guest holds no
+ * role in the default space and must land in the team space they were invited
+ * to, not in an empty "Mon espace".
  */
 export function enterableSpaceId(
   remembered: string | null,
   spaces: readonly ResolvableSpace[],
 ): string | null {
-  const enterable = spaces.filter((s) => s.access === "member");
+  const enterable = spaces.filter(isSpaceEnterable);
   const pick =
     enterable.find((s) => s.id === remembered) ??
     enterable.find((s) => s.isDefault) ??
+    enterable.find((s) => !s.personal) ??
     enterable[0];
   return pick?.id ?? null;
 }

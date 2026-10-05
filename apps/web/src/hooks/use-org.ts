@@ -117,6 +117,7 @@ export function useOrg() {
         (o) => o.id !== orgId,
       );
       queryClient.setQueryData<OrgList>(orgKeys.all, remaining);
+      spaceStore.getState().forgetOrg(orgId);
       selectOrg(remaining[0]?.id ?? null);
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
     },

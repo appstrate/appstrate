@@ -19,7 +19,10 @@ const persisted = () => JSON.parse(storage.getItem("appstrate_last_space_by_org"
 describe("space store", () => {
   // Another suite of the same process may have imported the stores first.
   const before = { org: orgStore.getState().id, space: spaceStore.getState() };
-  beforeAll(() => spaceStore.setState({ id: null, remembered: { org_a: "spc_studio" } }));
+  beforeAll(() => {
+    storage.setItem("appstrate_last_space_by_org", JSON.stringify({ org_a: "spc_studio" }));
+    spaceStore.setState({ id: null, remembered: { org_a: "spc_studio" } });
+  });
   afterAll(() => {
     orgStore.setState({ id: before.org });
     spaceStore.setState(before.space);
@@ -42,5 +45,37 @@ describe("space store", () => {
     spaceStore.getState().setId(null);
     expect(spaceStore.getState().remembered).toEqual({ org_a: "spc_studio", org_b: "spc_beta" });
     expect(persisted()).toEqual({ org_a: "spc_studio", org_b: "spc_beta" });
+  });
+
+  it("keeps what another tab remembered since this one loaded", () => {
+    storage.setItem(
+      "appstrate_last_space_by_org",
+      JSON.stringify({ ...persisted(), org_c: "spc_other_tab" }),
+    );
+    orgStore.getState().setId("org_a");
+    spaceStore.getState().setId("spc_vitrine");
+    expect(persisted()).toEqual({
+      org_a: "spc_vitrine",
+      org_b: "spc_beta",
+      org_c: "spc_other_tab",
+    });
+    expect(spaceStore.getState().remembered).toEqual(persisted());
+  });
+
+  it("forgets an organization the caller left or deleted", () => {
+    spaceStore.getState().forgetOrg("org_b");
+    expect(persisted()).toEqual({ org_a: "spc_vitrine", org_c: "spc_other_tab" });
+    expect(spaceStore.getState().remembered).toEqual(persisted());
+  });
+
+  it("ignores a stored value that is not a map of ids", () => {
+    storage.setItem("appstrate_last_space_by_org", JSON.stringify(["spc_x", { org_z: 3 }]));
+    orgStore.getState().setId("org_a");
+    spaceStore.getState().setId("spc_studio");
+    expect(persisted()).toEqual({ org_a: "spc_studio" });
+
+    storage.setItem("appstrate_last_space_by_org", JSON.stringify({ org_z: 3, org_y: "spc_y" }));
+    spaceStore.getState().setId("spc_vitrine");
+    expect(persisted()).toEqual({ org_a: "spc_vitrine", org_y: "spc_y" });
   });
 });

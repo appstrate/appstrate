@@ -4439,7 +4439,7 @@ export interface paths {
         };
         /**
          * List spaces
-         * @description List the spaces of the organization the caller reaches: the default space first, then the caller's personal space, then team spaces oldest first.
+         * @description List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.
          */
         get: operations["listSpaces"];
         put?: never;

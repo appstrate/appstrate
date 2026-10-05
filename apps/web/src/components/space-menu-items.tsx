@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Check, Star } from "lucide-react";
 import { useSpaces } from "../hooks/use-spaces";
-import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import {
   DropdownMenuItem,
@@ -28,9 +28,9 @@ export function SpaceMenuItems() {
   const renderItem = (space: (typeof spaces)[number]) => {
     const isActive = space.id === currentSpaceId;
     // A LIVE `private` space never reaches the client; `closed` ones do, listed
-    // but not enterable (`access: "none"`), and so does an ORPHANED personal
-    // space for an owner or admin — they may convert or sweep it, not enter it.
-    const enterable = space.access === "member";
+    // but not enterable, and so does an ORPHANED personal space for an owner or
+    // admin — they may convert or sweep it, not enter it.
+    const enterable = isSpaceEnterable(space);
     return (
       <DropdownMenuItem
         key={space.id}
