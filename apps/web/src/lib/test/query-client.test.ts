@@ -86,6 +86,10 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).toHaveBeenCalledTimes(1);
+    // Translated lead, and the permission the server named kept after it.
+    expect(toastError.mock.calls[0]![0]).toBe(
+      "Action refusée : Insufficient permissions: members:invite required",
+    );
   });
 
   it("keeps the opt-out for a 403 that is not about permissions", async () => {
