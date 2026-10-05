@@ -134,6 +134,8 @@ export class LocalQueue<T> implements JobQueue<T> {
     private readonly defaultJobOptions?: JobAddOptions,
     /** Injectable for tests; production always uses the app logger. */
     private readonly log: Logger = logger,
+    /** Injectable for tests; production always polls on {@link CRON_POLL_INTERVAL_MS}. */
+    private readonly cronPollIntervalMs: number = CRON_POLL_INTERVAL_MS,
   ) {}
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
@@ -405,6 +407,29 @@ export class LocalQueue<T> implements JobQueue<T> {
     this.delayed.add(entry);
   }
 
+  /** Delay from `now` to the next wall-clock poll boundary. */
+  private cronPollDelay(now: number): number {
+    return this.cronPollIntervalMs - (now % this.cronPollIntervalMs) + CRON_POLL_MARGIN_MS;
+  }
+
+  /**
+   * Arm the next poll. It re-arms itself, so drift never accumulates — and in a
+   * `finally`, so one evaluation that throws does not end cron for the life of
+   * the process.
+   */
+  private scheduleCronPoll(): void {
+    this.cronTimer = setTimeout(() => {
+      try {
+        this.evaluateCron();
+      } catch (err) {
+        this.log.error(`${this.name} cron evaluation failed`, { error: getErrorMessage(err) });
+      } finally {
+        if (!this.shuttingDown) this.scheduleCronPoll();
+      }
+    }, this.cronPollDelay(Date.now()));
+    this.cronTimer.unref?.();
+  }
+
   /**
    * Cron evaluator — enqueues every occurrence of each scheduler that fell in
    * the window `(prevPoll, now]`. Uses `computeNextRun` (cron-parser) so
@@ -421,20 +446,6 @@ export class LocalQueue<T> implements JobQueue<T> {
    * `lastFiredAt` bounds the base so an occurrence is never replayed across
    * overlapping polls.
    */
-  /** Delay from `now` to the next wall-clock poll boundary. */
-  private cronPollDelay(now: number): number {
-    return CRON_POLL_INTERVAL_MS - (now % CRON_POLL_INTERVAL_MS) + CRON_POLL_MARGIN_MS;
-  }
-
-  /** Arm the next poll; re-arms itself, so drift never accumulates. */
-  private scheduleCronPoll(): void {
-    this.cronTimer = setTimeout(() => {
-      this.evaluateCron();
-      if (!this.shuttingDown) this.scheduleCronPoll();
-    }, this.cronPollDelay(Date.now()));
-    this.cronTimer.unref?.();
-  }
-
   private evaluateCron(): void {
     if (this.shuttingDown || !this.handler) return;
 

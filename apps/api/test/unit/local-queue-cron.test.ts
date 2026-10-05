@@ -212,6 +212,30 @@ describe("LocalQueue cron poll alignment", () => {
   it("never lands before the boundary it aims at", () => {
     expect(delayAt("2026-01-15T10:30:00.000Z")).toBeGreaterThan(30_000);
   });
+
+  it("keeps polling after an evaluation throws, and stops at shutdown", async () => {
+    // A 100 ms cadence in place of 30 s; the evaluator is replaced on the
+    // instance so the test counts polls and makes the first one throw.
+    const silent = { debug() {}, info() {}, warn() {}, error() {} };
+    const q = new LocalQueue<unknown>("test-cron-rearm", undefined, silent as any, 100) as any;
+    let polls = 0;
+    q.evaluateCron = () => {
+      polls++;
+      if (polls === 1) throw new Error("boom");
+    };
+    q.process(async () => {});
+
+    const deadline = Date.now() + 2_000;
+    while (polls < 3) {
+      if (Date.now() > deadline) throw new Error(`only ${polls} poll(s) within 2s`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    await q.shutdown(0);
+    const atShutdown = polls;
+    await new Promise((r) => setTimeout(r, 400));
+    expect(polls).toBe(atShutdown);
+  });
 });
 
 // ---------------------------------------------------------------------------
