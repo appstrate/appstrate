@@ -106,9 +106,7 @@ describe("invalidation after a delete (#1678)", () => {
     const { qc, count } = await mounted();
     expect([count(list), count(deleted), count(kept)]).toEqual([1, 1, 1]);
 
-    invalidateAfterDelete(qc, packageKeys.family("skills"), (key) =>
-      packageKeys.isDetailOf(key, "@acme/gone"),
-    );
+    invalidateAfterDelete(qc, packageKeys.family("skills"), (key) => key[4] === "@acme/gone");
     await settled();
 
     // The page still mounted on the deleted package would only fetch a 404.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
 import { queryClient } from "../lib/query-client";
 import { invalidateAfterDelete } from "../lib/query-keys";
@@ -65,27 +65,23 @@ const SPACE_PATHS = [
   "/api/spaces/{id}/members",
 ] as const;
 
-/**
- * Invalidate every cached space read after a write. `deletedId` names the
- * space a delete just removed: its own reads are not refetched. Exported for
- * its test.
- */
-export function invalidateSpaces(qc: QueryClient, deletedId?: string): void {
-  for (const path of SPACE_PATHS) {
-    if (deletedId === undefined) void qc.invalidateQueries({ queryKey: ["get", path] });
-    else invalidateAfterDelete(qc, ["get", path], (key) => spaceIdOf(key) === deletedId);
-  }
+/** `deletedId` names the space a delete just removed: its own reads are not refetched. */
+function useInvalidateSpaces() {
+  const qc = useQueryClient();
+  return (deletedId?: string) => {
+    for (const path of SPACE_PATHS) {
+      invalidateAfterDelete(
+        qc,
+        ["get", path],
+        (key) => deletedId !== undefined && spaceIdOf(key) === deletedId,
+      );
+    }
+  };
 }
 
-/** The `{id}` of a typed-client key `[method, path, init]`; undefined for the listing. */
 function spaceIdOf(queryKey: readonly unknown[]): unknown {
   const init = queryKey[2] as { params?: { path?: { id?: unknown } } } | undefined;
   return init?.params?.path?.id;
-}
-
-function useInvalidateSpaces() {
-  const qc = useQueryClient();
-  return (deletedId?: string) => invalidateSpaces(qc, deletedId);
 }
 
 export function useCreateSpace() {

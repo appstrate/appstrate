@@ -253,9 +253,8 @@ function useDeletePackage(type: PackageType) {
       });
     },
     onSuccess: (_data, id) => {
-      invalidateAfterDelete(qc, packageKeys.family(segment), (key) =>
-        packageKeys.isDetailOf(key, id),
-      );
+      // Detail keys are `["packages", segment, orgId, spaceId, id, version]`.
+      invalidateAfterDelete(qc, packageKeys.family(segment), (key) => key[4] === id);
       navigate("/");
     },
   });

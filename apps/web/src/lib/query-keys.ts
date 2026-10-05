@@ -117,8 +117,6 @@ export const packageKeys = {
   list: (path: string, orgId: Id, spaceId: Id) => ["packages", path, orgId, spaceId] as const,
   detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string | null = null) =>
     ["packages", path, orgId, spaceId, id, version] as const,
-  /** Whether a key of the family is a `detail` of package `id`, at any version. */
-  isDetailOf: (queryKey: readonly unknown[], id: string) => queryKey[4] === id,
 };
 
 /**
