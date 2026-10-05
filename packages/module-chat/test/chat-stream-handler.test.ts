@@ -24,7 +24,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -39,6 +39,7 @@ import {
   type ChatEnv,
 } from "../src/chat-stream.ts";
 import { mintSessionId } from "../src/session-id.ts";
+import { logger } from "../src/logger.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import {
@@ -494,6 +495,58 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
     const rows = await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId));
     expect(rows).toEqual([]);
+  });
+
+  it("names the reason of a turn refused for lack of a usable model, in one info line", async () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        dispatch: async (req) =>
+          new URL(req.url).pathname === "/api/models"
+            ? Response.json({ object: "list", hasMore: false, data: [] })
+            : scriptedDispatch()(req),
+      });
+
+      expect(res.status).toBe(400);
+      expect(calls).toEqual([]);
+      expect(
+        info.mock.calls.filter(([msg]) => msg === "chat turn refused: no usable model"),
+      ).toEqual([
+        [
+          "chat turn refused: no usable model",
+          {
+            orgId: ctx.orgId,
+            requested: null,
+            reason: "No enabled model is configured (Settings → Models).",
+          },
+        ],
+      ]);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("logs the raw error behind a marker the stream's onError produced", async () => {
+    // An exception escaping the engine's `execute` reaches the client as the
+    // same marker a model error does, and the drain ignores that marker.
+    const error = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const { engine } = scriptedEngine();
+      let marker: string | undefined;
+      const res = await postChat(mintSessionId(), undefined, (input) => {
+        marker = input.onError(new Error("ESCAPED_EXECUTE_SENTINEL"));
+        return engine(input);
+      });
+      await res.text();
+
+      expect(marker).toStartWith("appstrate:chat-turn-error:");
+      expect(error.mock.calls).toEqual([
+        ["chat turn stream failed", { err: "Error: ESCAPED_EXECUTE_SENTINEL" }],
+      ]);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("ends the turn and clears the in-flight marker when the engine fails", async () => {

@@ -139,6 +139,9 @@ let providerPark: {
 /** How long the parked request waits for a teardown before reporting none. */
 const PARK_GIVE_UP_MS = 3_000;
 
+/** When set, the provider stub refuses every completion with this status. Reset in `afterEach`. */
+let providerRefusal: number | null = null;
+
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -146,6 +149,12 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
+      if (providerRefusal !== null) {
+        return Response.json(
+          { error: { message: "Incorrect API key provided", type: "invalid_request_error" } },
+          { status: providerRefusal },
+        );
+      }
       if (!providerPark) return openAiSse();
       const park = providerPark;
       park.arrived();
@@ -171,8 +180,26 @@ afterAll(() => server.stop(true));
 afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
+  providerRefusal = null;
   mcpSurface = EMPTY_SURFACE;
 });
+
+const MODEL_ERROR_LOG = "Pi chat turn ended on a model error";
+
+/** Run `act` with `logger.warn` / `logger.error` recorded instead of written. */
+async function recordingWarnAndError<T>(act: () => Promise<T>) {
+  const warn = mock((..._args: unknown[]) => {});
+  const error = mock((..._args: unknown[]) => {});
+  const original = { warn: logger.warn, error: logger.error };
+  logger.warn = warn as unknown as typeof logger.warn;
+  logger.error = error as unknown as typeof logger.error;
+  try {
+    return { result: await act(), warn: warn.mock.calls, error: error.mock.calls };
+  } finally {
+    logger.warn = original.warn;
+    logger.error = original.error;
+  }
+}
 
 function orgModel(): OrgModel {
   return {
@@ -385,6 +412,21 @@ describe("runPiChat against a stub provider", () => {
     });
   }, 30_000);
 
+  it("logs a turn the provider refused once, at warn, with the raw cause", async () => {
+    // The stream carries the category alone, and the persistence drain ignores
+    // that marker: this line is the only place the provider's answer is kept.
+    providerRefusal = 401;
+    const logs = await recordingWarnAndError(() => runTurn(() => "loopback-refused"));
+
+    const errorChunk = logs.result.chunks.find((c) => c.type === "error");
+    expect(errorChunk?.errorText).toBe("appstrate:chat-turn-error:credential_unavailable");
+    const lines = logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]![1]).toMatchObject({ chatSessionId: null });
+    expect(String((lines[0]![1] as { err: unknown }).err)).toContain("401");
+    expect(logs.error).toEqual([]);
+  }, 30_000);
+
   it("tears the live Pi session down when a stop lands mid-inference", async () => {
     // The two other stop cases in this file abort during CONSTRUCTION — one up
     // front, one on a wedged MCP handshake — so neither ever reaches
@@ -409,14 +451,20 @@ describe("runPiChat against a stub provider", () => {
     providerPark = { arrived, settle };
 
     const stopped = new AbortController();
-    const turn = runTurn(() => "loopback-midflight", stopped.signal);
-    // Only press stop once the completions request has actually landed —
-    // that is the proof the session exists and the prompt is in flight.
-    await requestArrived;
-    stopped.abort(new Error("stopped by user"));
+    const logs = await recordingWarnAndError(async () => {
+      const turn = runTurn(() => "loopback-midflight", stopped.signal);
+      // Only press stop once the completions request has actually landed —
+      // that is the proof the session exists and the prompt is in flight.
+      await requestArrived;
+      stopped.abort(new Error("stopped by user"));
+      return turn;
+    });
 
-    const { chunks } = await turn;
+    const { chunks } = logs.result;
     expect(await providerTornDown).toBe(true);
+    // A stop is not a model error, and not a failure: neither line is written.
+    expect(logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG)).toEqual([]);
+    expect(logs.error).toEqual([]);
     // Still a well-formed, non-error turn (same contract as the other stops).
     // The step chunks in between are whatever the model got through before the
     // stop — not pinned here, only the envelope and the absence of an error.

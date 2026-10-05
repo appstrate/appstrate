@@ -167,7 +167,14 @@ export const chatStreamSchema = z
     path: ["pinned_skills"],
   });
 
+/**
+ * The stream's `onError`: an exception that escaped the engine's `execute`
+ * becomes the same failed-turn marker a model error does. Only the marker
+ * crosses the stream (and the persistence drain ignores it), so the raw error
+ * is logged here or nowhere — at `error`, the engine's own catch missed it.
+ */
 function clientErrorMessage(error: unknown): string {
+  logger.error("chat turn stream failed", { err: String(error) });
   return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
