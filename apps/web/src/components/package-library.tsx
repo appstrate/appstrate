@@ -420,7 +420,7 @@ function PlacementMap({
                 <span className="text-xs">{space.name}</span>
                 {space.isDefault && (
                   <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem]">
-                    default
+                    {t("spaces.default", { ns: "settings" })}
                   </Badge>
                 )}
               </TableHead>

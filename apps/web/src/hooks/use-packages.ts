@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import i18n from "../i18n";
 import { stripScope } from "@appstrate/core/naming";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -249,6 +250,7 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+      toast.success(i18n.t("settings:packages.deleted"));
       navigate("/");
     },
   });

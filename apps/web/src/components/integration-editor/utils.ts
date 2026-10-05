@@ -111,7 +111,7 @@ export function setSource(manifest: Rec, s: SourceState): Rec {
 
 // ─── Auths ──────────────────────────────────────────────────
 
-export type AuthType = "api_key" | "oauth2" | "basic" | "custom";
+export type AuthType = (typeof AUTH_TYPES)[number];
 
 export interface ScopeCatalogEntry {
   value: string;
@@ -140,7 +140,8 @@ export interface AuthState {
   apiCallEnabled: boolean;
 }
 
-const KNOWN_AUTH_TYPES: AuthType[] = ["api_key", "oauth2", "basic", "custom"];
+/** Every AFPS §7.2 auth type. A type missing here is read back as `api_key` and rewritten as one. */
+export const AUTH_TYPES = ["api_key", "oauth2", "basic", "custom", "mtls"] as const;
 
 /** Keys present under `_meta["dev.appstrate/api"].auths` — each opts that auth
  * into the api_call tool. */
@@ -150,7 +151,7 @@ function getApiMetaAuthKeys(manifest: Rec): Set<string> {
 }
 
 function readAuth(key: string, raw: Rec, apiCallEnabled: boolean): AuthState {
-  const type = KNOWN_AUTH_TYPES.includes(raw.type as AuthType) ? (raw.type as AuthType) : "api_key";
+  const type = AUTH_TYPES.includes(raw.type as AuthType) ? (raw.type as AuthType) : "api_key";
   const delivery = asRec(raw.delivery);
   const http = asRec(delivery.http);
   const credentials = asRec(raw.credentials);

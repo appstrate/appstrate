@@ -261,6 +261,7 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
+      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });

@@ -340,8 +340,6 @@ export function ResourceSection({
                     setActive.mutate(
                       { spaceId: currentSpaceId, packageId: id, active: true },
                       {
-                        onSuccess: () =>
-                          toast.success(t("integrations.activate.success", { ns: "settings" })),
                         onError: () =>
                           toast.error(t("integrations.activate.error", { ns: "settings" })),
                       },

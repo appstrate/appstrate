@@ -140,8 +140,6 @@ function IntegrationConnectionCard({
               setActive.mutate(
                 { spaceId: currentSpaceId, packageId, active: true },
                 {
-                  onSuccess: () =>
-                    toast.success(t("integrations.activate.success", { ns: "settings" })),
                   onError: () => toast.error(t("integrations.activate.error", { ns: "settings" })),
                 },
               );

@@ -14,6 +14,7 @@ import {
   getAuths,
   setAuths,
   emptyAuth,
+  AUTH_TYPES,
   type AuthState,
   type AuthType,
   type ScopeCatalogEntry,
@@ -24,10 +25,8 @@ interface AuthsSectionProps {
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
-const AUTH_TYPES: AuthType[] = ["api_key", "oauth2", "basic", "custom"];
-
 export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation(["agents", "common", "settings"]);
   // Local row state preserves in-progress rows (e.g. a momentarily-empty key)
   // that setAuths drops from the manifest. Initialised once per mount; the tab
   // unmounts on switch, so an external JSON-tab edit is picked up on remount.
@@ -102,8 +101,15 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
             id={`auth-type-${idx}`}
             label={t("integrationEditor.auths.type")}
             value={auth.type}
-            onChange={(v) => updateAuth(idx, { type: v as AuthType })}
-            enumValues={AUTH_TYPES}
+            onChange={(v) =>
+              updateAuth(idx, {
+                type: v as AuthType,
+                // AFPS §7.2 + §7.6: `mtls` cannot ride `delivery.http`.
+                ...(v === "mtls" ? { deliveryHeaderName: "" } : {}),
+              })
+            }
+            enumValues={[...AUTH_TYPES]}
+            enumLabel={(v) => t(`settings:integration.auth.type.${v}`)}
           />
 
           <label className="flex items-center gap-2 text-sm">
@@ -141,31 +147,37 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
           </label>
 
           {/* Credential delivery (HTTP header injection) */}
-          <div className="border-border space-y-2 rounded border border-dashed p-2">
-            <Label className="text-xs uppercase">{t("integrationEditor.auths.delivery")}</Label>
-            <FormField
-              id={`auth-hdr-name-${idx}`}
-              label={t("integrationEditor.auths.headerName")}
-              value={auth.deliveryHeaderName}
-              onChange={(v) => updateAuth(idx, { deliveryHeaderName: v })}
-              placeholder="Authorization"
-            />
-            <FormField
-              id={`auth-hdr-prefix-${idx}`}
-              label={t("integrationEditor.auths.headerPrefix")}
-              value={auth.deliveryHeaderPrefix}
-              onChange={(v) => updateAuth(idx, { deliveryHeaderPrefix: v })}
-              placeholder="Bearer "
-            />
-            <FormField
-              id={`auth-hdr-value-${idx}`}
-              label={t("integrationEditor.auths.headerValue")}
-              value={auth.deliveryHeaderValue}
-              onChange={(v) => updateAuth(idx, { deliveryHeaderValue: v })}
-              placeholder="{$credential.api_key}"
-              description={t("integrationEditor.auths.headerValueDesc")}
-            />
-          </div>
+          {auth.type === "mtls" ? (
+            <p className="text-muted-foreground text-xs">
+              {t("integrationEditor.auths.mtlsDelivery")}
+            </p>
+          ) : (
+            <div className="border-border space-y-2 rounded border border-dashed p-2">
+              <Label className="text-xs uppercase">{t("integrationEditor.auths.delivery")}</Label>
+              <FormField
+                id={`auth-hdr-name-${idx}`}
+                label={t("integrationEditor.auths.headerName")}
+                value={auth.deliveryHeaderName}
+                onChange={(v) => updateAuth(idx, { deliveryHeaderName: v })}
+                placeholder="Authorization"
+              />
+              <FormField
+                id={`auth-hdr-prefix-${idx}`}
+                label={t("integrationEditor.auths.headerPrefix")}
+                value={auth.deliveryHeaderPrefix}
+                onChange={(v) => updateAuth(idx, { deliveryHeaderPrefix: v })}
+                placeholder="Bearer "
+              />
+              <FormField
+                id={`auth-hdr-value-${idx}`}
+                label={t("integrationEditor.auths.headerValue")}
+                value={auth.deliveryHeaderValue}
+                onChange={(v) => updateAuth(idx, { deliveryHeaderValue: v })}
+                placeholder="{$credential.api_key}"
+                description={t("integrationEditor.auths.headerValueDesc")}
+              />
+            </div>
+          )}
 
           {auth.type === "oauth2" ? (
             <div className="space-y-3">

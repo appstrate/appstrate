@@ -99,7 +99,7 @@ export function CreateVersionModal({
       actions={
         <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
           {createVersion.isPending && <Spinner />}{" "}
-          {targetVersion
+          {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}
         </Button>
@@ -120,7 +120,7 @@ export function CreateVersionModal({
           )}
         </div>
 
-        {needsBump && latestVersion && (
+        {needsBump && latestVersion && hasUnarchivedChanges && (
           <div className="space-y-2">
             <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
             <div className="flex gap-2">

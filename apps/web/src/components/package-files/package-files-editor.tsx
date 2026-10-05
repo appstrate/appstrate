@@ -247,17 +247,19 @@ export function PackageFilesEditor({
           onSubmit={(to) => stage([{ op: "move", from: dialog.path, to }], to)}
         />
       )}
-      <ConfirmModal
-        open={dialog?.kind === "delete"}
-        onClose={() => setDialog(null)}
-        title={t("files.delete")}
-        description={t("files.deleteConfirm", {
-          path: dialog?.kind === "delete" ? dialog.path : "",
-        })}
-        confirmLabel={t("files.delete")}
-        isPending={busy}
-        onConfirm={() => dialog?.kind === "delete" && stage([{ op: "delete", path: dialog.path }])}
-      />
+      {/* Mounted only while open, like the two above: kept mounted, it named
+          an empty path for as long as its closing transition lasted. */}
+      {dialog?.kind === "delete" && (
+        <ConfirmModal
+          open
+          onClose={() => setDialog(null)}
+          title={t("files.delete")}
+          description={t("files.deleteConfirm", { path: dialog.path })}
+          confirmLabel={t("files.delete")}
+          isPending={busy}
+          onConfirm={() => stage([{ op: "delete", path: dialog.path }])}
+        />
+      )}
     </div>
   );
 }

@@ -373,7 +373,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
-    version,
+    // The header names the version on screen, not the live one behind it.
+    version: downloadVersion,
     homeSpaceName,
   };
 
@@ -436,7 +437,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        hasUnarchivedChanges={hasTimestampChanges}
+        // Authoring state: only whoever can publish the draft has a use for it.
+        hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
         actionsLeft={
           type === "agent" ? (
             <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />

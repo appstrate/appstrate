@@ -75,7 +75,10 @@ export function RunDetailPage() {
   // said before the click rather than collected as a 404 after it. The verdict
   // rides this very response (`AgentDetail.active`), resolved for the space the
   // page is read from; the Re-run control renders only once it has landed.
-  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
+  const { data: agent, isLoading: agentLoading } = usePackageDetail(
+    "agent",
+    isInlinePath ? undefined : packageId,
+  );
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
 
@@ -248,7 +251,12 @@ export function RunDetailPage() {
           ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
           : inlineName,
       }
-    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
+    : {
+        // The id is the fallback for an agent with no name, not a placeholder
+        // for one whose name is still on its way.
+        label: agent?.display_name || (agentLoading ? "…" : packageId),
+        href: `/agents/${packageId}`,
+      };
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
