@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
+import { queryClient } from "../lib/query-client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
@@ -40,6 +41,10 @@ async function fetchProfile(): Promise<AuthProfile | null> {
  */
 function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });
+  // Every cached answer belongs to the session that just ended. Kept, the
+  // previous account's space listing would let the resolver promote ITS
+  // remembered space as the next account's `X-Space-Id` before a refetch.
+  queryClient.clear();
   orgStore.getState().setId(null);
   spaceStore.getState().setId(null);
   // Same reason, one scope deeper: a persona left behind would ride the next
