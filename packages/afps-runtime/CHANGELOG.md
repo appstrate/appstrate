@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one preparation of the caller half of an api_call (#1660)
+
+- `prepareApiCallRequest(target, callerHeaders, fields)` and its types
+  `PreparedApiCallRequest` / `ApiCallRequestIssue` (`./resolvers`): the
+  target and the caller's headers substituted, the headers a credential went
+  into, and the templates `credentialUrlPolicy` scans; or the one reason
+  nothing is sent (an unresolved placeholder in the target, then per header
+  a value that is no HTTP field value or an unresolved placeholder). It
+  repairs `Bearer{{field}}` on the template of `Authorization` /
+  `Proxy-Authorization`. The local integration resolver now goes through
+  it, so `appstrate run --integrations=local` repairs that scheme too.
+
 ### Changed — one outbound engine for every api_call path (#1641)
 
 - **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,

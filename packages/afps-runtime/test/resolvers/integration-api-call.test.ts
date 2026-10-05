@@ -796,6 +796,44 @@ describe("LocalIntegrationResolver", () => {
     });
   });
 
+  it("repairs `Bearer{{field}}` in a kept Authorization header, as the platform and the sidecar do", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", {
+          headerName: "Authorization",
+          headerPrefix: "Bearer ",
+          allowServerOverride: true,
+        }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "server" } } } },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        headers: { authorization: "Bearer{{api_key}}" },
+      },
+      ctx,
+    );
+    expect(Object.fromEntries(new Headers(calls[0]!.init.headers))).toEqual({
+      authorization: "Bearer server",
+    });
+  });
+
   it("honours an explicit injection override from the creds file", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});

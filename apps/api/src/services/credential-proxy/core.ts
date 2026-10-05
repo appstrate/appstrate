@@ -23,11 +23,7 @@
  * (spaceId, integrationId) and focuses purely on the mechanics.
  */
 
-import {
-  substituteVars,
-  applyInjectedCredentialHeaderToHeaders,
-  normalizeAuthSchemeTemplate,
-} from "@appstrate/connect";
+import { substituteVars, applyInjectedCredentialHeaderToHeaders } from "@appstrate/connect";
 import {
   buildInjectedCredentialHeader,
   credentialCarryingHeader,
@@ -37,17 +33,18 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
+  prepareApiCallRequest,
   redactionFields,
   templateHost,
   unresolvedPlaceholders,
   urlPolicyRefusalMessage,
+  type ApiCallRequestIssue,
   type CookieJar,
   type UrlPolicyRefusal,
 } from "@appstrate/afps-runtime/resolvers";
 import {
   assertHttpFieldValue,
   InvalidHeaderValueError,
-  isHttpFieldValue,
 } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
@@ -225,32 +222,17 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     throw err;
   }
 
-  // Substitute placeholders in target (fail-closed on unresolved refs —
-  // mirror of the sidecar; stops the proxy from leaking `{{foo}}` to the
-  // upstream when a template references a non-existent field).
+  // The target and the caller's headers, substituted (fail-closed: an unresolved `{{foo}}` or an
+  // invalid header value is refused, never sent), as on the sidecar and the local CLI.
   const fields = resolved.credentials;
-  const unresolvedIn = (template: string) => unresolvedPlaceholders(template, fields);
-  const target = substituteVars(input.target, fields);
-  const unresolvedInTarget = unresolvedIn(input.target);
-  if (unresolvedInTarget.length > 0) {
-    throw new ProxyCallError(
-      "unresolved_placeholder",
-      `Unresolved placeholders in target: {{${unresolvedInTarget.join(",")}}}`,
-    );
-  }
-  // `Bearer{{token}}` is repaired on the TEMPLATE: a raw secret reaches the upstream as-is (#988).
-  const headerTemplates = Object.entries(input.headers ?? {}).map(
-    ([k, v]) => [k, normalizeAuthSchemeTemplate(k, v)] as const,
-  );
+  const prepared = prepareApiCallRequest(input.target, input.headers ?? {}, fields);
+  if (!prepared.ok) throw requestIssueError(prepared.issue);
+  const { url: target, templates } = prepared.request;
   const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
-    templates: [
-      input.target,
-      ...headerTemplates.map(([, template]) => template),
-      ...(bodyTemplate !== null ? [bodyTemplate] : []),
-    ],
+    templates: [...templates, ...(bodyTemplate !== null ? [bodyTemplate] : [])],
     fields,
     allowAllUris: resolved.allowAllUris,
     declaredUris,
@@ -273,26 +255,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   //
   // Every header carrying a decrypted credential (any vendor name, or a caller `{{field}}`),
   // collected at injection time: a redirect leaving the allowlist strips them.
-  const sensitiveHeaderNames = new Set<string>();
+  const sensitiveHeaderNames = new Set<string>(prepared.request.credentialHeaders);
   const headers = new Headers();
   let credentialInjection;
   try {
-    for (const [k, template] of headerTemplates) {
-      // The caller's own value is a malformed request; only one the credential spoils is unusable.
-      if (!isHttpFieldValue(template)) {
-        throw new ProxyCallError("invalid_request", new InvalidHeaderValueError(k).message);
-      }
-      const unresolved = unresolvedIn(template);
-      if (unresolved.length > 0) {
-        throw new ProxyCallError(
-          "unresolved_placeholder",
-          `Unresolved placeholders in header "${k}": {{${unresolved.join(",")}}}`,
-        );
-      }
-      const substituted = substituteVars(template, fields);
-      if (substituted !== template) sensitiveHeaderNames.add(k);
-      assertHttpFieldValue(k, substituted);
-      headers.set(k, substituted);
+    for (const [k, value] of Object.entries(prepared.request.headers)) {
+      // The caller's own value was checked as written; one the credential spoils is unusable.
+      assertHttpFieldValue(k, value);
+      headers.set(k, value);
     }
     credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
   } catch (err) {
@@ -312,7 +282,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     if (isStreamBody) {
       body = input.body as ReadableStream<Uint8Array>;
     } else if (bodyTemplate !== null) {
-      const unresolved = unresolvedIn(bodyTemplate);
+      const unresolved = unresolvedPlaceholders(bodyTemplate, fields);
       if (unresolved.length > 0) {
         throw new ProxyCallError(
           "unresolved_placeholder",
@@ -507,6 +477,18 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     headers: res.headers,
     body: res.body,
   };
+}
+
+/** The caller's own target or header, refused as written (keys and header names, never a value). */
+function requestIssueError(issue: ApiCallRequestIssue): ProxyCallError {
+  if (issue.kind === "invalid_header") {
+    return new ProxyCallError("invalid_request", new InvalidHeaderValueError(issue.header).message);
+  }
+  const where = issue.in === "target" ? "target" : `header "${issue.header}"`;
+  return new ProxyCallError(
+    "unresolved_placeholder",
+    `Unresolved placeholders in ${where}: {{${issue.keys.join(",")}}}`,
+  );
 }
 
 /** A header the connection's credential makes invalid (`message` names the header, no value). */

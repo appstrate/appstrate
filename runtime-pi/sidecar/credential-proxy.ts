@@ -30,7 +30,6 @@
 import {
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
-  normalizeAuthSchemeTemplates,
   substituteVars,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
@@ -43,14 +42,16 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
+  prepareApiCallRequest,
   redactionFields,
   redactCredentialHost,
   templateHost,
   unresolvedPlaceholders,
   urlPolicyRefusalMessage,
+  type ApiCallRequestIssue,
   type CookieJar,
+  type PreparedApiCallRequest,
 } from "@appstrate/afps-runtime/resolvers";
-import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
@@ -121,8 +122,8 @@ interface ApiCallSuccess {
    * follow. Equals the resolved target URL when no redirect happened.
    *
    * An OUTPUT, never an input. `doUpstreamRequest` closes over the
-   * resolved target URL and issues against THAT on both branches — its
-   * only parameter is the credential set — so the 401 replay re-issues
+   * resolved target URL and issues against THAT on both branches — it takes
+   * the credential set and the caller's headers — so the 401 replay re-issues
    * against the resolved target and re-follows the chain from scratch,
    * then overwrites this value with the replay's own terminus.
    *
@@ -269,14 +270,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const { integrationId, targetUrl, method, body, substituteBody } = args;
   const scope = credentialScope(integrationId, args.connectionId);
 
-  // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
-  // once, before any substitution runs. Doing it on the resolved value (what
-  // this used to do, #988) corrupted every raw secret whose first bytes spell
-  // a scheme name. Every downstream read — the credential-reference scan, the
-  // fail-fast placeholder pre-check, and each `doUpstreamRequest` attempt —
-  // goes through this repaired copy so they can never disagree.
-  const callerHeaders = normalizeAuthSchemeTemplates(args.callerHeaders);
-
   // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
   if (!INTEGRATION_ID_RE.test(integrationId)) {
@@ -295,23 +288,17 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 3. Substitute {{vars}} in target URL.
-  const resolvedUrl = substituteVars(targetUrl, creds.credentials);
-  const unresolvedInUrl = unresolvedPlaceholders(targetUrl, creds.credentials);
-  if (unresolvedInUrl.length) {
-    return {
-      ok: false,
-      status: 400,
-      error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}`,
-    };
-  }
+  // 3. The target and the caller's headers, substituted (fail fast: an unresolved `{{var}}` or
+  //    an invalid header value is refused, never sent), as on the platform proxy and the CLI.
+  const prepared = prepareApiCallRequest(targetUrl, args.callerHeaders, creds.credentials);
+  if (!prepared.ok) return requestIssueFailure(prepared.issue);
+  const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
     templates: [
-      targetUrl,
-      ...Object.values(callerHeaders),
+      ...prepared.request.templates,
       ...(substituteBody ? substitutedBodyStrings(body) : []),
     ],
     fields: creds.credentials,
@@ -330,23 +317,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
-
-  // 5b. Fail fast on the caller's headers; each `doUpstreamRequest` substitutes them, so a 401
-  //     retry sees the refreshed token.
-  for (const [key, rawValue] of Object.entries(callerHeaders)) {
-    // The caller's own value; one a credential makes invalid is the engine's `invalid_header`.
-    if (!isHttpFieldValue(rawValue)) {
-      return { ok: false, status: 400, error: `Header "${key}" is not a valid HTTP field value` };
-    }
-    const unresolved = unresolvedPlaceholders(rawValue, creds.credentials);
-    if (unresolved.length) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}`,
-      };
-    }
-  }
 
   // 6. The same on every string the body substitutes (text, multipart fields, JSON leaves).
   if (substituteBody) {
@@ -390,12 +360,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   };
 
   /**
-   * One outbound attempt. Re-runs header + body substitution against
-   * the supplied creds so 401-retry sees the refreshed token. Returns
+   * One outbound attempt, from the caller's headers as prepared for
+   * `activeCreds`; the body is substituted here, so a 401 retry sees the refreshed token. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
+    caller: Pick<PreparedApiCallRequest, "headers" | "credentialHeaders">,
   ): Promise<{
     response: Response;
     finalUrl: string;
@@ -411,12 +382,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     /** Whether this attempt used the platform credential or an allowed caller override. */
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
-    const resolvedHeaders: Record<string, string> = {};
-    const credentialHeaders: string[] = [];
-    for (const [key, value] of Object.entries(callerHeaders)) {
-      resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
-      if (resolvedHeaders[key] !== value) credentialHeaders.push(key);
-    }
+    const resolvedHeaders = { ...caller.headers };
+    const credentialHeaders = [...caller.credentialHeaders];
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     const carrier = credentialCarryingHeader(credentialInjection);
@@ -493,7 +460,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // The credentials the terminal response answered; null when no hop carried them to it.
   let answered: CredentialsResponse | null;
   try {
-    const r = await doUpstreamRequest(creds);
+    const r = await doUpstreamRequest(creds, prepared.request);
     upstream = r.response;
     upstreamFinalUrl = r.finalUrl;
     upstreamHops = r.hops;
@@ -520,8 +487,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
     if (fresh) {
       redactFields = redactionFields(policy, fresh.credentials);
+      // The caller's headers are substituted again from the refreshed set.
+      const again = prepareApiCallRequest(targetUrl, args.callerHeaders, fresh.credentials);
+      if (!again.ok) return requestIssueFailure(again.issue);
       try {
-        const r = await doUpstreamRequest(fresh);
+        const r = await doUpstreamRequest(fresh, again.request);
         upstream = r.response;
         upstreamFinalUrl = r.finalUrl;
         upstreamHops = r.hops;
@@ -576,6 +546,23 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl };
+}
+
+/** The caller's own target or header, refused as written (keys and header names, never a value). */
+function requestIssueFailure(issue: ApiCallRequestIssue): ApiCallFailure {
+  if (issue.kind === "invalid_header") {
+    return {
+      ok: false,
+      status: 400,
+      error: `Header "${issue.header}" is not a valid HTTP field value`,
+    };
+  }
+  const where = issue.in === "target" ? "URL" : `header "${issue.header}"`;
+  return {
+    ok: false,
+    status: 400,
+    error: `Unresolved placeholders in ${where}: {{${issue.keys.join()}}}`,
+  };
 }
 
 /**

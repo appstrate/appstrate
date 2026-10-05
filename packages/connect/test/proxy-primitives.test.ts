@@ -15,8 +15,6 @@ import {
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
   credentialCarryingHeader,
-  normalizeAuthSchemeTemplate,
-  normalizeAuthSchemeTemplates,
 } from "../src/proxy-primitives.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
@@ -294,87 +292,5 @@ describe("injecting a credential that is no HTTP field value", () => {
         expect((caught as Error).message).not.toContain(secret);
       }
     }
-  });
-});
-
-describe("normalizeAuthSchemeTemplate", () => {
-  it("adds a space between the scheme and a placeholder", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "Bearer{{access_token}}")).toBe(
-      "Bearer {{access_token}}",
-    );
-  });
-
-  it("handles Basic and Token schemes", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "Basic{{creds}}")).toBe("Basic {{creds}}");
-    expect(normalizeAuthSchemeTemplate("Authorization", "Token{{api_key}}")).toBe(
-      "Token {{api_key}}",
-    );
-  });
-
-  it("is case-insensitive on the scheme and preserves the caller's casing", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "bearer{{access_token}}")).toBe(
-      "bearer {{access_token}}",
-    );
-  });
-
-  it("leaves well-formed templates untouched", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "Bearer {{access_token}}")).toBe(
-      "Bearer {{access_token}}",
-    );
-  });
-
-  it("normalises Proxy-Authorization too", () => {
-    expect(normalizeAuthSchemeTemplate("Proxy-Authorization", "Basic{{creds}}")).toBe(
-      "Basic {{creds}}",
-    );
-  });
-
-  it("matches the header name case-insensitively", () => {
-    expect(normalizeAuthSchemeTemplate("authorization", "Bearer{{t}}")).toBe("Bearer {{t}}");
-  });
-
-  it("leaves non-auth headers untouched", () => {
-    expect(normalizeAuthSchemeTemplate("X-Custom", "Bearer{{t}}")).toBe("Bearer{{t}}");
-  });
-
-  // ─── #988 regressions ────────────────────────────────────────────────
-  // The repair is anchored on `{{`, so a literal secret can never be
-  // rewritten. These are the exact values that the old resolved-value
-  // regex corrupted into a 401.
-  it("does not touch a raw secret that starts with a scheme name", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "basically_a_key_123")).toBe(
-      "basically_a_key_123",
-    );
-    expect(normalizeAuthSchemeTemplate("Authorization", "tokenlive_sk_123")).toBe(
-      "tokenlive_sk_123",
-    );
-    expect(normalizeAuthSchemeTemplate("Authorization", "bearerXYZ")).toBe("bearerXYZ");
-  });
-
-  it("does not touch a bare placeholder resolving to a scheme-prefixed secret", () => {
-    expect(normalizeAuthSchemeTemplate("Authorization", "{{api_key}}")).toBe("{{api_key}}");
-  });
-});
-
-describe("normalizeAuthSchemeTemplates (record)", () => {
-  it("repairs auth headers and passes the rest through", () => {
-    expect(
-      normalizeAuthSchemeTemplates({
-        Authorization: "Bearer{{access_token}}",
-        "X-Custom": "Bearer{{t}}",
-        Accept: "application/json",
-      }),
-    ).toEqual({
-      Authorization: "Bearer {{access_token}}",
-      "X-Custom": "Bearer{{t}}",
-      Accept: "application/json",
-    });
-  });
-
-  it("does not mutate the caller's record", () => {
-    const input = { Authorization: "Bearer{{access_token}}" };
-    const out = normalizeAuthSchemeTemplates(input);
-    expect(input).toEqual({ Authorization: "Bearer{{access_token}}" });
-    expect(out).toEqual({ Authorization: "Bearer {{access_token}}" });
   });
 });

@@ -53,6 +53,11 @@ export {
 // credential proxy (`@appstrate/connect` re-export), the delivery.http
 // renderer, and the portable integration resolver.
 export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
+export {
+  prepareApiCallRequest,
+  type ApiCallRequestIssue,
+  type PreparedApiCallRequest,
+} from "./api-call-request.ts";
 
 // The pre-send URL policy shared by the three `api_call` paths.
 export {

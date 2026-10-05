@@ -68,6 +68,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
+import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
@@ -438,11 +439,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Every substituted string: target, kept header values, a string body (never multipart).
-      const templates = [req.target];
-      if (typeof req.body === "string") templates.push(req.body);
-      const target = substituteVars(req.target, fields);
-
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
         deliveryPlan?.allowServerOverride === true &&
@@ -452,8 +448,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // survives on this LOCAL path only when the delivery plan targets that
       // header and explicitly authorises a caller override. The remote resolver
       // always strips it because it authenticates to Appstrate with that header.
-      const headers: Record<string, string> = {};
-      const credentialHeaders: string[] = [];
+      const callerHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers ?? {})) {
         const lowerKey = key.toLowerCase();
         if (
@@ -462,17 +457,26 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ) {
           continue;
         }
-        templates.push(value);
-        headers[key] = substituteVars(value, fields);
-        if (headers[key] !== value) credentialHeaders.push(key);
+        callerHeaders[key] = value;
       }
-      const unresolved = new Set(templates.flatMap((t) => unresolvedPlaceholders(t, fields)));
-      if (unresolved.size > 0) {
-        throw new ResolverError(
-          "RESOLVER_BODY_INVALID",
-          `Integration ${meta.name}: unresolved placeholders: {{${[...unresolved].join()}}}`,
-          { integration: meta.name },
-        );
+      // The target and the kept headers, substituted, as on the platform proxy and the sidecar.
+      const prepared = prepareApiCallRequest(req.target, callerHeaders, fields);
+      if (!prepared.ok) {
+        if (prepared.issue.kind === "invalid_header") {
+          throw headerInvalid(
+            meta.name,
+            new InvalidHeaderValueError(prepared.issue.header).message,
+          );
+        }
+        throw unresolvedError(meta.name, prepared.issue.keys);
+      }
+      const { url: target, headers, credentialHeaders } = prepared.request;
+      // Every substituted string: target, kept header values, a string body (never multipart).
+      const templates = [...prepared.request.templates];
+      if (typeof req.body === "string") {
+        const unresolvedInBody = unresolvedPlaceholders(req.body, fields);
+        if (unresolvedInBody.length > 0) throw unresolvedError(meta.name, unresolvedInBody);
+        templates.push(req.body);
       }
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
@@ -575,6 +579,15 @@ function refusalError(refusal: UrlPolicyRefusal, integration: string, target: st
   return refusal === "exfiltration"
     ? new ResolverError("RESOLVER_CREDENTIAL_EXFIL_BLOCKED", message, { integration })
     : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
+}
+
+/** A `{{field}}` the credential bag does not hold, in the target, a header or the body. */
+function unresolvedError(integration: string, keys: readonly string[]): ResolverError {
+  return new ResolverError(
+    "RESOLVER_BODY_INVALID",
+    `Integration ${integration}: unresolved placeholders: {{${[...new Set(keys)].join()}}}`,
+    { integration },
+  );
 }
 
 /** An agent header value that is no HTTP field value (the message names the header only). */

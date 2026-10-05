@@ -195,6 +195,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`appstrate run` repairs `Bearer{{field}}` like the other api_call
+  paths** (#1660). With `--integrations=local`, a kept `Authorization` or
+  `Proxy-Authorization` header written without the space after its scheme
+  was substituted as `Bearerghp_…` and answered 401; the platform proxy and
+  the sidecar already repaired the template. The three paths now prepare the
+  target and the caller's headers through one function
+  (`prepareApiCallRequest`, `@appstrate/afps-runtime`): unresolved
+  placeholders, a caller value that is no HTTP field value, scheme repair,
+  substitution, and the names of the headers a credential went into. A call
+  with two defects is now refused on its headers before the URL policy runs
+  (a 400 where the platform proxy and the sidecar answered the policy's
+  403); nothing is sent either way.
 - **An OAuth refresh keeps the connection's other outputs** (#1629).
   Refreshing an integration connection rewrote its credential with
   `access_token` and `refresh_token` only, so a manifest reading
