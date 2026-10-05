@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
+  locale localises the unit names and the decimal separator (`fr` →
+  `2,0 Ko`). Without it the output is unchanged.
+- **`PACKAGE_ZIP_ERROR_CODES`** / **`PackageZipErrorCode`**
+  (`@appstrate/core/zip`) and **`PACKAGE_FILE_WRITE_ERROR_CODES`**
+  (`@appstrate/core/package-file-operations`): the runtime lists behind the
+  two error classes' `code`.
+
+### Changed
+
+- **`PackageZipError`'s `code` is typed `PackageZipErrorCode`** instead of
+  `string`. A caller that constructed the error with a code outside the list
+  no longer compiles.
+
 ## [14.0.0] — 2026-10-05
 
 ### Added

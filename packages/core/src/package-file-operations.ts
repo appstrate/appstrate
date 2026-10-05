@@ -10,15 +10,19 @@ export type FileTreeOperation<T> =
   | { op: "delete"; path: string }
   | { op: "move"; from: string; to: string };
 
-export type PackageFileWriteErrorCode =
-  | "invalid_bundle"
-  | "invalid_path"
-  | "reserved_entry"
-  | "content_entry_immovable"
-  | "not_found"
-  | "path_conflict"
-  | "file_too_large"
-  | "tree_too_large";
+/** A runtime list, not only a type: the dashboard's translation guard iterates it. */
+export const PACKAGE_FILE_WRITE_ERROR_CODES = [
+  "invalid_bundle",
+  "invalid_path",
+  "reserved_entry",
+  "content_entry_immovable",
+  "not_found",
+  "path_conflict",
+  "file_too_large",
+  "tree_too_large",
+] as const;
+
+export type PackageFileWriteErrorCode = (typeof PACKAGE_FILE_WRITE_ERROR_CODES)[number];
 
 export class PackageFileWriteError extends Error {
   constructor(

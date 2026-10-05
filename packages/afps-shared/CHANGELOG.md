@@ -14,6 +14,12 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`COMPANION_VIOLATION_REASONS`** (`./companion-files`): the runtime list
+  behind `CompanionViolationReason`, so a consumer that renders the reasons
+  can prove it covers each one. The type is now derived from it, unchanged.
+
 ## [0.10.0] — 2026-09-30
 
 Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new

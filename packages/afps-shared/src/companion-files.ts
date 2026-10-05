@@ -20,18 +20,22 @@
 import { parse as parseYaml } from "yaml";
 
 /**
- * Stable, machine-readable companion-file violation reasons.
+ * Stable, machine-readable companion-file violation reasons. A runtime list,
+ * not only a type, so a consumer that renders them can prove it covers each.
  */
-export type CompanionViolationReason =
-  | "AGENT_MISSING_PROMPT"
-  | "AGENT_EMPTY_PROMPT"
-  | "SKILL_MISSING_SKILL_MD"
-  | "SKILL_INVALID_FRONTMATTER"
-  | "SKILL_MISSING_FRONTMATTER_NAME"
-  | "SKILL_INVALID_FRONTMATTER_NAME"
-  | "SKILL_MISSING_FRONTMATTER_DESCRIPTION"
-  | "SKILL_INVALID_FRONTMATTER_DESCRIPTION"
-  | "MCP_SERVER_MISSING_ENTRY_POINT";
+export const COMPANION_VIOLATION_REASONS = [
+  "AGENT_MISSING_PROMPT",
+  "AGENT_EMPTY_PROMPT",
+  "SKILL_MISSING_SKILL_MD",
+  "SKILL_INVALID_FRONTMATTER",
+  "SKILL_MISSING_FRONTMATTER_NAME",
+  "SKILL_INVALID_FRONTMATTER_NAME",
+  "SKILL_MISSING_FRONTMATTER_DESCRIPTION",
+  "SKILL_INVALID_FRONTMATTER_DESCRIPTION",
+  "MCP_SERVER_MISSING_ENTRY_POINT",
+] as const;
+
+export type CompanionViolationReason = (typeof COMPANION_VIOLATION_REASONS)[number];
 
 /**
  * Structured error type for callers that want to translate companion-file
