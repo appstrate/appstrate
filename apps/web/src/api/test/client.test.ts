@@ -51,29 +51,44 @@ describe("toApiError", () => {
     expect(error.details).toEqual([{ path: "name" }] as never);
   });
 
-  it("carries a code's own extension members as details", async () => {
+  it("carries a problem's extension members through as details", async () => {
+    // RFC 9457 §3.2: the server writes the code-specific half of a conflict
+    // BESIDE the standard fields, never under `errors`.
     const error = (await toApiError(
       problem(
         {
-          type: "about:blank",
+          type: "https://docs.appstrate.dev/errors/draft-overwrite",
           title: "Conflict",
           status: 409,
-          code: "role_in_use",
-          detail: "Role is still held",
-          request_id: "req_2",
-          member_count: 1,
-          pending_invitation_count: 0,
+          code: "draft_overwrite",
+          detail: "unpublished changes",
+          instance: "urn:appstrate:request:req_1",
+          request_id: "req_1",
+          packageId: "@acme/skill",
+          active_version: "1.0.0",
         },
         409,
       ),
     )) as ApiError;
 
-    expect(error.details).toEqual({ member_count: 1, pending_invitation_count: 0 });
+    expect(error.details).toEqual({ packageId: "@acme/skill", active_version: "1.0.0" });
   });
 
-  it("leaves details undefined when the problem carries nothing of its own", async () => {
+  it("prefers `errors` when a problem carries both it and extension members", async () => {
+    // Consumers of a validation problem index `details` as an array.
     const error = (await toApiError(
-      problem({ title: "Not Found", status: 404, code: "not_found", detail: "gone" }, 404),
+      problem(
+        { code: "validation_failed", detail: "invalid", errors: [{ path: "name" }], hint: "x" },
+        400,
+      ),
+    )) as ApiError;
+
+    expect(error.details).toEqual([{ path: "name" }] as never);
+  });
+
+  it("leaves details undefined when a problem has only standard fields", async () => {
+    const error = (await toApiError(
+      problem({ code: "conflict", detail: "nope", request_id: "req_1", status: 409 }, 409),
     )) as ApiError;
 
     expect(error.details).toBeUndefined();
