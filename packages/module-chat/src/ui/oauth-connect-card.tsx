@@ -50,7 +50,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
-import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
+import {
+  BLOCKED_POPUP_LINK,
+  createConnectWaiter,
+  openConnectPopup,
+  routeCompletion,
+} from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -290,14 +295,9 @@ export function OAuthConnectCard({
     if (!authUrl) return;
     setErrMsg(null);
     setPhase("pending");
-    // Keep the opener (no `noopener`) so the callback can postMessage us back.
-    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
-    waiter.popupOpened(popup);
-    if (!popup) {
-      // Popup blocked. Never navigate THIS tab to the flow: the conversation
-      // that must resume lives here, and a tab that left it has no listener
-      // left to resume anything. Offer the flow as a link to a new tab instead;
-      // the BroadcastChannel + SSE listeners above resume when it completes.
+    if (openConnectPopup(window, waiter, authUrl, popupName(packageId)) === "blocked") {
+      // Offer the flow as a link to a new tab instead; the BroadcastChannel +
+      // SSE listeners above resume when it completes.
       setPopupBlocked(true);
       setPhase("error");
       setErrMsg(t("connect.popupBlocked"));
@@ -346,7 +346,7 @@ export function OAuthConnectCard({
           <>
             {popupBlocked ? (
               <Button asChild className="shrink-0">
-                <a href={authUrl} target="_blank" rel="noopener noreferrer">
+                <a href={authUrl} {...BLOCKED_POPUP_LINK}>
                   {t("connect.openInTab")}
                 </a>
               </Button>
