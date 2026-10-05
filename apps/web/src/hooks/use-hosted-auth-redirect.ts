@@ -58,7 +58,6 @@ export function useHostedAuthRedirect(options: HostedAuthRedirectOptions = {}): 
     if (!active) return;
     void import("../modules/oidc/lib/oidc")
       .then(({ startOidcLogin, startOidcSignup }) => {
-        // The callback's boot must expect the session this flow sets out for.
         rememberSignedIn(localStorage, true);
         return starter === "signup"
           ? startOidcSignup(redirectTo, loginHint)

@@ -97,9 +97,7 @@ function useRunAgent(packageId: string) {
       return data!;
     },
     onSuccess: (data) => {
-      // Stale, not refetched: every launch lands on the run's own page, so the
-      // lists behind it are read again by whichever screen mounts them next,
-      // and the ones that stay mounted move on the run's realtime frames.
+      // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },

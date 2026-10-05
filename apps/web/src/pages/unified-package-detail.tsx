@@ -174,8 +174,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
 
-  // Configuration tab data (must be before early returns — hooks rule). Only
-  // an agent has that tab: a skill or an MCP server page reads neither list.
+  // Configuration tab data, agents only (must be before early returns — hooks rule)
   const { data: orgProxies } = useProxies(type === "agent");
   const { data: orgModels } = useModels(type === "agent");
 

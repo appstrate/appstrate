@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which requests a session read issues (#1678). A visitor on `/login` used to
+ * Which requests a session read issues. A visitor on `/login` used to
  * cost a profile request answered 401 and a `POST /api/auth/sign-out`, on every
  * load, for someone who had never signed in.
  */
 
 import { describe, it, expect } from "bun:test";
+import { installFakeStorage } from "../../test/fake-storage.ts";
 import { readSession, rememberSignedIn, sessionExpected } from "../session-read.ts";
 
 const USER = { id: "usr_1" };
@@ -44,9 +45,19 @@ describe("readSession", () => {
   });
 
   it("reads an expected session and its profile together", async () => {
-    const r = reads(USER, PROFILE);
-    expect(await readSession(true, r)).toEqual({ user: USER, profile: PROFILE });
-    expect(r.calls).toEqual(["get-session", "profile"]);
+    // The session answers only once the profile has been asked for: a
+    // sequential read would never get there.
+    let profileAsked: () => void = () => {};
+    const asked = new Promise<void>((resolve) => (profileAsked = resolve));
+    const session = await readSession(true, {
+      getSession: () => asked.then(() => USER),
+      getProfile: async () => {
+        profileAsked();
+        return PROFILE;
+      },
+      dropCookies: async () => {},
+    });
+    expect(session).toEqual({ user: USER, profile: PROFILE });
   });
 
   it("drops the cookie that failed to yield an expected session", async () => {
@@ -64,23 +75,13 @@ describe("readSession", () => {
   });
 });
 
-/** The slice of `Storage` the flag uses, over a map. */
-function memoryStorage(): Storage {
-  const items = new Map<string, string>();
-  return {
-    getItem: (key: string) => items.get(key) ?? null,
-    setItem: (key: string, value: string) => void items.set(key, value),
-    removeItem: (key: string) => void items.delete(key),
-  } as Storage;
-}
-
 describe("the signed-in hint", () => {
   it("expects no session from a browser that never held one", () => {
-    expect(sessionExpected(memoryStorage())).toBe(false);
+    expect(sessionExpected(installFakeStorage())).toBe(false);
   });
 
   it("expects one after a sign-in, and none after the session is torn down", () => {
-    const storage = memoryStorage();
+    const storage = installFakeStorage();
     rememberSignedIn(storage, true);
     expect(sessionExpected(storage)).toBe(true);
     rememberSignedIn(storage, false);

@@ -43,11 +43,9 @@ export function AuthCallbackPage() {
     (async () => {
       try {
         const { redirectTo } = await handleOidcCallback();
-        // The BA session cookie was set before this page loaded, and the
-        // page cannot mount before the boot read settles (`App` holds the
-        // boot screen until then): that read is the read of this session.
-        // Only when it found none does `refreshAuth` run, dropping the
-        // cookie that failed and throwing `AuthRefreshError`. The
+        // The boot read already saw the BA session cookie; resync only if not.
+        // `refreshAuth` throws `AuthRefreshError` if the resync did not
+        // establish a user (stale cookie, server-side session gone). The
         // catch below turns that into an inline error rather than letting
         // us navigate onto a protected page → catch-all → /login → OIDC
         // re-redirect → back here in a tight loop with no error UI.

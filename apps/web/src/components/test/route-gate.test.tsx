@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A layout's gate and the page under it (#1678): `/org-settings/billing`
+ * A layout's gate and the page under it: `/org-settings/billing`
  * without the billing module mounted the settings layout, whose own reads left
  * before the page's gate redirected and aborted them.
  */

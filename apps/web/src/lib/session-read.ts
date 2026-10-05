@@ -1,24 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The session read behind `use-auth.ts`, as pure functions of the server calls
- * and the storage they touch, so the request plan of each case is pinned by a
- * test.
- */
-
 const SIGNED_IN_KEY = "appstrate_signed_in";
 
-/**
- * Whether this browser last saw the app signed in — the `expected` of
- * {@link readSession}. A hint, never an authority: a stale `true` costs one
- * boot two requests answered 401 and a sign-out, a stale `false` costs a
- * signed-in user one sequential round trip, and both correct themselves on
- * that same boot.
- */
+/** Whether the next boot should expect a session: the cookie itself is httpOnly. */
 export function sessionExpected(storage: Storage): boolean {
   return storage.getItem(SIGNED_IN_KEY) !== null;
 }
 
+/**
+ * Set on a session and just before any sign-in attempt, so the next boot drops
+ * a cookie that yields none. A hint: a stale value corrects itself in one boot.
+ */
 export function rememberSignedIn(storage: Storage, signedIn: boolean): void {
   if (signedIn) storage.setItem(SIGNED_IN_KEY, "1");
   else storage.removeItem(SIGNED_IN_KEY);
@@ -27,24 +19,12 @@ export function rememberSignedIn(storage: Storage, signedIn: boolean): void {
 export interface SessionReads<User, Profile> {
   getSession: () => Promise<User | null>;
   getProfile: () => Promise<Profile | null>;
-  /** Has the server expire every auth cookie the browser still sends. */
   dropCookies: () => Promise<void>;
 }
 
 /**
- * `expected` says whether this browser last saw the app signed in — the session
- * cookie is httpOnly, so that is all the page can know before asking.
- *
- * Expected: the session and the profile authenticate on the same cookie, so
- * they are read together rather than one behind the other. A cookie that yields
- * no session (secret rotated, session row gone, domain or partition changed) is
- * dropped: Better Auth's `get-session` answers null WITHOUT clearing it, so it
- * would keep arriving, shadow the next sign-in and bounce the user between the
- * login page and the OIDC callback with nothing to show for it.
- *
- * Not expected (a visitor on a public page): the session read and nothing else.
- * No profile request bound to answer 401, and no sign-out for someone who never
- * signed in.
+ * Expected: session and profile together, and a cookie that yields no session
+ * is dropped (`get-session` does not clear it). Otherwise: the session alone.
  */
 export async function readSession<User, Profile>(
   expected: boolean,
@@ -60,7 +40,6 @@ export async function readSession<User, Profile>(
   }
   const profile = expected ? eagerProfile : await reads.getProfile();
   if (!profile) {
-    // A session whose profile cannot be loaded is not usable either.
     await reads.dropCookies();
     return null;
   }

@@ -66,8 +66,7 @@ async function syncAuth(expected: boolean) {
   const session = await readSession(expected, {
     getSession: async () => (await authClient.getSession()).data?.user ?? null,
     getProfile: fetchProfile,
-    // Best-effort: a failing sign-out (network blip, cookie already gone) must
-    // not strand the user — `clearSession` still resets the SPA stores.
+    // Best-effort: `clearSession` resets the SPA stores either way.
     dropCookies: async () => {
       await authClient.signOut().catch(() => {});
     },
@@ -97,22 +96,13 @@ export function startAuthBootstrap(): void {
 }
 
 /**
- * Called just before any sign-in attempt that can end in a new session or a
- * new document. Whatever the attempt leaves behind, the next boot then expects
- * a session and drops a cookie that fails to yield one, instead of treating
- * the browser as a visitor's and leaving a dead cookie to shadow the next try.
- */
-function expectSessionNextBoot(): void {
-  rememberSignedIn(localStorage, true);
-}
-
-/**
  * Thrown by `refreshAuth()` when the resync completed but did not
  * establish an authenticated user — e.g. `getSession()` returned null
  * because of a stale Better Auth cookie. Callers that depend on a
- * session being present (the OIDC callback, post-email-change) can catch
- * this discriminant and show a meaningful "please sign in again" message
- * instead of navigating into a silent loop.
+ * session being present after `refreshAuth()` (the OIDC callback,
+ * post-email-change) can catch this discriminant and show a
+ * meaningful "please sign in again" message instead of navigating into a
+ * silent loop.
  */
 export class AuthRefreshError extends Error {
   constructor(
@@ -142,11 +132,11 @@ export class EmailChangeError extends Error {
 
 /**
  * Resync auth state from the server cookie and assert that a user was
- * established. Use after a flow that changed the session IN PLACE (an email
- * change), or when the boot found none where one must exist (the OIDC
- * callback). On the no-user path the read already best-effort clears the stale
- * cookie; this throw lets the caller surface the failure in the UI rather than
- * silently navigating onwards on a null user.
+ * established. Use after any flow that should have left a valid session
+ * behind (OIDC callback, email change). On the no-user
+ * path `syncAuth` already best-effort clears the stale cookie via
+ * `signOut()`; this throw lets the caller surface the failure in the UI
+ * rather than silently navigating onwards on a null user.
  */
 export async function refreshAuth(): Promise<void> {
   await syncAuth(true);
@@ -170,7 +160,7 @@ export function useAuth() {
    * there is no redirect variant here — the gate owns that path.
    */
   const login = useCallback(async (email: string, password: string) => {
-    expectSessionNextBoot();
+    rememberSignedIn(localStorage, true);
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
     const profile = await fetchProfile();
@@ -188,7 +178,7 @@ export function useAuth() {
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
       // page first — so signup has no OIDC branch; the gate owns that path.
-      expectSessionNextBoot();
+      rememberSignedIn(localStorage, true);
       const result = await authClient.signUp.email({
         email,
         password,
@@ -224,7 +214,6 @@ export function useAuth() {
       // which starts a new OIDC login flow before the browser can follow
       // the logout redirect — effectively re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
-      // Not a store: the page this lands on boots as a visitor's.
       rememberSignedIn(localStorage, false);
       startOidcLogout(redirectTo);
     } else {
@@ -243,7 +232,7 @@ export function useAuth() {
 
   const signInWithSocial = useCallback(
     async (provider: "google" | "github", callbackURL?: string) => {
-      expectSessionNextBoot();
+      rememberSignedIn(localStorage, true);
       await authClient.signIn.social({
         provider,
         callbackURL: callbackURL ?? "/",
@@ -308,7 +297,7 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
-    expectSessionNextBoot();
+    rememberSignedIn(localStorage, true);
     const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
     if (result.error) throw new Error(result.error.message);
   }, []);

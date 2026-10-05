@@ -12,7 +12,6 @@ import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
 
-/** `enabled: false` for a surface that mounts the hook but shows no proxy. */
 export function useProxies(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(

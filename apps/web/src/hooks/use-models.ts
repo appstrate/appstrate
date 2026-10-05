@@ -19,7 +19,6 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
 export type OrgModelInfo = components["schemas"]["OrgModel"];
 
-/** `enabled: false` for a surface that mounts the hook but shows no model. */
 export function useModels(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(

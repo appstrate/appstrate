@@ -44,16 +44,19 @@ window.addEventListener("vite:preloadError", (event) => {
   }
 });
 
-// A signed-in first screen needs three server reads that share no data with
-// each other: the Better Auth session, `GET /api/profile` and `GET /api/orgs`.
-// All three authenticate on the session cookie alone, so for a browser that
-// last saw the app signed in they are issued together here, before `i18nReady`
-// resolves and before React mounts, instead of one behind the other (session,
-// then profile, then the org gate's list). `GET /api/spaces` needs the selected
-// org id, which that user has persisted: it starts as soon as the org list
-// confirms the membership, still ahead of the layout, and every space-scoped
-// read waits on it (`useSpaceResolver`). Any other browser is a visitor's until
-// the session read says otherwise, and issues that read alone.
+// The first screen needs three server reads that share no data with each
+// other: the Better Auth session, `GET /api/profile` and `GET /api/orgs`. All
+// three authenticate on the session cookie alone, so none of them has to wait
+// for another. They used to run strictly one after the next — the session
+// gated the profile, the profile gated the first render, and the first render
+// was what mounted the org gate that issued the org list.
+//
+// Kicking them here, before `i18nReady` resolves and before React mounts,
+// collapses those three round-trips into one and takes them off the locale
+// fetch's tail. `GET /api/spaces` needs the selected org id, which a
+// returning user already has persisted: it starts as soon as the org list
+// confirms that membership, still ahead of the layout, and every space-scoped
+// read waits on it (`useSpaceResolver`). A visitor's browser reads the session alone.
 startAuthBootstrap();
 if (sessionExpected(localStorage)) primeSpaceList(primeOrgList());
 

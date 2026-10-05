@@ -15,10 +15,7 @@ import { EmptyState, LoadingState } from "./page-states";
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
  * whose module is not loaded does not exist, and falls back to the dashboard.
- *
- * That last rule is also asked of the page the URL lands on, which is this
- * route everywhere but on a layout: a layout mounts, and reads what its
- * navigation shows, before the gate of the page under it runs.
+ * Asked of the page the URL lands on too: a layout mounts before its child's gate.
  */
 export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
   const { can, ready } = usePermissions();
