@@ -44,6 +44,10 @@ const member = () => false;
 const manager = () => true;
 const BILLING = { label: "turn.error.manageBilling", href: "/org-settings/billing" };
 const MODELS = { label: "turn.error.manageModels", href: "/org-settings/models" };
+/** Edits model credentials AND reaches the page that lists them. */
+const modelAdmin = (p: string) => p === "model-provider-credentials:write" || p === "models:read";
+/** May edit a credential but cannot open `/org-settings/models`: no link to a page that refuses them. */
+const credentialsOnly = (p: string) => p === "model-provider-credentials:write";
 
 describe("turnErrorState", () => {
   it("is null for a turn that did not fail", () => {
@@ -109,10 +113,7 @@ describe("turnErrorState", () => {
         t,
         member,
       ),
-    ).toMatchObject({
-      text: "turn.error.credentialUnavailable turn.error.contactAdmin",
-      retryable: false,
-    });
+    ).toMatchObject({ text: "turn.error.credentialUnavailableMember", retryable: false });
   });
 
   it("gives a dead model credential a way out instead of a retry", () => {
@@ -127,19 +128,21 @@ describe("turnErrorState", () => {
     );
     const live = failed(assistantError("appstrate:chat-turn-error:credential_unavailable"));
     for (const failure of [persisted, live]) {
-      expect(
-        turnErrorState(failure, t, (p) => p === "model-provider-credentials:write"),
-      ).toMatchObject({
+      expect(turnErrorState(failure, t, modelAdmin)).toMatchObject({
         text: "turn.error.credentialUnavailable",
         retryable: false,
         action: MODELS,
       });
-      const forMember = turnErrorState(failure, t, member);
-      expect(forMember).toMatchObject({
-        text: "turn.error.credentialUnavailable turn.error.contactAdmin",
-        retryable: false,
-      });
-      expect(forMember?.action).toBeUndefined();
+      // "Fix its connection" is not something to tell a reader who cannot: they
+      // get a sentence of their own, not that one with an admin tacked on.
+      for (const reader of [member, credentialsOnly]) {
+        const state = turnErrorState(failure, t, reader);
+        expect(state).toMatchObject({
+          text: "turn.error.credentialUnavailableMember",
+          retryable: false,
+        });
+        expect(state?.action).toBeUndefined();
+      }
     }
   });
 
@@ -224,9 +227,10 @@ describe("turnErrorState", () => {
     expect(turnErrorState(reconnect, t, manager)).toEqual(
       refused("turn.error.needsReconnection", MODELS),
     );
-    // Billing rights do not reconnect a model.
+    // Billing rights do not reconnect a model, and "reconnect it" is not said
+    // to someone who cannot.
     expect(turnErrorState(reconnect, t, (p) => p === "billing:manage")).toEqual(
-      refused("turn.error.needsReconnection turn.error.contactAdmin"),
+      refused("turn.error.needsReconnectionMember"),
     );
   });
 

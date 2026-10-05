@@ -7,7 +7,7 @@
  */
 
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
-import { sourceMessage } from "./turn-error-state.ts";
+import { sourceMessage, turnFailed } from "./turn-error-state.ts";
 
 /** Frozen at write time, so it still names a model whose org row is gone. */
 export function turnModelLabel(message: unknown): string | null {
@@ -19,7 +19,7 @@ export function turnModelLabel(message: unknown): string | null {
  * "which model failed" is the question — but it answered nothing.
  */
 export function turnModelSentenceKey(message: unknown): "model.answeredBy" | "model.failedWith" {
-  return turnMetadataFromMessage(sourceMessage(message))?.finishReason === "error"
+  return turnFailed(turnMetadataFromMessage(sourceMessage(message)))
     ? "model.failedWith"
     : "model.answeredBy";
 }

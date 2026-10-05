@@ -17,7 +17,10 @@
 
 import type { AssistantState } from "@assistant-ui/react";
 import { getExternalStoreMessages } from "@assistant-ui/react";
-import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import {
+  turnMetadataFromMessage,
+  type AppstrateTurnMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 
 import {
   clientTurnErrorFromMarker,
@@ -48,22 +51,40 @@ const TURN_ERROR_KEY = {
 } as const;
 
 /**
- * Where a failure only an administrator can clear is fixed. Whoever holds the
- * permission gets the link; anyone else is sent to an administrator. Plain
- * paths: the module never imports the router.
+ * Where a failure only an administrator can clear is fixed. Whoever holds
+ * EVERY permission listed gets the link — the one the fix takes, and the one
+ * the page itself is reached with; anyone else is sent to an administrator.
+ * Plain paths: the module never imports the router.
  */
 const FIX = {
   billing: {
-    permission: "billing:manage",
+    permissions: ["billing:manage"],
     label: "turn.error.manageBilling",
     href: "/org-settings/billing",
   },
   models: {
-    permission: "model-provider-credentials:write",
+    permissions: ["model-provider-credentials:write", "models:read"],
     label: "turn.error.manageModels",
     href: "/org-settings/models",
   },
 } as const;
+
+/**
+ * A failure with a fix: `text` speaks to whoever can apply it. `memberText` is
+ * the whole sentence for a reader who cannot, when `text` tells them to do the
+ * fix; without one, `text` states a fact and "contact an administrator" follows.
+ */
+interface Fixable {
+  text: string;
+  memberText?: string;
+  fix: keyof typeof FIX;
+}
+
+const DEAD_CREDENTIAL: Fixable = {
+  text: "turn.error.credentialUnavailable",
+  memberText: "turn.error.credentialUnavailableMember",
+  fix: "models",
+};
 
 /**
  * Sentences for the refusals a turn can be denied with BEFORE the stream opens.
@@ -72,10 +93,14 @@ const FIX = {
  * the wire code, loosely: a code we have no sentence for degrades to the
  * generic failure rather than rendering a missing i18n key.
  */
-const REFUSAL: Record<string, { text: string; fix?: keyof typeof FIX }> = {
+const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", fix: "billing" },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", fix: "billing" },
-  needs_reconnection: { text: "turn.error.needsReconnection", fix: "models" },
+  needs_reconnection: {
+    text: "turn.error.needsReconnection",
+    memberText: "turn.error.needsReconnectionMember",
+    fix: "models",
+  },
   org_deleting: { text: "turn.error.orgDeleting" },
 };
 
@@ -88,15 +113,14 @@ interface TurnErrorState {
 
 /** The sentence, plus the way out the reader's grants allow. */
 function withFix(
-  text: string,
-  fix: keyof typeof FIX,
+  { text, memberText, fix }: Fixable,
   t: ChatTranslate,
   can: ChatCan,
 ): Pick<TurnErrorState, "text" | "action"> {
-  const { permission, label, href } = FIX[fix];
-  return can(permission)
-    ? { text, action: { label: t(label), href } }
-    : { text: `${text} ${t("turn.error.contactAdmin")}` };
+  const { permissions, label, href } = FIX[fix];
+  if (permissions.every((permission) => can(permission)))
+    return { text: t(text), action: { label: t(label), href } };
+  return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
 }
 
 /**
@@ -108,8 +132,21 @@ function classifiedState(
   t: ChatTranslate,
   can: ChatCan,
 ): Pick<TurnErrorState, "text" | "action"> {
-  const text = t(TURN_ERROR_KEY[error.category]);
-  return error.category === "credential_unavailable" ? withFix(text, "models", t, can) : { text };
+  return error.category === "credential_unavailable"
+    ? withFix(DEAD_CREDENTIAL, t, can)
+    : { text: t(TURN_ERROR_KEY[error.category]) };
+}
+
+/**
+ * Did this turn fail? Errored outright, or cut by the wall-clock ceiling while
+ * it was failing. A deadline with no cause is not a failure: nothing failed,
+ * the turn ran out of clock, and its notice already says so.
+ */
+export function turnFailed(turn: AppstrateTurnMetadata | null): turn is AppstrateTurnMetadata {
+  return (
+    turn?.finishReason === "error" ||
+    (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
+  );
 }
 
 /**
@@ -142,10 +179,7 @@ export function turnErrorState(
   // "generation failed" sentence would contradict a notice that says the turn
   // was cut mid-work. Hence the category is required for that branch, while the
   // `"error"` branch degrades a category-less turn to `unknown`.
-  if (
-    turn?.finishReason === "error" ||
-    (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
-  ) {
+  if (turnFailed(turn)) {
     // `errorCategory` is OPTIONAL on the persisted shape — it is stamped only
     // on a turn that carried an error, so the type forces a default here and
     // the compiler rejects the bare index. Not a legacy accommodation: the
@@ -184,7 +218,7 @@ export function turnErrorState(
       return { text: t("turn.error.unknown"), retryable: true, requestId };
     }
     return {
-      ...(refusal.fix ? withFix(t(refusal.text), refusal.fix, t, can) : { text: t(refusal.text) }),
+      ...(refusal.fix ? withFix(refusal, t, can) : { text: t(refusal.text) }),
       retryable: false,
       requestId,
     };

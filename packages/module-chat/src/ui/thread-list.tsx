@@ -257,7 +257,8 @@ function ConversationRow({
           </div>
         )}
       </div>
-      {/* Deleting takes the messages and the conversation's files with it. */}
+      {/* Deleting takes the messages and the conversation's files with it, bar
+          a file a run still consumes (`cleanupSessionFiles`): the text says so. */}
       <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
         {/* A portal still bubbles through the React tree: same drawer, same reason. */}
         <DialogContent data-testid="chat-delete-confirm" onClick={(e) => e.stopPropagation()}>

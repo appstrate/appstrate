@@ -63,6 +63,16 @@ describe("reading a turn's model", () => {
     expect(turnModelSentenceKey(assistant("a", OPUS, { finishReason: "error" }))).toBe(
       "model.failedWith",
     );
+    // Same verdict as the error alert under it (`turnFailed`): a turn cut by
+    // the deadline while failing failed; one that simply ran out of clock did not.
+    expect(
+      turnModelSentenceKey(
+        assistant("a", OPUS, { finishReason: "deadline", errorCategory: "rate_limited" }),
+      ),
+    ).toBe("model.failedWith");
+    expect(turnModelSentenceKey(assistant("a", OPUS, { finishReason: "deadline" }))).toBe(
+      "model.answeredBy",
+    );
   });
 });
 
