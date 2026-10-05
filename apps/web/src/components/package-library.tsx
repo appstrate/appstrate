@@ -59,7 +59,7 @@ import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ConfirmModal } from "./confirm-modal";
-import { errorMessage } from "../lib/mutation-error";
+import { toastError } from "../lib/mutation-error";
 
 const TABS = ["agents", "skills", "mcpServers", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -589,7 +589,8 @@ function SpacePlacements({
 
   const notifyChatEnforceError = (err: unknown) => {
     const key = chatEnforceErrorKey(err);
-    toast.error(key ? t(key) : errorMessage(err));
+    if (key) toast.error(t(key));
+    else toastError(err);
   };
 
   if (pkgs.length === 0) {

@@ -23,7 +23,7 @@ import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spa
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
-import { errorMessage } from "../../../lib/mutation-error";
+import { errorMessage, toastError } from "../../../lib/mutation-error";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
 type SpaceVisibility = SpaceObject["visibility"];
@@ -299,7 +299,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
               // dialog closes: confirming again would only be refused again.
               onError: (error) => {
                 setConfirmOpen(false);
-                toast.error(errorMessage(error), {
+                toastError(error, {
                   description:
                     error instanceof ApiError && error.code === "space_homes_packages"
                       ? t("spaces.deleteHomesPackagesHint")

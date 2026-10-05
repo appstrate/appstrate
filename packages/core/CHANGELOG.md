@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
   locale localises the unit names and the decimal separator (`fr` →
   `2,0 Ko`). Without it the output is unchanged.
-- **`PACKAGE_ZIP_ERROR_CODES`** / **`PackageZipErrorCode`**
-  (`@appstrate/core/zip`) and **`PACKAGE_FILE_WRITE_ERROR_CODES`**
-  (`@appstrate/core/package-file-operations`): the runtime lists of the
-  codes the two modules throw. `PackageZipError`'s constructor still takes
-  any `string`.
+- **`PACKAGE_ZIP_ERROR_CODES`** (`@appstrate/core/zip`),
+  **`PACKAGE_FILE_WRITE_ERROR_CODES`**
+  (`@appstrate/core/package-file-operations`) and
+  **`MODEL_GENERATION_ERROR_CODES`** (`@appstrate/core/model-generation`):
+  the runtime lists of the codes the three modules throw, for a consumer
+  that renders them. `PackageZipError`'s constructor still takes any
+  `string`.
 
 ## [14.0.0] — 2026-10-05
 

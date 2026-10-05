@@ -44,6 +44,7 @@ import {
   type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
 import type { TestResult } from "@appstrate/shared-types";
+import { TestResultSpan } from "./test-result-span";
 import {
   buildProviderPickerRows,
   CUSTOM_ENDPOINT_ID,
@@ -335,11 +336,11 @@ function CredentialFormBody({
               {testMutation.isPending ? <Spinner /> : t("credentials.test")}
             </Button>
             {testResult && (
-              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
-                {testResult.ok
-                  ? t("credentials.testSuccess", { latency: testResult.latency })
-                  : t("credentials.testFailed", { message: testResult.message })}
-              </span>
+              <TestResultSpan
+                result={testResult}
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
+              />
             )}
           </div>
           <Button type="button" variant="outline" onClick={onClose}>

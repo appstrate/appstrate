@@ -16,7 +16,7 @@ import { useAuth } from "../../hooks/use-auth";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
-import { errorField, errorMessage } from "../../lib/mutation-error";
+import { errorMessage, errorField } from "../../lib/mutation-error";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },

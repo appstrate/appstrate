@@ -55,7 +55,9 @@ describe("failed mutations", () => {
 
     expect(toastError).toHaveBeenCalledTimes(1);
     // The refusal's translated sentence, not the server's English detail.
-    expect(toastError.mock.calls[0]![0]).toBe(i18n.t("common:apiError.blocked_url"));
+    expect(toastError.mock.calls[0]![0]).toBe(
+      i18n.t("common:apiError.blocked_url", { message: "URL is blocked" }),
+    );
   });
 
   // An `onError` rolls a cache back or invalidates far more often than it

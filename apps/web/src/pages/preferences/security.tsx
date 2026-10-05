@@ -19,7 +19,7 @@ import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
-import { errorMessage } from "../../lib/mutation-error";
+import { errorMessage, toastError } from "../../lib/mutation-error";
 
 // Shape as `listAccounts()` returns it. `id` is Better Auth's `account` row
 // primary key — the value `unlinkAccount()` takes. `accountId` is the id AT
@@ -135,7 +135,7 @@ function LinkedAccountsSection({
                     } else {
                       // Surface the failure — previously a rejection here was
                       // silently swallowed and the button just stopped spinning.
-                      toast.error(errorMessage(err));
+                      toastError(err);
                     }
                   } finally {
                     setUnlinking(false);
@@ -185,7 +185,7 @@ function LinkedAccountsSection({
             toast.success(t("preferences.unlinked"));
           } catch (err: unknown) {
             // The retry can still fail (last account, unlinked in another tab).
-            toast.error(errorMessage(err));
+            toastError(err);
             setPendingUnlink(null);
           }
         }}

@@ -49,7 +49,7 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
-import { errorMessage } from "../../lib/mutation-error";
+import { errorMessage, toastError } from "../../lib/mutation-error";
 
 function ModelsList({
   models,
@@ -472,11 +472,11 @@ export function OrgSettingsModelsPage() {
 
   const closeConfirm = () => setConfirmState(null);
   const reportDeleteFailure = (err: unknown) => {
-    toast.error(
-      err instanceof ApiError && err.code === "credential_in_use"
-        ? t("credentials.deleteRefused")
-        : errorMessage(err),
-    );
+    if (err instanceof ApiError && err.code === "credential_in_use") {
+      toast.error(t("credentials.deleteRefused"));
+    } else {
+      toastError(err);
+    }
     closeConfirm();
   };
 

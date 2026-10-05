@@ -2,17 +2,15 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/format-date";
-import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { Spinner } from "./spinner";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Trash2 } from "lucide-react";
-import { errorMessage } from "../lib/mutation-error";
+import { toastError } from "../lib/mutation-error";
 
 interface VersionHistoryProps {
   packageId: string;
@@ -95,7 +93,7 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
               // `onError` the modal hung on its spinner.
               onError: (err) => {
                 setConfirmState(null);
-                toast.error(translateSkillFrontmatterError(err, t) ?? errorMessage(err));
+                toastError(err);
               },
             });
           } else {

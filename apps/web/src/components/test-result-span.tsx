@@ -20,7 +20,8 @@ export function TestResultSpan({
   failedKey: string;
 }) {
   const { t } = useTranslation(["settings"]);
-  // The outcome is named by its code; a code with no sentence keeps the server's own message.
+  // The outcome is named by its code, as a sentence of its own; a code with no sentence
+  // keeps the server's message behind the caller's "Échec :" lead.
   const failure = result.error
     ? refusalMessage({ code: result.error, message: result.message })
     : null;
@@ -28,7 +29,7 @@ export function TestResultSpan({
     <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
       {result.ok
         ? t(successKey, { latency: result.latency })
-        : t(failedKey, { message: failure ?? result.message })}
+        : (failure ?? t(failedKey, { message: result.message }))}
     </span>
   );
 }

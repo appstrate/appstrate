@@ -37,6 +37,10 @@ const REFUSAL_ERROR_KEYS: Record<string, string> = {
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
+  // Draft-tree refusals only the package editor can provoke: its sentences name the remedy.
+  invalid_path: "files.errorInvalidPath",
+  reserved_entry: "files.errorReserved",
+  path_conflict: "files.errorConflictPath",
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 };
 
@@ -59,6 +63,7 @@ export function refusalMessage(err: Refusal): string | null {
   const message = err.message ?? "";
   const agentsKey = REFUSAL_ERROR_KEYS[code];
   if (agentsKey) {
+    if (!i18n.exists(agentsKey, { ns: "agents" })) return null;
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
@@ -66,9 +71,10 @@ export function refusalMessage(err: Refusal): string | null {
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
+  // `input.` is the wire prefix of a launch parameter, not part of the name the user typed.
   // A code emitted both with and without a field has a second sentence, `<key>_nofield`, so
   // the first never renders an empty « ».
-  const field = err.field ?? err.param;
+  const field = (err.field ?? err.param)?.replace(/^input\./, "");
   return i18n.t(key, { field, message, context: field ? undefined : "nofield", ns: "common" });
 }
 
@@ -111,20 +117,29 @@ function translated(err: unknown): string | null {
 /**
  * The sentence to show for any failure, in an inline slot (a form error, an error panel). A
  * server refusal is named by its translated `code`; a failure that carries no known code (a
- * network error, a code from a module this SPA build has no copy for) keeps its own message.
+ * network error, a code from a module this SPA build has no copy for) keeps its own message,
+ * and one that says nothing at all gets the generic sentence rather than an empty slot.
  */
 export function errorMessage(err: unknown): string {
-  return translated(err) ?? getErrorMessage(err);
+  return translated(err) ?? (getErrorMessage(err) || i18n.t("error.generic"));
 }
 
-/** The one place a failed write is toasted. */
+/**
+ * The one format of an error toast: the translated refusal, or "Erreur : <message>" for a
+ * failure nothing translates. `options` is Sonner's (a `description` under the sentence).
+ */
+export function toastError(err: unknown, options?: Parameters<typeof toast.error>[1]) {
+  toast.error(translated(err) ?? i18n.t("error.prefix", { message: errorMessage(err) }), options);
+}
+
+/** A failed write, as a mutation's `onError` — and what the global mutation toast calls. */
 export function onMutationError(err: Error) {
   // A run launch answers this 409 with its recovery modal, a schedule form inline, and a
   // surface with no picker with `toastScheduleConnectionChoice`.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
-  toast.error(translated(err) ?? i18n.t("error.prefix", { message: getErrorMessage(err) }));
+  toastError(err);
 }
 
 /**

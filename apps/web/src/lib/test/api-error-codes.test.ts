@@ -8,7 +8,8 @@
  *     `new GithubImportError("UPPER"` — read from the API SOURCE, plus the `error: "UPPER"`
  *     of the modules that build a connection-test result;
  *   - the ones forwarded from an error class, through the runtime lists their modules export
- *     (`PACKAGE_ZIP_ERROR_CODES`, `PACKAGE_FILE_WRITE_ERROR_CODES`, `COMPANION_VIOLATION_REASONS`);
+ *     (`PACKAGE_ZIP_ERROR_CODES`, `PACKAGE_FILE_WRITE_ERROR_CODES`, `MODEL_GENERATION_ERROR_CODES`,
+ *     `COMPANION_VIOLATION_REASONS`);
  *   - Better Auth's, checked against the installed package's own table.
  * A code assembled any other way (a ternary, a lookup table, a third-party module) is invisible
  * unless it is named in `EMITTED_OUT_OF_SIGHT` — the guard narrows the gap, it does not close it.
@@ -23,6 +24,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { BASE_ERROR_CODES } from "better-auth";
 import { COMPANION_VIOLATION_REASONS } from "@appstrate/afps-shared/companion-files";
+import { MODEL_GENERATION_ERROR_CODES } from "@appstrate/core/model-generation";
 import { PACKAGE_FILE_WRITE_ERROR_CODES } from "@appstrate/core/package-file-operations";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { PACKAGE_ZIP_ERROR_CODES } from "@appstrate/core/zip";
@@ -59,8 +61,8 @@ const CODE_PATTERNS = [
   /\bcode:\s*"([a-z][a-z0-9_]*)"/g,
   // Either case: two `gone(…)` codes are UPPER_SNAKE on the wire.
   /\b(?:conflict|gone)\(\s*"([A-Za-z][A-Za-z0-9_]*)"/g,
-  // `POST /packages/import-github` forwards this class's code as the problem code.
-  /\bnew GithubImportError\(\s*"([A-Z][A-Z_]*)"/g,
+  // The import routes forward these classes' codes as the problem code.
+  /\bnew (?:GithubImportError|PackageZipError)\(\s*"([A-Z][A-Z_]*)"/g,
 ];
 
 /**
@@ -76,6 +78,7 @@ const BUILDS_TEST_RESULTS =
 const FORWARDED = [
   ...PACKAGE_ZIP_ERROR_CODES,
   ...PACKAGE_FILE_WRITE_ERROR_CODES,
+  ...MODEL_GENERATION_ERROR_CODES,
   ...COMPANION_VIOLATION_REASONS,
 ];
 
@@ -320,6 +323,22 @@ describe("errorMessage", () => {
     const err = await problem({ code: "invalid_input", detail: "age: must be number" });
     expect(errorMessage(err)).toBe("Paramètres invalides : age: must be number");
     expect(errorMessage(err)).not.toContain("«");
+  });
+
+  it("shows a launch parameter under the name the user typed, without the wire prefix", async () => {
+    await i18n.changeLanguage("fr");
+    const err = await problem({
+      code: "validation_failed",
+      detail: "input.age: must be number",
+      errors: [{ field: "input.age", code: "invalid_input", message: "must be number" }],
+    });
+    expect(errorMessage(err)).toBe("Paramètres invalides, champ « age » : must be number");
+  });
+
+  it("falls back to the generic sentence for a failure that says nothing", async () => {
+    await i18n.changeLanguage("fr");
+    expect(errorMessage(new ApiError("", "", 0))).toBe(fr["error.generic"]);
+    expect(errorMessage(new Error(""))).toBe(fr["error.generic"]);
   });
 
   it("keeps the server's own summary when the item code has no sentence", async () => {

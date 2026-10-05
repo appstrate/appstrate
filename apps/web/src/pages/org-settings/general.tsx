@@ -24,7 +24,7 @@ import { McpClientConnect } from "../../components/org-settings/mcp-client-conne
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
-import { errorMessage } from "../../lib/mutation-error";
+import { toastError } from "../../lib/mutation-error";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -94,11 +94,11 @@ export function OrgSettingsGeneralPage() {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
       // The server is the real guard (owners may have changed meanwhile).
-      toast.error(
-        err instanceof ApiError && err.code === "last_owner"
-          ? t("orgSettings.leaveLastOwner")
-          : errorMessage(err),
-      );
+      if (err instanceof ApiError && err.code === "last_owner") {
+        toast.error(t("orgSettings.leaveLastOwner"));
+      } else {
+        toastError(err);
+      }
     },
   });
 

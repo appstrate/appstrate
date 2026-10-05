@@ -12,6 +12,7 @@ import { useUnsavedChanges } from "./use-unsaved-changes";
 import { packageDetailPath } from "../lib/package-paths";
 import { packageCreateBody, packageUpdateBody } from "../lib/package-file-drafts";
 import type { PackageFileWriteOperation } from "../lib/package-file-tree";
+import { errorMessage } from "../lib/mutation-error";
 
 export interface EditorState {
   manifest: Record<string, unknown>;
@@ -25,7 +26,6 @@ interface UseEditorStateOptions {
   packageType: PackageType;
   packageId: string | undefined;
   isEdit: boolean;
-  translateError?: (error: Error) => string | null;
   validate?: (state: EditorState) => { error: string; tab?: string } | null;
 }
 
@@ -56,7 +56,6 @@ export function useEditorState({
   packageType,
   packageId,
   isEdit,
-  translateError,
   validate,
 }: UseEditorStateOptions): UseEditorStateReturn {
   const navigate = useNavigate();
@@ -101,9 +100,7 @@ export function useEditorState({
       const failure = cause as Error;
       const key = packageFilesErrorKey(failure);
       setError(
-        key
-          ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) })
-          : (translateError?.(failure) ?? failure.message),
+        key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(failure),
       );
       throw cause;
     } finally {
@@ -147,7 +144,7 @@ export function useEditorState({
           setError(
             key
               ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) })
-              : (translateError?.(failure) ?? failure.message),
+              : errorMessage(failure),
           );
         },
       });

@@ -10,7 +10,6 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
-import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { errorMessage } from "../lib/mutation-error";
 
 interface CreateVersionModalProps {
@@ -78,7 +77,7 @@ export function CreateVersionModal({
                 ? t("version.draftChanged")
                 : null;
           setError("root", {
-            message: refused ?? translateSkillFrontmatterError(err, t) ?? errorMessage(err),
+            message: refused ?? errorMessage(err),
           });
         },
       },

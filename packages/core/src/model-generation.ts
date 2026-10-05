@@ -142,11 +142,15 @@ export function reconcileModelGenerationSettings(
   return next;
 }
 
-export type ModelGenerationErrorCode =
-  | "temperature_unsupported"
-  | "reasoning_unsupported"
-  | "reasoning_level_unsupported"
-  | "temperature_with_reasoning_unsupported";
+/** A runtime list, not only a type: a launch forwards the code as the problem `code`. */
+export const MODEL_GENERATION_ERROR_CODES = [
+  "temperature_unsupported",
+  "reasoning_unsupported",
+  "reasoning_level_unsupported",
+  "temperature_with_reasoning_unsupported",
+] as const;
+
+export type ModelGenerationErrorCode = (typeof MODEL_GENERATION_ERROR_CODES)[number];
 
 export class ModelGenerationError extends Error {
   readonly code: ModelGenerationErrorCode;
