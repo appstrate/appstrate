@@ -624,9 +624,7 @@ export function App() {
           {/*
            * `/register` stays mounted even when `signupDisabled` is true so
            * an `AUTH_PLATFORM_ADMIN_EMAILS` entry or an invited address can
-           * sign up via email/password without needing Google/GitHub/SMTP.
-           * The bootstrap owner does not come through here: that account is
-           * claimed at `/claim`, with the bootstrap token. The real
+           * sign up via email/password without Google/GitHub/SMTP. The real
            * barrier is server-side in `databaseHooks.user.create.before` —
            * unauthorized signups receive a `signup_disabled` error that
            * `RegisterPage` surfaces. The signup link is still hidden from

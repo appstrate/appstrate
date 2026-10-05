@@ -41,9 +41,8 @@ export function buildAppConfig(): AppConfig {
       smtp: isSmtpConfigured(),
       // Self-hosting closed mode (issue #228) — flags exposed so the SPA
       // can hide signup affordances and route org-less users away from
-      // /onboarding/create when the platform is locked down. Their
-      // companions (BOOTSTRAP_OWNER_EMAIL, PLATFORM_ADMIN_EMAILS,
-      // ALLOWED_SIGNUP_DOMAINS) stay server-side: each names who may get in.
+      // /onboarding/create when the platform is locked down. The variables
+      // that name who may get in stay server-side.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       orgCreationDisabled: env.AUTH_DISABLE_ORG_CREATION,
       // Surface ONLY the boolean — the token value stays server-side,

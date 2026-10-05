@@ -9,24 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Operators
 
 - **The owner account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` is created at
-  `/claim`, with `AUTH_BOOTSTRAP_TOKEN`.** The email/password sign-up form
-  no longer creates that account (it answers as for any address it will not
-  register, and the server log says why); it is created by redeeming the
-  bootstrap token, by a Google/GitHub sign-in whose provider asserts the
-  address, or by a magic link. With both variables set, the token claims the
-  named address only, and that address is exempt from
-  `AUTH_ALLOWED_SIGNUP_DOMAINS`. An existing account can no longer change
-  its e-mail to that address or to one listed in `AUTH_PLATFORM_ADMIN_EMAILS`
-  (403 `email_change_refused`); a listed platform-admin address is otherwise
-  unchanged and is still created by plain sign-up. A Google sign-in now takes `emailVerified`
-  from Google's `email_verified` claim instead of assuming it. An instance whose
-  owner account already exists is unaffected. An instance that names an
-  owner who has not signed up yet needs a token before they can: add
-  `AUTH_BOOTSTRAP_TOKEN` (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`)
-  to its environment, restart, and open `<APP_URL>/claim`. The installer
-  now writes the token alongside a named owner and prints the `/claim` step. The address is no longer part of the page configuration
-  sent to browsers, and `/register` is the plain sign-up form again. See
-  `examples/self-hosting/AUTH_MODES.md`.
+  `/claim`, with `AUTH_BOOTSTRAP_TOKEN`** (or by a provider-verified
+  Google/GitHub sign-in, or a magic link) — no longer by the sign-up form.
+  An instance that names an owner who has no account yet must set
+  `AUTH_BOOTSTRAP_TOKEN` by hand (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`),
+  restart, and open `<APP_URL>/claim`; fresh installs get the token from the
+  installer. An account can no longer change its e-mail to that address or
+  to an `AUTH_PLATFORM_ADMIN_EMAILS` one (403 `email_change_refused`). A
+  Google sign-in now takes `emailVerified` from Google's `email_verified`
+  claim. Details and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **An integration calling an internal API needs its host in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
   reach a private, loopback or link-local address as soon as the

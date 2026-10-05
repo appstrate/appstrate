@@ -44,27 +44,15 @@ describe("auth social provider config — emailVerified comes from the provider"
     _rebuildAuthForTesting();
   });
 
-  it("github provider does NOT force emailVerified", async () => {
-    // GitHub lets a user attach an UNVERIFIED email. Without an override,
-    // Better Auth's per-email `/user/emails` flag is what a new row is created
-    // with. It does not decide account linking: GitHub is a trusted provider,
-    // and Better Auth links those without reading the flag.
+  it.each(["google", "github"])("%s carries no mapProfileToUser override", (provider) => {
+    // Without one, `emailVerified` is the provider's own answer (Google's
+    // `email_verified` claim, GitHub's per-address `/user/emails` flag), which
+    // is what a new row is created with and what the bootstrap-owner proof reads.
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
-    const github = options.socialProviders?.github as { mapProfileToUser?: unknown } | undefined;
-    expect(github).toBeDefined();
-    expect(github?.mapProfileToUser).toBeUndefined();
-  });
-
-  it("google provider does NOT force emailVerified either — the id_token claim decides", async () => {
-    // Better Auth maps Google's `email_verified` claim onto `emailVerified`.
-    // An override answering `true` for every profile would turn "came back
-    // from Google" into "Google asserts this address", which is what the
-    // bootstrap-owner proof relies on.
-    const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
-      .options;
-    const google = options.socialProviders?.google as { mapProfileToUser?: unknown } | undefined;
-    expect(google).toBeDefined();
-    expect(google?.mapProfileToUser).toBeUndefined();
+    const config = options.socialProviders?.[provider] as
+      { mapProfileToUser?: unknown } | undefined;
+    expect(config).toBeDefined();
+    expect(config?.mapProfileToUser).toBeUndefined();
   });
 });

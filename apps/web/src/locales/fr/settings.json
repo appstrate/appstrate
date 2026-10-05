@@ -225,6 +225,7 @@
   "preferences.changingEmail": "Modification...",
   "preferences.emailChanged": "Adresse email modifiée avec succès.",
   "preferences.emailConflict": "Cette adresse email est déjà utilisée.",
+  "preferences.emailRefused": "Cette adresse email ne peut pas être utilisée.",
   "preferences.emailVerified": "Email vérifié",
   "preferences.emailNotVerified": "Email non vérifié",
   "preferences.resendVerification": "Renvoyer l'email de vérification",

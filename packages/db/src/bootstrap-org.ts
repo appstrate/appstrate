@@ -5,9 +5,8 @@
 //
 // Two callers:
 //   1. `auth.ts` after-hook  — fires when the bootstrap owner's account is
-//      created (token redemption, verified social sign-in, magic link).
-//      Errors are logged, never thrown (we do not want a transient DB
-//      failure to break signup).
+//      created. Errors are logged, never thrown (we do not
+//      want a transient DB failure to break signup).
 //   2. `apps/api/scripts/bootstrap-org.ts` — explicit ops bootstrap (IaC /
 //      recovery). Errors propagate to the caller which decides exit code.
 //

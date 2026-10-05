@@ -183,10 +183,10 @@ function writeToTty(line: string): void {
  * Post-install browser deep-link. A fresh install has no session and no
  * account yet, so the first thing the operator needs is the signup form —
  * open `/register` directly instead of the bare root (which only bounces
- * there after an extra redirect). One carve-out: a **closed install**
- * claims ownership at `/claim` by pasting the printed bootstrap token, NOT
- * at `/register`, so it keeps the root landing and the follow-up note
- * points the operator at `/claim`.
+ * there after an extra redirect). One carve-out: the **bootstrap token**
+ * flow (unattended closed install) claims ownership at `/claim` by pasting
+ * the printed token, NOT at `/register`, so it keeps the root landing and
+ * the follow-up note points the operator at `/claim`.
  *
  * `localUrl` (not `appUrl`) because the browser runs on the install host
  * and must hit the local bind port; a remote `appUrl` is unreachable until
@@ -198,11 +198,8 @@ export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOver
 }
 
 /**
- * Print the closed-mode follow-up note: the operator claims ownership at
- * `<appUrl>/claim` by pasting the printed bootstrap token. Single-use, dies
- * on first redemption or as soon as any organization exists. When the
- * install named an owner (#228, `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`), the
- * note says which address the platform will accept on that form.
+ * Print the closed-mode follow-up note: claim ownership at `<appUrl>/claim`
+ * with the printed single-use token, as the named owner when there is one.
  *
  * Renders nothing in true open mode (Tier 0 interactive). Called by
  * both Tier 0 and Docker-tier installers right before `outro()`.
@@ -221,12 +218,7 @@ export function printBootstrapFollowup(
   const token = bootstrap.bootstrapToken;
   if (token) {
     const email = bootstrap.bootstrapOwnerEmail;
-    // The platform accepts no other address on `/claim` once an owner is named.
-    const claimAs =
-      (email ? `Claim it as  ${email}  with a password of your choice.\n` : "") +
-      (bootstrap.ownerMayExist
-        ? "If the owner account already exists, ignore this: the token is inert\nonce the instance has an organization.\n"
-        : "");
+    const claimAs = email ? `Claim it as  ${email}  with a password of your choice.\n` : "";
     const stdoutIsTty = process.stdout.isTTY === true;
     if (stdoutIsTty) {
       // Interactive install: stdout IS the operator's terminal, so
@@ -366,7 +358,6 @@ export async function installCommand(
       tier,
       mode: installState.mode,
       nonInteractive,
-      existingEnv: installState.existing.existingEnv,
     });
 
     // Public URL (issue #822) — flag/env/prompt, defaults to
@@ -456,9 +447,7 @@ export async function composeUpgradeCommand(
  *   1. `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` env var — the IaC / `curl|bash`
  *      path. Always wins, on every tier and mode. Invalid email throws
  *      so the misconfiguration surfaces at install time, not at first
- *      signup. A named owner always comes with a bootstrap token: the
- *      address says which account owns the instance, the token is what
- *      proves the person creating it is the operator.
+ *      signup.
  *   2. Interactive prompt — fired only on a Tier ≥ 1 fresh install when
  *      no env var is set and the install is interactive. Empty input
  *      means "skip" (open mode + footer pointer in the generated `.env`).
@@ -467,17 +456,13 @@ export async function composeUpgradeCommand(
  * Upgrades short-circuit to undefined: `mergeEnv` preserves whatever
  * `AUTH_*` keys the user already has in their `.env`, so re-running
  * `appstrate install` on a closed-mode instance never silently flips
- * the policy. A token is minted on an upgrade only when the env var names
- * an owner and `.env` holds no token yet — never over an existing one.
+ * the policy, and no token is minted: `mergeEnv` would keep the one on disk.
  */
 export async function resolveBootstrapEmail(opts: {
   tier: Tier;
   mode: InstallMode;
   nonInteractive: boolean;
-  /** The `.env` already on disk — empty on a fresh install. */
-  existingEnv?: EnvVars;
 }): Promise<BootstrapOverrides> {
-  const existingEnv = opts.existingEnv ?? {};
   const fromEnv = process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL?.trim();
   if (fromEnv) {
     if (!isValidBootstrapEmail(fromEnv)) {
@@ -487,29 +472,10 @@ export async function resolveBootstrapEmail(opts: {
     }
     const orgName = process.env.APPSTRATE_BOOTSTRAP_ORG_NAME?.trim();
     const named = { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
-    // `mergeEnv` keeps the token already in `.env`, so a new one would be
-    // printed and then rejected at `/claim`. The one on disk stays the one in
-    // force; nothing is minted and nothing is printed.
-    if (existingEnv.AUTH_BOOTSTRAP_TOKEN) return named;
-    return {
-      ...named,
-      bootstrapToken: generateBootstrapToken(),
-      // An upgrade cannot tell whether the owner already signed up.
-      ...(opts.mode === "upgrade" ? { ownerMayExist: true } : {}),
-    };
+    if (opts.mode === "upgrade") return named;
+    return { ...named, bootstrapToken: generateBootstrapToken() };
   }
-  if (opts.mode === "upgrade") {
-    // Nothing is written on a plain upgrade — a token arrives with the
-    // closed-mode flags, and adding those would change the instance's policy.
-    // An instance that names an owner and has no token is told how to add one.
-    if (existingEnv.AUTH_BOOTSTRAP_OWNER_EMAIL && !existingEnv.AUTH_BOOTSTRAP_TOKEN) {
-      note(
-        `This instance names its owner (AUTH_BOOTSTRAP_OWNER_EMAIL) without a bootstrap token.\nIf that account already exists, nothing to do.\nOtherwise it is created at /claim: add to <dir>/.env\n  AUTH_BOOTSTRAP_TOKEN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')\nthen restart. See examples/self-hosting/AUTH_MODES.md.`,
-        "Owner account — bootstrap token missing",
-      );
-    }
-    return {};
-  }
+  if (opts.mode === "upgrade") return {};
   // Tier 0 (local dev) stays open — invitation-only is meaningless when
   // the platform binds to localhost and survives only as long as the
   // dev shell.

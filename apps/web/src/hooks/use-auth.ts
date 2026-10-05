@@ -151,6 +151,7 @@ export class EmailChangeError extends Error {
   constructor(
     public conflict: boolean,
     message: string,
+    public refused = false,
   ) {
     super(message);
     this.name = "EmailChangeError";
@@ -333,7 +334,11 @@ export function useAuth() {
   const changeEmail = useCallback(async (newEmail: string) => {
     const result = await authClient.changeEmail({ newEmail });
     if (result.error) {
-      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
+      throw new EmailChangeError(
+        result.error.status === 409,
+        result.error.message ?? "",
+        result.error.code === "email_change_refused",
+      );
     }
   }, []);
 

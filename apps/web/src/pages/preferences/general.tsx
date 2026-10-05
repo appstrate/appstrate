@@ -99,6 +99,8 @@ function EmailChangeForm() {
     } catch (err) {
       if (err instanceof EmailChangeError && err.conflict) {
         setError("root", { message: t("preferences.emailConflict") });
+      } else if (err instanceof EmailChangeError && err.refused) {
+        setError("root", { message: t("preferences.emailRefused") });
       } else {
         const message = err instanceof Error && err.message ? err.message : t("login.error");
         setError("root", { message });

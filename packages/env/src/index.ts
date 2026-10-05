@@ -824,8 +824,7 @@ export const envSchema = z
     // (email/password, magic-link, social OIDC). Three exceptions always pass:
     //   1. Email matches a pending+non-expired invitation in `org_invitations`.
     //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
-    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL and the caller proves
-    //      control of it (see that variable).
+    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL, on proof of ownership.
     AUTH_DISABLE_SIGNUP: z
       .string()
       .default("false")
@@ -889,12 +888,9 @@ export const envSchema = z
         message: "AUTH_PLATFORM_ADMIN_EMAILS must be a comma-separated list of valid emails",
       }),
     // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
-    // self-hosted instances in closed mode. Names the account that owns the
-    // instance: an organization is auto-created with it as owner when the
-    // account is. That account is created only on proof of ownership — the
-    // bootstrap token below, or a path that verified the inbox (social
-    // provider assertion, magic link) — never by e-mail/password sign-up.
-    // Idempotent: if the user already owns an org, the after-hook is a no-op.
+    // self-hosted instances in closed mode. An organization is auto-created
+    // with this account as owner when it is created, which takes proof of
+    // ownership (AUTH_MODES.md). Idempotent if the user already owns an org.
     //
     // Empty is allowed (open mode); anything else must look like an email
     // so a typo (`AUTH_BOOTSTRAP_OWNER_EMAIL=admin`) is caught at boot
@@ -925,10 +921,8 @@ export const envSchema = z
     // logout, cross-device revocation, freshness gate, realm guard):
     // `apps/api/test/integration/auth/session-cookie-cache.test.ts`.
     AUTH_SESSION_COOKIE_CACHE_SECONDS: z.coerce.number().int().min(0).default(0),
-    // AUTH_BOOTSTRAP_TOKEN — one-shot redemption token proving that the
-    // person creating the owner account is the operator (#344 Layer 2b).
-    // With AUTH_BOOTSTRAP_OWNER_EMAIL it claims that address only; alone,
-    // the token holder picks the address.
+    // AUTH_BOOTSTRAP_TOKEN — one-shot token that creates the owner account
+    // (the one AUTH_BOOTSTRAP_OWNER_EMAIL names, when set).
     // The CLI generates a 256-bit token at install time, writes it into
     // .env, and prints a banner with the redemption URL. The platform
     // reads it at boot, holds it in memory, and lets the first POST to

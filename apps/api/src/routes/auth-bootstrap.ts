@@ -19,9 +19,6 @@
  *   6. Timing-safe compare of `token` against `env.AUTH_BOOTSTRAP_TOKEN`.
  *      Failed verifies are logged at WARN with `clientIp` so SIEMs can
  *      detect a brute-force attempt.
- *      When `AUTH_BOOTSTRAP_OWNER_EMAIL` names the owner, the submitted
- *      e-mail must be that address — this route is then the only
- *      password path that can create that account.
  *   7. Run BA's `signUpEmail` inside `withBootstrapTokenRedemption()` so
  *      the closed-mode gate (`AUTH_DISABLE_SIGNUP=true`) is bypassed
  *      exactly once for this request. The bypass is scoped — it does
@@ -195,9 +192,7 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
-      // A named owner stays the owner: the token proves who is claiming, the
-      // env says which account they claim. Checked after the token so the
-      // answer reaches the operator only.
+      // After the token check, so only the operator learns the named address.
       const namedOwner = getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL;
       if (namedOwner && data.email !== namedOwner) {
         throw new ApiError({
@@ -210,10 +205,7 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
-      // The token creates the owner's account; it does not take over one that
-      // exists. Said plainly here, to the operator, rather than through
-      // Better Auth's duplicate answer — which is a 422 without mail
-      // verification and a synthetic success with it.
+      // Looked up here: under mail verification Better Auth reports a duplicate as success.
       const [taken] = await db
         .select({ id: userTable.id })
         .from(userTable)
@@ -236,7 +228,6 @@ export function createAuthBootstrapRouter(): Hono {
         const msg = getErrorMessage(err);
         // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
-        // The same address registered between the check above and here.
         if (msg.includes("already exists") || msg.includes("duplicate")) {
           throw bootstrapUserExists();
         }

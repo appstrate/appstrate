@@ -114,8 +114,8 @@ status and body the form gives any address it will not register
 (`signup_disabled`, `signup_domain_not_allowed`, or "User already
 exists"), and the address is not sent to the browser. The reason is in
 the server log
-(`refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of ownership`),
-followed by the recovery step that applies to the instance's state.
+(`refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of ownership`);
+the recovery is under Pitfalls below.
 
 The named owner is exempt from `AUTH_ALLOWED_SIGNUP_DOMAINS` on every
 accepted path: the operator named that address.
@@ -402,9 +402,10 @@ To go back to open mode, unset the flags and restart. No data migration.
   user-already-owns-an-org).
 - **`AUTH_BOOTSTRAP_OWNER_EMAIL` without a token** — the sign-up form
   refuses that address like any address it will not register, and the
-  server log says why. Add
-  `AUTH_BOOTSTRAP_TOKEN` to `.env`, restart, and claim the instance at
-  `/claim`. The token is redeemable only while the instance has no
+  server log says why. This is the state of an instance installed before
+  the token accompanied a named owner, if its owner never signed up. Add
+  `AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>`
+  to `.env` by hand, restart, and claim the instance at `/claim`. The token is redeemable only while the instance has no
   organization at all.
 - **`AUTH_BOOTSTRAP_OWNER_EMAIL` on an instance that already has an
   organization, owner account absent** — no token can claim it (`/claim`

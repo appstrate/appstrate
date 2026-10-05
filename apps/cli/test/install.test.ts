@@ -899,6 +899,12 @@ describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
       nonInteractive: true,
     });
     expect(result.bootstrapOwnerEmail).toBe("admin@acme.com");
+    // `mergeEnv` keeps whatever token `.env` holds; one minted here would be
+    // printed to the operator and then refused at /claim.
+    expect(result.bootstrapToken).toBeUndefined();
+    const notes: string[] = [];
+    printBootstrapFollowup("http://localhost:3000", result, (m) => notes.push(m));
+    expect(notes).toHaveLength(0);
   });
 
   it("throws when APPSTRATE_BOOTSTRAP_OWNER_EMAIL is malformed (fail-fast at install)", async () => {
@@ -935,51 +941,6 @@ describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
       tier: 0,
       mode: "fresh",
       nonInteractive: true,
-    });
-    expect(result).toEqual({});
-  });
-
-  it("mints nothing on upgrade when .env already holds a token — the one on disk stays in force", async () => {
-    // `mergeEnv` keeps the existing token; a freshly minted one would be
-    // printed to the operator and then refused at /claim.
-    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
-    const result = await resolveBootstrapEmail({
-      tier: 3,
-      mode: "upgrade",
-      nonInteractive: true,
-      existingEnv: { AUTH_BOOTSTRAP_TOKEN: "token-already-on-disk-0123456789" },
-    });
-    expect(result).toEqual({ bootstrapOwnerEmail: "admin@acme.com" });
-    const cap: string[] = [];
-    printBootstrapFollowup("http://localhost:3000", result, (m) => cap.push(m));
-    expect(cap).toHaveLength(0);
-  });
-
-  it("mints one on upgrade when the env var names an owner and .env has no token", async () => {
-    process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL = "admin@acme.com";
-    const result = await resolveBootstrapEmail({
-      tier: 3,
-      mode: "upgrade",
-      nonInteractive: true,
-      existingEnv: { AUTH_BOOTSTRAP_OWNER_EMAIL: "admin@acme.com" },
-    });
-    expect(result.bootstrapToken).toMatch(/^[A-Za-z0-9_-]{40,64}$/);
-    // The installer cannot know whether the owner already signed up.
-    expect(result.ownerMayExist).toBe(true);
-    const cap: string[] = [];
-    printBootstrapFollowup("http://localhost:3000", result, (m) => cap.push(m));
-    expect(cap[0]).toContain("already exists");
-  });
-
-  it("writes nothing on a plain upgrade of an instance that names an owner without a token", async () => {
-    // A token comes with the closed-mode flags; adding them here would flip
-    // the instance's sign-up policy. The operator is told how to add one.
-    delete process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL;
-    const result = await resolveBootstrapEmail({
-      tier: 3,
-      mode: "upgrade",
-      nonInteractive: true,
-      existingEnv: { AUTH_BOOTSTRAP_OWNER_EMAIL: "admin@acme.com" },
     });
     expect(result).toEqual({});
   });

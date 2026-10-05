@@ -62,8 +62,8 @@ function base64urlPassword24(): string {
 
 /**
  * 32 random bytes → base64url (43 chars, URL-safe). One-shot redemption
- * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` by every closed
- * install, named owner or not (#344 Layer 2b).
+ * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` by every fresh closed
+ * install, named owner or not.
  *
  * 256 bits of entropy — brute-force exclu. Generated client-side at
  * install time; the platform reads it at boot, holds it in memory, and
@@ -136,11 +136,7 @@ export interface BootstrapOverrides {
   /** Org name shown in the dashboard. Defaults to "Default" when unset. */
   bootstrapOrgName?: string;
   /**
-   * One-shot redemption token (issue #344 Layer 2b). Set on every closed
-   * install: alongside `bootstrapOwnerEmail` when the owner is named, and
-   * alone when the install runs unattended (`--yes` / no-TTY) without
-   * one — the alternative would be silently shipping an open instance
-   * (the historical default).
+   * One-shot redemption token, set on every fresh closed install.
    *
    * When this field is set the install writes:
    *   AUTH_DISABLE_SIGNUP=true
@@ -150,12 +146,6 @@ export interface BootstrapOverrides {
    * of the install so the operator can claim ownership of the instance.
    */
   bootstrapToken?: string;
-  /**
-   * Set when the token was minted on an UPGRADE: the installer cannot tell
-   * whether the owner already signed up, so the follow-up note says the
-   * token may have nothing left to claim.
-   */
-  ownerMayExist?: boolean;
 }
 
 /** Minimal RFC 5322 sanity check — sufficient for an install-time guard. */
@@ -257,17 +247,10 @@ export function generateEnvForTier(
   }
 
   if (bootstrap.bootstrapOwnerEmail || bootstrap.bootstrapToken) {
-    // Closed install (issues #228, #344 Layer 2b). Signup is locked until
-    // the operator claims the instance by POSTing the token to
-    // `/api/auth/bootstrap/redeem`, so a fresh install on a public VPS is
-    // never silently exposed.
     env.AUTH_DISABLE_SIGNUP = "true";
     env.AUTH_DISABLE_ORG_CREATION = "true";
     if (bootstrap.bootstrapOwnerEmail) {
-      // A named owner is the only address the token can claim. It is also
-      // added to PLATFORM_ADMIN_EMAILS so the owner keeps org-creation
-      // rights after the bootstrap (otherwise they'd be locked out of
-      // `POST /api/orgs` for any future tenant org).
+      // Also a platform admin, to keep org-creation rights after the bootstrap.
       env.AUTH_PLATFORM_ADMIN_EMAILS = bootstrap.bootstrapOwnerEmail;
       env.AUTH_BOOTSTRAP_OWNER_EMAIL = bootstrap.bootstrapOwnerEmail;
     }
@@ -343,8 +326,7 @@ export function generateEnvForTier(
  *
  * Footer branches on the closed-mode shape:
  *   - `AUTH_BOOTSTRAP_TOKEN` set → token-redemption pointer for the operator.
- *   - `AUTH_BOOTSTRAP_OWNER_EMAIL` alone → no footer (lockdown already
- *     configured by hand, or an upgrade of an instance that predates the token).
+ *   - `AUTH_BOOTSTRAP_OWNER_EMAIL` alone → no footer (lockdown already configured).
  *   - neither → 3-line pointer to AUTH_MODES.md for the self-hoster who'll
  *     edit `.env` anyway and wants to discover the feature.
  */

@@ -10,9 +10,7 @@
  *
  * Idempotent. The owner user MUST already exist (sign up via the dashboard
  * first — `AUTH_PLATFORM_ADMIN_EMAILS` lets them through the closed-mode
- * signup gate; the address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` is not
- * created by the sign-up form but claimed at `/claim`, which creates the
- * organization too and makes this script unnecessary). The script:
+ * signup gate). The script:
  *
  *   1. Looks up the user by email — exits 2 if absent.
  *   2. If they already own an org → exits 0 (idempotent no-op, prints orgId).

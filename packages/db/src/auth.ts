@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { betterAuth } from "better-auth";
+import { BASE_ERROR_CODES, betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -14,7 +14,7 @@ const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema/index.ts";
-import { organizations, profiles, orgInvitations, user } from "./schema/index.ts";
+import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
@@ -76,9 +76,8 @@ export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Pr
 }
 
 /**
- * Auto-create the bootstrap organization when the freshly-created user
- * matches `AUTH_BOOTSTRAP_OWNER_EMAIL` — the create hook let that row through
- * only on proof of ownership. Delegates the idempotent create-or-noop
+ * Auto-create the bootstrap organization when the freshly-signed-up user
+ * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Delegates the idempotent create-or-noop
  * to `createBootstrapOrg`, which is shared with `apps/api/scripts/bootstrap-org.ts`.
  *
  * Runs in the BA `after` hook, after the profile row is inserted. Errors are
@@ -591,11 +590,6 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
       },
-      // No `mapProfileToUser` override: Better Auth maps Google's
-      // `email_verified` id_token claim onto `user.emailVerified`, and that
-      // claim — not the fact of a Google round-trip — is what the
-      // bootstrap-owner proof in the create hook rests on. It does NOT govern
-      // account linking: see `trustedProviders` below.
     },
     github: {
       get clientId() {
@@ -604,9 +598,6 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
-      // No `mapProfileToUser` override either. GitHub lets a user add an
-      // UNVERIFIED email to their account; BA computes the real per-email
-      // flag from `/user/emails`, and a new row is created with it.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
@@ -748,11 +739,6 @@ function buildAuth(options: CreateAuthOptions) {
     account: {
       accountLinking: {
         enabled: anySocialEnabled,
-        // KNOWN LIMIT: Better Auth links a trusted provider onto an existing
-        // user with the same address WITHOUT asking whether the provider
-        // verified it (`link-account.mjs`: the `emailVerified` check applies to
-        // untrusted providers only). The providers' verified flag therefore
-        // protects row creation, not linking.
         trustedProviders: [
           ...(googleEnvEnabled ? ["google" as const] : []),
           ...(githubEnvEnabled ? ["github" as const] : []),
@@ -915,45 +901,14 @@ function buildAuth(options: CreateAuthOptions) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
-            // The account at `AUTH_BOOTSTRAP_OWNER_EMAIL` is born owner of the
-            // root organization, so naming that address is not enough to
-            // create it: the caller must hold the operator's bootstrap token,
-            // or arrive by a path that verified the inbox itself. Better Auth
-            // hands this hook `emailVerified: true` only from a provider
-            // assertion or a consumed magic link — never from e-mail/password
-            // sign-up, whose later verification mail proves who reads the
-            // inbox, not who chose the password. Checked before every other
-            // gate and in every realm, so no allowlist reopens it.
-            //
-            // The refusal does not NAME the reason: it carries the status and
-            // body any address without an exception gets under the current
-            // policy and, where that policy would let it in, those of an address
-            // that is already taken. That is not indistinguishable — with
-            // sign-up open and no mail verification, Better Auth answers a taken
-            // address before hashing the password and this hook runs after, so
-            // timing tells the two apart. The explanation goes to the log, where
-            // the operator is the reader.
+            // Proof for the bootstrap owner's account: the bootstrap token, or a
+            // row born verified (provider assertion, consumed magic link). The
+            // refusal mirrors what an unprivileged or taken address gets.
             const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
             if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
-              // The token claims an instance that has no organization yet; past
-              // that point `/claim` answers 410 and is the wrong place to send
-              // the operator.
-              const [anyOrg] = await db
-                .select({ id: organizations.id })
-                .from(organizations)
-                .limit(1);
-              let recovery = "set AUTH_BOOTSTRAP_TOKEN, restart, and claim it at /claim";
-              if (anyOrg) {
-                recovery =
-                  "this instance already has an organization, so no bootstrap token can claim it: " +
-                  "unset AUTH_BOOTSTRAP_OWNER_EMAIL, sign the address up, then run " +
-                  "apps/api/scripts/bootstrap-org.ts";
-              } else if (getEnv().AUTH_BOOTSTRAP_TOKEN) {
-                recovery = "claim it at /claim with AUTH_BOOTSTRAP_TOKEN";
-              }
               logger.warn(
                 "auth: refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of " +
-                  `ownership — ${recovery} (examples/self-hosting/AUTH_MODES.md)`,
+                  "ownership — see examples/self-hosting/AUTH_MODES.md",
               );
               const unprivileged = evaluateUnprivilegedSignup(user.email);
               if (!unprivileged.allowed) {
@@ -962,15 +917,13 @@ function buildAuth(options: CreateAuthOptions) {
                   code: unprivileged.reason,
                 });
               }
-              // With verification required, Better Auth answers a taken address
-              // with a synthetic success, and gives a 403 from this hook that
-              // same answer; without it, a taken address is this 422.
+              // Under mail verification Better Auth answers a 403 as it does a taken address.
               throw smtpEnabled
                 ? new APIError("FORBIDDEN", { message: "signup_disabled", code: "signup_disabled" })
-                : new APIError("UNPROCESSABLE_ENTITY", {
-                    message: "User already exists. Use another email.",
-                    code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
-                  });
+                : APIError.from(
+                    "UNPROCESSABLE_ENTITY",
+                    BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+                  );
             }
             // A pending invitation for this exact email overrides the signup
             // gate (Infisical-style breakage avoidance) so an invited user can
@@ -986,8 +939,7 @@ function buildAuth(options: CreateAuthOptions) {
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
               if (bootstrapTokenBypass) {
-                // The named owner passes the allowlist here as on every other
-                // path (`evaluateSignupPolicy` rule 1): the operator named it.
+                // The named owner is exempt, as in `evaluateSignupPolicy`.
                 if (
                   envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 &&
                   !invited &&
@@ -1049,13 +1001,6 @@ function buildAuth(options: CreateAuthOptions) {
                     query: ctx?.query ?? null,
                   })
                 : "platform";
-            // `emailVerified` is left as Better Auth computed it: true only when
-            // the creating path verified the inbox. Nothing here upgrades it — a
-            // pending invitation in particular is matched on the address alone,
-            // so treating it as verification would let anyone mint a verified
-            // account for any unclaimed address (create org → self-invite →
-            // sign up) and defeat the OIDC end-user adopter's
-            // `emailVerified === true` takeover guard.
             return { data: { realm } };
           },
           after: async (user, context) => {
@@ -1105,19 +1050,8 @@ function buildAuth(options: CreateAuthOptions) {
           },
         },
         update: {
-          // The addresses the environment grants authority to
-          // (`AUTH_BOOTSTRAP_OWNER_EMAIL`, `AUTH_PLATFORM_ADMIN_EMAILS`) are
-          // acquired by creating their account — never by moving an existing
-          // account onto them. For the owner's address that creation takes
-          // proof (create hook above). For a platform admin's it does NOT: the
-          // sign-up form still creates it on its name alone, so this guard
-          // closes one door onto those addresses, not the address. The 403 is
-          // also an oracle: a signed-in caller learns the address is named. Every Better Auth
-          // writer of `user.email` comes through here (change-email with or
-          // without verification, a provider profile update), so this is the
-          // one place the rule needs stating. A write that restates the
-          // address its own row already holds is not an acquisition: the
-          // column is unique, so a row holding it can only be that row.
+          // No account moves onto an address the environment names (owner,
+          // platform admins); every Better Auth writer of `user.email` passes here.
           before: async (data) => {
             const next = (data as { email?: unknown }).email;
             if (typeof next !== "string") return;
@@ -1133,7 +1067,7 @@ function buildAuth(options: CreateAuthOptions) {
                 "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
             );
             throw new APIError("FORBIDDEN", {
-              message: "This e-mail address cannot be used.",
+              message: "email_change_refused",
               code: "email_change_refused",
             });
           },
