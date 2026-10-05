@@ -71,7 +71,7 @@
   "validation.emailFormat": "Invalid email address",
   "validation.urlFormat": "Invalid URL",
   "test.failed": "Test failed",
-  "test.acceptedWithStatus": "Key accepted, but the provider answered {{status}} ({{latency}}ms)",
+  "test.acceptedWithStatus": "The provider answered {{status}} ({{latency}}ms)",
   "dashboard.welcome": "Welcome, {{name}} 👋",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",

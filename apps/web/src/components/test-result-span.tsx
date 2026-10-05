@@ -10,8 +10,9 @@ import type { TestResult } from "@appstrate/shared-types";
  * its own namespace (`{ latency }` / `{ message }` interpolation).
  *
  * A third state sits between the two: a provider key passes its test on any
- * answer that got past the key check (`validateKeyByInference`), a 400 on the
- * probe request included. That is not the green "OK" — the status is shown.
+ * answer that got past the key check (`validateKeyByInference`) — a 400 on the
+ * probe request, a 404 from a wrong base URL. That is not the green "OK": the
+ * status is shown, and the wording claims nothing about the key.
  */
 export function TestResultSpan({
   result,

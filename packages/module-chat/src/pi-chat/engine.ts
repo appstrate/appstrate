@@ -612,6 +612,8 @@ export function runPiChat(input: PiChatInput): Response {
         if (turnError !== undefined) {
           logger.warn("Pi chat turn ended on a model error", {
             err: turnError,
+            orgId: input.orgId,
+            presetId: input.presetId,
             chatSessionId: input.chatSessionId,
           });
         }

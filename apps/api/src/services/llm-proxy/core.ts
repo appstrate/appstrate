@@ -324,21 +324,22 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       });
       throw blockedUpstream(presetId);
     }
-    // `warn`, like an upstream HTTP error (`metering.ts`): the provider is
-    // unreachable or silent, the caller is told so (502/504) and may retry.
-    logger.warn("llm-proxy: upstream fetch failed", {
-      presetId,
-      upstreamUrl,
-      error: getErrorMessage(err),
-    });
-    throw unreachableUpstream(
-      presetId,
+    const code =
       err instanceof SsrfBlockedError
         ? "upstream_unresolvable"
         : (err as { name?: unknown } | null)?.name === "TimeoutError"
           ? "upstream_timeout"
-          : "upstream_unreachable",
-    );
+          : "upstream_unreachable";
+    // A provider that accepted the connection and stayed silent is its own
+    // slowness: `warn`. Failing to resolve or reach it may just as well be this
+    // platform's egress, and an operator alerting on `error` must see that.
+    logger[code === "upstream_timeout" ? "warn" : "error"]("llm-proxy: upstream fetch failed", {
+      presetId,
+      upstreamUrl,
+      code,
+      error: getErrorMessage(err),
+    });
+    throw unreachableUpstream(presetId, code);
   }
 
   // Only an org's own credential can be revoked from under it; the headers

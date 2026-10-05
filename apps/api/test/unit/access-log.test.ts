@@ -34,6 +34,8 @@ function createApp(sink: Logger) {
   // tail of a catch-all (Better Auth's `/api/auth/reset-password/<token>`).
   app.get("/invite/:token/info", (c) => c.json({ ok: true }));
   app.on(["GET", "POST"], "/api/auth/*", (c) => c.json({ ok: true }));
+  // The SPA fallback: a page URL can carry a token too (`/invite/<token>`).
+  app.get("/*", (c) => c.html("<!doctype html>"));
   app.post("/missing", () => {
     throw notFound("nope");
   });
@@ -61,12 +63,23 @@ describe("accessLog middleware", () => {
   it.each([
     ["/invite/TOKEN_IN_PARAM/info", "/invite/:token/info"],
     ["/api/auth/reset-password/TOKEN_IN_TAIL", "/api/auth/*"],
+    ["/invite/TOKEN_IN_PAGE_URL", "/*"],
   ])("logs %s as its route pattern, never the token", async (path, route) => {
     const { lines, logger } = recordingLogger();
     const res = await createApp(logger).request(path);
 
     expect(res.status).toBe(200);
     expect(lines.map((l) => l.data?.route)).toEqual([route]);
+    expect(JSON.stringify(lines)).not.toContain("TOKEN_IN_");
+  });
+
+  it("logs a path no route matched as a bare wildcard", async () => {
+    // Nothing answers a PUT here, so the last frame is a global middleware's.
+    const { lines, logger } = recordingLogger();
+    const res = await createApp(logger).request("/nowhere/TOKEN_IN_UNMATCHED", { method: "PUT" });
+
+    expect(res.status).toBe(404);
+    expect(lines.map((l) => l.data?.route)).toEqual(["/*"]);
     expect(JSON.stringify(lines)).not.toContain("TOKEN_IN_");
   });
 

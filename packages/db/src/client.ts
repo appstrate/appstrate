@@ -70,15 +70,15 @@ async function initPGlite(): Promise<Db> {
     // `close()` takes no lock of its own, and tearing the WASM module down
     // under a statement still in flight never settles — a request served
     // during shutdown was enough to leave the process to SIGKILL. So close
-    // under both of PGlite's mutexes: the transaction one, held by a
-    // `transaction()` for its whole life and by every top-level `query()`, so
-    // a transaction is never cut between two statements; then the statement
-    // one, which `exec()` and LISTEN take on their own. `_runExclusiveTransaction`
-    // is underscore-named but part of PGlite's declared interface; the
-    // shutdown tests in `pglite-hot-reload.test.ts` pin what is relied on.
-    // Ready first: initialisation runs under the statement mutex.
+    // under PGlite's transaction mutex: a `transaction()` holds it for its
+    // whole life, and `query()`, `exec()` and LISTEN each take it first, so
+    // nothing is running and no transaction is cut between two statements.
+    // `_runExclusiveTransaction` is underscore-named but part of PGlite's
+    // declared interface; the shutdown tests in `pglite-hot-reload.test.ts`
+    // pin what is relied on. Must not be called from inside a transaction:
+    // the mutex is not re-entrant, the close would wait on its own caller.
     await client.waitReady;
-    await client._runExclusiveTransaction(() => client.runExclusive(() => client.close()));
+    await client._runExclusiveTransaction(() => client.close());
   };
   _listenClient = {
     listen: async (channel, handler) => {

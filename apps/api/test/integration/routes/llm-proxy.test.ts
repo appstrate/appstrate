@@ -508,6 +508,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       502,
       "upstream_unreachable",
       "destination_unavailable",
+      "error",
     ],
     [
       "silent",
@@ -515,10 +516,11 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       504,
       "upstream_timeout",
       "http_response_timeout",
+      "warn",
     ],
   ] as const)(
     "answers an %s upstream as its own failure, never a 500",
-    async (_, thrown, status, code, proxyError) => {
+    async (_, thrown, status, code, proxyError, level) => {
       const h = await buildHarness();
       mockUpstream(async () => {
         throw thrown;
@@ -534,9 +536,11 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
         expect(res.status).toBe(status);
         expect(((await res.json()) as { code: string }).code).toBe(code);
         expect(res.headers.get("proxy-status")).toBe(`appstrate; error=${proxyError}`);
-        // The provider failed, not the platform: one warn line, no error line.
-        expect(warn.mock.calls.map(([msg]) => msg)).toEqual(["llm-proxy: upstream fetch failed"]);
-        expect(error).not.toHaveBeenCalled();
+        // One line: `warn` for a silent provider, `error` for an upstream this
+        // platform could not reach at all (it may be its own egress).
+        const lines = { warn: warn.mock.calls, error: error.mock.calls };
+        expect(lines[level].map(([msg]) => msg)).toEqual(["llm-proxy: upstream fetch failed"]);
+        expect(lines[level === "warn" ? "error" : "warn"]).toEqual([]);
       } finally {
         warn.mockRestore();
         error.mockRestore();

@@ -31,7 +31,7 @@ function line(result: Parameters<typeof TestResultSpan>[0]["result"]): string {
 describe("TestResultSpan", () => {
   it("names the upstream status of a key accepted on a non-2xx answer", () => {
     const html = line({ ok: true, latency: 262, status: 400 });
-    expect(html).toContain("Clé acceptée, mais le provider a répondu 400 (262ms)");
+    expect(html).toContain("Le provider a répondu 400 (262ms)");
     expect(html).toContain("text-warning");
     expect(html).not.toContain("OK (");
   });
