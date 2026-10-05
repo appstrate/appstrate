@@ -286,6 +286,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **The MITM listener connects each upstream request to the address it
+  validated** (#1658). It checked the address the SNI host resolved to at
+  CONNECT, then let `fetch` resolve the name again: a name answering a public
+  address first and an internal one next reached the internal one. Each
+  request now goes through `guardedFetch`, which resolves, checks and
+  connects to that address, the name kept on `Host` and the TLS identity. A
+  host resolving into a blocked range at request time is a 403
+  (`target blocked by SSRF policy`); one that no longer resolves, a 502.
 - **A credential no HTTP header can carry is refused, never quoted** (#1641).
   A stored or rendered credential holding CR, LF, NUL, another control
   character or a character above U+00FF made `Headers` throw an error quoting

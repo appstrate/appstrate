@@ -68,7 +68,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   isBlockedHost,
-  isBlockedUrl,
   peerAddress,
   peerAdmitted,
   readRequestBodyBounded,
@@ -95,6 +94,7 @@ import {
   type EgressPolicy,
 } from "@appstrate/afps-runtime/resolvers";
 import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
+import { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
@@ -175,7 +175,7 @@ interface CreateMitmListenerOptions {
   credentials: MitmCredentialSource;
   /** Host to bind. Defaults to `"127.0.0.1"`. */
   host?: string;
-  /** Upstream fetch implementation. Defaults to `globalThis.fetch`. */
+  /** Upstream transport for tests; it disables the address pin. Omitted = pinned global `fetch`. */
   fetch?: typeof fetch;
   /**
    * Injectable DNS resolver for the SNI rebind guard (tests stub it so
@@ -223,6 +223,9 @@ export interface MitmListenerHandle {
   close(): Promise<void>;
 }
 
+/** The upstream transport: one request, its redirect returned unfollowed. */
+type UpstreamFetch = (url: string, init: RequestInit) => Promise<Response>;
+
 /** An inner TLS server (one per upstream authority), reachable only through its unix socket. */
 interface InnerTlsServer {
   socketPath: string;
@@ -240,7 +243,14 @@ export function createIntegrationMitmListener(
   // Ephemeral port (0 → kernel-assigned, read back from `address()` after `ready`).
   const port = 0;
   const maxRequestBytes = 10 * 1024 * 1024; // 10 MiB inner-request body cap.
-  const fetchFn = options.fetch ?? globalThis.fetch;
+  // Each upstream request connects to the address the guard validated for it, the name kept on
+  // `Host` and the TLS identity. An injected `fetch` (tests) owns its transport: checked, not pinned.
+  const fetchFn: UpstreamFetch = (url, init) =>
+    guardedFetch(url, init, {
+      followRedirects: false,
+      ...(options.fetch ? { fetchImpl: options.fetch } : {}),
+      ...(options.resolveHostFn ? { resolve: options.resolveHostFn } : {}),
+    });
   const emit = options.onEvent ?? (() => {});
 
   // Inner servers keyed by upstream authority: the inner request carries no
@@ -533,10 +543,8 @@ async function handleInboundConnection(
   }
   // … then the DNS-rebind layer: a public-looking SNI name whose A/AAAA
   // record points inside must not get a minted leaf either. Fail closed on
-  // resolution failure. Note: the upstream request is made by `fetch` against
-  // the SNI hostname (TLS cert validation needs the name), so this cannot pin
-  // the connect to a resolved IP — it is fail-closed defence-in-depth with a
-  // residual resolver TOCTOU, same stance as the platform's `ssrf-dns` guard.
+  // resolution failure. This check gates the leaf only: each upstream request
+  // resolves again and connects to the address it validated (`guardedFetch`).
   const sniCheck = await resolveAndCheckHost(sniHost, { resolve: resolveHostFn });
   if (sniCheck.blocked) {
     const why =
@@ -781,7 +789,7 @@ export async function handleInnerRequest(
   req: Request,
   authority: string,
   credentials: MitmCredentialSource,
-  fetchFn: typeof fetch,
+  fetchFn: UpstreamFetch,
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
   egressPolicy: Pick<EgressPolicy, "allowsUrl">,
@@ -811,7 +819,7 @@ async function forwardInnerRequest(
   req: Request,
   authority: string,
   credentials: MitmCredentialSource,
-  fetchFn: typeof fetch,
+  fetchFn: UpstreamFetch,
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
   egressPolicy: Pick<EgressPolicy, "allowsUrl">,
@@ -950,24 +958,24 @@ async function forwardInnerRequest(
   );
   if (!outboundHeaders) return refuseInvalidCredential(url, emit);
 
-  // SSRF defense-in-depth: the SNI host was checked at CONNECT, but the
-  // connect-login substitution above can rewrite `targetUrl` — re-check the
-  // final URL before egress (mirrors credential-proxy).
-  if (isBlockedUrl(targetUrl)) {
-    emit({ kind: "request-refused", url, reason: "target blocked by SSRF policy" });
-    return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
-  }
+  const send = (headers: Headers): Promise<Response> =>
+    fetchFn(targetUrl, {
+      method: req.method,
+      headers,
+      ...(body.byteLength > 0 ? { body } : {}),
+      signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
+    });
 
   let response: Response;
   try {
-    response = await fetchFn(targetUrl, {
-      method: req.method,
-      headers: outboundHeaders,
-      ...(body.byteLength > 0 ? { body } : {}),
-      redirect: "manual",
-      signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
-    });
+    response = await send(outboundHeaders);
   } catch (err) {
+    // The SNI host was checked at CONNECT; the guard re-checks the final URL (the connect-login
+    // substitution can rewrite it) and the address it resolves to now.
+    if (err instanceof SsrfBlockedError && err.reason !== "resolution-failed") {
+      emit({ kind: "request-refused", url, reason: "target blocked by SSRF policy" });
+      return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
+    }
     emit({ kind: "upstream-error", url, error: errorClass(err) });
     return new Response("MITM listener: upstream request failed", { status: 502 });
   }
@@ -1023,13 +1031,7 @@ async function forwardInnerRequest(
       return null;
     }
     try {
-      return await fetchFn(targetUrl, {
-        method: req.method,
-        headers: outbound,
-        ...(body.byteLength > 0 ? { body } : {}),
-        redirect: "manual",
-        signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
-      });
+      return await send(outbound);
     } catch (err) {
       emit({ kind: "upstream-error", url, error: `retry: ${errorClass(err)}` });
       return null;
