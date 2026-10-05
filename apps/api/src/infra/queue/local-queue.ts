@@ -43,18 +43,10 @@ interface CronScheduler<T> {
   lastFiredAt: number;
 }
 
-/**
- * Cron poll cadence (ms). Polls land on wall-clock multiples of it, not on
- * multiples counted from process start: a cron occurrence is always at second
- * :00, so a cadence anchored at boot fired every schedule late by a constant
- * 0–30 s (whatever second the server happened to start on).
- */
+/** Cron poll cadence (ms). Polls land on wall-clock multiples of it. */
 const CRON_POLL_INTERVAL_MS = 30_000;
 
-/**
- * Aim just past the boundary: a timer that fires a millisecond early would see
- * the occurrence as still in the future and leave it to the next poll.
- */
+/** Past the boundary: a timer firing a millisecond early would miss the occurrence. */
 const CRON_POLL_MARGIN_MS = 20;
 
 /**
@@ -410,11 +402,7 @@ export class LocalQueue<T> implements JobQueue<T> {
     return CRON_POLL_INTERVAL_MS - (now % CRON_POLL_INTERVAL_MS) + CRON_POLL_MARGIN_MS;
   }
 
-  /**
-   * Arm the next poll. It re-arms itself, so drift never accumulates — and in a
-   * `finally`, so one evaluation that throws does not end cron for the life of
-   * the process.
-   */
+  /** Arm the next poll; it re-arms itself even when an evaluation throws. */
   private scheduleCronPoll(): void {
     this.cronTimer = setTimeout(() => {
       try {

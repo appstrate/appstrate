@@ -31,19 +31,12 @@ const DialogOverlay = React.forwardRef<
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 /**
- * Mounted only while the dialog is open (the overlay's `Presence` owns that), so
- * the lazy initializer runs during the opening render — before any `autoFocus`
- * inside the dialog moves focus — and captures the control that opened it.
+ * Returns focus to the control that opened a state-opened dialog (Radix only
+ * knows its own `DialogTrigger`). Mounted only while open, so the initializer
+ * captures the opener before any `autoFocus` inside moves focus.
  *
- * Radix returns focus to its own `DialogTrigger` on close, and nowhere when
- * there is none: every dialog here is opened by state (`<Dialog open>`), so
- * without this, Escape drops keyboard users on `<body>`.
- *
- * Known limits. An opener wrapped in a Radix `Tooltip` shows its tooltip when
- * refocused (Radix opens on any focus not preceded by a pointer-down), exactly
- * as it would behind a `DialogTrigger`. And a dialog that replaces another
- * (create → secret reveal) captures a control INSIDE the first one, gone by the
- * time it closes: focus then falls to `<body>`, as before.
+ * Limits: a tooltip-wrapped opener shows its tooltip on refocus; a dialog that
+ * replaces another captures a control inside the first one, gone at close.
  */
 const DialogSurface = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,

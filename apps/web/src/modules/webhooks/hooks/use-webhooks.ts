@@ -23,11 +23,7 @@ export function toggleEvent(event: string, setter: Dispatch<SetStateAction<strin
   setter((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
 }
 
-/**
- * Keyed by the wire enum so the compiler refuses a list that falls behind the
- * server's: an event the API accepts but this form cannot tick is a
- * subscription only reachable by hand-written request.
- */
+/** Keyed by the wire enum: a list that falls behind the API's does not compile. */
 const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
   "run.started": true,
   "run.success": true,
@@ -115,8 +111,7 @@ export function useCreateWebhook() {
       enabled?: boolean;
     }) => {
       // A space-level webhook is pinned to the CURRENT space. Form state holds
-      // plain strings; the wire enum cast is the same trust boundary as the
-      // legacy untyped helper.
+      // plain strings, cast to the wire enum here.
       const events = data.events as WebhookEvent[];
       const body: CreateWebhookBody =
         level === "org"
@@ -141,7 +136,6 @@ export function useDeleteWebhook() {
 }
 
 export function useTestWebhook() {
-  // The ping is a real delivery: it lands in the webhook's history.
   const invalidate = useInvalidateWebhooks();
   return $api.useMutation("post", "/api/webhooks/{id}/test", { onSuccess: invalidate });
 }

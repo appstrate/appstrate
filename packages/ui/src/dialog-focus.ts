@@ -1,12 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Where focus goes back to when a state-opened dialog closes.
- *
- * Structural types rather than DOM ones: the logic is two lookups, and typing
- * it on what it reads lets it be tested without a DOM.
- */
+/** Where focus returns when a state-opened dialog closes. Structural types: testable without a DOM. */
 
 interface OpenerElement {
   isConnected: boolean;
@@ -26,10 +21,8 @@ export interface DialogOpener {
 }
 
 /**
- * Record what had focus as the dialog opens. `<body>` holding focus means
- * nothing did, so there is nothing to give it back to. A menu item is
- * unmounted with its menu by the time the dialog closes, so the menu's own
- * trigger is recorded too: Radix labels the menu with it (`aria-labelledby`).
+ * Record what had focus as the dialog opens (`<body>` counts as nothing), plus
+ * the trigger of the enclosing menu: a menu item is unmounted by close time.
  */
 export function captureDialogOpener(doc: {
   activeElement: OpenerElement | null;
@@ -42,11 +35,7 @@ export function captureDialogOpener(doc: {
   };
 }
 
-/**
- * Focus the opener if it is still in the page, else the trigger of the menu it
- * sat in. Returns false when neither is left (a deleted row's button): the
- * caller then keeps the platform default.
- */
+/** Focus the opener, else its menu's trigger; false when neither is left in the page. */
 export function restoreDialogOpener(
   opener: DialogOpener,
   doc: { getElementById(id: string): FocusableElement | null },

@@ -122,11 +122,7 @@ interface PackageActionsDropdownProps {
   activationPending?: boolean;
 }
 
-/**
- * A menu item's label with, when the item is disabled, the reason under it. A
- * disabled item is skipped by the keyboard and fires no pointer event, so a
- * `title` on it is read by nobody — the reason has to be on screen.
- */
+/** A disabled menu item takes no focus or pointer event: its reason is shown, not titled. */
 function DisabledItemLabel({ label, reason }: { label: string; reason?: string }) {
   if (!reason) return label;
   return (

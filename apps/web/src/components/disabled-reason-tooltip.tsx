@@ -10,11 +10,8 @@ import {
 
 /**
  * Explains why a control is disabled. A disabled control fires no pointer
- * events and takes no focus, so a `title` on it reaches nobody but a mouse: a
- * focusable span carries the reason instead — as a tooltip on hover and on
- * keyboard focus, and as text a screen reader reads when it lands on the span.
- * A tap does not open it (a Radix tooltip never opens on touch). `null` renders
- * the control bare.
+ * events: a focusable span carries the reason, as a tooltip (not on touch) and
+ * as screen-reader text. `null` renders the control bare.
  */
 export function DisabledReasonTooltip({
   reason,
