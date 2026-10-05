@@ -5,8 +5,8 @@
  * published agents instead of creating new ones or composing one on the fly.
  *
  * A PREFERENCE inside the `agents:write` grant: the host renders it only for a
- * caller who may create agents. A turn carries it (`agent_authoring: false`)
- * only when it is off, and the server intersects it with the grant: it narrows
+ * caller who may create agents. The chat sends it with every turn
+ * (`agent_authoring`) and the server intersects it with the grant: it narrows
  * the turn's authority and can never widen it.
  */
 

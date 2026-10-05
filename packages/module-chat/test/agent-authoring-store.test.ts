@@ -8,7 +8,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
-  agentAuthoringForTurn,
   bindAgentAuthoringUser,
   getAgentAuthoringEnabled,
   setAgentAuthoringEnabled,
@@ -80,19 +79,5 @@ describe("the agent-authoring preference", () => {
     } finally {
       unsubscribe();
     }
-  });
-});
-
-describe("what a turn sends as agent_authoring", () => {
-  it("asks for nothing while the preference is on", () => {
-    // Absent reads as on server-side; a turn must not ASK for agent authoring,
-    // least of all an operator's, who holds no grant for it.
-    expect(agentAuthoringForTurn()).toBeUndefined();
-  });
-
-  it("always sends an opt-out, whoever the caller is", () => {
-    // Omitting it would fail open: the server would read the turn as "on".
-    setAgentAuthoringEnabled(false);
-    expect(agentAuthoringForTurn()).toBe(false);
   });
 });

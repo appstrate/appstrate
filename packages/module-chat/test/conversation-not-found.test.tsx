@@ -63,6 +63,31 @@ describe("a conversation URL the caller has no conversation for", () => {
     expect(html).not.toContain("threads.new");
   });
 
+  it("never calls a conversation minted on this page not found", () => {
+    // Bare `/chat`: the id is minted here and has no row until its first turn
+    // is admitted. A refused first send leaves the list row behind, and the
+    // history reconcile then writes its 404 (`null`) into this cache entry —
+    // which must not replace the user's message, its error and Retry.
+    const qc = new QueryClient();
+    qc.setQueryDefaults(["chat", "session"], { initialData: null });
+    const html = renderToString(
+      <QueryClientProvider client={qc}>
+        <ChatPage
+          getHeaders={getHeaders}
+          conversationId={null}
+          onConversationChange={() => {}}
+          downloadFile={() => {}}
+          useFileImageSrc={() => null}
+          uploadFile={async () => "upload://upl_1"}
+          t={(key) => key}
+          can={() => true}
+        />
+      </QueryClientProvider>,
+    );
+    expect(html).not.toContain("conversation.notFound.title");
+    expect(html).toContain("Message Appstrate");
+  });
+
   it("still mounts the composer for a conversation that exists", () => {
     // Guards the assertions above: the harness does render the thread.
     const html = render(

@@ -66,16 +66,6 @@ export function setAgentAuthoringEnabled(enabled: boolean): void {
   notify();
 }
 
-/**
- * What a turn sends as `agent_authoring`: the opt-out, or nothing. The server
- * reads absence as ON and intersects with the caller's grants, so a stored
- * "off" is ALWAYS sent — for a caller with nothing to narrow it is a no-op —
- * and "on" never needs asking for.
- */
-export function agentAuthoringForTurn(): false | undefined {
-  return cache ? undefined : false;
-}
-
 export function useAgentAuthoringEnabled(): boolean {
   return useSyncExternalStore(subscribeAgentAuthoring, getAgentAuthoringEnabled, () => true);
 }

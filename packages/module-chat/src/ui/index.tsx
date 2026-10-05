@@ -82,7 +82,7 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { agentAuthoringForTurn } from "./agent-authoring-store.ts";
+import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
@@ -489,10 +489,15 @@ const Conversation = memo(function Conversation({
       </div>
     );
   }
-  // The URL names a conversation this caller does not have (deleted, or someone
+  // The URL named a conversation this caller does not have (deleted, or someone
   // else's). No runtime is mounted: a composer here would send under that id,
   // and the server creates a session for any id it does not know.
-  if (history.data === null) {
+  //
+  // Only a conversation that was in the URL at mount can be "not found". One
+  // minted here has no row until its first turn is admitted, and the reconcile
+  // below writes its 404 into this same cache entry: a refused first send (rate
+  // limit, invalid body) must keep showing the message, its error and Retry.
+  if (persistedAtMount && history.data === null) {
     return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
   }
   return (
@@ -582,15 +587,14 @@ function ConversationInner({
         headers: buildHeaders,
         prepareSendMessagesRequest: ({ id: chatId, messages, body }) => {
           const skills = getChosenSkills();
-          // Read at request time, like the model above, for the same reason.
-          const agentAuthoring = agentAuthoringForTurn();
           return {
             body: {
               ...body,
               id: chatId,
               messages,
               generation: getCompatibleGenerationSettings(),
-              ...(agentAuthoring !== undefined && { agent_authoring: agentAuthoring }),
+              // Read at request time, like the model above, for the same reason.
+              agent_authoring: getAgentAuthoringEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,
