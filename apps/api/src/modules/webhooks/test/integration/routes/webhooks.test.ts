@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -15,6 +15,8 @@ import {
   seedSpace,
   seedUnreachableSpace,
 } from "../../../../../../test/helpers/seed.ts";
+
+import { initWebhookWorker, shutdownWebhookWorker } from "../../../service.ts";
 
 const app = getTestApp();
 
@@ -308,6 +310,50 @@ describe("Webhooks API", () => {
    * managing them must not require a space the caller does not have. The router
    * therefore enters a space only when the caller identifies one.
    */
+  describe("POST /api/webhooks/:id/test", () => {
+    beforeAll(async () => {
+      await initWebhookWorker();
+    });
+    afterAll(async () => {
+      await shutdownWebhookWorker();
+    });
+
+    async function waitForDeliveries(webhookId: string, timeoutMs = 20_000) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const res = await app.request(`/api/webhooks/${webhookId}/deliveries`, {
+          headers: authHeaders(ctx),
+        });
+        const { data } = (await res.json()) as { data: { eventId: string; eventType: string }[] };
+        if (data.length > 0) return data;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return [];
+    }
+
+    // The endpoint used to build the envelope and return it: nothing was sent
+    // and the delivery history stayed empty behind a "test sent" toast.
+    it("delivers the ping and records it in the delivery history", async () => {
+      // Disabled on purpose: a test goes out before the webhook is switched on.
+      const wh = await createWebhook({
+        url: "https://no-such-domain-xyz123.test/hook",
+        enabled: false,
+      });
+
+      const res = await app.request(`/api/webhooks/${wh.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { eventId: string; payload: { type: string } };
+      expect(body.payload.type).toBe("test.ping");
+
+      const deliveries = await waitForDeliveries(wh.id);
+      expect(deliveries[0]).toMatchObject({ eventId: body.eventId, eventType: "test.ping" });
+    });
+  });
+
   describe("a cookie caller with no X-Space-Id", () => {
     const orgPayload = {
       level: "org" as const,

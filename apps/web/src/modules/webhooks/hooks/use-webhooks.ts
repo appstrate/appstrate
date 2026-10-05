@@ -133,9 +133,12 @@ export function useDeleteWebhook() {
   return $api.useMutation("delete", "/api/webhooks/{id}", { onSuccess: invalidate });
 }
 
+/** The ping is a real delivery: its outcome lands in the delivery history. */
 export function useTestWebhook() {
+  const invalidate = useInvalidateWebhooks();
   return $api.useMutation("post", "/api/webhooks/{id}/test", {
     meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
   });
 }
 
