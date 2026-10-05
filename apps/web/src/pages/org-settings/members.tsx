@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -26,6 +25,7 @@ import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { toast } from "sonner";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
+import { errorMessage } from "../../lib/mutation-error";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -76,8 +76,7 @@ export function OrgSettingsMembersPage() {
     void invalidateIntegrationQueries(queryClient);
   };
 
-  const toastMemberError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+  const toastMemberError = (err: unknown) => toast.error(errorMessage(err));
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
@@ -90,7 +89,7 @@ export function OrgSettingsMembersPage() {
   });
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;

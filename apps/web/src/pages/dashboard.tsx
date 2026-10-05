@@ -14,6 +14,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
 import { RunRows } from "../components/run-list";
+import { errorMessage } from "../lib/mutation-error";
 
 /** Rows shown under "recent runs" — a prefix of the page's own run query. */
 const RECENT_RUNS_COUNT = 7;
@@ -42,7 +43,7 @@ export function DashboardPage() {
   const error = runsError || agentsError;
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   const runs = runsData?.data ?? [];
 

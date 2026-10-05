@@ -10,6 +10,7 @@ import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
+import { errorMessage } from "../lib/mutation-error";
 
 /**
  * Standalone hosted connect form (issue #769) — the non-OAuth half of the
@@ -78,7 +79,7 @@ export function HostedConnectPage() {
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
-        setErrorDetail(err instanceof Error ? err.message : String(err));
+        setErrorDetail(errorMessage(err));
         setPhase("error");
       }
     })();
@@ -115,7 +116,7 @@ export function HostedConnectPage() {
       else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       setPhase("form");
     }
   };

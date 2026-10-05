@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { handleOidcCallback } from "../lib/oidc";
 import { refreshAuth, AuthRefreshError } from "../../../hooks/use-auth";
 import { Spinner } from "../../../components/spinner";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 
 /**
  * Server-rendered prefixes that live outside the SPA's router. Paths
@@ -68,8 +68,7 @@ export function AuthCallbackPage() {
           );
           return;
         }
-        const msg = getErrorMessage(err);
-        setError(msg);
+        setError(errorMessage(err));
       }
     })();
   }, [navigate]);

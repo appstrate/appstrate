@@ -13,6 +13,7 @@ import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
+import { errorMessage } from "../lib/mutation-error";
 
 type LoginFormData = {
   email: string;
@@ -62,9 +63,7 @@ export function LoginForm({
         await onSuccess();
       }
     } catch (err) {
-      setError("root", {
-        message: err instanceof Error ? err.message : t("login.error"),
-      });
+      setError("root", { message: errorMessage(err) });
     }
   };
 

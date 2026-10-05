@@ -150,6 +150,7 @@ import {
 } from "../components/integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
+import { errorMessage } from "../lib/mutation-error";
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) — create / edit modal
@@ -2064,8 +2065,7 @@ export function IntegrationDetailPage() {
         onConfirm={() =>
           deletePkg.mutate(packageId, {
             onSuccess: () => setConfirmDelete(false),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
+            onError: (err) => toast.error(errorMessage(err)),
           })
         }
       />

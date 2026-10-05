@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OnboardingLayout,
   useOnboardingGuard,
@@ -14,6 +13,7 @@ import { useAppConfig } from "../../hooks/use-app-config";
 import { useBilling, useCheckout, type CheckoutPlanId } from "../../hooks/use-billing";
 import { Spinner } from "../../components/spinner";
 import { PlanGrid } from "../../components/plan-card";
+import { errorMessage } from "../../lib/mutation-error";
 
 export function OnboardingPlanStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -43,7 +43,7 @@ export function OnboardingPlanStep() {
           window.location.href = url;
         },
         onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
+          toast.error(errorMessage(err));
         },
       },
     );

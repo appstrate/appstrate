@@ -23,7 +23,6 @@ import {
   useTestProxy,
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -32,6 +31,7 @@ import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
 import { SourceBadge } from "../../components/source-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { errorMessage } from "../../lib/mutation-error";
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -50,7 +50,7 @@ export function OrgSettingsProxiesPage() {
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   const onCreate = () => {
     setEditProxy(null);

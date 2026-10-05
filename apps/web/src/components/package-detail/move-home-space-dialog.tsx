@@ -19,7 +19,7 @@ import { Spinner } from "../spinner";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../lib/mutation-error";
 
 /**
  * Move a package's home space — the counterpart of `PUT
@@ -72,7 +72,7 @@ export function MoveHomeSpaceDialog({
           toast.success(t("packages.moveHomeDone", { space: destination.name }));
           close();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) => toast.error(errorMessage(error)),
       },
     );
   };

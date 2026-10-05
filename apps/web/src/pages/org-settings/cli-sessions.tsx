@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
@@ -12,6 +11,7 @@ import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
+import { errorMessage } from "../../lib/mutation-error";
 
 interface AdminCliSession extends CliSessionDisplay {
   userId: string;
@@ -53,7 +53,7 @@ export function OrgSettingsCliSessionsPage() {
 
   if (!orgId) return <LoadingState />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   const sessions = data ?? [];
 

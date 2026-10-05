@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { runFileDirection, type RunFileDirection } from "../lib/files";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
@@ -22,6 +21,7 @@ import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { FileTile } from "./file-tile";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
+import { errorMessage } from "../lib/mutation-error";
 
 /** Gallery axis: how the file was created, straight off the stored `purpose`. */
 export type PurposeFilter = "all" | "agent_output" | "user_upload";
@@ -192,7 +192,7 @@ export function FileListPanel({
           toast.success(t("keep.success"));
           onKept?.(file.id);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
+        onError: (err) => toast.error(errorMessage(err)),
       },
     );
 
@@ -207,7 +207,7 @@ export function FileListPanel({
           onDeleted?.(id);
           setPendingDelete(null);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
+        onError: (err) => toast.error(errorMessage(err)),
       },
     );
   };
@@ -232,7 +232,7 @@ export function FileListPanel({
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState message={getErrorMessage(error)} />
+        <ErrorState message={errorMessage(error)} />
       ) : shown.length === 0 ? (
         <EmptyState
           message={empty.message}

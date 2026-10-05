@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/format-date";
@@ -13,6 +12,7 @@ import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Trash2 } from "lucide-react";
+import { errorMessage } from "../lib/mutation-error";
 
 interface VersionHistoryProps {
   packageId: string;
@@ -95,7 +95,7 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
               // `onError` the modal hung on its spinner.
               onError: (err) => {
                 setConfirmState(null);
-                toast.error(translateSkillFrontmatterError(err, t) ?? getErrorMessage(err));
+                toast.error(translateSkillFrontmatterError(err, t) ?? errorMessage(err));
               },
             });
           } else {
@@ -103,7 +103,7 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
               onSuccess: () => setConfirmState(null),
               onError: (err) => {
                 setConfirmState(null);
-                toast.error(getErrorMessage(err));
+                toast.error(errorMessage(err));
               },
             });
           }

@@ -7,7 +7,6 @@ import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api, ApiError } from "../../api/client";
@@ -25,6 +24,7 @@ import { McpClientConnect } from "../../components/org-settings/mcp-client-conne
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
+import { errorMessage } from "../../lib/mutation-error";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -78,7 +78,7 @@ export function OrgSettingsGeneralPage() {
       setEditingName(false);
     },
     onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+      toast.error(errorMessage(err));
     },
   });
 
@@ -91,7 +91,7 @@ export function OrgSettingsGeneralPage() {
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+      toast.error(errorMessage(err));
     },
   });
 
@@ -102,7 +102,7 @@ export function OrgSettingsGeneralPage() {
       toast.error(
         err instanceof ApiError && err.code === "last_owner"
           ? t("orgSettings.leaveLastOwner")
-          : t("error.prefix", { message: getErrorMessage(err) }),
+          : errorMessage(err),
       );
     },
   });
@@ -241,7 +241,7 @@ export function OrgSettingsGeneralPage() {
                       );
                     },
                     onError: (err) => {
-                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+                      toast.error(errorMessage(err));
                     },
                   },
                 )
@@ -290,7 +290,7 @@ export function OrgSettingsGeneralPage() {
                         );
                       },
                       onError: (err) => {
-                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+                        toast.error(errorMessage(err));
                       },
                     },
                   )

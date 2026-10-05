@@ -44,6 +44,7 @@ import {
   type SmtpConfigView,
   type SocialProviderView,
 } from "../hooks/use-space-auth-config";
+import { errorMessage } from "../../../lib/mutation-error";
 
 export function SpaceAuthTab() {
   const { t } = useTranslation(["settings", "common"]);
@@ -96,7 +97,7 @@ function SmtpSection() {
           toast.success(t("settings:spaceAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
-        onError: (err) => toast.error(err.message),
+        onError: (err) => toast.error(errorMessage(err)),
       },
     );
   }
@@ -244,7 +245,7 @@ function SmtpSection() {
               toast.success(t("settings:spaceAuth.smtpTestOk"));
               setTestOpen(false);
             },
-            onError: (err) => toast.error(err.message),
+            onError: (err) => toast.error(errorMessage(err)),
           })
         }
       />
@@ -331,7 +332,7 @@ function SocialSection({
           toast.success(t("settings:spaceAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
-        onError: (err) => toast.error(err.message),
+        onError: (err) => toast.error(errorMessage(err)),
       },
     );
   }

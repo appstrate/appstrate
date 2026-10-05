@@ -13,6 +13,7 @@ import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
+import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
   open: boolean;
@@ -277,11 +278,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
             </div>
 
             {updateMutation.error && (
-              <p className="text-destructive text-sm">
-                {updateMutation.error instanceof Error
-                  ? updateMutation.error.message
-                  : String(updateMutation.error)}
-              </p>
+              <p className="text-destructive text-sm">{errorMessage(updateMutation.error)}</p>
             )}
           </form>
         </Modal>

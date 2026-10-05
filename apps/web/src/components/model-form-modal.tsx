@@ -32,7 +32,6 @@ import {
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
@@ -51,6 +50,7 @@ import {
 } from "@/lib/model-source";
 import { rowOverridesCatalog } from "@/lib/row-overrides-catalog";
 import { selectableCredentials } from "@/lib/model-credential-filter";
+import { errorMessage } from "../lib/mutation-error";
 
 interface ModelFormModalProps {
   open: boolean;
@@ -75,7 +75,7 @@ interface ModelFormBodyProps {
 export function ModelFormBody(props: ModelFormBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
-  if (registryQuery.error) return <ErrorState message={getErrorMessage(registryQuery.error)} />;
+  if (registryQuery.error) return <ErrorState message={errorMessage(registryQuery.error)} />;
   if (!registryQuery.data) return <LoadingState />;
   // A row whose provider left the registry has no endpoint to describe and no
   // credential to match: say so rather than render an empty form.

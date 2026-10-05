@@ -11,7 +11,7 @@ import { useWebhooks } from "../hooks/use-webhooks";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 
 export function WebhooksPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -25,7 +25,7 @@ export function WebhooksPage() {
   // from this UI. The route gate owns the read half (either level opens it).
   const canCreate = can("webhooks:write");
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   return (
     <div className="p-6">

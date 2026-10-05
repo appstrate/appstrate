@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { FolderInput, Package, Share2, X } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
@@ -60,6 +59,7 @@ import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ConfirmModal } from "./confirm-modal";
+import { errorMessage } from "../lib/mutation-error";
 
 const TABS = ["agents", "skills", "mcpServers", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -271,7 +271,7 @@ function ActivationCheckbox({
         setActive.mutate(
           { spaceId: space.id, packageId: pkg.id, active: !active },
           {
-            onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")),
+            onError: (err) => toast.error(errorMessage(err)),
           },
         );
       }}
@@ -487,7 +487,7 @@ function PlacementMap({
                                     },
                                   },
                                 },
-                                { onError: (err) => toast.error(getErrorMessage(err)) },
+                                { onError: (err) => toast.error(errorMessage(err)) },
                               )
                             }
                           >
@@ -597,7 +597,7 @@ function SpacePlacements({
 
   const notifyChatEnforceError = (err: unknown) => {
     const key = chatEnforceErrorKey(err);
-    toast.error(key ? t(key) : getErrorMessage(err) || t("error.generic"));
+    toast.error(key ? t(key) : errorMessage(err));
   };
 
   if (pkgs.length === 0) {

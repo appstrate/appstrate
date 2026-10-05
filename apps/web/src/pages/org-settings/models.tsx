@@ -34,7 +34,6 @@ import {
   deduplicateLabel,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
@@ -50,6 +49,7 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
+import { errorMessage } from "../../lib/mutation-error";
 
 function ModelsList({
   models,
@@ -80,7 +80,7 @@ function ModelsList({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   return (
     <>
@@ -261,7 +261,7 @@ function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
 
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
@@ -475,7 +475,7 @@ export function OrgSettingsModelsPage() {
     toast.error(
       err instanceof ApiError && err.code === "credential_in_use"
         ? t("credentials.deleteRefused")
-        : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
+        : errorMessage(err),
     );
     closeConfirm();
   };

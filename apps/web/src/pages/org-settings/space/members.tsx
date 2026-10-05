@@ -6,7 +6,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Users } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -61,6 +60,7 @@ import { ViewAsDialog } from "../../../components/view-as-dialog";
 import { OrgInvitationsList } from "../../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+import { errorMessage } from "../../../lib/mutation-error";
 
 /** Owners and admins reach every space by role; a space-member row adds nothing. */
 const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
@@ -118,8 +118,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     { enabled: canSeeInvitations && !!currentOrg?.id },
   );
 
-  const onError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+  const onError = (err: unknown) => toast.error(errorMessage(err));
 
   /**
    * One control, two routes: an explicit row is PATCHed, an implicit member
@@ -169,7 +168,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   };
 
   if (canRead && isLoading) return <LoadingState />;
-  if (canRead && error) return <ErrorState message={getErrorMessage(error)} />;
+  if (canRead && error) return <ErrorState message={errorMessage(error)} />;
 
   const explicitUserIds = new Set(
     (members ?? []).filter((m) => m.source === "explicit").map((m) => m.userId),
@@ -417,7 +416,7 @@ function AddSpaceMemberModal({
         setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
         return;
       }
-      setFormError(getErrorMessage(err));
+      setFormError(errorMessage(err));
     },
   });
   const isPending = addMember.isPending || inviteGuest.isPending;
@@ -500,7 +499,7 @@ function AddSpaceMemberModal({
           setFormError(
             err instanceof ApiError && err.code === "redundant_space_role"
               ? t("spaceMembers.redundantRole")
-              : getErrorMessage(err),
+              : errorMessage(err),
           ),
       },
     );

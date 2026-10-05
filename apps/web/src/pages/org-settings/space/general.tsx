@@ -23,7 +23,7 @@ import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spa
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
 type SpaceVisibility = SpaceObject["visibility"];
@@ -39,7 +39,7 @@ export function OrgSettingsSpaceGeneralPage() {
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
   if (!space) return <ErrorState />;
 
   return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;
@@ -242,7 +242,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
 
           {updateMutation.error && (
             <Alert variant="destructive">
-              <AlertDescription>{getErrorMessage(updateMutation.error)}</AlertDescription>
+              <AlertDescription>{errorMessage(updateMutation.error)}</AlertDescription>
             </Alert>
           )}
           <Button type="submit" className="self-start" disabled={updateMutation.isPending}>
@@ -297,7 +297,7 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
               // RBAC spec §6.9) and the detail names them — but not how to act
               // on it, which is one move per package from its own page.
               onError: (error) =>
-                toast.error(getErrorMessage(error), {
+                toast.error(errorMessage(error), {
                   description:
                     error instanceof ApiError && error.code === "space_homes_packages"
                       ? t("spaces.deleteHomesPackagesHint")

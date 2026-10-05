@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { TestResult } from "@appstrate/shared-types";
+import { refusalMessage } from "../lib/mutation-error";
 
 /**
  * Inline connection-test result — green latency on success, red message on
@@ -19,11 +20,13 @@ export function TestResultSpan({
   failedKey: string;
 }) {
   const { t } = useTranslation(["settings"]);
+  // The outcome is named by its code; a code with no sentence keeps the server's own message.
+  const failure = result.error ? refusalMessage({ code: result.error }) : null;
   return (
     <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
       {result.ok
         ? t(successKey, { latency: result.latency })
-        : t(failedKey, { message: result.message })}
+        : t(failedKey, { message: failure ?? result.message })}
     </span>
   );
 }

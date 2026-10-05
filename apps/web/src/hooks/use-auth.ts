@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
-import { toUnlinkError } from "../lib/auth-errors";
+import { toAuthError, toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -142,16 +142,13 @@ export class AuthRefreshError extends Error {
 }
 
 /**
- * Thrown by `changeEmail()` so the caller can distinguish a 409 address
- * collision (a dedicated "email already in use" message) from any other
- * failure without reaching into the raw Better Auth result shape — the
- * seam is the only place that touches `authClient`.
+ * Thrown by `changeEmail()` on a 409 address collision, so the caller can show
+ * its dedicated "email already in use" message without reaching into the raw
+ * Better Auth result shape — the seam is the only place that touches
+ * `authClient`. Any other failure is thrown as a coded `ApiError`.
  */
 export class EmailChangeError extends Error {
-  constructor(
-    public conflict: boolean,
-    message: string,
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = "EmailChangeError";
   }
@@ -188,7 +185,7 @@ export function useAuth() {
    */
   const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
     const profile = await fetchProfile();
     if (result.data?.user) {
       setAuthenticatedUser(result.data.user, profile);
@@ -209,7 +206,7 @@ export function useAuth() {
         password,
         name: displayName || email,
       });
-      if (result.error) throw new Error(result.error.message);
+      if (result.error) throw toAuthError(result.error);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
@@ -251,7 +248,7 @@ export function useAuth() {
       currentPassword,
       newPassword,
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const signInWithSocial = useCallback(
@@ -294,7 +291,7 @@ export function useAuth() {
 
   const resendVerificationEmail = useCallback(async (email: string) => {
     const result = await authClient.sendVerificationEmail({ email });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   // ─── Password recovery / passwordless (OSS-only at runtime) ─────────────
@@ -311,17 +308,17 @@ export function useAuth() {
       email,
       redirectTo: "/reset-password",
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const resetPassword = useCallback(async (token: string, newPassword: string) => {
     const result = await authClient.resetPassword({ newPassword, token });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
     const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   // ─── Authenticated account management (no OIDC entry redirect) ───────────
@@ -332,14 +329,13 @@ export function useAuth() {
 
   const changeEmail = useCallback(async (newEmail: string) => {
     const result = await authClient.changeEmail({ newEmail });
-    if (result.error) {
-      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
-    }
+    if (result.error?.status === 409) throw new EmailChangeError(result.error.message ?? "");
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const listLinkedAccounts = useCallback(async () => {
     const result = await authClient.listAccounts();
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
     return result.data ?? [];
   }, []);
 

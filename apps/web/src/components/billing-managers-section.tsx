@@ -15,7 +15,6 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { roleI18nKey } from "../hooks/use-permissions";
@@ -36,6 +35,7 @@ import {
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
+import { errorMessage } from "../lib/mutation-error";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {
@@ -78,9 +78,9 @@ export function BillingManagersSection() {
   const [draft, setDraft] = useState<string[] | null>(null);
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
-  if (managersQuery.error) return <ErrorState message={getErrorMessage(managersQuery.error)} />;
+  if (managersQuery.error) return <ErrorState message={errorMessage(managersQuery.error)} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
-  if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
+  if (orgQuery.error) return <ErrorState message={errorMessage(orgQuery.error)} />;
 
   const saved = (managersQuery.data?.data ?? []).map((m) => m.userId);
   const selected = draft ?? saved;
@@ -101,8 +101,7 @@ export function BillingManagersSection() {
           void queryClient.invalidateQueries({ queryKey: managersKey });
           toast.success(t("billingManagers.saveSuccess"));
         },
-        onError: (err) =>
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
+        onError: (err) => toast.error(errorMessage(err)),
       },
     );
   };

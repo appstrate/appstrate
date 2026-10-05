@@ -49,12 +49,12 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
 import { LoadingState, ErrorState } from "./page-states";
 import { isMarkdownFile } from "../lib/files";
 import { client } from "../api/client";
+import { errorMessage } from "../lib/mutation-error";
 
 /**
  * The EXACT iframe sandbox token set for the HTML preview. The server ships the
@@ -175,7 +175,7 @@ export function FileViewer({
 
   function renderBody() {
     if (isLoading) return <LoadingState />;
-    if (error) return <ErrorState message={getErrorMessage(error)} />;
+    if (error) return <ErrorState message={errorMessage(error)} />;
     if (!file?.preview_url) {
       return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;
     }

@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -24,6 +23,7 @@ import { LoadingState, ErrorState, EmptyState } from "../../components/page-stat
 import { formatDateField } from "../../lib/format-date";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { errorMessage } from "../../lib/mutation-error";
 
 // Keyed on the status enum the spec declares, not on `string`: a status added
 // to `EeBillingAccount.status` without an i18n key fails to compile here
@@ -63,7 +63,7 @@ export function OrgSettingsBillingPage() {
   const canManageBilling = can("billing:manage");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState message={errorMessage(error)} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }
@@ -82,7 +82,7 @@ export function OrgSettingsBillingPage() {
   const firstUpgradeId = upgradeIds[0];
 
   const onMutationError = (err: unknown) => {
-    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
+    toast.error(errorMessage(err));
   };
 
   const handleManage = () => {
