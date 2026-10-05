@@ -21,7 +21,7 @@ import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
@@ -302,9 +302,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
-  if (error || !detail) {
-    return <Navigate to="/" replace />;
-  }
+  if (error || !detail) return <ResourceErrorState error={error} />;
 
   // A published version whose stored archive is unavailable EXISTS — redirecting
   // to the live page (what any other version failure does) would hide that it

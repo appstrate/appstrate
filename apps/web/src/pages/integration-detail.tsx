@@ -94,7 +94,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -1724,7 +1724,7 @@ export function IntegrationDetailPage() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={String(error)} />;
+  if (error) return <ResourceErrorState error={error} />;
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);

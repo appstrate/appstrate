@@ -18,7 +18,7 @@ import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ResourceErrorState } from "../components/page-states";
 import { RunOutcomeTab } from "../components/run-outcome-tab";
 import { RunExecutionTab } from "../components/run-execution-tab";
 import { RunConfigurationTab } from "../components/run-configuration-tab";
@@ -232,7 +232,7 @@ export function RunDetailPage() {
 
   if (isLoading) return <LoadingState />;
 
-  if (error || !run) return <ErrorState message={error?.message} />;
+  if (error || !run) return <ResourceErrorState error={error} />;
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";

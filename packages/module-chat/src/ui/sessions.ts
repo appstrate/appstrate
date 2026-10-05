@@ -161,6 +161,12 @@ interface StoredMessage {
 interface SessionHistory {
   messages: UIMessage[];
   skills: ChatSkillSelection;
+  /**
+   * The server has no such session for this caller. Expected for a conversation
+   * that has not sent its first turn; on a deep link it means deleted, or
+   * someone else's — the route answers 404 for both.
+   */
+  notFound?: true;
 }
 
 /**
@@ -177,7 +183,9 @@ export async function loadHistory(
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (res.status === 404) return { messages: [], skills: DEFAULT_SKILL_SELECTION };
+  if (res.status === 404) {
+    return { messages: [], skills: DEFAULT_SKILL_SELECTION, notFound: true };
+  }
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as {
     messages?: StoredMessage[];

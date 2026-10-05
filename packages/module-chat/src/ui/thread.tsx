@@ -16,6 +16,7 @@ import {
   AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
+  useAuiEvent,
   useAuiState,
   type ReasoningGroupComponent,
   type ReasoningMessagePartComponent,
@@ -241,6 +242,24 @@ function SentAttachmentChip() {
   return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
 }
 
+/**
+ * Why a picked file did not become a chip. The adapter refuses an over-cap file
+ * before any attachment exists, so assistant-ui's event is the only trace of it:
+ * without a listener the file picker closes on nothing.
+ */
+function ComposerAttachmentError() {
+  const [message, setMessage] = React.useState<string | null>(null);
+  useAuiEvent("composer.attachmentAddError", (event) => setMessage(event.message));
+  useAuiEvent("composer.attachmentAdd", () => setMessage(null));
+  useAuiEvent("composer.send", () => setMessage(null));
+  if (!message) return null;
+  return (
+    <p role="alert" className="text-destructive text-xs">
+      {message}
+    </p>
+  );
+}
+
 function Composer({ slot }: { slot?: React.ReactNode }) {
   const { can, t } = useChatHost();
   // Sending, stopping and attaching all guard on `chat:write`.
@@ -261,6 +280,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
       <div className="flex flex-wrap gap-1.5 empty:hidden">
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
+      <ComposerAttachmentError />
       <ComposerPrimitive.Input
         rows={1}
         autoFocus

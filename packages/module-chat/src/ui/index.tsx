@@ -38,6 +38,7 @@ import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
   ChatHostProvider,
+  useChatHost,
   SelectConversationProvider,
 } from "./runtime-context.ts";
 import type {
@@ -437,6 +438,7 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
+  const { t } = useChatHost();
   const spaceId = spaceIdFromHeaders(getHeaders);
   const history = useQuery({
     queryKey: sessionQueryKey(spaceId, id),
@@ -479,6 +481,15 @@ const Conversation = memo(function Conversation({
     [getHeaders, skills, chooseSkills, showPicker, canWrite, composerSlot],
   );
 
+  // Only a deep link loads history, so a missing session here was deleted or is
+  // not the caller's: say so instead of opening an empty chat under that URL.
+  if (persistedAtMount && history.data?.notFound) {
+    return (
+      <p className="text-muted-foreground flex h-full items-center justify-center px-4 text-center text-sm">
+        {t("conversation.unavailable")}
+      </p>
+    );
+  }
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
