@@ -34,10 +34,16 @@ import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
-import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
+import {
+  buildDiscoverBody,
+  discoveryFailureOutcome,
+  parsesAsUrl,
+  type DiscoveryState,
+} from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
+  modelFormRefusals,
   type ModelFormFields,
   type ModelFormSubmit,
 } from "@/lib/model-form-payload";
@@ -240,6 +246,8 @@ function ModelForm({
    */
   const dropEndpointBinding = () => {
     setCreatedCredentialId(null);
+    // What the refusal named is being answered: it must not outlive the edit.
+    clearErrors(["credentialId", "modelId"]);
     dropListing();
   };
 
@@ -330,8 +338,13 @@ function ModelForm({
             models: data.models,
             truncated: data.truncated,
           }),
-        onError: () =>
-          setDiscovery({ key, outcome: "request_failed", models: [], truncated: false }),
+        onError: (err) =>
+          setDiscovery({
+            key,
+            outcome: discoveryFailureOutcome(err),
+            models: [],
+            truncated: false,
+          }),
       },
     );
   };
@@ -404,13 +417,32 @@ function ModelForm({
     if (!overridable || parsesAsUrl(v)) return undefined;
     return t(v.trim() ? "validation.urlFormat" : "validation.required", { ns: "common" });
   };
-  // An empty id with no arrangement to type it in names the steps, not the field.
-  const modelIdValidate = (v: string) =>
-    v.trim()
-      ? undefined
-      : manual
-        ? t("validation.required", { ns: "common" })
-        : t("models.form.modelStepRequired");
+  const refusals = (modelId: string) =>
+    modelFormRefusals({
+      modelId,
+      manual,
+      isOauth,
+      credentialMissing:
+        !!selectedProvider &&
+        !selectedCredential &&
+        !createdCredentialId &&
+        (isOauth || !inlineApiKey.trim()),
+      offeredIds:
+        source === "catalog" && selectedProvider ? selectedProvider.models.map((m) => m.id) : null,
+      editedModelId: model?.modelId ?? null,
+    });
+  // Said on the key row, where it is answered.
+  const credentialValidate = () => {
+    const key = refusals("").credentialId;
+    return key ? t(key) : undefined;
+  };
+  const modelIdValidate = (v: string) => {
+    const key = refusals(v).modelId;
+    if (!key) return undefined;
+    return key === "validation.required"
+      ? t(key, { ns: "common" })
+      : t(key, { provider: selectedProvider?.displayName });
+  };
 
   const modelIdError =
     showError("modelId") && errors.modelId?.message ? (
@@ -424,7 +456,10 @@ function ModelForm({
   );
 
   return (
-    <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
+    // `noValidate`: the fields answer in the form's own words, not the browser's.
+    <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
+      {/* The credential is set, not typed: registered so its absence refuses the save. */}
+      <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
       <ProviderPicker
         id="mdl-provider"
         registry={registry}

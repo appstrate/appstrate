@@ -19,6 +19,7 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { withConnectionOverride } from "../lib/connection-set";
+import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
@@ -100,6 +101,10 @@ export function RunOverridesPanel({
   // users can still clear an override and see which model will be resolved.
   const orgDefaultModel = orgModels?.find((model) => model.is_default);
   const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
+  // "Inherit" is the absence of an override, so it names what then applies:
+  // the agent's own setting, and the organization default only below it.
+  const inheritedModel = inheritedEntry(orgModels, persistedModelId, orgDefaultModel);
+  const inheritedProxy = inheritedEntry(orgProxies, persistedProxyId, orgDefaultProxy);
 
   const setModel = (next: string) => {
     const nextModelId = next === INHERIT ? persistedModelId : next;
@@ -136,11 +141,10 @@ export function RunOverridesPanel({
     }
   };
 
-  const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
+  const modelSelectValue = value.model_id_override ?? INHERIT;
   const selectedModel =
-    orgModels?.find((model) => model.id === (value.model_id_override ?? persistedModelId)) ??
-    orgDefaultModel;
-  const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
+    orgModels?.find((model) => model.id === value.model_id_override) ?? inheritedModel;
+  const proxySelectValue = value.proxy_id_override ?? INHERIT;
 
   return (
     <div className="space-y-4">
@@ -157,13 +161,13 @@ export function RunOverridesPanel({
                   user who wants to clear one. */}
               <SelectItem value={INHERIT}>
                 <span className="inline-flex items-center gap-1.5">
-                  {orgDefaultModel
+                  {inheritedModel
                     ? t("run.overrides.modelInheritWithDefault", {
                         ns: "agents",
-                        name: orgDefaultModel.label,
+                        name: inheritedModel.label,
                       })
                     : t("run.overrides.modelInherit", { ns: "agents" })}
-                  {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
+                  {inheritedModel && <ModelUnselectableNote model={inheritedModel} />}
                 </span>
               </SelectItem>
               {orgModels.map((m) => {
@@ -214,12 +218,17 @@ export function RunOverridesPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={INHERIT}>
-                {orgDefaultProxy
+                {persistedProxyId === NONE
                   ? t("run.overrides.proxyInheritWithDefault", {
                       ns: "agents",
-                      name: orgDefaultProxy.label,
+                      name: t("run.overrides.proxyNone", { ns: "agents" }),
                     })
-                  : t("run.overrides.proxyInherit", { ns: "agents" })}
+                  : inheritedProxy
+                    ? t("run.overrides.proxyInheritWithDefault", {
+                        ns: "agents",
+                        name: inheritedProxy.label,
+                      })
+                    : t("run.overrides.proxyInherit", { ns: "agents" })}
               </SelectItem>
               <SelectItem value={NONE}>{t("run.overrides.proxyNone", { ns: "agents" })}</SelectItem>
               {orgProxies.map((p) => (

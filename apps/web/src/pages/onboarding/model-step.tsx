@@ -36,6 +36,8 @@ export function OnboardingModelStep() {
   if (!orgId) return null;
 
   const hasModels = models && models.length > 0;
+  // The same test `OnboardingQuickConnect` renders on.
+  const hasQuickConnect = (registry ?? []).some((p) => p.authMode === "oauth2");
 
   return (
     <OnboardingLayout
@@ -89,19 +91,21 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        {/* "Or add manually" — separator + secondary CTA. Always visible,
-            but downplayed: the dashed border + ghost button signal it as
-            the fallback path. */}
-        <div className="relative my-1">
-          <div className="border-border absolute inset-0 flex items-center">
-            <div className="w-full border-t border-dashed" />
+        {/* "Or add manually" — separator before the secondary CTA. Only where
+            something sits above it: with no quick-connect provider and no model
+            yet, the button is the single path and "or" would answer nothing. */}
+        {(hasModels || hasQuickConnect) && (
+          <div className="relative my-1">
+            <div className="border-border absolute inset-0 flex items-center">
+              <div className="w-full border-t border-dashed" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-background text-muted-foreground px-2 text-xs">
+                {t("onboarding.modelSeed.manualSeparator")}
+              </span>
+            </div>
           </div>
-          <div className="relative flex justify-center">
-            <span className="bg-background text-muted-foreground px-2 text-xs">
-              {t("onboarding.modelSeed.manualSeparator")}
-            </span>
-          </div>
-        </div>
+        )}
 
         <Button
           variant="outline"

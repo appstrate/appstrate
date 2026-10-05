@@ -1361,6 +1361,31 @@ describe("Models API", () => {
       expect(delCred.status).toBe(204);
     });
 
+    it("refuses a disabled model as the org default — 409 model_disabled", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        enabled: false,
+      });
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_disabled");
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBeNull();
+    });
+
     it("refuses a dead model as the org default — 409 model_needs_reconnection", async () => {
       const { model } = await seedDeadPair("Dead default candidate");
 

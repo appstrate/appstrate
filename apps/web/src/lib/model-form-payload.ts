@@ -144,6 +144,42 @@ export interface ModelFormPayloadInput {
 
 type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
 
+/**
+ * What refuses a save before anything is sent: one i18n key per field, in that
+ * field's own namespace (`modelId: "validation.required"` is `common`'s).
+ */
+export function modelFormRefusals(input: {
+  modelId: string;
+  /** The id is being typed, not picked from a list. */
+  manual: boolean;
+  isOauth: boolean;
+  /** A provider is picked and nothing opens its endpoint yet. */
+  credentialMissing: boolean;
+  /**
+   * The ids a catalog provider binds — the server refuses any other — or
+   * `null` where ids are free-form (gateway, live search, discovery).
+   */
+  offeredIds: readonly string[] | null;
+  /** The edited row's id: an edit that keeps it is not a rebind, so not re-judged. */
+  editedModelId: string | null;
+}): { credentialId: string | null; modelId: string | null } {
+  const credentialId = !input.credentialMissing
+    ? null
+    : input.isOauth
+      ? "models.form.connectionRequired"
+      : "models.form.apiKeyRequired";
+  const id = input.modelId.trim();
+  if (!id) {
+    if (input.manual) return { credentialId, modelId: "validation.required" };
+    // No arrangement to type an id in: name the steps — unless the key row
+    // already says which one is missing.
+    return { credentialId, modelId: credentialId ? null : "models.form.modelStepRequired" };
+  }
+  const outsideOffer =
+    input.offeredIds !== null && id !== input.editedModelId && !input.offeredIds.includes(id);
+  return { credentialId, modelId: outsideOffer ? "models.form.modelNotOffered" : null };
+}
+
 type ModelFormPayloadResult = { ok: true; data: ModelFormData } | CredentialFailure;
 
 /** The credential half of any create: an existing selection, or the inline key to create first. */

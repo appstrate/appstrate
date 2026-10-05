@@ -244,6 +244,22 @@ describe("Model Provider Keys API", () => {
       const body = (await res.json()) as any;
       expect(body.label).toStartWith("10.255.255.9:9 · ");
     });
+
+    it("refuses a base URL that is not http(s)", async () => {
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          api_key: "sk-local",
+          base_url_override: "ftp://example.com/v1",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.errors[0].field).toBe("base_url_override");
+    });
   });
 
   describe("wire casing (snake_case family)", () => {

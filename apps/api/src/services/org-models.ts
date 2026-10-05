@@ -669,10 +669,18 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // client's reach here. Refuse it: the pointer feeds every run and chat, and
   // resolution of a dead model fails at inference time. The check lives in this
   // service — NOT in `createDefaultPointer`, which is shared byte-for-byte with
-  // `org-proxies` and must stay generic. `modelNeedsReconnection` is the single
-  // predicate (system ids, unknown rows and non-UUIDs all answer false, so the
-  // pointer helper below still owns the 404).
-  if (modelDbId !== null && (await modelNeedsReconnection(orgId, modelDbId))) {
+  // `org-proxies` and must stay generic. System ids, unknown rows and non-UUIDs
+  // carry no binding, so the pointer helper below still owns the 404.
+  const row = modelDbId === null ? undefined : await loadModelBinding(orgId, modelDbId);
+  // A switched-off row is skipped by `resolveModel`: as the default it would
+  // read "default" in the list while every run resolved something else.
+  if (row && !row.enabled) {
+    throw conflict(
+      "model_disabled",
+      "A disabled model cannot be the default model. Enable it, or pick another model.",
+    );
+  }
+  if (row && (await credentialIsDeadButListed(orgId, row.credentialId))) {
     throw conflict(
       "model_needs_reconnection",
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
@@ -1000,26 +1008,39 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
  * it — and the actionable advice for it is "enable it", not "reconnect".
  */
 export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
-  if (isSystemModel(modelDbId)) return false;
+  const row = await loadModelBinding(orgId, modelDbId);
+  return !!row && row.enabled && (await credentialIsDeadButListed(orgId, row.credentialId));
+}
 
-  let row: { credentialId: string; enabled: boolean } | undefined;
+/** A custom row's credential and switch — undefined for a system id, an unknown row or a non-UUID. */
+async function loadModelBinding(
+  orgId: string,
+  modelDbId: string,
+): Promise<{ credentialId: string; enabled: boolean } | undefined> {
+  if (isSystemModel(modelDbId)) return undefined;
   try {
-    [row] = await db
+    const [row] = await db
       .select({ credentialId: orgModels.credentialId, enabled: orgModels.enabled })
       .from(orgModels)
       .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
       .limit(1);
+    return row;
   } catch (err) {
     // Same non-UUID cast hazard `loadModel` guards against → treat as "no".
-    if (isInvalidTextRepresentation(err)) return false;
+    if (isInvalidTextRepresentation(err)) return undefined;
     throw err;
   }
-  if (!row || !row.enabled || !row.credentialId) return false;
+}
 
-  // The list's two tests, in its order: dead for inference, but still
-  // renderable. See the doc block for why the second one is not redundant.
-  if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
-  return (await loadCredentialRow(row.credentialId, orgId)) !== null;
+/**
+ * The list's two tests, in its order: dead for inference, but still
+ * renderable. See {@link modelNeedsReconnection} for why the second one is not
+ * redundant.
+ */
+async function credentialIsDeadButListed(orgId: string, credentialId: string): Promise<boolean> {
+  if (!credentialId) return false;
+  if ((await loadInferenceCredentials(orgId, credentialId)) !== null) return false;
+  return (await loadCredentialRow(credentialId, orgId)) !== null;
 }
 
 /**

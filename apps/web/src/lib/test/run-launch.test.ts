@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { launchFromOptions, retryLaunch } from "../run-launch.ts";
+import { inheritedEntry, launchFromOptions, retryLaunch } from "../run-launch.ts";
 
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {
@@ -171,5 +171,20 @@ describe("launchFromOptions", () => {
         overrides: { model_id_override: "", proxy_id_override: "" },
       }),
     ).toEqual({ version: "draft" });
+  });
+});
+
+describe("inheritedEntry", () => {
+  const m1 = { id: "m1" };
+  const m2 = { id: "m2" };
+
+  it("names the agent's own setting ahead of the organization default", () => {
+    expect(inheritedEntry([m1, m2], "m2", m1)).toBe(m2);
+  });
+
+  it("falls to the organization default with no setting, or one whose entry is gone", () => {
+    expect(inheritedEntry([m1, m2], null, m1)).toBe(m1);
+    expect(inheritedEntry([m1], "deleted", m1)).toBe(m1);
+    expect(inheritedEntry(undefined, "m2", undefined)).toBeUndefined();
   });
 });

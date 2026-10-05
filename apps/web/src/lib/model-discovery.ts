@@ -10,11 +10,12 @@ import type {
   DiscoveredModelsResponse,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
+import { ApiError } from "../api/errors";
 
 export interface DiscoveryState {
   /** Identifies the endpoint+key the listing came from — see `discoveryKey`. */
   key: string;
-  outcome: DiscoveredModelsResponse["outcome"] | "request_failed";
+  outcome: DiscoveredModelsResponse["outcome"] | "request_failed" | "throttled";
   models: DiscoveredModel[];
   /** The endpoint serves more than `models` lists — a cap stopped the read. */
   truncated: boolean;
@@ -28,6 +29,8 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
       return "models.form.discoverBlockedUrl";
     case "request_failed":
       return "models.form.discoverRequestFailed";
+    case "throttled":
+      return "models.form.discoverThrottled";
     case "rate_limited":
       return "models.form.discoverRateLimited";
     case "unreachable":
@@ -59,10 +62,20 @@ export function buildDiscoverBody(input: {
   };
 }
 
+/**
+ * A request the platform refused before it reached the endpoint. Its own rate
+ * limit is named apart: `rate_limited` is the ENDPOINT's 429, and waiting is
+ * the only fix for this one.
+ */
+export function discoveryFailureOutcome(err: unknown): "throttled" | "request_failed" {
+  return err instanceof ApiError && err.status === 429 ? "throttled" : "request_failed";
+}
+
+/** An endpoint is reached over HTTP(S): any other scheme parses and then serves nothing. */
 export function parsesAsUrl(value: string): boolean {
   try {
-    new URL(value.trim());
-    return true;
+    const { protocol } = new URL(value.trim());
+    return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
   }

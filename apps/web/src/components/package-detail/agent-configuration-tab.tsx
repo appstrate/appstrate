@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
@@ -294,10 +295,10 @@ function ModelSectionEditor({
           size="sm"
           disabled={setAgentModel.isPending}
           onClick={() =>
-            setAgentModel.mutate({
-              modelId,
-              generation: Object.keys(generation).length > 0 ? generation : null,
-            })
+            setAgentModel.mutate(
+              { modelId, generation: Object.keys(generation).length > 0 ? generation : null },
+              { onSuccess: () => toast.success(t("models.agent.saved")) },
+            )
           }
         >
           {t("models.generation.save")}

@@ -11,6 +11,7 @@ import { describe, it, expect } from "bun:test";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
+  modelFormRefusals,
   toCreateModelBody,
   type ModelFormFields,
   type ModelFormModelEntry,
@@ -620,5 +621,56 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
       field: "credentialId",
       messageKey: "models.form.apiKeyRequired",
     });
+  });
+});
+
+describe("modelFormRefusals", () => {
+  const base = {
+    modelId: "",
+    manual: false,
+    isOauth: false,
+    credentialMissing: false,
+    offeredIds: null,
+    editedModelId: null,
+  };
+
+  it("names the missing key on the key row, not the endpoint steps", () => {
+    expect(modelFormRefusals({ ...base, credentialMissing: true })).toEqual({
+      credentialId: "models.form.apiKeyRequired",
+      modelId: null,
+    });
+    expect(modelFormRefusals({ ...base, credentialMissing: true, isOauth: true })).toEqual({
+      credentialId: "models.form.connectionRequired",
+      modelId: null,
+    });
+  });
+
+  it("names the model step once the endpoint is answered and no id is set", () => {
+    expect(modelFormRefusals(base)).toEqual({
+      credentialId: null,
+      modelId: "models.form.modelStepRequired",
+    });
+    expect(modelFormRefusals({ ...base, manual: true }).modelId).toBe("validation.required");
+  });
+
+  it("refuses a typed id a catalog provider does not offer", () => {
+    const catalog = { ...base, manual: true, offeredIds: ["deepseek-v4-flash"] };
+    expect(modelFormRefusals({ ...catalog, modelId: "deepseek-chat" }).modelId).toBe(
+      "models.form.modelNotOffered",
+    );
+    expect(modelFormRefusals({ ...catalog, modelId: " deepseek-v4-flash " }).modelId).toBeNull();
+  });
+
+  it("leaves a free-form provider's id and an edit's unchanged id alone", () => {
+    expect(modelFormRefusals({ ...base, manual: true, modelId: "anything" }).modelId).toBeNull();
+    expect(
+      modelFormRefusals({
+        ...base,
+        manual: true,
+        modelId: "retired-id",
+        offeredIds: ["current-id"],
+        editedModelId: "retired-id",
+      }).modelId,
+    ).toBeNull();
   });
 });

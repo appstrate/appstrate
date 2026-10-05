@@ -46,6 +46,9 @@ import {
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 
+/** `z.httpUrl()` also demands a domain name: a self-hosted endpoint is often an IP or `localhost`. */
+const HTTP_PROTOCOL = /^https?$/;
+
 export const createSchema = z
   .object({
     /**
@@ -58,9 +61,13 @@ export const createSchema = z
     label: z.string().min(1).optional(),
     providerId: z.string().min(1, "providerId is required"),
     api_key: z.string().min(1, "api_key is required"),
-    /** Required only for providers with `baseUrlOverridable: true` (the custom-endpoint entries). */
+    /**
+     * Required only for providers with `baseUrlOverridable: true` (the
+     * custom-endpoint entries). HTTP(S) only: any other scheme would be stored
+     * and then refused by every call made against it.
+     */
     base_url_override: z
-      .url({ error: "base_url_override must be a valid URL" })
+      .url({ protocol: HTTP_PROTOCOL, error: "base_url_override must be a valid http(s) URL" })
       .optional()
       .nullable(),
   })
@@ -84,7 +91,7 @@ export const discoverSchema = z
     credentialId: z.uuid().optional(),
     providerId: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
-    base_url_override: z.url().optional(),
+    base_url_override: z.url({ protocol: HTTP_PROTOCOL }).optional(),
   })
   .strict();
 
@@ -176,7 +183,7 @@ async function resolveDiscoverTarget(
 export const testInlineSchema = z
   .object({
     providerId: z.string().min(1),
-    base_url: z.url(),
+    base_url: z.url({ protocol: HTTP_PROTOCOL }),
     api_key: z.string().optional(),
     credentialId: z.string().optional(),
   })

@@ -100,3 +100,16 @@ export function launchFromOptions({
     ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
   };
 }
+
+/**
+ * What a launch with no override resolves to, for the "Inherit" row to name:
+ * the agent's own setting, else the organization default. A setting whose
+ * entry is gone falls to the default too, as the server's resolution does.
+ */
+export function inheritedEntry<T extends { id: string }>(
+  entries: readonly T[] | undefined,
+  agentSettingId: string | null,
+  orgDefault: T | undefined,
+): T | undefined {
+  return entries?.find((entry) => entry.id === agentSettingId) ?? orgDefault;
+}
