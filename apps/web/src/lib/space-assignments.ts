@@ -22,6 +22,14 @@ export function toSpaceAssignments(drafts: AssignmentDraft[]): SpaceAssignment[]
     .map((d) => ({ spaceId: d.spaceId, ...spaceRoleAssignment(d.role) }));
 }
 
+/**
+ * The spaces a deferred grant may name: a personal space belongs to one member
+ * and is never assignable, so the API refuses one in `space_assignments` (400).
+ */
+export function assignableSpaces<T extends { personal: boolean }>(spaces: readonly T[]): T[] {
+  return spaces.filter((space) => !space.personal);
+}
+
 /** `admin` already runs every space: the API refuses a non-empty list for it (400). */
 export function assignmentsFor(
   role: AssignableOrgRole,

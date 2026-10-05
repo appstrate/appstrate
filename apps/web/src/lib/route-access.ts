@@ -19,6 +19,12 @@ type Permission = CorePermission | (string & {});
 type RouteAccess = {
   /** Module feature flag (`features.<key>`) without which the route does not exist. */
   readonly feature?: string;
+  /**
+   * The route does not exist in a personal space: the server refuses there every
+   * write the page is for (409 `personal_space_*`, RBAC spec §3.6), whatever the
+   * owner's permissions.
+   */
+  readonly teamSpaceOnly?: true;
 } & (
   | {
       readonly anyOf: readonly Permission[];
@@ -106,7 +112,11 @@ export const ROUTE_ACCESS = {
     operations: ["getChatSession"],
   },
 
-  "/end-users": { anyOf: ["end-users:read"], operations: ["listEndUsers"] },
+  "/end-users": {
+    teamSpaceOnly: true,
+    anyOf: ["end-users:read"],
+    operations: ["listEndUsers"],
+  },
 
   "/org-settings": { open: "layout only: the index redirects to general, every tab gates itself" },
   // The org read asks membership only; its handler filters the member list on `members:read`.
@@ -134,10 +144,15 @@ export const ROUTE_ACCESS = {
   "/org-settings/space/general": { anyOf: ["space-settings:write"], operations: ["updateSpace"] },
   // An inviter who may not list members still reaches the add-member form.
   "/org-settings/space/members": {
+    teamSpaceOnly: true,
     anyOf: ["space-members:read", "space-members:invite"],
     operations: ["listSpaceMembers", "addSpaceMember"],
   },
-  "/org-settings/space/api-keys": { anyOf: ["api-keys:read"], operations: ["listApiKeys"] },
+  "/org-settings/space/api-keys": {
+    teamSpaceOnly: true,
+    anyOf: ["api-keys:read"],
+    operations: ["listApiKeys"],
+  },
   "/org-settings/space/auth": {
     feature: "oidc",
     anyOf: ["space-settings:write"],
@@ -145,6 +160,7 @@ export const ROUTE_ACCESS = {
   },
   "/org-settings/space/oauth": {
     feature: "oidc",
+    teamSpaceOnly: true,
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
@@ -152,16 +168,21 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
-/** `absent`: the module behind the route is not loaded, so the route does not exist. */
+/**
+ * `absent`: the route does not exist here — its module is not loaded, or it is
+ * a team-space route and the current space is personal.
+ */
 type RouteVerdict = "absent" | "granted" | "denied";
 
 export function routeVerdict(
   path: RoutePath,
   can: (permission: Permission) => boolean,
   features: Readonly<Record<string, boolean | undefined>>,
+  inPersonalSpace: boolean,
 ): RouteVerdict {
   const access: RouteAccess = ROUTE_ACCESS[path];
   if (access.feature && !features[access.feature]) return "absent";
+  if (access.teamSpaceOnly && inPersonalSpace) return "absent";
   if ("open" in access) return "granted";
   return access.anyOf.some(can) ? "granted" : "denied";
 }

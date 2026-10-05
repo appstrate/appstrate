@@ -11,13 +11,13 @@ import { routeOf } from "../lib/route-match";
  * page `RouteGate` opens. A URL outside every declaration is not gated here.
  */
 export function useCanReach(): (target: string) => boolean {
-  const { can } = usePermissions();
+  const { can, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   return useCallback(
     (target: string) => {
       const route = routeOf(target);
-      return !route || routeVerdict(route, can, features) === "granted";
+      return !route || routeVerdict(route, can, features, inPersonalSpace) === "granted";
     },
-    [can, features],
+    [can, features, inPersonalSpace],
   );
 }

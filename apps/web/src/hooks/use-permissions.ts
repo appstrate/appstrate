@@ -103,7 +103,13 @@ export function usePermissions() {
   const enterableSpaceExists = spaces?.some((s) => s.access === "member") ?? false;
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
-  return { can, ready, orgRole: currentOrg?.role ?? null };
+  return {
+    can,
+    ready,
+    orgRole: currentOrg?.role ?? null,
+    /** The current space is the caller's personal one (`teamSpaceOnly` routes are absent there). */
+    inPersonalSpace: space?.personal ?? false,
+  };
 }
 
 /**

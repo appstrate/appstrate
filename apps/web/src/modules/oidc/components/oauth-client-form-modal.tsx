@@ -26,6 +26,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "@/hooks/use-roles";
 import {
   hasUnavailableAssignments,
+  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -80,7 +81,7 @@ function OAuthClientFormBody({
   // Either catalog feeds the org signup policy only.
   const spacesQuery = useSpaces(isOrgLevel);
   const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
-  const spaces = spacesQuery.data ?? [];
+  const spaces = assignableSpaces(spacesQuery.data ?? []);
   const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
   const catalogError = spacesQuery.error || rolesQuery.error;
   const isSpaceLevel = formLevel === "space";

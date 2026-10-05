@@ -47,10 +47,7 @@ export function OrgSettingsLayout() {
       to: "/org-settings/space/members",
       icon: Users,
       label: t("spaceMembers.tabTitle"),
-      // A personal space takes no members at all (RBAC spec §3.6): the write
-      // routes answer 409 and the list would only ever hold its owner, so the
-      // tab is not there rather than there and empty.
-      show: !space?.personal && canReach("/org-settings/space/members"),
+      show: canReach("/org-settings/space/members"),
     },
     {
       to: "/org-settings/space/api-keys",
