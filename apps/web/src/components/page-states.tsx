@@ -2,8 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
-import type { LucideIcon } from "lucide-react";
+import { SearchX, type LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { errorMessage } from "../lib/mutation-error";
+import { ApiError } from "../api/errors";
 
 export function LoadingState() {
   return (
@@ -21,6 +23,26 @@ export function ErrorState({ message }: { message?: string }) {
       {message && <p className="mt-1 text-sm">{message}</p>}
     </div>
   );
+}
+
+/**
+ * A detail page whose resource could not be read. The API answers 404 for an id
+ * that does not exist and for one the caller may not see alike (and 403 where
+ * hiding it is pointless), so both get one panel that says so — never a silent
+ * redirect, a blank page or the server's English `detail`.
+ */
+export function ResourceErrorState({ error }: { error: unknown }) {
+  const { t } = useTranslation();
+  if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        message={t("error.resourceUnavailable")}
+        hint={t("error.resourceUnavailableHint")}
+      />
+    );
+  }
+  return <ErrorState message={error ? errorMessage(error) : undefined} />;
 }
 
 export function EmptyState({

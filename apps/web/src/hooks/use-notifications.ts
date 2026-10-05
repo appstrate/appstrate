@@ -88,9 +88,11 @@ function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClien
   qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
+/** Best-effort, fired on the way to the run: a failure leaves the item unread, which is true. */
 export function useMarkRead() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/{id}/read", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }
@@ -103,6 +105,8 @@ export function useMarkRead() {
 export function useMarkReadByRun() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/read/{runId}", {
+    // Fired from an effect, never by the user: nothing to report to them.
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }

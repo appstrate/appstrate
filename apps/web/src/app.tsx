@@ -439,6 +439,7 @@ function BootScreen() {
 
 function MainLayout() {
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
+  const { pathname } = useLocation();
   useSpaceResolver();
 
   return (
@@ -459,7 +460,11 @@ function MainLayout() {
             pages a persona is precisely there to provoke. */}
         <ViewAsBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <Outlet />
+          {/* A page that crashes on render takes only itself down: the sidebar
+              and the header stay, and navigating away clears the error. */}
+          <ErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </SidebarInset>
     </SidebarProvider>

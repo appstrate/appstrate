@@ -18,7 +18,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
@@ -54,7 +54,7 @@ export function ScheduleDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error?.message} />;
+  if (error || !schedule) return <ResourceErrorState error={error} />;
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;

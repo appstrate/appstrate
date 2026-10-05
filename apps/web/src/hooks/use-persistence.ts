@@ -24,7 +24,6 @@ import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { onMutationError } from "../lib/mutation-error";
 import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
 
@@ -136,6 +135,5 @@ export function useDeletePinnedSlot(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
-    onError: onMutationError,
   });
 }

@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -24,7 +23,7 @@ import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { toast } from "sonner";
+import { hasFullOrgAccess } from "../../lib/org-role";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 import { errorMessage } from "../../lib/mutation-error";
 
@@ -77,17 +76,12 @@ export function OrgSettingsMembersPage() {
     void invalidateIntegrationQueries(queryClient);
   };
 
-  const toastMemberError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: toastMemberError,
   });
 
   const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,
-    onError: toastMemberError,
   });
 
   if (isLoading) return <LoadingState />;
@@ -259,6 +253,11 @@ export function OrgSettingsMembersPage() {
                   ),
                   revokesAccess(roleChange.from, roleChange.role)
                     ? t("orgSettings.demotionUnsharesConnections")
+                    : "",
+                  // A promotion deleted the explicit space roles (RBAC spec
+                  // §3.2), so the demotion restores none of them.
+                  hasFullOrgAccess(roleChange.from) && !hasFullOrgAccess(roleChange.role)
+                    ? t("orgSettings.demotionRestoresNoSpaceRole")
                     : "",
                 ]
                   .filter(Boolean)

@@ -15,7 +15,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { $api, client } from "../api/client";
-import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateSchedules } from "./use-schedules";
 
@@ -62,7 +61,6 @@ export function useDisconnectIntegrationConnection() {
       void invalidateIntegrationQueries(qc);
     },
     // `connection_pinned` while an admin pin or the space default names it.
-    onError: onMutationError,
   });
 }
 
@@ -107,6 +105,5 @@ export function useUpdateMeIntegrationConnection() {
       void invalidateIntegrationQueries(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
     },
-    onError: onMutationError,
   });
 }

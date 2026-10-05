@@ -10,7 +10,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   useBillingContact,
   useBillingContactKey,
@@ -115,8 +114,6 @@ export function BillingContactSection() {
           void queryClient.invalidateQueries({ queryKey: contactKey });
           toast.success(t("billingContact.saveSuccess"));
         },
-        onError: (err) =>
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

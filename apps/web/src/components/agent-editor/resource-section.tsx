@@ -122,7 +122,7 @@ export function ResourceSection({
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
   const upload = useUploadPackage(type);
-  const setActive = useSetPackageActive();
+  const setActive = useSetPackageActive({ errorHandledByCaller: true });
   const currentSpaceId = useCurrentSpaceId();
   // The tree's ONE activation verdict, the same one the library and the package
   // dropdown ask: the type's grant in THIS space, or owning it (RBAC §3.6).
@@ -196,8 +196,8 @@ export function ResourceSection({
         if (prev.some((e) => e.id === newId)) return prev;
         return [...prev, { id: newId, version: caretRange(newVersion) }];
       });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("error.unknown"));
+    } catch {
+      // Reported by the mutation cache.
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";

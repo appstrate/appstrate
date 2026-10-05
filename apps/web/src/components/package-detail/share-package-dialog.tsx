@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   Select,
   SelectContent,
@@ -344,7 +343,6 @@ export function SharePackageDialog({
                           },
                           {
                             onSuccess: () => toast.success(t("packages.shareRevoked")),
-                            onError: (error) => toast.error(getErrorMessage(error)),
                           },
                         )
                       }
@@ -402,7 +400,7 @@ function CoeditTab({
   // refusal does the talking.
   const { data: existing } = useSpaceMembers(homeSpaceId ?? "", open && mayInvite && mayRead);
   const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, open && mayInvite);
-  const addMember = useAddSpaceMember();
+  const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const [member, setMember] = useState("");
   const [role, setRole] = useState(DEFAULT_SPACE_ROLE_VALUE);
 

@@ -9,6 +9,7 @@ import { toAuthError, toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
+import { createSessionRefusedHandler, setSessionRefusedHandler } from "../lib/stale-authority";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -110,6 +111,25 @@ function initAuth() {
     clearSession();
   });
 }
+
+/**
+ * A 401 on an established session: the cookie expired, or the session was
+ * revoked from elsewhere. Only Better Auth's own "no user" signs out — unlike
+ * the boot path above, a profile that failed to load proves nothing here.
+ */
+setSessionRefusedHandler(
+  createSessionRefusedHandler({
+    hasSession: async () => {
+      const result = await authClient.getSession();
+      return result.error ? null : !!result.data?.user;
+    },
+    endSession: async () => {
+      // Same reason as in `syncAuth`: drop the dead cookie, not only the store.
+      await authClient.signOut().catch(() => {});
+      clearSession();
+    },
+  }),
+);
 
 /**
  * Start the session resync at boot rather than on the first `useAuth()`

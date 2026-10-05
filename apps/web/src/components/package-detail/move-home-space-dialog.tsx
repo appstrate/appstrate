@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { getErrorMessage } from "@appstrate/core/errors";
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -72,7 +71,6 @@ export function MoveHomeSpaceDialog({
           toast.success(t("packages.moveHomeDone", { space: destination.name }));
           close();
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
       },
     );
   };

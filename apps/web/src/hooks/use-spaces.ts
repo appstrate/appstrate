@@ -69,13 +69,17 @@ function useInvalidateSpaces() {
 
 export function useCreateSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/spaces", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateSpace() {
   const invalidate = useInvalidateSpaces();
   const qc = useQueryClient();
   return $api.useMutation("patch", "/api/spaces/{id}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       invalidate();
       // Closing the space unshares the connections of owners it leaves without access.
@@ -86,17 +90,24 @@ export function useUpdateSpace() {
 
 export function useDeleteSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("delete", "/api/spaces/{id}", { onSuccess: invalidate });
+  return $api.useMutation("delete", "/api/spaces/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 /** The transfer: an orphaned personal space becomes a team space. */
 export function useConvertSpaceToTeam() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/spaces/{id}/convert-to-team", {
+    onSuccess: invalidate,
+  });
 }
 
 /** Run the offboarding routine on one orphaned personal space immediately. */
 export function useSweepPersonalSpace() {
   const invalidate = useInvalidateSpaces();
-  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/spaces/{id}/sweep-now", {
+    onSuccess: invalidate,
+  });
 }

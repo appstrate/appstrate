@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
 import { formatDateField } from "../lib/format-date";
@@ -101,11 +100,7 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
             });
           } else {
             deleteVersion.mutate(confirmState.version, {
-              onSuccess: () => setConfirmState(null),
-              onError: (err) => {
-                setConfirmState(null);
-                toast.error(getErrorMessage(err));
-              },
+              onSettled: () => setConfirmState(null),
             });
           }
         }}

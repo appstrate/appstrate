@@ -9,6 +9,7 @@ import { ScheduleForm } from "../components/schedule-form";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
+import { errorMessage } from "../lib/mutation-error";
 
 export function ScheduleCreatePage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -29,7 +30,7 @@ export function ScheduleCreatePage() {
   // all there is nothing to wait for, so the (empty) selector stays reachable.
   // A detail query that FAILED never lands either, so it gets the error
   // affordance rather than an endless spinner.
-  if (depsError) return <ErrorState message={depsError.message} />;
+  if (depsError) return <ErrorState message={errorMessage(depsError)} />;
   if (effectiveAgentId && !deps) return <LoadingState />;
 
   return (

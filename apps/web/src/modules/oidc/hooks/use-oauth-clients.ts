@@ -5,7 +5,7 @@
  * Mirrors the backend `/api/oauth/clients*` routes shipped in Stage 4.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
@@ -73,6 +73,7 @@ export function useCreateOAuthClient(level?: "org" | "space") {
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (data: {
       name: string;
       redirectUris: string[];
@@ -98,9 +99,13 @@ export function useCreateOAuthClient(level?: "org" | "space") {
   });
 }
 
-export function useUpdateOAuthClient() {
+/** `meta`: the edit form shows a refusal on itself; the list's toggles leave it to the cache. */
+export function useUpdateOAuthClient(meta?: MutationMeta) {
   const invalidate = useInvalidateOAuthClients();
-  return $api.useMutation("patch", "/api/oauth/clients/{clientId}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/oauth/clients/{clientId}", {
+    meta,
+    onSuccess: invalidate,
+  });
 }
 
 export function useDeleteOAuthClient() {

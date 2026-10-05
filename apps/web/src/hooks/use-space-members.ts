@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -23,9 +23,13 @@ export function useSpaceMembers(spaceId: string, enabled = true) {
   );
 }
 
-export function useAddSpaceMember() {
+/** `meta`: the add and share dialogs show a refusal on themselves; the role picker leaves it to the cache. */
+export function useAddSpaceMember(meta?: MutationMeta) {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("post", "/api/spaces/{id}/members", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/spaces/{id}/members", {
+    meta,
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateSpaceMember() {

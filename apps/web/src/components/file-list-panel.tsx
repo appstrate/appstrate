@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { runFileDirection, type RunFileDirection } from "../lib/files";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
@@ -193,7 +192,6 @@ export function FileListPanel({
           toast.success(t("keep.success"));
           onKept?.(file.id);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
 
@@ -208,7 +206,6 @@ export function FileListPanel({
           onDeleted?.(id);
           setPendingDelete(null);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };

@@ -94,7 +94,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -1693,7 +1693,7 @@ export function IntegrationDetailPage() {
   // a space by `POST /api/spaces/{id}/packages` and switched off by its
   // `DELETE`, exactly like an agent or a skill. The row and its settings
   // survive the deactivation — connections were never held there anyway.
-  const setActive = useSetPackageActive();
+  const setActive = useSetPackageActive({ errorHandledByCaller: true });
   const currentSpaceId = useCurrentSpaceId();
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
@@ -1724,7 +1724,7 @@ export function IntegrationDetailPage() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={String(error)} />;
+  if (error) return <ResourceErrorState error={error} />;
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
@@ -2064,8 +2064,6 @@ export function IntegrationDetailPage() {
         onConfirm={() =>
           deletePkg.mutate(packageId, {
             onSuccess: () => setConfirmDelete(false),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
           })
         }
       />

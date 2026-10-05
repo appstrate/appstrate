@@ -9,7 +9,6 @@ import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
-import { onMutationError } from "../lib/mutation-error";
 import {
   packageKeys,
   agentsKeys,
@@ -47,7 +46,6 @@ export function useSaveInputSettings(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
-    onError: onMutationError,
   });
 }
 
@@ -102,7 +100,6 @@ function useRunAgent(packageId: string) {
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },
-    onError: onMutationError,
   });
 }
 
@@ -157,6 +154,9 @@ export function useImportPackage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    // The import dialog answers every refusal itself: an overwrite or integrity
+    // confirmation, or the form error.
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       file,
       force,
@@ -209,7 +209,6 @@ export function useImportPackage() {
       }
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
   });
 }
 
@@ -217,6 +216,8 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    // The import dialog shows the refusal on its form.
+    meta: { errorHandledByCaller: true },
     mutationFn: async (url: string) => {
       const { data } = await client.POST("/api/packages/import-github", { body: { url } });
       return data!;
@@ -228,7 +229,6 @@ export function useImportFromGithub() {
       invalidatePackageFiles(qc);
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
   });
 }
 
@@ -246,7 +246,6 @@ export function useCancelRun() {
       qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -265,7 +264,6 @@ export function useDeleteAgentRuns(packageId: string) {
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -282,7 +280,6 @@ export function useDeleteAgent() {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       navigate("/");
     },
-    onError: onMutationError,
   });
 }
 
@@ -299,7 +296,6 @@ export function useDeleteMemory(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -315,7 +311,6 @@ export function useDeleteAllMemories(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -324,6 +319,8 @@ export function useDeleteAllMemories(packageId: string) {
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
+    // The editor shows the refusal inline (`use-editor-state.ts`).
+    meta: { errorHandledByCaller: true },
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
     // declared here that the server does not model is a 400 rather than a
@@ -368,7 +365,6 @@ export function useCreatePackage(type: PackageType) {
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -376,6 +372,8 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    // The editor shows the refusal inline (`use-editor-state.ts`).
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       etag,
       body,
@@ -411,6 +409,5 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
     },
-    onError: onMutationError,
   });
 }

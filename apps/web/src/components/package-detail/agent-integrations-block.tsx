@@ -95,7 +95,7 @@ function IntegrationConnectionCard({
 }: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const setActive = useSetPackageActive();
+  const setActive = useSetPackageActive({ errorHandledByCaller: true });
   const currentSpaceId = useCurrentSpaceId();
   // The tree's ONE activation verdict (`maySetPackageActive`), not a third
   // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).

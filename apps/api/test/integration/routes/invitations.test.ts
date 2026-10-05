@@ -57,7 +57,9 @@ describe("Invitations API", () => {
         headers: { Cookie: member.cookie },
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ role: "member" });
+      // `created` and not a role comparison: the role edited mid-flight differs
+      // from the one the page loaded, yet this is a brand-new member.
+      expect(await res.json()).toMatchObject({ role: "member", created: true });
       const memberships = await db
         .select()
         .from(spaceMembers)
@@ -148,6 +150,7 @@ describe("Invitations API", () => {
       expect(body.id).toBe(ctx.orgId);
       expect(body.slug).toBe("inviteorg");
       expect(body.role).toBe("admin");
+      expect(body.created).toBe(true);
       expect(body).not.toHaveProperty("success");
 
       // The membership row is actually written (not just a 200 body), with the
@@ -250,6 +253,12 @@ describe("Invitations API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.id).toBe(ctx.orgId);
+      // The answer names the role the member actually holds — it used to echo
+      // the invited one, which told the SPA (and the user) they were now admin.
+      expect(body.role).toBe("guest");
+      // What the accept page keys its "your role did not change" notice on.
+      expect(body.created).toBe(false);
+      expect(body.permissions).not.toContain("members:invite");
 
       // Exactly one membership row, role unchanged, invitation consumed.
       await assertDbCount(

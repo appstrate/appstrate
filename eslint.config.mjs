@@ -275,6 +275,17 @@ const AUTH_CLIENT_BAN = {
     "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
 };
 
+// The SPA never prints an error's raw message: for an `ApiError` it is the
+// server's English `detail`. `errorMessage` / `onMutationError`
+// (apps/web/src/lib/mutation-error.ts) name the refusal by its translated
+// code, and that module is the one place allowed to fall back to the raw text.
+const RAW_ERROR_MESSAGE_BAN = {
+  group: ["@appstrate/core/errors"],
+  importNames: ["getErrorMessage"],
+  message:
+    "Show errorMessage(err) (or toast through onMutationError) from lib/mutation-error — getErrorMessage prints the server's untranslated detail.",
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -659,9 +670,14 @@ export default tseslint.config(
     //      login redirect (`HostedAuthGate` / `useHostedAuthRedirect`) by
     //      calling `auth-client` directly — the bug class this exists to kill.
     //      Exempted for the seam file itself in the next block.
+    //   3. Translated-error guard: see `RAW_ERROR_MESSAGE_BAN`. Exempted for
+    //      `lib/mutation-error.ts`, which owns the fallback, two blocks down.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
+      "no-restricted-imports": [
+        "error",
+        { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN, RAW_ERROR_MESSAGE_BAN] },
+      ],
     },
   },
   {
@@ -671,7 +687,15 @@ export default tseslint.config(
     // block fully replaces the rule for this file.
     files: ["apps/web/src/hooks/use-auth.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN] }],
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, RAW_ERROR_MESSAGE_BAN] }],
+    },
+  },
+  {
+    // The one module that may print a raw message: the fallback of
+    // `errorMessage` for a failure that carries no code the SPA knows.
+    files: ["apps/web/src/lib/mutation-error.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
     },
   },
   {

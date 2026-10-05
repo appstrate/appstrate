@@ -91,6 +91,7 @@ export function OrgInvitationForm({
   };
   const onError = (error: unknown) => form.setError("root", { message: errorMessage(error) });
   const invite = $api.useMutation("post", "/api/orgs/{orgId}/members", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (_result, request) => {
       toast.success(t("orgSettings.inviteSuccess", { email: request.body.email }));
       complete();
@@ -99,6 +100,7 @@ export function OrgInvitationForm({
   });
 
   const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       toast.success(t("orgSettings.inviteUpdated"));
       complete();
