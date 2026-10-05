@@ -7,7 +7,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { readSession } from "../session-read.ts";
+import {
+  readSession,
+  rememberSignedIn,
+  sessionAfterBoot,
+  sessionExpected,
+} from "../session-read.ts";
 
 const USER = { id: "usr_1" };
 const PROFILE = { id: "usr_1", language: "fr" };
@@ -61,5 +66,61 @@ describe("readSession", () => {
       expect(await readSession(expected, r)).toBeNull();
       expect(r.calls).toEqual(["get-session", "profile", "sign-out"]);
     }
+  });
+});
+
+/** The slice of `Storage` the flag uses, over a map. */
+function memoryStorage(): Storage {
+  const items = new Map<string, string>();
+  return {
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, value: string) => void items.set(key, value),
+    removeItem: (key: string) => void items.delete(key),
+  } as Storage;
+}
+
+describe("the signed-in hint", () => {
+  it("expects no session from a browser that never held one", () => {
+    expect(sessionExpected(memoryStorage())).toBe(false);
+  });
+
+  it("expects one after a sign-in, and none after the session is torn down", () => {
+    const storage = memoryStorage();
+    rememberSignedIn(storage, true);
+    expect(sessionExpected(storage)).toBe(true);
+    rememberSignedIn(storage, false);
+    expect(sessionExpected(storage)).toBe(false);
+  });
+});
+
+describe("sessionAfterBoot", () => {
+  it("settles on the boot read when it established a user", async () => {
+    let resyncs = 0;
+    await sessionAfterBoot(
+      Promise.resolve(),
+      () => true,
+      async () => void resyncs++,
+    );
+    expect(resyncs).toBe(0);
+  });
+
+  it("resyncs, expecting a session, when the boot found none", async () => {
+    let resyncs = 0;
+    await sessionAfterBoot(
+      Promise.resolve(),
+      () => false,
+      async () => void resyncs++,
+    );
+    expect(resyncs).toBe(1);
+  });
+
+  it("surfaces the resync's refusal to the caller", async () => {
+    const refusal = new Error("no session");
+    const outcome = sessionAfterBoot(
+      Promise.resolve(),
+      () => false,
+      () => Promise.reject(refusal),
+    );
+    expect(outcome).rejects.toBe(refusal);
   });
 });

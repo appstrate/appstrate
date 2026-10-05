@@ -6,7 +6,12 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
-import { readSession } from "../lib/session-read";
+import {
+  readSession,
+  rememberSignedIn,
+  sessionAfterBoot,
+  sessionExpected,
+} from "../lib/session-read";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -31,21 +36,6 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 }
 
 /**
- * Set while this browser holds a session the app has seen, so the next boot
- * knows whether to expect one: the session cookie itself is httpOnly.
- */
-const SIGNED_IN_KEY = "appstrate_signed_in";
-
-/**
- * Whether the boot should expect a session. A stale `true` costs what every
- * boot used to cost (two requests answered 401 and a sign-out) and corrects
- * itself; a stale `false` costs a signed-in user one sequential round trip.
- */
-export function sessionExpected(): boolean {
-  return localStorage.getItem(SIGNED_IN_KEY) !== null;
-}
-
-/**
  * Centralized session teardown. Resets the auth store AND the org/space scope
  * stores (clearing their persisted localStorage ids) so a subsequent login
  * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
@@ -54,7 +44,7 @@ export function sessionExpected(): boolean {
  * requests after re-login.
  */
 function clearSession() {
-  localStorage.removeItem(SIGNED_IN_KEY);
+  rememberSignedIn(localStorage, false);
   authStore.setState({ user: null, profile: null, loading: false });
   orgStore.getState().setId(null);
   spaceStore.getState().setId(null);
@@ -67,9 +57,9 @@ function clearSession() {
 
 function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
-  profile: AuthProfile | null,
+  profile: AuthProfile,
 ) {
-  localStorage.setItem(SIGNED_IN_KEY, "1");
+  rememberSignedIn(localStorage, true);
   authStore.setState({
     user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },
     profile,
@@ -77,15 +67,17 @@ function setAuthenticatedUser(
   });
 }
 
+// Best-effort: a failing sign-out (network blip, cookie already gone) must not
+// strand the user — `clearSession` still resets the SPA stores.
+async function dropCookies() {
+  await authClient.signOut().catch(() => {});
+}
+
 async function syncAuth(expected: boolean) {
   const session = await readSession(expected, {
     getSession: async () => (await authClient.getSession()).data?.user ?? null,
     getProfile: fetchProfile,
-    // Best-effort: a failing sign-out (network blip, cookie already gone) must
-    // not strand the user — `clearSession` still resets the SPA stores.
-    dropCookies: async () => {
-      await authClient.signOut().catch(() => {});
-    },
+    dropCookies,
   });
   if (session) setAuthenticatedUser(session.user, session.profile);
   else clearSession();
@@ -93,7 +85,7 @@ async function syncAuth(expected: boolean) {
 
 let boot: Promise<void> | null = null;
 function initAuth(): Promise<void> {
-  boot ??= syncAuth(sessionExpected()).catch(() => {
+  boot ??= syncAuth(sessionExpected(localStorage)).catch(() => {
     clearSession();
   });
   return boot;
@@ -161,16 +153,28 @@ export async function refreshAuth(): Promise<void> {
   }
 }
 
+/** {@link sessionAfterBoot} for the OIDC callback, over this document's boot read. */
+export function requireBootSession(): Promise<void> {
+  return sessionAfterBoot(initAuth(), () => authStore.getState().user !== null, refreshAuth);
+}
+
 /**
- * Assert the session a full-page redirect was meant to leave behind (the OIDC
- * callback). The cookie was set before this document loaded, so its boot read
- * IS the read of that session and a second one would only repeat it. When the
- * boot found none it may not have been expecting one, so the resync that does
- * — and that drops the cookie that failed — runs then, and only then.
+ * Finish a sign-in the server just accepted. A session whose profile cannot be
+ * read is not one, exactly as at boot (`readSession`): a dead cookie still
+ * shadowing the new one would otherwise render the app signed in over requests
+ * that answer 401.
  */
-export async function requireBootSession(): Promise<void> {
-  await initAuth();
-  if (!authStore.getState().user) await refreshAuth();
+async function establishSession(user: Parameters<typeof setAuthenticatedUser>[0]) {
+  const profile = await fetchProfile();
+  if (!profile) {
+    await dropCookies();
+    clearSession();
+    throw new AuthRefreshError(
+      "no_session",
+      "Authentication did not complete — the session could not be established.",
+    );
+  }
+  setAuthenticatedUser(user, profile);
 }
 
 export function useAuth() {
@@ -187,10 +191,7 @@ export function useAuth() {
   const login = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });
     if (result.error) throw new Error(result.error.message);
-    const profile = await fetchProfile();
-    if (result.data?.user) {
-      setAuthenticatedUser(result.data.user, profile);
-    }
+    if (result.data?.user) await establishSession(result.data.user);
   }, []);
 
   const signup = useCallback(
@@ -212,8 +213,7 @@ export function useAuth() {
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
       }
-      const profile = await fetchProfile();
-      setAuthenticatedUser(result.data.user, profile);
+      await establishSession(result.data.user);
       return { emailVerificationRequired: false };
     },
     [],
@@ -237,6 +237,8 @@ export function useAuth() {
       // which starts a new OIDC login flow before the browser can follow
       // the logout redirect — effectively re-logging the user in.
       const { startOidcLogout } = await import("../modules/oidc/lib/oidc");
+      // Not a store: the page this lands on boots as a visitor's.
+      rememberSignedIn(localStorage, false);
       startOidcLogout(redirectTo);
     } else {
       await authClient.signOut();
