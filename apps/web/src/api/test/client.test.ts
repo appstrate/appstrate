@@ -51,6 +51,34 @@ describe("toApiError", () => {
     expect(error.details).toEqual([{ path: "name" }] as never);
   });
 
+  it("carries a code's own extension members as details", async () => {
+    const error = (await toApiError(
+      problem(
+        {
+          type: "about:blank",
+          title: "Conflict",
+          status: 409,
+          code: "role_in_use",
+          detail: "Role is still held",
+          request_id: "req_2",
+          member_count: 1,
+          pending_invitation_count: 0,
+        },
+        409,
+      ),
+    )) as ApiError;
+
+    expect(error.details).toEqual({ member_count: 1, pending_invitation_count: 0 });
+  });
+
+  it("leaves details undefined when the problem carries nothing of its own", async () => {
+    const error = (await toApiError(
+      problem({ title: "Not Found", status: 404, code: "not_found", detail: "gone" }, 404),
+    )) as ApiError;
+
+    expect(error.details).toBeUndefined();
+  });
+
   it("falls back to the status when a coded problem has no detail", async () => {
     const error = await toApiError(problem({ code: "conflict" }, 409));
 

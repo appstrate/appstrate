@@ -94,6 +94,7 @@ function invalidateFiles(qc: ReturnType<typeof useQueryClient>) {
 export function useDeleteFile() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/files/{id}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       invalidateFiles(qc);
       void invalidateRunDetails(qc);
@@ -110,6 +111,7 @@ export function useDeleteFile() {
 export function useKeepFile() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/files/{id}/keep", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateFiles(qc),
   });
 }

@@ -47,17 +47,26 @@ export async function invalidateModelConnectionTestQueries(qc: QueryClient): Pro
 
 function useCreateModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("post", "/api/models", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/models", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 function useUpdateModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("patch", "/api/models/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/models/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
+  return $api.useMutation("delete", "/api/models/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useSetDefaultModel() {
@@ -68,6 +77,7 @@ export function useSetDefaultModel() {
 export function useTestModel() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/models/{id}/test", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateModelConnectionTestQueries(qc),
   });
 }
@@ -164,7 +174,7 @@ export function useModelFormHandler(opts: {
 }) {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
-  const createCredential = useCreateModelProviderCredential();
+  const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
 
   // Spans the whole submission: the per-mutation flags drop between calls.
   const [submitPending, setSubmitPending] = useState(false);

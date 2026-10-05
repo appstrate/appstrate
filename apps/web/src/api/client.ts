@@ -12,6 +12,8 @@
  * - `X-Org-Id` / `X-Space-Id` headers injected from the org/space stores
  * - a non-2xx answer to a request that carried a role preview ends the preview
  *   when the persona itself was refused (`lib/view-as-refusal.ts`)
+ * - a 401 resyncs the session and a 403/404 re-reads the caller's permissions
+ *   (`lib/stale-authority.ts`), so neither is shown as an empty screen
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
  *   Note: because errors are thrown, the `{ error }` branch of direct
@@ -23,6 +25,7 @@ import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
 import { buildScopingHeaders } from "../lib/scoping-headers";
 import { noteViewAsRefusal } from "../lib/view-as-refusal";
+import { noteStaleAuthority } from "../lib/stale-authority";
 
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
@@ -83,6 +86,20 @@ const orgContext: Middleware = {
   },
 };
 
+/** The members RFC 9457 and this API define; anything else is a per-code extension. */
+const STANDARD_PROBLEM_MEMBERS: ReadonlySet<string> = new Set<keyof ProblemDetail>([
+  "type",
+  "title",
+  "status",
+  "detail",
+  "instance",
+  "code",
+  "request_id",
+  "param",
+  "retry_after",
+  "errors",
+]);
+
 /**
  * Normalizes a non-2xx response into the error the caller sees. A body with an
  * RFC 9457 `code` becomes an `ApiError` carrying the problem details; anything
@@ -96,16 +113,19 @@ export async function toApiError(response: Response): Promise<Error> {
     .json()
     .catch(() => ({ detail: response.statusText }));
   if (body.code) {
+    // The machine-readable half of a refusal: validation failures list field
+    // errors under `errors`, every other code merges its own members into the
+    // problem body (RFC 9457 §3.2 extensions — `member_count`, `invitation_id`).
+    const extensions = Object.fromEntries(
+      Object.entries(body).filter(([member]) => !STANDARD_PROBLEM_MEMBERS.has(member)),
+    );
     return new ApiError(
       body.code,
       body.detail || `API Error: ${response.status}`,
       response.status,
-      // `ApiError.details` is intentionally an open record: the spec models
-      // `errors` as a typed array, but runtime problem bodies are polymorphic
-      // by `code` (validation → array of field errors; conflict codes →
-      // code-specific object), so consumers narrow per `code`. The cast
-      // bridges the spec's array type to that open shape.
-      body.errors as unknown as Record<string, unknown> | undefined,
+      // An open record on purpose: consumers narrow per `code`.
+      (body.errors ?? (Object.keys(extensions).length > 0 ? extensions : undefined)) as
+        Record<string, unknown> | undefined,
       body.request_id,
       body.param,
     );
@@ -119,6 +139,7 @@ const problemDetailErrors: Middleware = {
     // Before the throw, and for every route: a refused role preview must end
     // the preview wherever it is noticed, not only on the org listing.
     await noteViewAsRefusal(request.headers, response);
+    noteStaleAuthority(request, response);
     throw await toApiError(response);
   },
 };

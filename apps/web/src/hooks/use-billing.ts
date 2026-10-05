@@ -60,15 +60,17 @@ export function useBillingKey() {
 }
 
 export function useCheckout() {
-  return $api.useMutation("post", "/api/billing/checkout");
+  return $api.useMutation("post", "/api/billing/checkout", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 export function useChangePlan() {
-  return $api.useMutation("post", "/api/billing/plan");
+  return $api.useMutation("post", "/api/billing/plan", { meta: { errorHandledByCaller: true } });
 }
 
 export function usePortal() {
-  return $api.useMutation("post", "/api/billing/portal");
+  return $api.useMutation("post", "/api/billing/portal", { meta: { errorHandledByCaller: true } });
 }
 
 /**
@@ -100,7 +102,7 @@ export function useBillingManagersKey() {
 
 /** Replace the whole manager set — the route is a `PUT` of the complete list. */
 export function useReplaceBillingManagers() {
-  return $api.useMutation("put", "/api/billing/managers");
+  return $api.useMutation("put", "/api/billing/managers", { meta: { errorHandledByCaller: true } });
 }
 
 /** Where invoices, receipts and payment alerts go. */
@@ -122,5 +124,7 @@ export function useBillingContactKey() {
 
 /** Merge-patch the contact; `billing_email: null` clears it. */
 export function useUpdateBillingContact() {
-  return $api.useMutation("patch", "/api/billing/contact");
+  return $api.useMutation("patch", "/api/billing/contact", {
+    meta: { errorHandledByCaller: true },
+  });
 }

@@ -46,6 +46,7 @@ function useInvalidateShares() {
 export function useSharePackage() {
   const invalidate = useInvalidateShares();
   return $api.useMutation("post", "/api/packages/{scope}/{name}/shares", {
+    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }
@@ -53,6 +54,7 @@ export function useSharePackage() {
 export function useRevokePackageShare() {
   const invalidate = useInvalidateShares();
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

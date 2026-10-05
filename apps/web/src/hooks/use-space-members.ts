@@ -25,12 +25,16 @@ export function useSpaceMembers(spaceId: string, enabled = true) {
 
 export function useAddSpaceMember() {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("post", "/api/spaces/{id}/members", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/spaces/{id}/members", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateSpaceMember() {
   const invalidate = useInvalidateRoles();
   return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

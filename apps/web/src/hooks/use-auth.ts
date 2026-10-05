@@ -9,6 +9,8 @@ import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
+import { queryClient } from "../lib/query-client";
+import { setSessionRefusedHandler } from "../lib/stale-authority";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -110,6 +112,27 @@ function initAuth() {
     clearSession();
   });
 }
+
+/**
+ * A 401 on an established session: the cookie expired, or the session was
+ * revoked from elsewhere. Better Auth stays the sole authority on whether a
+ * user exists — `syncAuth` asks it and lands on the login screen only when it
+ * says no. One resync at a time: every query on screen fails together, and the
+ * resync's own profile read is one of them.
+ */
+let sessionResync: Promise<void> | null = null;
+setSessionRefusedHandler(() => {
+  if (!authStore.getState().user || sessionResync) return;
+  sessionResync = syncAuth()
+    .catch(clearSession)
+    .then(() => {
+      // The next user must not be shown what the previous session had loaded.
+      if (!authStore.getState().user) queryClient.clear();
+    })
+    .finally(() => {
+      sessionResync = null;
+    });
+});
 
 /**
  * Start the session resync at boot rather than on the first `useAuth()`

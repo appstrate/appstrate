@@ -214,6 +214,7 @@ function useUploadPackage(type: PackageType) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
       const fd = new FormData();
       fd.append("file", file);
@@ -242,6 +243,7 @@ function useDeletePackage(type: PackageType) {
   const navigate = useNavigate();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (id: string) => {
       await client.DELETE(`/api/packages/${segment}/{scope}/{name}`, {
         params: { path: splitPackageRef(id) },
@@ -266,6 +268,7 @@ function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       id,
       homeSpaceId,
@@ -481,6 +484,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (version: string) => {
       await client.DELETE(`/api/packages/${segment}/{scope}/{name}/versions/{version}`, {
         params: { path: { ...splitPackageRef(packageId), version } },
@@ -503,6 +507,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (
       version: string,
     ): Promise<{ id: string; version: string | null; etag: string | null }> => {
@@ -555,6 +560,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
 export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
       // 201 → the forked package resource, bare (issue #657): `id` is the new
       // package ID under org scope, `forked_from` the source package ID.

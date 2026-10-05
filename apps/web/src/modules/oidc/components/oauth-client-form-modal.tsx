@@ -85,7 +85,7 @@ function OAuthClientFormBody({
   const catalogError = spacesQuery.error || rolesQuery.error;
   const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
-  const updateMutation = useUpdateOAuthClient();
+  const updateMutation = useUpdateOAuthClient({ errorHandledByCaller: true });
   const { data: availableScopes } = useOAuthScopes();
   const isPending = createMutation.isPending || updateMutation.isPending;
 
