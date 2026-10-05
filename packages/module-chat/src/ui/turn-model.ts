@@ -14,6 +14,16 @@ export function turnModelLabel(message: unknown): string | null {
   return turnMetadataFromMessage(sourceMessage(message))?.modelLabel ?? null;
 }
 
+/**
+ * The sentence the badge reads out. A failed turn still names its model —
+ * "which model failed" is the question — but it answered nothing.
+ */
+export function turnModelSentenceKey(message: unknown): "model.answeredBy" | "model.failedWith" {
+  return turnMetadataFromMessage(sourceMessage(message))?.finishReason === "error"
+    ? "model.failedWith"
+    : "model.answeredBy";
+}
+
 function turnModelId(message: unknown): string | null {
   return turnMetadataFromMessage(sourceMessage(message))?.modelId ?? null;
 }

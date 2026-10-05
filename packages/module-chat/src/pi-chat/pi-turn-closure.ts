@@ -176,6 +176,8 @@ export function closePiTurn(input: {
   modelId: string;
   /** Its display name frozen at write time — never resolved back into a model. */
   modelLabel: string;
+  /** The chat request's `Request-Id`, reported with an error that named none of its own. */
+  requestId?: string;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -184,7 +186,8 @@ export function closePiTurn(input: {
     abortReason: input.abortReason,
     finishReason: input.finishReason,
   });
-  const clientError = input.error === undefined ? undefined : classifyClientTurnError(input.error);
+  const clientError =
+    input.error === undefined ? undefined : classifyClientTurnError(input.error, input.requestId);
   const chunks: UIMessageChunk[] = [];
 
   if (!input.streamStarted) chunks.push({ type: "start", messageId: newId() });

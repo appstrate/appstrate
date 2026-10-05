@@ -55,7 +55,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
-import { turnModelLabel } from "./turn-model.ts";
+import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 
@@ -440,8 +440,9 @@ function TurnModelBadge() {
   const { t } = useChatHost();
   // A plain string selector — never a derived object. See `turn-error-state.ts`.
   const label = useAuiState((s) => turnModelLabel(s.message));
+  const sentenceKey = useAuiState((s) => turnModelSentenceKey(s.message));
   if (label === null) return null;
-  const answeredBy = t("model.answeredBy", { model: label });
+  const answeredBy = t(sentenceKey, { model: label });
   return (
     // `min-w-0` lets `truncate` shrink inside the flex row. Assistive tech reads
     // the full sentence: a bare model name says nothing out of context.
@@ -477,11 +478,7 @@ export function MessageError() {
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const canManageBilling = can("billing:manage");
-  const errorState = React.useMemo(
-    () => turnErrorState(message, t, canManageBilling),
-    [message, t, canManageBilling],
-  );
+  const errorState = React.useMemo(() => turnErrorState(message, t, can), [message, t, can]);
   if (!errorState) return null;
   return (
     <div

@@ -167,10 +167,6 @@ export const chatStreamSchema = z
     path: ["pinned_skills"],
   });
 
-function clientErrorMessage(error: unknown): string {
-  return clientTurnErrorMarker(classifyClientTurnError(error));
-}
-
 /**
  * Claim the conversation for this turn, then write its user message. Returns the
  * user message id, which the assistant turn derives its own id from.
@@ -233,6 +229,7 @@ export async function handleChatStream(
   }
   const orgId = c.get("orgId");
   const user = c.get("user");
+  const requestId = c.get("requestId");
   // The space the router entered — the session's space, and the scope of every
   // space-scoped read this turn makes.
   const spaceId = c.get("space").id;
@@ -669,6 +666,7 @@ export async function handleChatStream(
         orgId,
         userId: user.id,
         chatSessionId: meteringSessionId,
+        ...(requestId ? { requestId } : {}),
         messages,
         system,
         generation: generationSettings,
@@ -684,7 +682,7 @@ export async function handleChatStream(
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
-        onError: clientErrorMessage,
+        onError: (error) => clientTurnErrorMarker(classifyClientTurnError(error, requestId)),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
           void deps.recordChatUsage(record).catch((err) => {

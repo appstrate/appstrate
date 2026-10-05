@@ -16,6 +16,8 @@ export interface ClientTurnError {
 }
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
+/** Shape of a platform request id (`Request-Id`) — all a marker may carry besides the category. */
+const REQUEST_ID = /^req_[A-Za-z0-9_-]+$/;
 
 /** assistant-ui hands a thrown Error over as a plain `{ code, message }`. */
 function messageFromError(error: unknown): string {
@@ -53,32 +55,47 @@ export function clientTurnErrorForCategory(category: ChatTurnErrorCategory): Cli
  *
  * It must stay verdict-identical to {@link clientTurnErrorFromMarker}: the UI
  * reads a failed turn through whichever of the two arrived first (persisted
- * metadata, or the transient stream marker), and only the category survives
- * the marker. Anything this path knew that the category does not would make
- * one failed turn offer a retry on one render and refuse it on the next.
+ * metadata, or the transient stream marker), and only the category and the
+ * request id survive the marker. Anything this path knew that those do not
+ * would make one failed turn offer a retry on one render and refuse it on the
+ * next.
+ *
+ * `turnRequestId` is the chat request's own `Request-Id`: the id a failed turn
+ * is reported under when the upstream envelope named none, so every failure can
+ * be matched to a server log line.
  */
-export function classifyClientTurnError(error: unknown): ClientTurnError {
+export function classifyClientTurnError(error: unknown, turnRequestId?: string): ClientTurnError {
   const message = messageFromError(error).trim();
   const status = statusFromError(error);
-  return classifyModelError({
+  const classified = classifyModelError({
     message,
     ...(status !== undefined ? { status } : {}),
   });
+  return classified.requestId || !turnRequestId
+    ? classified
+    : { ...classified, requestId: turnRequestId };
 }
 
-/** Safe string carried by transient AI-SDK error chunks. */
+/** Safe string carried by transient AI-SDK error chunks: `<prefix><category>[:<request id>]`. */
 export function clientTurnErrorMarker(error: ClientTurnError): string {
-  return `${ERROR_MARKER_PREFIX}${error.category}`;
+  return `${ERROR_MARKER_PREFIX}${error.category}${error.requestId ? `:${error.requestId}` : ""}`;
 }
 
-/** Recover a safe category from a transient stream marker. */
+/** Recover the safe category (and the request id, when one rode along) from a transient stream marker. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
   const marker = messageFromError(value);
   if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
-  const category = marker.slice(ERROR_MARKER_PREFIX.length) as ChatTurnErrorCategory;
-  return Object.prototype.hasOwnProperty.call(MODEL_ERROR_RETRYABLE_BY_CATEGORY, category)
-    ? clientTurnErrorForCategory(category)
-    : undefined;
+  const [category, requestId] = marker.slice(ERROR_MARKER_PREFIX.length).split(":", 2) as [
+    ChatTurnErrorCategory,
+    string | undefined,
+  ];
+  if (!Object.prototype.hasOwnProperty.call(MODEL_ERROR_RETRYABLE_BY_CATEGORY, category)) {
+    return undefined;
+  }
+  return {
+    ...clientTurnErrorForCategory(category),
+    ...(requestId && REQUEST_ID.test(requestId) ? { requestId } : {}),
+  };
 }
 
 function problemFromError(value: unknown): Record<string, unknown> | undefined {
@@ -95,6 +112,12 @@ export function clientTurnErrorFromRateLimit(value: unknown): ClientTurnError | 
   return problemFromError(value)?.status === 429
     ? clientTurnErrorForCategory("rate_limited")
     : undefined;
+}
+
+/** The `request_id` every problem document the API answers with carries (RFC 9457 extension). */
+export function problemRequestId(value: unknown): string | undefined {
+  const requestId = problemFromError(value)?.request_id;
+  return typeof requestId === "string" && REQUEST_ID.test(requestId) ? requestId : undefined;
 }
 
 /**

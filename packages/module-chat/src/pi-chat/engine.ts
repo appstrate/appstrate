@@ -71,6 +71,8 @@ export interface PiChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
+  /** The chat request's `Request-Id`: shown with a failed turn, and logged with it. */
+  requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
@@ -619,6 +621,7 @@ export function runPiChat(input: PiChatInput): Response {
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
           modelId: input.presetId,
           modelLabel: input.modelLabel,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
         });
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
@@ -662,6 +665,7 @@ export function runPiChat(input: PiChatInput): Response {
           logger.error("Pi chat turn failed", {
             err: String(err),
             chatSessionId: input.chatSessionId,
+            requestId: input.requestId,
           });
           const aborted = turnAbort.signal.aborted;
           const closing = closePiTurn({
@@ -677,6 +681,7 @@ export function runPiChat(input: PiChatInput): Response {
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
             modelId: input.presetId,
             modelLabel: input.modelLabel,
+            ...(input.requestId ? { requestId: input.requestId } : {}),
           });
           for (const chunk of closing.chunks) write(chunk);
         }
