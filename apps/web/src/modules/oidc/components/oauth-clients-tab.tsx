@@ -138,6 +138,7 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
           setRotateConfirmOpen(false);
           setRotatedSecret(result.clientSecret);
         },
+        onError: () => setRotateConfirmOpen(false),
       },
     );
   }
@@ -150,6 +151,7 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
           setDeleteConfirmOpen(false);
           toast.success(t("settings:oauthClients.deleted"));
         },
+        onError: () => setDeleteConfirmOpen(false),
       },
     );
   }

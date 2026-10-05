@@ -16,6 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const { RunList } = await import("../run-list.tsx");
 const { ResourceErrorState } = await import("../page-states.tsx");
 const { ErrorBoundary } = await import("../error-boundary.tsx");
+const { settledWhileOpen } = await import("../../lib/confirm-settle.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { paginatedRunsKeys } = await import("../../lib/query-keys.ts");
 const { render } = await import("../../test/render.tsx");
@@ -128,5 +129,26 @@ describe("ErrorBoundary", () => {
     const html = commit(mount("/agents"), "/runs", true);
 
     expect(html).toContain(t("error.unexpected"));
+  });
+});
+
+// The effect that applies this cannot run without a DOM; the rule it applies is
+// the whole decision, and `ConfirmModal` only feeds it its refs and props.
+describe("ConfirmModal: a refused confirmation closes its dialog", () => {
+  const settled = { confirmed: true, wasPending: true, isPending: false, open: true };
+
+  it("closes when the confirmed action settles on a dialog still open", () => {
+    expect(settledWhileOpen(settled)).toBe(true);
+  });
+
+  it("leaves the dialog alone in every other state", () => {
+    // Still running.
+    expect(settledWhileOpen({ ...settled, isPending: true })).toBe(false);
+    // Already closed by the caller's onSuccess.
+    expect(settledWhileOpen({ ...settled, open: false })).toBe(false);
+    // An unrelated mutation behind the same `isPending` settled: nobody confirmed here.
+    expect(settledWhileOpen({ ...settled, confirmed: false })).toBe(false);
+    // Nothing was pending.
+    expect(settledWhileOpen({ ...settled, wasPending: false })).toBe(false);
   });
 });

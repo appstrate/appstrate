@@ -295,17 +295,14 @@ function GeneralForm({ spaceId, space }: { spaceId: string; space: SpaceObject }
               },
               // A space that homes packages refuses (409 `space_homes_packages`,
               // RBAC spec §6.9) and the detail names them — but not how to act
-              // on it, which is one move per package from its own page. The
-              // dialog closes: confirming again would only be refused again.
-              onError: (error) => {
-                setConfirmOpen(false);
+              // on it, which is one move per package from its own page.
+              onError: (error) =>
                 toastError(error, {
                   description:
                     error instanceof ApiError && error.code === "space_homes_packages"
                       ? t("spaces.deleteHomesPackagesHint")
                       : undefined,
-                });
-              },
+                }),
             },
           );
         }}

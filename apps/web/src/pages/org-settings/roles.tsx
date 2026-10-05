@@ -179,6 +179,7 @@ export function OrgSettingsRolesPage() {
           (confirmDelete ? t("roles.deleteConfirm", { name: confirmDelete.name }) : "")
         }
         isPending={deleteRole.isPending}
+        keepOpenOnSettle
         onConfirm={() => confirmDelete && onDelete(confirmDelete)}
       />
     </>
