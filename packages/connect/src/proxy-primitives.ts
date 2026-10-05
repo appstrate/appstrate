@@ -195,46 +195,6 @@ export function credentialCarryingHeader(
 }
 
 /**
- * Repair a malformed `Authorization` / `Proxy-Authorization` scheme in a
- * caller **template**, before substitution: `Bearer{{access_token}}` →
- * `Bearer {{access_token}}`. LLMs writing the free-form `api_call` headers
- * surface sometimes concatenate the scheme and the placeholder without a
- * space, which substitution would expand to `Bearerghp_…` — a hard 401
- * upstream.
- *
- * The repair is anchored on `{{`, so it fires only on the authoring defect
- * it exists for. Running it on the *resolved* value instead (which is what
- * this used to do, issue #988) matched any secret whose first bytes happen
- * to spell a scheme name — `tokenlive_sk_123` became `token live_sk_123`,
- * silently corrupting a valid credential into a 401 that looked like the
- * user's fault. A template can never be a secret, so there is no such
- * false positive here.
- *
- * Returns the value unchanged for every header name other than the two
- * auth headers, so callers can pipe every header through it.
- */
-export function normalizeAuthSchemeTemplate(headerName: string, rawValue: string): string {
-  const lower = headerName.toLowerCase();
-  if (lower !== "authorization" && lower !== "proxy-authorization") return rawValue;
-  return rawValue.replace(/^(Bearer|Basic|Token)(?=\{\{)/i, "$1 ");
-}
-
-/**
- * {@link normalizeAuthSchemeTemplate} over a whole header-template record.
- * Returns a new record — the caller's input is never mutated, so the
- * unrepaired templates stay available if a caller needs to echo them.
- */
-export function normalizeAuthSchemeTemplates(
-  headers: Record<string, string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    out[key] = normalizeAuthSchemeTemplate(key, value);
-  }
-  return out;
-}
-
-/**
  * Clone an UPSTREAM RESPONSE's headers for relay downstream, dropping the
  * headers a proxy must not forward: RFC 7230 hop-by-hop headers plus
  * `content-encoding`/`content-length`. Bun's `fetch` auto-decompresses the

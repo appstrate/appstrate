@@ -72,7 +72,7 @@ describe("executeApiCall — structured failures", () => {
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
-  it("returns 400 on unresolved URL placeholders", async () => {
+  it("returns 400 on unresolved target placeholders", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -84,8 +84,44 @@ describe("executeApiCall — structured failures", () => {
       },
       makeDeps(),
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/Unresolved placeholders in URL/);
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: "Unresolved placeholders in target: {{missing}}",
+    });
+  });
+
+  it("refuses an unresolved header placeholder ahead of the URL policy", async () => {
+    const fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { "X-Other": "{{nope}}" },
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        declaredUris: [],
+        // An injected credential and no allowlist: alone, the URL policy's 403.
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok-123" },
+          authorizedUris: null,
+          allowAllUris: true,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer ",
+          credentialFieldName: "access_token",
+        })),
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'Unresolved placeholders in header "X-Other": {{nope}}',
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   // The lookup runs on the template: a `{{word}}` inside a value is no placeholder.
@@ -261,6 +297,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
         credentialHeaderName: "Authorization",
+        credentialAllowServerOverride: true,
         credentialFieldName: "api_key",
       })),
     });
@@ -313,7 +350,7 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
     expect(sentAuthHeader(fetchFn)).toBe("tokenlive_sk_123");
   });
 
-  it("still repairs the authoring defect it exists for: Bearer{{access_token}}", async () => {
+  it("still repairs the authoring defect it exists for: Bearer{{field}}", async () => {
     const fetchFn = mock(async () => new Response("{}", { status: 200 }));
     const result = await executeApiCall(
       {
@@ -321,17 +358,95 @@ describe("executeApiCall — auth-scheme template repair (#988)", () => {
         connectionId: "conn-1",
         targetUrl: "https://api.example.com/x",
         method: "GET",
-        callerHeaders: { Authorization: "Bearer{{access_token}}" },
+        // Not the injected field: the caller's value is what must reach the wire.
+        callerHeaders: { Authorization: "Bearer{{alt}}" },
         body: { kind: "none" },
       },
-      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "platform", alt: "other" },
+          authorizedUris: ["https://api.example.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer ",
+          credentialAllowServerOverride: true,
+          credentialFieldName: "access_token",
+        })),
+      }),
     );
     expect(result.ok).toBe(true);
-    expect(sentAuthHeader(fetchFn)).toBe("Bearer tok-123");
+    expect(sentAuthHeader(fetchFn)).toBe("Bearer other");
   });
 });
 
 describe("executeApiCall — 401 retry path", () => {
+  /** Injects `Authorization` from `access_token`; first answer 401, then 200. */
+  function retryDeps(first: Record<string, string>, refreshed: Record<string, string>) {
+    const payload = (credentials: Record<string, string>): CredentialsResponse => ({
+      credentials,
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer ",
+      credentialFieldName: "access_token",
+    });
+    let calls = 0;
+    const fetchFn = mock(
+      async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        new Response("{}", { status: calls++ === 0 ? 401 : 200 }),
+    );
+    const deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      fetchCredentials: mock(async () => payload(first)),
+      refreshCredentials: mock(async () => payload(refreshed)),
+    });
+    const headersSent = () =>
+      fetchFn.mock.calls.map((call) => new Headers((call[1] as RequestInit).headers));
+    return { deps, headersSent };
+  }
+
+  it("substitutes the caller's headers again from the refreshed credentials", async () => {
+    const { deps, headersSent } = retryDeps({ access_token: "tok-1" }, { access_token: "tok-2" });
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { "X-Token": "{{access_token}}" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok && result.response.status).toBe(200);
+    expect(headersSent().map((h) => [h.get("x-token"), h.get("authorization")])).toEqual([
+      ["tok-1", "Bearer tok-1"],
+      ["tok-2", "Bearer tok-2"],
+    ]);
+  });
+
+  it("does not replay when the refreshed credentials no longer fill a caller template: the 401 stands", async () => {
+    const { deps, headersSent } = retryDeps(
+      { access_token: "tok-1", tenant: "acme" },
+      { access_token: "tok-2" },
+    );
+    const result = await executeApiCall(
+      {
+        integrationId: "gmail",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/x",
+        method: "GET",
+        callerHeaders: { "X-Tenant": "{{tenant}}" },
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(result.ok && result.response.status).toBe(401);
+    expect(headersSent().map((h) => h.get("x-tenant"))).toEqual(["acme"]);
+    expect(deps.reportedAuthFailures.has(scopeOf("gmail"))).toBe(true);
+  });
+
   it("does not refresh or flag a 401 produced by an allowed caller override", async () => {
     const fetchFn = mock(
       async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>

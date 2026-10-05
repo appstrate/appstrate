@@ -30,7 +30,6 @@
 import {
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
-  normalizeAuthSchemeTemplates,
   substituteVars,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
@@ -43,14 +42,14 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
+  prepareApiCallRequest,
   redactionFields,
   redactCredentialHost,
   templateHost,
-  unresolvedPlaceholders,
   urlPolicyRefusalMessage,
   type CookieJar,
+  type PreparedApiCallRequest,
 } from "@appstrate/afps-runtime/resolvers";
-import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "./logger.ts";
@@ -121,8 +120,8 @@ interface ApiCallSuccess {
    * follow. Equals the resolved target URL when no redirect happened.
    *
    * An OUTPUT, never an input. `doUpstreamRequest` closes over the
-   * resolved target URL and issues against THAT on both branches — its
-   * only parameter is the credential set — so the 401 replay re-issues
+   * resolved target URL and issues against THAT on both branches — it takes
+   * the credential set and the caller's headers — so the 401 replay re-issues
    * against the resolved target and re-follows the chain from scratch,
    * then overwrites this value with the replay's own terminus.
    *
@@ -269,14 +268,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   const { integrationId, targetUrl, method, body, substituteBody } = args;
   const scope = credentialScope(integrationId, args.connectionId);
 
-  // Repair `Bearer{{token}}` → `Bearer {{token}}` on the caller TEMPLATES,
-  // once, before any substitution runs. Doing it on the resolved value (what
-  // this used to do, #988) corrupted every raw secret whose first bytes spell
-  // a scheme name. Every downstream read — the credential-reference scan, the
-  // fail-fast placeholder pre-check, and each `doUpstreamRequest` attempt —
-  // goes through this repaired copy so they can never disagree.
-  const callerHeaders = normalizeAuthSchemeTemplates(args.callerHeaders);
-
   // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
   if (!INTEGRATION_ID_RE.test(integrationId)) {
@@ -295,25 +286,23 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 3. Substitute {{vars}} in target URL.
-  const resolvedUrl = substituteVars(targetUrl, creds.credentials);
-  const unresolvedInUrl = unresolvedPlaceholders(targetUrl, creds.credentials);
-  if (unresolvedInUrl.length) {
-    return {
-      ok: false,
-      status: 400,
-      error: `Unresolved placeholders in URL: {{${unresolvedInUrl.join()}}}`,
-    };
-  }
+  // 3. Substitute {{vars}} in the target and the caller's headers; refuse an unresolved one, there
+  //    or in a string the body substitutes (text, multipart fields, JSON leaves).
+  const prepareFor = (fields: Record<string, string>) =>
+    prepareApiCallRequest({
+      target: targetUrl,
+      headers: args.callerHeaders,
+      bodyTemplates: substituteBody ? [...substitutedBodyStrings(body)] : [],
+      fields,
+    });
+  const prepared = prepareFor(creds.credentials);
+  if (!prepared.ok) return { ok: false, status: 400, error: prepared.refusal.message };
+  const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
-    templates: [
-      targetUrl,
-      ...Object.values(callerHeaders),
-      ...(substituteBody ? substitutedBodyStrings(body) : []),
-    ],
+    templates: prepared.request.templates,
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
     declaredUris: deps.declaredUris,
@@ -330,40 +319,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
-
-  // 5b. Fail fast on the caller's headers; each `doUpstreamRequest` substitutes them, so a 401
-  //     retry sees the refreshed token.
-  for (const [key, rawValue] of Object.entries(callerHeaders)) {
-    // The caller's own value; one a credential makes invalid is the engine's `invalid_header`.
-    if (!isHttpFieldValue(rawValue)) {
-      return { ok: false, status: 400, error: `Header "${key}" is not a valid HTTP field value` };
-    }
-    const unresolved = unresolvedPlaceholders(rawValue, creds.credentials);
-    if (unresolved.length) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in header "${key}": {{${unresolved.join()}}}`,
-      };
-    }
-  }
-
-  // 6. The same on every string the body substitutes (text, multipart fields, JSON leaves).
-  if (substituteBody) {
-    const unresolvedInBody = new Set<string>();
-    for (const template of substitutedBodyStrings(body)) {
-      for (const key of unresolvedPlaceholders(template, creds.credentials)) {
-        unresolvedInBody.add(key);
-      }
-    }
-    if (unresolvedInBody.size) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in body: {{${[...unresolvedInBody].join()}}}`,
-      };
-    }
-  }
 
   /** Build the request body with credential substitution applied. */
   const buildBody = (
@@ -390,12 +345,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   };
 
   /**
-   * One outbound attempt. Re-runs header + body substitution against
-   * the supplied creds so 401-retry sees the refreshed token. Returns
+   * One outbound attempt, from the caller's headers as prepared for `activeCreds`; the body is
+   * substituted here. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
+    caller: Pick<PreparedApiCallRequest, "headers" | "credentialHeaders">,
   ): Promise<{
     response: Response;
     finalUrl: string;
@@ -411,12 +367,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     /** Whether this attempt used the platform credential or an allowed caller override. */
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
-    const resolvedHeaders: Record<string, string> = {};
-    const credentialHeaders: string[] = [];
-    for (const [key, value] of Object.entries(callerHeaders)) {
-      resolvedHeaders[key] = substituteVars(value, activeCreds.credentials);
-      if (resolvedHeaders[key] !== value) credentialHeaders.push(key);
-    }
+    const { headers: resolvedHeaders, credentialHeaders } = caller;
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     const carrier = credentialCarryingHeader(credentialInjection);
@@ -480,7 +431,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   };
 
-  // 7. First outbound request. Network/timeout errors surface as a
+  // 5. First outbound request. Network/timeout errors surface as a
   //    structured failure rather than a raw exception.
   const requestStartedAt = performance.now();
   let upstream: Response;
@@ -493,7 +444,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // The credentials the terminal response answered; null when no hop carried them to it.
   let answered: CredentialsResponse | null;
   try {
-    const r = await doUpstreamRequest(creds);
+    const r = await doUpstreamRequest(creds, prepared.request);
     upstream = r.response;
     upstreamFinalUrl = r.finalUrl;
     upstreamHops = r.hops;
@@ -504,7 +455,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return wrapRequestError(err, integrationId, targetHost);
   }
 
-  // 7b. Retry on 401 — force a refresh and re-issue the call. The platform
+  // 5b. Retry on 401 — force a refresh and re-issue the call. The platform
   //     `/refresh` flags the connection needsReconnection when the credential
   //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
   //     401'd), so a `null` result means "do not retry". A non-null result is
@@ -518,10 +469,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
-    if (fresh) {
+    // Headers and body are substituted again from the refreshed set; the target keeps its first
+    // rendering. A set that no longer fills the call is not replayed: the 401 stands.
+    const again = fresh ? prepareFor(fresh.credentials) : null;
+    if (fresh && again?.ok) {
       redactFields = redactionFields(policy, fresh.credentials);
       try {
-        const r = await doUpstreamRequest(fresh);
+        const r = await doUpstreamRequest(fresh, again.request);
         upstream = r.response;
         upstreamFinalUrl = r.finalUrl;
         upstreamHops = r.hops;
@@ -534,7 +488,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 8. Log a persistent auth failure once per connection per run. The flag is
+  // 6. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
@@ -548,7 +502,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
-  // 9. Success-path diagnostic envelope (#404). One structured line per
+  // 7. Success-path diagnostic envelope (#404). One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,
   //    and the request/response header *names* (values redacted). Only
   //    emitted at LOG_LEVEL=debug, so it is silent in default production

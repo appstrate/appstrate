@@ -54,6 +54,9 @@ export {
 // renderer, and the portable integration resolver.
 export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
+// The caller half of an `api_call` (target, headers, body templates), one preparation for every path.
+export { prepareApiCallRequest, type PreparedApiCallRequest } from "./api-call-request.ts";
+
 // The pre-send URL policy shared by the three `api_call` paths.
 export {
   credentialUrlPolicy,

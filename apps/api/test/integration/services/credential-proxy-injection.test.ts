@@ -389,6 +389,78 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     },
   );
 
+  /**
+   * An api_key integration injecting `Authorization: Bearer <api_key>`, caller override allowed.
+   * No DNS: `api.example.com` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+   */
+  async function seedOverridable(
+    packageId: string,
+    credentials = { api_key: "platform", alt: "other" },
+  ): Promise<void> {
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Overridable",
+        description: "Overridable integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key", "alt"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+              allowServerOverride: true,
+            }),
+          },
+        },
+      }),
+    );
+    await seedProxyConnection(ctx, packageId, "api", credentials);
+  }
+
+  it("repairs `Bearer{{field}}` in a caller Authorization the manifest lets override", async () => {
+    const packageId = "@cpinjectorg/repair";
+    await seedOverridable(packageId);
+    const authorization: Array<string | null> = [];
+    await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/x",
+      headers: { authorization: "Bearer{{alt}}" },
+      fetch: ((_url: string, init: RequestInit) => {
+        authorization.push(new Headers(init.headers).get("authorization"));
+        return Promise.resolve(new Response("{}"));
+      }) as unknown as typeof fetch,
+    });
+    expect(authorization).toEqual(["Bearer other"]);
+  });
+
+  it("reports a request defect ahead of a credential no header can carry", async () => {
+    const packageId = "@cpinjectorg/defect-first";
+    await seedOverridable(packageId, { api_key: "platform", alt: "a\nb" });
+    const call = proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/x",
+      // `X-Key` alone is a 502 `credential_unusable`.
+      headers: { "X-Key": "{{alt}}", "X-Other": "{{nope}}" },
+      fetch: (() => Promise.resolve(new Response("{}"))) as unknown as typeof fetch,
+    });
+    await expect(call).rejects.toMatchObject({
+      code: "unresolved_placeholder",
+      message: 'Unresolved placeholders in header "X-Other": {{nope}}',
+    });
+  });
+
   it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
     await seedProxyIntegration(

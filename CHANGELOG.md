@@ -195,6 +195,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **An `api_call`'s target, headers and body templates are checked the same
+  way on the three paths** (#1660). The platform proxy, the sidecar and the
+  local resolver of `appstrate run` each checked and substituted them in
+  their own order; one function now does it (`prepareApiCallRequest`,
+  `@appstrate/afps-runtime`). What a caller sees:
+  - `appstrate run --integrations=local` repairs an `Authorization` header
+    written `Bearer{{field}}` (no space after the scheme), as the sidecar
+    does; it was sent as `Bearerghp_…` and answered 401. Only a manifest
+    that lets the caller override `Authorization` keeps that header.
+  - One wording for a refused request, naming the first defect:
+    `Unresolved placeholders in target|header "X"|body: {{a,b}}` (each key
+    once) or `Header "X" is not a valid HTTP field value`. The sidecar said
+    `in URL`; the local resolver listed every unresolved key of the call.
+  - A defect of the request (an unresolved placeholder, a caller header
+    value that is no HTTP field value) is reported ahead of a refusal by the
+    URL policy. On the platform proxy it is also reported ahead of a
+    credential no header can carry, when that credential sits in an earlier
+    header or the defect is in the body (was 502 `credential_unusable`).
+  - The local resolver judges a caller header value as written, first, as
+    the two other paths do: `RESOLVER_HEADER_INVALID` ahead of the URL
+    policy, of an unresolved placeholder elsewhere and of a body error, and
+    also for a header it then replaces (the injected one, a `Content-Type`
+    the body sets): that call used to go out without the caller's value.
+  - In a run, a 401 is not replayed when the refreshed credentials no longer
+    hold a field the call names, in its target, a header or the body: the
+    replay used to send a header or a body with the literal `{{field}}`.
+    The 401 is returned.
 - **An OAuth refresh keeps the connection's other outputs** (#1629).
   Refreshing an integration connection rewrote its credential with
   `access_token` and `refresh_token` only, so a manifest reading

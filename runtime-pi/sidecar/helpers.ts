@@ -359,7 +359,6 @@ export {
   substituteVars,
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
-  normalizeAuthSchemeTemplates,
   withIdleBound,
   STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";

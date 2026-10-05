@@ -67,7 +67,8 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
+import { substituteVars, templateHost } from "./template-vars.ts";
+import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
@@ -438,11 +439,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Every substituted string: target, kept header values, a string body (never multipart).
-      const templates = [req.target];
-      if (typeof req.body === "string") templates.push(req.body);
-      const target = substituteVars(req.target, fields);
-
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
         deliveryPlan?.allowServerOverride === true &&
@@ -452,8 +448,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // survives on this LOCAL path only when the delivery plan targets that
       // header and explicitly authorises a caller override. The remote resolver
       // always strips it because it authenticates to Appstrate with that header.
-      const headers: Record<string, string> = {};
-      const credentialHeaders: string[] = [];
+      const callerHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers ?? {})) {
         const lowerKey = key.toLowerCase();
         if (
@@ -462,18 +457,23 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ) {
           continue;
         }
-        templates.push(value);
-        headers[key] = substituteVars(value, fields);
-        if (headers[key] !== value) credentialHeaders.push(key);
+        callerHeaders[key] = value;
       }
-      const unresolved = new Set(templates.flatMap((t) => unresolvedPlaceholders(t, fields)));
-      if (unresolved.size > 0) {
-        throw new ResolverError(
-          "RESOLVER_BODY_INVALID",
-          `Integration ${meta.name}: unresolved placeholders: {{${[...unresolved].join()}}}`,
-          { integration: meta.name },
-        );
+      // A string body is the only one substituted (never multipart).
+      const prepared = prepareApiCallRequest({
+        target: req.target,
+        headers: callerHeaders,
+        bodyTemplates: typeof req.body === "string" ? [req.body] : [],
+        fields,
+      });
+      if (!prepared.ok) {
+        const { kind, message } = prepared.refusal;
+        if (kind === "invalid_header") throw headerInvalid(meta.name, message);
+        throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
+          integration: meta.name,
+        });
       }
+      const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
       // an out-of-boundary cross-origin hop.
