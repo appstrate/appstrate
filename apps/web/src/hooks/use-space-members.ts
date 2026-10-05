@@ -43,6 +43,7 @@ export function useRemoveSpaceMember() {
   const invalidate = useInvalidateRoles();
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/spaces/{id}/members/{userId}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       invalidate();
       // The removal unshares the member's connections here once they lose access.
