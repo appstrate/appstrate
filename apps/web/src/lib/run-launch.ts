@@ -46,7 +46,15 @@ export interface RunLaunch {
  * The slot follows the launch's own promise, never a subscription to it: it is
  * freed when the request settles, whatever happened to its listeners meanwhile.
  */
-export function launchFlight<T>(): {
+export function launchFlight<T>(
+  /**
+   * Told when the slot is taken and when it is freed — the launcher's
+   * `isPending`. The mutation's own flag cannot serve: it drops on `forget`
+   * while the slot is still held, and a live-looking button would then swallow
+   * its click.
+   */
+  onBusyChange?: (busy: boolean) => void,
+): {
   /** Starts the launch, or returns `false` while another one is in flight. */
   run: (
     start: () => Promise<T>,
@@ -64,6 +72,7 @@ export function launchFlight<T>(): {
     run: (start, handlers) => {
       if (busy) return false;
       busy = true;
+      onBusyChange?.(true);
       const flight = {};
       reported = flight;
       void start()
@@ -77,6 +86,7 @@ export function launchFlight<T>(): {
         )
         .finally(() => {
           busy = false;
+          onBusyChange?.(false);
         });
       return true;
     },

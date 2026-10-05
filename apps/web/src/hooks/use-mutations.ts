@@ -118,7 +118,9 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
-  const [flight] = useState(() => launchFlight<unknown>());
+  // The slot, not the mutation, says whether a launch is in flight: see `launchFlight`.
+  const [isPending, setIsPending] = useState(false);
+  const [flight] = useState(() => launchFlight<unknown>(setIsPending));
 
   /** One run per click: a second call while one is in flight is dropped. */
   const send = (launch: RunLaunch, onSuccess?: () => void) => {
@@ -143,7 +145,7 @@ export function useRunLauncher(packageId: string) {
   };
 
   return {
-    isPending: runAgent.isPending,
+    isPending,
     missingErrors,
     /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
     launch: send,

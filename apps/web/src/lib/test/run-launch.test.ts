@@ -61,7 +61,9 @@ describe("launchFlight", () => {
   });
 
   it("a launch dismissed while in flight keeps the slot, reports nothing, then frees it", async () => {
-    const flight = launchFlight<string>();
+    // `busy` is what the launcher shows as pending: it must outlive the dismissal.
+    const busy: boolean[] = [];
+    const flight = launchFlight<string>((b) => busy.push(b));
     const retry = pendingLaunch();
     const seen: string[] = [];
     flight.run(retry.start, { onError: (e) => seen.push(e.message) });
@@ -69,10 +71,12 @@ describe("launchFlight", () => {
 
     // Still being created server-side: a click now would be a second run.
     expect(flight.run(pendingLaunch().start, {})).toBe(false);
+    expect(busy).toEqual([true]);
 
     retry.reject(new Error("409"));
     await settled();
     expect(seen).toEqual([]);
+    expect(busy).toEqual([true, false]);
     expect(flight.run(pendingLaunch().start, {})).toBe(true);
   });
 });
