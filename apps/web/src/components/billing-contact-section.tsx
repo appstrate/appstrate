@@ -27,7 +27,6 @@ import {
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
-import { errorMessage } from "../lib/mutation-error";
 
 /**
  * Where invoices, receipts and dunning mail go instead of every owner's inbox.
@@ -54,7 +53,7 @@ export function BillingContactSection() {
   const [ccError, setCcError] = useState<string | null>(null);
 
   if (contactQuery.isLoading) return <LoadingState />;
-  if (contactQuery.error) return <ErrorState message={errorMessage(contactQuery.error)} />;
+  if (contactQuery.error) return <ErrorState error={contactQuery.error} />;
 
   const contact = contactQuery.data ?? { billing_email: null, billing_cc: [] };
   const current = draft ?? toBillingContactDraft(contact);

@@ -21,7 +21,6 @@ import {
 import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
 import { Lock } from "lucide-react";
-import { errorMessage } from "../lib/mutation-error";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -51,7 +50,7 @@ export function ScheduleEditPage() {
   // on every save). `key={schedule.id}` gives no remount to repair it. When
   // that query FAILS (deleted agent, revoked permission) the detail never
   // lands, so waiting is waiting forever — say so instead.
-  if (depsError) return <ErrorState message={errorMessage(depsError)} />;
+  if (depsError) return <ErrorState error={depsError} />;
   if (denied) return <NoAccessState />;
   if (!deps) return <LoadingState />;
 

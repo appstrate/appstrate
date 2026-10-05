@@ -275,10 +275,8 @@ const AUTH_CLIENT_BAN = {
     "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
 };
 
-// The SPA never prints an error's raw message: for an `ApiError` it is the
-// server's English `detail`. `errorMessage` / `onMutationError`
-// (apps/web/src/lib/mutation-error.ts) name the refusal by its translated
-// code, and that module is the one place allowed to fall back to the raw text.
+// An `ApiError`'s raw message is the server's English `detail`: the SPA shows
+// the translated refusal instead (apps/web/src/lib/mutation-error.ts).
 const RAW_ERROR_MESSAGE_BAN = {
   group: ["@appstrate/core/errors"],
   importNames: ["getErrorMessage"],
@@ -670,8 +668,7 @@ export default tseslint.config(
     //      login redirect (`HostedAuthGate` / `useHostedAuthRedirect`) by
     //      calling `auth-client` directly — the bug class this exists to kill.
     //      Exempted for the seam file itself in the next block.
-    //   3. Translated-error guard: see `RAW_ERROR_MESSAGE_BAN`. Exempted for
-    //      `lib/mutation-error.ts`, which owns the fallback, two blocks down.
+    //   3. Translated-error guard: `RAW_ERROR_MESSAGE_BAN`.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
@@ -691,8 +688,7 @@ export default tseslint.config(
     },
   },
   {
-    // The one module that may print a raw message: the fallback of
-    // `errorMessage` for a failure that carries no code the SPA knows.
+    // Owns the raw-message fallback `RAW_ERROR_MESSAGE_BAN` forbids elsewhere.
     files: ["apps/web/src/lib/mutation-error.ts"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],

@@ -23,7 +23,6 @@ import { LoadingState, ErrorState, EmptyState } from "../../components/page-stat
 import { formatDateField } from "../../lib/format-date";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { errorMessage } from "../../lib/mutation-error";
 
 // Keyed on the status enum the spec declares, not on `string`: a status added
 // to `EeBillingAccount.status` without an i18n key fails to compile here
@@ -63,7 +62,7 @@ export function OrgSettingsBillingPage() {
   const canManageBilling = can("billing:manage");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }

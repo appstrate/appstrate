@@ -39,7 +39,7 @@ export function OrgSettingsSpaceGeneralPage() {
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!space) return <ErrorState />;
 
   return <GeneralForm key={spaceId} spaceId={spaceId} space={space} />;

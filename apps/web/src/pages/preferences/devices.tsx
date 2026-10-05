@@ -10,7 +10,6 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
 import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-import { errorMessage } from "../../lib/mutation-error";
 
 const SESSIONS_QUERY_KEY = ["get", "/api/auth/cli/sessions"] as const;
 
@@ -44,7 +43,7 @@ export function PreferencesDevicesPage() {
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const sessions = data ?? [];
 

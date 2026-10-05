@@ -15,7 +15,6 @@ import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
-import { errorMessage } from "../lib/mutation-error";
 
 export interface CardItem {
   id: string;
@@ -61,7 +60,7 @@ export function PackageTab({
   headerContent,
 }: PackageTabProps) {
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const header = title ? (
     <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>

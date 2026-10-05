@@ -29,7 +29,6 @@ import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { IntegrationIcon } from "../components/integration-icon";
 import type { OrgPackageItem } from "@appstrate/shared-types";
-import { errorMessage } from "../lib/mutation-error";
 
 function matchesQuery(integration: OrgPackageItem, query: string): boolean {
   if (!query) return true;
@@ -122,7 +121,7 @@ export function IntegrationsPage() {
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState message={errorMessage(error)} />
+        <ErrorState error={error} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Boxes}

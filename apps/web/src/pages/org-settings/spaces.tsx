@@ -16,7 +16,6 @@ import { LoadingState, ErrorState, EmptyState } from "../../components/page-stat
 import { SpaceCreateModal } from "../../components/space-create-modal";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
-import { errorMessage } from "../../lib/mutation-error";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
 
@@ -34,7 +33,7 @@ export function OrgSettingsSpacesPage() {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const canCreate = can("spaces:write");
   // An ORPHANED personal space is the one a caller sees without being able to

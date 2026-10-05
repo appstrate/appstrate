@@ -42,16 +42,11 @@ export function formatBytes(bytes: number, locale?: string): string {
     tier++;
   }
   const digits = value >= 10 ? 0 : 1;
-  const amount =
-    locale === undefined
-      ? digits === 0
-        ? String(Math.round(value))
-        : value.toFixed(1)
-      : new Intl.NumberFormat(locale, {
-          minimumFractionDigits: digits,
-          maximumFractionDigits: digits,
-          useGrouping: false,
-        }).format(value);
+  const amount = new Intl.NumberFormat(locale ?? "en", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    useGrouping: false,
+  }).format(value);
   return `${amount} ${units[tier]}`;
 }
 

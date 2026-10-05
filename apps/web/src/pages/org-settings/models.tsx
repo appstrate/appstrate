@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -34,7 +34,6 @@ import {
   deduplicateLabel,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -49,7 +48,7 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
-import { errorMessage, toastError } from "../../lib/mutation-error";
+import { toastError } from "../../lib/mutation-error";
 
 function ModelsList({
   models,
@@ -80,7 +79,7 @@ function ModelsList({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   return (
     <>
@@ -261,7 +260,7 @@ function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
@@ -472,11 +471,7 @@ export function OrgSettingsModelsPage() {
 
   const closeConfirm = () => setConfirmState(null);
   const reportDeleteFailure = (err: unknown) => {
-    if (err instanceof ApiError && err.code === "credential_in_use") {
-      toast.error(t("credentials.deleteRefused"));
-    } else {
-      toastError(err);
-    }
+    toastError(err);
     closeConfirm();
   };
 

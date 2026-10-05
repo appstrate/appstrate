@@ -17,7 +17,6 @@ import {
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { formatDateField } from "../lib/format-date";
-import { errorMessage } from "../lib/mutation-error";
 
 function isExpired(expiresAt: string | null | undefined): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;
@@ -36,7 +35,7 @@ export function ApiKeysPage() {
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const canCreate = can("api-keys:create");
   const canRevoke = can("api-keys:revoke");

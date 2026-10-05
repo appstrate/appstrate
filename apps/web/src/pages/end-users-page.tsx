@@ -20,7 +20,6 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { formatDateField } from "../lib/format-date";
-import { errorMessage } from "../lib/mutation-error";
 
 /** Deterministic color from ID hash for the avatar circle. */
 const AVATAR_COLORS = [
@@ -122,7 +121,7 @@ function EndUsersPageContent() {
   }, [endUsers, search]);
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   return (
     <div className="p-6">

@@ -28,7 +28,6 @@ import {
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
-import { errorMessage } from "../../../lib/mutation-error";
 
 interface OAuthClientsTabProps {
   level?: "org" | "space";
@@ -53,7 +52,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!data) return <ErrorState />;
 
   return (

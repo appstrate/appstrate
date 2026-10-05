@@ -72,8 +72,6 @@ export function ForkPackageModal({ open, onClose, packageId, defaultName, type }
           const code = err instanceof ApiError ? err.code : "";
           if (code === "already_owned") {
             setError("root", { message: t("fork.errorOwned") });
-          } else if (code === "name_collision") {
-            setError("root", { message: t("fork.errorCollision") });
           } else if (code === "no_published_version") {
             setError("root", { message: t("fork.errorNoPublishedVersion") });
           } else {

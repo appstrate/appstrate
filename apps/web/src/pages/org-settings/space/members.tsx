@@ -165,7 +165,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   };
 
   if (canRead && isLoading) return <LoadingState />;
-  if (canRead && error) return <ErrorState message={errorMessage(error)} />;
+  if (canRead && error) return <ErrorState error={error} />;
 
   const explicitUserIds = new Set(
     (members ?? []).filter((m) => m.source === "explicit").map((m) => m.userId),

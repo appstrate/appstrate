@@ -55,7 +55,7 @@ export function OrgSettingsRolesPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   // Authoring bundles is OSS platform code: the permission is the whole gate,
   // with no deployment-level feature on top of it.
@@ -506,7 +506,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
             <LoadingState />
           ) : vocabularyError ? (
             <div role="alert">
-              <ErrorState message={errorMessage(vocabularyError)} />
+              <ErrorState error={vocabularyError} />
               <Button type="button" variant="outline" onClick={() => void refetch()}>
                 {t("common:btn.retry")}
               </Button>

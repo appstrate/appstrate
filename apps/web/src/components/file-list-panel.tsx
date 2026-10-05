@@ -21,7 +21,6 @@ import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { FileTile } from "./file-tile";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { errorMessage } from "../lib/mutation-error";
 
 /** Gallery axis: how the file was created, straight off the stored `purpose`. */
 export type PurposeFilter = "all" | "agent_output" | "user_upload";
@@ -230,7 +229,7 @@ export function FileListPanel({
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState message={errorMessage(error)} />
+        <ErrorState error={error} />
       ) : shown.length === 0 ? (
         <EmptyState
           message={empty.message}

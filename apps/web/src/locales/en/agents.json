@@ -437,7 +437,6 @@
   "fork.invalidName": "Name must contain only lowercase letters, numbers, and hyphens",
   "fork.submit": "Fork",
   "fork.errorOwned": "You already own this package",
-  "fork.errorCollision": "A package with this name already exists",
   "fork.errorNoPublishedVersion": "This package has no published version and cannot be forked",
   "ownership.readOnly": "Read-only system package. Fork it to customize.",
   "ownership.forkedFrom": "Forked from ",

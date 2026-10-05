@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { ApiError } from "../api/errors";
+import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
 
 /** SKILL.md frontmatter refusals; their sentences quote the checker's own `{{detail}}`. */
 export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
@@ -15,12 +16,10 @@ export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
 };
 
 /**
- * Refusals whose sentence is agent-domain copy other components reuse (`agents:*`); the lock
- * codes interpolate the field named in `param`. From `pinned_connection_unavailable` on, the
- * codes are the resolver's per-integration `errors[]` items. Every other code resolves by
- * convention — see `refusalMessage`.
+ * Refusals whose sentence is `agents:*` copy other components reuse; the lock codes interpolate
+ * the field named in `param`. Every other code resolves to `common:apiError.<code>`.
  */
-const REFUSAL_ERROR_KEYS: Record<string, string> = {
+export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   locked_input_field: "error.lockedInputField",
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
@@ -37,10 +36,7 @@ const REFUSAL_ERROR_KEYS: Record<string, string> = {
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
-  // Draft-tree refusals only the package editor can provoke: its sentences name the remedy.
-  invalid_path: "files.errorInvalidPath",
-  reserved_entry: "files.errorReserved",
-  path_conflict: "files.errorConflictPath",
+  ...PACKAGE_PATH_ERROR_KEYS,
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 };
 
@@ -53,17 +49,14 @@ interface Refusal {
 }
 
 /**
- * The translated sentence for a server refusal `code`, or `null` when it has none. A code is
- * translated by adding `apiError.<code>` to `locales/{fr,en}/common.json` — nothing to register
- * here. A sentence that cannot say everything the server said ends with its `{{message}}`.
- * Better Auth's and the importers' UPPER_SNAKE codes share the table, lower-cased.
+ * The translated sentence for a server refusal `code`, or `null` when it has none. Better
+ * Auth's and the importers' UPPER_SNAKE codes share the table, lower-cased.
  */
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
   const message = err.message ?? "";
   const agentsKey = REFUSAL_ERROR_KEYS[code];
   if (agentsKey) {
-    if (!i18n.exists(agentsKey, { ns: "agents" })) return null;
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
@@ -71,9 +64,8 @@ export function refusalMessage(err: Refusal): string | null {
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
-  // `input.` is the wire prefix of a launch parameter, not part of the name the user typed.
-  // A code emitted both with and without a field has a second sentence, `<key>_nofield`, so
-  // the first never renders an empty « ».
+  // `input.` is a launch parameter's wire prefix. `<key>_nofield` is the sentence of a code
+  // also emitted without a field, so the first never renders an empty « ».
   const field = (err.field ?? err.param)?.replace(/^input\./, "");
   return i18n.t(key, { field, message, context: field ? undefined : "nofield", ns: "common" });
 }
@@ -114,20 +106,18 @@ function translated(err: unknown): string | null {
   return `${sentence} ${i18n.t("error.moreErrors", { count: others.length, ns: "common" })}`;
 }
 
-/**
- * The sentence to show for any failure, in an inline slot (a form error, an error panel). A
- * server refusal is named by its translated `code`; a failure that carries no known code (a
- * network error, a code from a module this SPA build has no copy for) keeps its own message,
- * and one that says nothing at all gets the generic sentence rather than an empty slot.
- */
-export function errorMessage(err: unknown): string {
-  return translated(err) ?? (getErrorMessage(err) || i18n.t("error.generic"));
+/** What a failure says: its translated refusal, else its own message, else `null`. */
+export function errorDetail(err: unknown): string | null {
+  if (err === null || err === undefined) return null;
+  return translated(err) ?? (getErrorMessage(err) || null);
 }
 
-/**
- * The one format of an error toast: the translated refusal, or "Erreur : <message>" for a
- * failure nothing translates. `options` is Sonner's (a `description` under the sentence).
- */
+/** The sentence for an inline slot (a form error): never empty. */
+export function errorMessage(err: unknown): string {
+  return errorDetail(err) ?? i18n.t("error.generic");
+}
+
+/** The one toast format: the translated refusal, or "Erreur : <message>" when nothing translates. */
 export function toastError(err: unknown, options?: Parameters<typeof toast.error>[1]) {
   toast.error(translated(err) ?? i18n.t("error.prefix", { message: errorMessage(err) }), options);
 }

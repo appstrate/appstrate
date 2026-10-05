@@ -672,7 +672,6 @@
   "credentials.deleteConfirm": "Supprimer la clé \"{{label}}\" ?",
   "credentials.deleteInUse_one": "La clé \"{{label}}\" est utilisée par {{count}} modèle. Supprime ce modèle avant la clé.",
   "credentials.deleteInUse_other": "La clé \"{{label}}\" est utilisée par {{count}} modèles. Supprime ces modèles avant la clé.",
-  "credentials.deleteRefused": "Impossible de supprimer cette clé : des modèles l'utilisent encore.",
   "credentials.test": "Tester",
   "credentials.testSuccess": "OK ({{latency}}ms)",
   "credentials.testFailed": "Échec : {{message}}",

@@ -1,37 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Refusal codes ↔ locale files, in both directions.
+ * Refusal codes ↔ locale files.
  *
  * What this suite can see of the API's codes, and no more:
  *   - the literal ones — `code: "…"`, `conflict("…")`, `gone("…")`,
- *     `new GithubImportError("UPPER"` — read from the API SOURCE, plus the `error: "UPPER"`
- *     of the modules that build a connection-test result;
- *   - the ones forwarded from an error class, through the runtime lists their modules export
- *     (`PACKAGE_ZIP_ERROR_CODES`, `PACKAGE_FILE_WRITE_ERROR_CODES`, `MODEL_GENERATION_ERROR_CODES`,
- *     `COMPANION_VIOLATION_REASONS`);
+ *     `new GithubImportError("…")`, `new PackageZipError("…")` — read from the API SOURCE, plus
+ *     the `error: "UPPER"` of the modules that build a connection-test result;
+ *   - the four closed unions an error class or a validator forwards, each written out below as a
+ *     `Record<Union, true>` so a member added to the type fails the typecheck here;
  *   - Better Auth's, checked against the installed package's own table.
  * A code assembled any other way (a ternary, a lookup table, a third-party module) is invisible
- * unless it is named in `EMITTED_OUT_OF_SIGHT` — the guard narrows the gap, it does not close it.
- * A code that only a comment names is counted too: it then needs a sentence or an exemption,
- * which errs on the loud side.
+ * unless it is named in `EMITTED_OUT_OF_SIGHT`: the guard narrows the gap, it does not close it.
  *
- * A visible code with no sentence in both locales fails, unless it is exempted in `NOT_SURFACED`
- * with the reason; an `apiError.*` key that matches no known code fails too.
+ * Forward (strict): a visible code with no sentence fails, unless `NOT_SURFACED` exempts it with
+ * the reason. Reverse (best-effort, bounded by what is visible): a sentence or a mapped key that
+ * matches no known code fails.
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { BASE_ERROR_CODES } from "better-auth";
-import { COMPANION_VIOLATION_REASONS } from "@appstrate/afps-shared/companion-files";
-import { MODEL_GENERATION_ERROR_CODES } from "@appstrate/core/model-generation";
-import { PACKAGE_FILE_WRITE_ERROR_CODES } from "@appstrate/core/package-file-operations";
+import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-files";
+import type { FieldErrorCode } from "@appstrate/core/api-errors";
+import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
+import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
-import { PACKAGE_ZIP_ERROR_CODES } from "@appstrate/core/zip";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
-import { errorField, errorMessage, refusalMessage } from "../mutation-error.ts";
+import { errorField, errorMessage, refusalMessage, REFUSAL_ERROR_KEYS } from "../mutation-error.ts";
 import fr from "../../locales/fr/common.json";
 import en from "../../locales/en/common.json";
 import agentsFr from "../../locales/fr/agents.json";
@@ -74,12 +72,50 @@ const TEST_RESULT_PATTERN = /\berror:\s*"([A-Z][A-Z_]*)"/g;
 const BUILDS_TEST_RESULTS =
   /^apps\/api\/src\/(lib\/network-error|services\/(org-models|org-proxies|model-providers\/)|routes\/(models|proxies|model-provider-credentials))/;
 
-/** Codes forwarded from an error class: the lists their modules export. */
+/** Every member of a closed union: a missing or a stale one is a type error. */
+const membersOf = <T extends string>(members: Record<T, true>): string[] => Object.keys(members);
+
+/** Codes a validator or an error class forwards as the problem (or item) code. */
 const FORWARDED = [
-  ...PACKAGE_ZIP_ERROR_CODES,
-  ...PACKAGE_FILE_WRITE_ERROR_CODES,
-  ...MODEL_GENERATION_ERROR_CODES,
-  ...COMPANION_VIOLATION_REASONS,
+  ...membersOf<FieldErrorCode>({
+    required: true,
+    invalid_type: true,
+    invalid_format: true,
+    out_of_range: true,
+    unknown_field: true,
+    invalid_value: true,
+    invalid_union: true,
+    invalid_key: true,
+    invalid_element: true,
+    invalid_request: true,
+  }),
+  ...membersOf<PackageFileWriteErrorCode>({
+    invalid_bundle: true,
+    invalid_path: true,
+    reserved_entry: true,
+    content_entry_immovable: true,
+    not_found: true,
+    path_conflict: true,
+    file_too_large: true,
+    tree_too_large: true,
+  }),
+  ...membersOf<ModelGenerationErrorCode>({
+    temperature_unsupported: true,
+    reasoning_unsupported: true,
+    reasoning_level_unsupported: true,
+    temperature_with_reasoning_unsupported: true,
+  }),
+  ...membersOf<CompanionViolationReason>({
+    AGENT_MISSING_PROMPT: true,
+    AGENT_EMPTY_PROMPT: true,
+    SKILL_MISSING_SKILL_MD: true,
+    SKILL_INVALID_FRONTMATTER: true,
+    SKILL_MISSING_FRONTMATTER_NAME: true,
+    SKILL_INVALID_FRONTMATTER_NAME: true,
+    SKILL_MISSING_FRONTMATTER_DESCRIPTION: true,
+    SKILL_INVALID_FRONTMATTER_DESCRIPTION: true,
+    MCP_SERVER_MISSING_ENTRY_POINT: true,
+  }),
 ];
 
 /** Better Auth's own codes the sign-in, sign-up, password and account forms can meet. */
@@ -101,38 +137,14 @@ const BETTER_AUTH_CODES = [
   "CREDENTIAL_ACCOUNT_NOT_FOUND",
 ];
 
-/**
- * The keys of `PROXY_PROBLEMS` (`apps/api/src/lib/proxy-status.ts`), picked by a lookup or a
- * ternary. `invalid_request` is one of them too; it is a literal elsewhere.
- */
-const PROXY_PROBLEM_CODES = [
-  "unauthorized_target",
-  "blocked_target",
-  "credential_exfiltration_refused",
-  "credential_not_found",
-  "credential_unusable",
-  "unresolved_placeholder",
-  "upstream_unresolvable",
-  "upstream_unreachable",
-  "upstream_timeout",
-];
-
-/** Codes no list and no literal can show. */
+/** Codes no literal and no union can show: each is picked by a ternary. */
 const EMITTED_OUT_OF_SIGHT = [
-  // The two `beforeUsage` refusals of `@appstrate/module-ee`, picked by a ternary.
+  // The two `beforeUsage` refusals of `@appstrate/module-ee`.
   "quota_exceeded",
   "subscription_blocked",
-  // `FieldErrorCode` (`@appstrate/core/api-errors`): a type, the closed set a Zod issue maps to.
-  "required",
-  "invalid_type",
-  "invalid_format",
-  "out_of_range",
-  "unknown_field",
-  "invalid_value",
-  "invalid_union",
-  "invalid_key",
-  "invalid_element",
-  ...PROXY_PROBLEM_CODES,
+  // `parsePackageZip`'s companion-file refusal (`@appstrate/core/zip`).
+  "missing_content",
+  "invalid_content",
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -177,8 +189,6 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
-  // The credential and LLM proxies answer an agent or an API client, never a dashboard screen.
-  ...PROXY_PROBLEM_CODES,
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",
@@ -227,24 +237,25 @@ describe("API refusal codes ↔ locale files", () => {
     expect(literal.has("repo_too_large")).toBe(true);
   });
 
-  for (const lng of ["fr", "en"] as const) {
-    it(`translates every surfaced code in ${lng}`, async () => {
-      await i18n.changeLanguage(lng);
-      const untranslated = [...emitted]
-        .filter((code) => !NOT_SURFACED.has(code))
-        .filter((code) => refusalMessage({ code }) === null)
-        .sort();
-      expect(untranslated).toEqual([]);
-    });
-  }
+  // French only: `fr` is the fallback language, so an English pass would resolve the same keys;
+  // the parity test below is what holds `en`.
+  it("translates every surfaced code", async () => {
+    await i18n.changeLanguage("fr");
+    const untranslated = [...emitted]
+      .filter((code) => !NOT_SURFACED.has(code))
+      .filter((code) => refusalMessage({ code }) === null)
+      .sort();
+    expect(untranslated).toEqual([]);
+  });
+
+  it("maps only emitted codes to sentences the agents bundle has", () => {
+    const mapped = Object.entries(REFUSAL_ERROR_KEYS);
+    expect(mapped.filter(([code]) => !emitted.has(code)).map(([code]) => code)).toEqual([]);
+    expect(mapped.filter(([, key]) => !(key in agentsFr)).map(([, key]) => key)).toEqual([]);
+  });
 
   it("keeps no exemption for a code the API stopped emitting", () => {
     expect([...NOT_SURFACED].filter((code) => !emitted.has(code))).toEqual([]);
-  });
-
-  it("lists only proxy codes `PROXY_PROBLEMS` still defines", async () => {
-    const source = await Bun.file(join(REPO_ROOT, "apps/api/src/lib/proxy-status.ts")).text();
-    expect(PROXY_PROBLEM_CODES.filter((code) => !source.includes(`\n  ${code}: {`))).toEqual([]);
   });
 
   it("keeps no sentence for a code nothing emits", () => {

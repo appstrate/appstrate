@@ -25,7 +25,6 @@ import { OrgInvitationsList } from "../../components/org-invitations-list";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { hasFullOrgAccess } from "../../lib/org-role";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
-import { errorMessage } from "../../lib/mutation-error";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -85,7 +84,7 @@ export function OrgSettingsMembersPage() {
   });
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;

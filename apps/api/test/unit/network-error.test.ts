@@ -26,9 +26,7 @@ describe("mapFetchErrorToTestResult", () => {
     });
   });
 
-  it("reads the code of a wrapped cause, and still reads an errno in the message", () => {
-    const wrapped = new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
-    expect(mapFetchErrorToTestResult(wrapped, 0).error).toBe("CONNECTION_REFUSED");
+  it("reads the code Bun sets, and still reads an errno in the message", () => {
     expect(mapFetchErrorToTestResult(new Error("getaddrinfo ENOTFOUND x.invalid"), 0).error).toBe(
       "DNS_ERROR",
     );

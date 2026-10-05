@@ -35,7 +35,6 @@ import {
 import { LoadingState, ErrorState } from "./page-states";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
-import { errorMessage } from "../lib/mutation-error";
 
 /** What a row the server would now refuse says about itself. */
 const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, string]> = {
@@ -78,9 +77,9 @@ export function BillingManagersSection() {
   const [draft, setDraft] = useState<string[] | null>(null);
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
-  if (managersQuery.error) return <ErrorState message={errorMessage(managersQuery.error)} />;
+  if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
-  if (orgQuery.error) return <ErrorState message={errorMessage(orgQuery.error)} />;
+  if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
 
   const saved = (managersQuery.data?.data ?? []).map((m) => m.userId);
   const selected = draft ?? saved;

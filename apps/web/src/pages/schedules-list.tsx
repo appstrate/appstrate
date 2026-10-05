@@ -10,7 +10,6 @@ import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ScheduleCard } from "../components/schedule-card";
-import { errorMessage } from "../lib/mutation-error";
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -20,7 +19,7 @@ export function SchedulesListPage() {
   const { data: agents } = useAgents();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const getAgentName = (packageId: string) =>
     agents?.find((f) => f.id === packageId)?.display_name ?? packageId;

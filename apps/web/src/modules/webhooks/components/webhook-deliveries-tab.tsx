@@ -51,7 +51,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
 
   if (isLoading) return <LoadingState />;
   // Once rows are on screen, a failed page (next or refetch) must not hide them.
-  if (error && !data) return <ErrorState message={errorMessage(error)} />;
+  if (error && !data) return <ErrorState error={error} />;
 
   if (deliveries.length === 0) {
     return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;

@@ -274,25 +274,10 @@ export interface ParsedPackageZip {
   droppedRuntimeTools: string[];
 }
 
-/**
- * Every code a {@link PackageZipError} carries. A runtime list, not only a type: the import
- * routes forward the code (lower-cased) as the problem `code`, and the dashboard's translation
- * guard iterates it.
- */
-export const PACKAGE_ZIP_ERROR_CODES = [
-  "ZIP_INVALID",
-  "ZIP_BOMB",
-  "FILE_TOO_LARGE",
-  "MISSING_MANIFEST",
-  "INVALID_MANIFEST",
-  "MISSING_CONTENT",
-  "INVALID_CONTENT",
-] as const;
-
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
 export class PackageZipError extends Error {
   /**
-   * @param code - Error code; this module throws the ones in {@link PACKAGE_ZIP_ERROR_CODES}
+   * @param code - Error code (e.g. "FILE_TOO_LARGE", "ZIP_INVALID", "MISSING_MANIFEST")
    * @param message - Human-readable error description
    * @param details - Optional structured error details (e.g. validation error list)
    * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising this

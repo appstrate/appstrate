@@ -82,6 +82,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     taken identifier. It is now **409** everywhere: package create
     (`POST /api/packages/{type}`), fork, and the import routes (a system
     package's identifier, or one owned by another organization).
+  - A model or proxy connection test that is refused at the TCP level
+    answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
 
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
