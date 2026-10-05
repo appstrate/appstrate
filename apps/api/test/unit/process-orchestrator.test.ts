@@ -627,6 +627,24 @@ describe("ProcessOrchestrator", () => {
       expect(lines).toEqual({ info: [], error: ["Subprocess exited non-zero"] });
     }, 10_000);
 
+    // `removeWorkload` runs in the `finally` of every run: arriving right
+    // after a crash, it must not turn the crash into a requested stop.
+    it("still reports a crash when the workload is removed right after it", async () => {
+      const { boundary, handle } = await stageAgent("test-run-crash-then-remove");
+
+      const lines = await exitLines("test-run-crash-then-remove", async () => {
+        await withFakeEntrypoint(
+          boundary.id,
+          () => orchestrator.startWorkload(handle),
+          "process.exit(3);",
+        );
+        await orchestrator.waitForExit(handle);
+        await orchestrator.removeWorkload(handle);
+      });
+
+      expect(lines).toEqual({ info: [], error: ["Subprocess exited non-zero"] });
+    }, 10_000);
+
     it("removeWorkload drops the pending spec, not just the process entry", async () => {
       const { handle } = await stageAgent("test-run-remove-evicts");
       expect(pendingSpecCount()).toBe(1);

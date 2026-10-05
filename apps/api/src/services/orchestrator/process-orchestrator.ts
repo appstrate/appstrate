@@ -614,6 +614,10 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // `Bun.Subprocess.exited` never rejects and the handler only sleeps and logs.
     void proc.exited.then(async (code) => {
       if (code === 0) return;
+      // Read at exit time, before the flush below: `removeWorkload` runs in the
+      // `finally` of every run, and a stop arriving after a crash must not
+      // relabel it.
+      const stopped = ph.stopRequested === true;
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
       await new Promise((r) => setTimeout(r, 100));
@@ -624,7 +628,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
         exitCode: code,
         stderrTail: stderrTail.slice(-50).join("\n"),
       };
-      if (ph.stopRequested) logger.info("Subprocess stopped", fields);
+      if (stopped) logger.info("Subprocess stopped", fields);
       else logger.error("Subprocess exited non-zero", fields);
     });
   }
