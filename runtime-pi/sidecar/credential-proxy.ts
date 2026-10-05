@@ -47,7 +47,6 @@ import {
   redactCredentialHost,
   templateHost,
   urlPolicyRefusalMessage,
-  type ApiCallRequestIssue,
   type CookieJar,
   type PreparedApiCallRequest,
 } from "@appstrate/afps-runtime/resolvers";
@@ -287,9 +286,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 3. The target, the caller's headers and every string the body substitutes (text, multipart
-  //    fields, JSON leaves), as on the platform proxy and the CLI: an unresolved `{{var}}` or an
-  //    invalid header value is refused before anything is sent.
+  // 3. Substitute {{vars}} in the target and the caller's headers; refuse an unresolved one, there
+  //    or in a string the body substitutes (text, multipart fields, JSON leaves).
   const prepareFor = (fields: Record<string, string>) =>
     prepareApiCallRequest({
       target: targetUrl,
@@ -298,7 +296,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) return requestIssueFailure(prepared.issues[0]);
+  if (!prepared.ok) return { ok: false, status: 400, error: prepared.refusal.message };
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
@@ -347,8 +345,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   };
 
   /**
-   * One outbound attempt, from the caller's headers as prepared for
-   * `activeCreds`; the body is substituted here, so a 401 retry sees the refreshed token. Returns
+   * One outbound attempt, from the caller's headers as prepared for `activeCreds`; the body is
+   * substituted here. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
@@ -369,8 +367,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     /** Whether this attempt used the platform credential or an allowed caller override. */
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
-    const resolvedHeaders = { ...caller.headers };
-    const credentialHeaders = [...caller.credentialHeaders];
+    const { headers: resolvedHeaders, credentialHeaders } = caller;
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
     const carrier = credentialCarryingHeader(credentialInjection);
@@ -472,8 +469,8 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
-    // The caller's templates are substituted again from the refreshed set. One that no longer
-    // fills them is not replayed: the 401 stands.
+    // Headers and body are substituted again from the refreshed set; the target keeps its first
+    // rendering. A set that no longer fills the call is not replayed: the 401 stands.
     const again = fresh ? prepareFor(fresh.credentials) : null;
     if (fresh && again?.ok) {
       redactFields = redactionFields(policy, fresh.credentials);
@@ -533,24 +530,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   });
 
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl };
-}
-
-/** The caller's own target, header or body, refused as written (keys and header names, never a value). */
-function requestIssueFailure(issue: ApiCallRequestIssue): ApiCallFailure {
-  if (issue.kind === "invalid_header") {
-    return {
-      ok: false,
-      status: 400,
-      error: `Header "${issue.header}" is not a valid HTTP field value`,
-    };
-  }
-  const where =
-    issue.in === "header" ? `header "${issue.header}"` : issue.in === "target" ? "URL" : "body";
-  return {
-    ok: false,
-    status: 400,
-    error: `Unresolved placeholders in ${where}: {{${issue.keys.join()}}}`,
-  };
 }
 
 /**

@@ -9,17 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — one preparation of the caller half of an api_call (#1660)
 
-- `prepareApiCallRequest({ target, headers, bodyTemplates?, fields })` and
-  its types `ApiCallRequestTemplates` / `PreparedApiCallRequest` /
-  `ApiCallRequestIssue` (`./resolvers`): the target and the caller's headers
-  substituted, the headers a credential went into, and every template of the
-  call for `credentialUrlPolicy`; or every reason it is not prepared, in
-  order (an unresolved placeholder in the target; per header a value that is
-  no HTTP field value, else an unresolved placeholder; an unresolved
-  placeholder in the body). It repairs `Bearer{{field}}` on the template of
-  `Authorization`. The local integration resolver goes through it: it now
-  repairs that scheme, and refuses a caller header value that is no HTTP
-  field value before the URL policy (`RESOLVER_HEADER_INVALID`).
+- `prepareApiCallRequest({ target, headers, bodyTemplates, fields })` and
+  `PreparedApiCallRequest` (`./resolvers`): the target and the caller's
+  headers substituted, the headers a credential went into, and every
+  template of the call for `credentialUrlPolicy`; or the first defect,
+  worded (an unresolved placeholder in the target, a header or the body; a
+  header value that is no HTTP field value). It repairs `Bearer{{field}}` on
+  the template of `Authorization`.
+
+### Changed — local resolver (#1660)
+
+- It goes through `prepareApiCallRequest`: it repairs `Bearer{{field}}`,
+  names the first unresolved location
+  (`Unresolved placeholders in target: {{a}}`) where it listed every key,
+  and refuses a caller header value that is no HTTP field value before the
+  URL policy (`RESOLVER_HEADER_INVALID`).
 
 ### Changed — one outbound engine for every api_call path (#1641)
 

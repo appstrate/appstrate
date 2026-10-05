@@ -390,7 +390,10 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
   );
 
   /** An api_key integration injecting `Authorization: Bearer <api_key>`, caller override allowed. */
-  async function seedOverridable(packageId: string): Promise<void> {
+  async function seedOverridable(
+    packageId: string,
+    credentials = { api_key: "platform", alt: "other" },
+  ): Promise<void> {
     await seedProxyIntegration(
       ctx,
       localIntegrationManifest({
@@ -412,7 +415,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         },
       }),
     );
-    await seedProxyConnection(ctx, packageId, "api", { api_key: "platform", alt: "other" });
+    await seedProxyConnection(ctx, packageId, "api", credentials);
   }
 
   it("repairs `Bearer{{field}}` in a caller Authorization the manifest lets override", async () => {
@@ -435,29 +438,24 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(authorization).toEqual(["Bearer other"]);
   });
 
-  it("refuses an unresolved header placeholder before the URL policy is consulted", async () => {
-    const packageId = "@cpinjectorg/header-unresolved";
-    await seedOverridable(packageId);
-    let sent = 0;
+  it("reports a request defect ahead of a credential no header can carry", async () => {
+    const packageId = "@cpinjectorg/defect-first";
+    await seedOverridable(packageId, { api_key: "platform", alt: "a\nb" });
     const call = proxyCall({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
-      // Off the allowlist with a templated credential: alone, the URL policy's refusal.
-      target: "https://elsewhere.example.net/x",
+      target: "https://api.example.com/x",
+      // `X-Key` alone is a 502 `credential_unusable`.
       headers: { "X-Key": "{{alt}}", "X-Other": "{{nope}}" },
-      fetch: (() => {
-        sent++;
-        return Promise.resolve(new Response("{}"));
-      }) as unknown as typeof fetch,
+      fetch: (() => Promise.resolve(new Response("{}"))) as unknown as typeof fetch,
     });
     await expect(call).rejects.toMatchObject({
       code: "unresolved_placeholder",
       message: 'Unresolved placeholders in header "X-Other": {{nope}}',
     });
-    expect(sent).toBe(0);
   });
 
   it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {

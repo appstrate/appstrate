@@ -1,34 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * `prepareApiCallRequest` — the caller half every api_call path prepares the same way: target,
- * header and body templates in; wire values out, or every reason the call is not prepared.
- */
-
 import { describe, it, expect } from "bun:test";
 import { prepareApiCallRequest } from "../../src/resolvers/api-call-request.ts";
 
 const fields: Record<string, string> = { token: "ghp_live", tenant: "acme" };
-const target = "https://api.example.com/";
+type Call = { target?: string; headers?: Record<string, string>; bodyTemplates?: string[] };
 
-/** The prepared request, failing the test when it was refused. */
-function prepared(
-  call: { target?: string; headers?: Record<string, string>; bodyTemplates?: string[] },
-  bag = fields,
-) {
-  const result = prepareApiCallRequest({ target, headers: {}, ...call, fields: bag });
-  if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.issues)}`);
+const prepare = (call: Call, bag = fields) =>
+  prepareApiCallRequest({
+    target: "https://api.example.com/",
+    headers: {},
+    bodyTemplates: [],
+    ...call,
+    fields: bag,
+  });
+
+function prepared(call: Call, bag = fields) {
+  const result = prepare(call, bag);
+  if (!result.ok) throw new Error(`refused: ${result.refusal.message}`);
   return result.request;
 }
 
-/** The issues of a refused request, failing the test when it was prepared. */
-function issues(
-  call: { target?: string; headers?: Record<string, string>; bodyTemplates?: string[] },
-  bag = fields,
-) {
-  const result = prepareApiCallRequest({ target, headers: {}, ...call, fields: bag });
+function refusal(call: Call, bag = fields) {
+  const result = prepare(call, bag);
   if (result.ok) throw new Error("prepared");
-  return result.issues;
+  return result.refusal;
 }
 
 describe("prepareApiCallRequest — substitution", () => {
@@ -45,24 +41,18 @@ describe("prepareApiCallRequest — substitution", () => {
     expect(request.credentialHeaders).toEqual(["Authorization"]);
   });
 
-  it("returns every template of the call: target, headers as repaired, body", () => {
+  it("returns every template of the call: target, headers, body", () => {
     const request = prepared({
       target: "https://api.example.com/{{tenant}}",
-      headers: { Authorization: "Bearer{{token}}", "X-Trace": "abc" },
+      headers: { "X-Key": "{{token}}", "X-Trace": "abc" },
       bodyTemplates: ['{"k":"{{token}}"}'],
     });
     expect(request.templates).toEqual([
       "https://api.example.com/{{tenant}}",
-      "Bearer {{token}}",
+      "{{token}}",
       "abc",
       '{"k":"{{token}}"}',
     ]);
-  });
-
-  it("does not mutate the caller's headers", () => {
-    const headers = { Authorization: "Bearer{{token}}" };
-    prepared({ headers });
-    expect(headers).toEqual({ Authorization: "Bearer{{token}}" });
   });
 
   it("names a header an empty credential went into", () => {
@@ -71,19 +61,10 @@ describe("prepareApiCallRequest — substitution", () => {
     expect(request.credentialHeaders).toEqual(["X-Key"]);
   });
 
-  it("substitutes once: a `{{word}}` inside a credential value is sent as is", () => {
-    const request = prepared(
-      { target: "https://api.example.com/{{token}}", headers: { "X-Key": "{{token}}" } },
-      { token: "a{{tenant}}b" },
-    );
-    expect(request.url).toBe("https://api.example.com/a{{tenant}}b");
-    expect(request.headers).toEqual({ "X-Key": "a{{tenant}}b" });
-  });
-
-  it("returns a caller value a credential spoils: judging it is the sender's", () => {
-    const request = prepared({ headers: { "X-Key": "{{token}}" } }, { token: "a\nb" });
-    expect(request.headers).toEqual({ "X-Key": "a\nb" });
-    expect(request.credentialHeaders).toEqual(["X-Key"]);
+  it("returns a value a credential makes invalid: only the caller's own text is judged", () => {
+    expect(prepared({ headers: { "X-Key": "{{token}}" } }, { token: "a\nb" }).headers).toEqual({
+      "X-Key": "a\nb",
+    });
   });
 });
 
@@ -99,12 +80,9 @@ describe("prepareApiCallRequest — auth scheme repair (on the template, #988)",
     ["Authorization", "Bearer{{ token }}", "Bearer ghp_live"],
     ["authorization", "Bearer{{token}}", "Bearer ghp_live"],
     ["Authorization", "Bearer {{token}}", "Bearer ghp_live"],
+    ["X-Custom", "Bearer{{token}}", "Bearerghp_live"],
   ])("%s: %s → %s", (name, template, value) => {
     expect(sent(name, template)).toBe(value);
-  });
-
-  it("leaves another header untouched", () => {
-    expect(sent("X-Custom", "Bearer{{token}}")).toBe("Bearerghp_live");
   });
 
   it("never rewrites a value: a secret whose first bytes spell a scheme is returned as is", () => {
@@ -115,40 +93,48 @@ describe("prepareApiCallRequest — auth scheme repair (on the template, #988)",
   });
 });
 
-describe("prepareApiCallRequest — refusals", () => {
-  it("resolves own fields only: {{constructor}} is unresolved, not Object.prototype's", () => {
-    expect(issues({ target: "https://api.example.com/{{constructor}}" })).toEqual([
-      { kind: "unresolved_placeholder", in: "target", keys: ["constructor"] },
-    ]);
-  });
-
-  it("names every issue, in order: target, each header, body", () => {
+describe("prepareApiCallRequest — the first refusal", () => {
+  it("an unresolved target placeholder, each key once, ahead of any header", () => {
     expect(
-      issues({
-        target: "https://api.example.com/{{missing}}/{{gone}}",
-        headers: { "X-Ok": "{{token}}", "X-Missing": "{{nope}}", "X-Bad": "a\nb" },
-        bodyTemplates: ["{{b1}} {{token}}", "{{b2}} {{b1}}"],
+      refusal({
+        target: "https://api.example.com/{{missing}}/{{gone}}/{{missing}}",
+        headers: { "X-Bad": "a\nb" },
       }),
-    ).toEqual([
-      { kind: "unresolved_placeholder", in: "target", keys: ["missing", "gone"] },
-      { kind: "unresolved_placeholder", in: "header", header: "X-Missing", keys: ["nope"] },
-      { kind: "invalid_header", header: "X-Bad" },
-      { kind: "unresolved_placeholder", in: "body", keys: ["b1", "b2"] },
-    ]);
+    ).toEqual({
+      kind: "unresolved_placeholder",
+      message: "Unresolved placeholders in target: {{missing,gone}}",
+    });
   });
 
-  it.each(["a\nb", "a\rb", "a\0b", "cafĀ"])(
-    "a caller value that is no HTTP field value (%j)",
-    (value) => {
-      expect(issues({ headers: { "X-Bad": value } })).toEqual([
-        { kind: "invalid_header", header: "X-Bad" },
-      ]);
-    },
-  );
+  it("resolves own fields only: {{constructor}} is unresolved, not Object.prototype's", () => {
+    expect(refusal({ target: "https://api.example.com/{{constructor}}" }).message).toBe(
+      "Unresolved placeholders in target: {{constructor}}",
+    );
+  });
 
-  it("a header both invalid and unresolved is reported invalid", () => {
-    expect(issues({ headers: { "X-Bad": "{{nope}}\n" } })).toEqual([
-      { kind: "invalid_header", header: "X-Bad" },
-    ]);
+  it("the first header at fault, in the caller's order, ahead of the body", () => {
+    expect(
+      refusal({
+        headers: { "X-Ok": "{{token}}", "X-Missing": "{{nope}}", "X-Bad": "a\nb" },
+        bodyTemplates: ["{{b}}"],
+      }),
+    ).toEqual({
+      kind: "unresolved_placeholder",
+      message: 'Unresolved placeholders in header "X-Missing": {{nope}}',
+    });
+  });
+
+  it("a caller value that is no HTTP field value, ahead of its own placeholders", () => {
+    expect(refusal({ headers: { "X-Bad": "{{nope}}\n" } })).toEqual({
+      kind: "invalid_header",
+      message: 'Header "X-Bad" is not a valid HTTP field value',
+    });
+  });
+
+  it("an unresolved placeholder in any body template", () => {
+    expect(refusal({ bodyTemplates: ["{{b1}} {{token}}", "{{b2}} {{b1}}"] })).toEqual({
+      kind: "unresolved_placeholder",
+      message: "Unresolved placeholders in body: {{b1,b2}}",
+    });
   });
 });

@@ -41,9 +41,8 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // primitives but imports `@appstrate/connect/proxy-primitives` directly, so
 // its binary does not pull this barrel's credentials module (transitively
 // `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
-// consumer actually imports is re-exported here; the sidecar-only
-// `applyInjectedCredentialHeader` and the in-package-only
-// `buildInjectedCredentialHeader` are reached through the subpath.
+// consumer actually imports is re-exported here; `applyInjectedCredentialHeader`
+// and `buildInjectedCredentialHeader` are reached through the subpath.
 export {
   substituteVars,
   matchesAuthorizedUriSpec,

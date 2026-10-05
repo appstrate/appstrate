@@ -68,7 +68,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { substituteVars, templateHost } from "./template-vars.ts";
-import { prepareApiCallRequest, type ApiCallRequestIssue } from "./api-call-request.ts";
+import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
@@ -459,15 +459,20 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         }
         callerHeaders[key] = value;
       }
-      // The target, the kept headers and a string body (never multipart), checked and substituted
-      // as on the platform proxy and the sidecar. Every unresolved placeholder is named at once.
+      // A string body is the only one substituted (never multipart).
       const prepared = prepareApiCallRequest({
         target: req.target,
         headers: callerHeaders,
         bodyTemplates: typeof req.body === "string" ? [req.body] : [],
         fields,
       });
-      if (!prepared.ok) throw requestIssuesError(meta.name, prepared.issues);
+      if (!prepared.ok) {
+        const { kind, message } = prepared.refusal;
+        if (kind === "invalid_header") throw headerInvalid(meta.name, message);
+        throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
+          integration: meta.name,
+        });
+      }
       const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
@@ -570,28 +575,6 @@ function refusalError(refusal: UrlPolicyRefusal, integration: string, target: st
   return refusal === "exfiltration"
     ? new ResolverError("RESOLVER_CREDENTIAL_EXFIL_BLOCKED", message, { integration })
     : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
-}
-
-/** Every `{{field}}` the credential bag does not hold, named at once; else the first invalid header. */
-function requestIssuesError(
-  integration: string,
-  issues: readonly ApiCallRequestIssue[],
-): ResolverError {
-  const unresolved = new Set<string>();
-  const invalid: string[] = [];
-  for (const issue of issues) {
-    if (issue.kind === "invalid_header") invalid.push(issue.header);
-    else for (const key of issue.keys) unresolved.add(key);
-  }
-  const [header] = invalid;
-  if (unresolved.size === 0 && header !== undefined) {
-    return headerInvalid(integration, new InvalidHeaderValueError(header).message);
-  }
-  return new ResolverError(
-    "RESOLVER_BODY_INVALID",
-    `Integration ${integration}: unresolved placeholders: {{${[...unresolved].join()}}}`,
-    { integration },
-  );
 }
 
 /** An agent header value that is no HTTP field value (the message names the header only). */
