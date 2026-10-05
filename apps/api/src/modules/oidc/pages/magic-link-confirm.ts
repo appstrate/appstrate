@@ -29,6 +29,34 @@
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedSpaceBranding } from "../services/branding.ts";
+import { logger } from "../../../lib/logger.ts";
+
+const MAGIC_LINK_CONFIRM_PATH = "/api/oauth/magic-link/confirm";
+const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
+
+/**
+ * Turn Better Auth's verify URL into the URL of this interstitial — the one
+ * the email carries. The query (token, callbackURL, errorCallbackURL) is kept
+ * as is; the POST handler hands it back to the verify endpoint.
+ */
+export function toMagicLinkConfirmUrl(verifyUrl: string, email: string): string {
+  const url = new URL(verifyUrl);
+  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) {
+    // A Better Auth upgrade moved the verify route: the email falls back to
+    // the direct link, which a mail scanner can burn. Loud, so it is caught
+    // in ops before users report expired links.
+    logger.warn("oidc: unexpected magic-link verify path, emailing the direct link", {
+      module: "oidc",
+      pathname: url.pathname,
+    });
+    return verifyUrl;
+  }
+  url.pathname = MAGIC_LINK_CONFIRM_PATH;
+  // Shown on the interstitial ("you are signing in as …"). The URL only ever
+  // reaches that address's inbox.
+  url.searchParams.set("email", email);
+  return url.toString();
+}
 
 interface MagicLinkConfirmPageProps {
   /** Action URL for the POST form — `/api/oauth/magic-link/confirm?token=…&callbackURL=…&errorCallbackURL=…`. */

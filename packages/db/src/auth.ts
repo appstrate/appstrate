@@ -215,12 +215,19 @@ export function setRealmResolver(resolver: RealmResolver): void {
 // ─── Magic-link issued hook (injected at boot by the OIDC module) ───
 //
 // Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
-// email leaves the transport, with the freshly minted single-use token and
-// the request headers of the `sign-in/magic-link` call. The OIDC module
-// uses it to persist a server-side `(token → OAuth client)` binding so the
-// later `/magic-link/verify` leg — driven entirely by Better Auth — can
-// resolve the user's realm from state the browser cannot strip or forge
-// (CRIT-15).
+// email leaves the transport, with the freshly minted single-use token, the
+// verify URL Better Auth built for it and the request headers of the
+// `sign-in/magic-link` call. The OIDC module uses it for two things:
+//
+//   - persist a server-side `(token → OAuth client)` binding so the later
+//     `/magic-link/verify` leg — driven entirely by Better Auth — can resolve
+//     the user's realm from state the browser cannot strip or forge (CRIT-15);
+//   - return the URL to email instead: its confirmation interstitial, which
+//     keeps mail scanners from burning the one-shot token.
+//
+// The interstitial is a route of that module, so the URL that points at it
+// is decided there. Without the module the hook is unset and the email
+// carries Better Auth's own verify URL, which is the only one that exists.
 //
 // FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
 // surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
@@ -231,14 +238,31 @@ export interface MagicLinkIssuedInfo {
   token: string;
   /** Normalized (lowercased/trimmed) recipient email. */
   email: string;
+  /** Better Auth's verify URL for this token. */
+  url: string;
   /** Headers of the `sign-in/magic-link` request — `null` outside HTTP. */
   headers: Headers | null;
 }
 
-let _magicLinkIssuedHook: ((info: MagicLinkIssuedInfo) => Promise<void>) | null = null;
+/** Returns the URL to put in the email. */
+type MagicLinkIssuedHook = (info: MagicLinkIssuedInfo) => Promise<string>;
 
-export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Promise<void>): void {
+let _magicLinkIssuedHook: MagicLinkIssuedHook | null = null;
+
+export function setMagicLinkIssuedHook(hook: MagicLinkIssuedHook): void {
   _magicLinkIssuedHook = hook;
+}
+
+/**
+ * Test-only: swap the hook and return the previous one, so a test can put the
+ * auth layer in the state of an instance that does not run the OIDC module.
+ */
+export function _swapMagicLinkIssuedHookForTesting(
+  hook: MagicLinkIssuedHook | null,
+): MagicLinkIssuedHook | null {
+  const previous = _magicLinkIssuedHook;
+  _magicLinkIssuedHook = hook;
+  return previous;
 }
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
@@ -490,57 +514,21 @@ function buildBasePlugins(
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
-                // Give the OIDC module a chance to persist the server-side
-                // `(token → OAuth client)` transaction binding BEFORE the
-                // email is sent (see `setMagicLinkIssuedHook`). A throw here
-                // aborts the send via the surrounding catch — fail closed:
-                // an OIDC magic link must never leave without its binding,
-                // otherwise the verify leg would fall back to forgeable
-                // browser state for realm resolution (CRIT-15).
+                // See `setMagicLinkIssuedHook`. A throw here aborts the send
+                // via the surrounding catch — fail closed.
+                let url = rawUrl;
                 if (_magicLinkIssuedHook) {
                   // `EndpointContext.headers` is typed `HeadersInit` — copy
                   // into a real `Headers` so the hook contract stays uniform
                   // with the other signup-hook channels.
                   const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
-                  await _magicLinkIssuedHook({
+                  url = await _magicLinkIssuedHook({
                     token,
                     email: normalizedEmail,
+                    url: rawUrl,
                     headers: rawHeaders ? new Headers(rawHeaders) : null,
                   });
                 }
-
-                // Rewrite the verify URL to route through the OIDC module's
-                // confirmation interstitial so that one-shot token consumption
-                // is gated behind an explicit click. Without this, email
-                // clients (Resend click-tracking, Outlook SafeLinks, Gmail
-                // preview, Apple Mail preview, corporate URL scanners)
-                // prefetch the `GET` link and burn the token before the user
-                // clicks — producing a `session_expired` on the relying-party
-                // callback. Mirrors Slack/Notion/Linear/Supabase.
-                //
-                // The confirm page lives in the OIDC module but is generic
-                // (falls back to platform branding when the callbackURL has
-                // no client_id, e.g. invitation flows).
-                const rewritten = new URL(rawUrl);
-                if (rewritten.pathname === "/api/auth/magic-link/verify") {
-                  rewritten.pathname = "/api/oauth/magic-link/confirm";
-                  // Surface the recipient email on the confirm interstitial
-                  // ("You are signing in as foo@bar.com") to match SOTA UX
-                  // (Slack/Linear). Safe: the recipient already owns the
-                  // email, and the URL is only delivered to their inbox.
-                  rewritten.searchParams.set("email", normalizedEmail);
-                } else {
-                  // Defense against a silent BA path change in future upgrades.
-                  // If the path ever moves, the rewrite above becomes a no-op
-                  // and we'd regress to prefetch-vulnerable behavior — log
-                  // loudly so the drift is caught in ops before it reaches
-                  // users.
-                  logger.warn(
-                    "oidc: magic-link URL rewrite skipped — unexpected BA path, falling back to direct verify",
-                    { pathname: rewritten.pathname },
-                  );
-                }
-                const url = rewritten.toString();
 
                 // Magic-link is now a pure passwordless-login channel. The
                 // invitation flow no longer rides on magic-link: an invited
