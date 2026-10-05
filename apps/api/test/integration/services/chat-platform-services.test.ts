@@ -13,7 +13,7 @@
  * message).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { chatSessions, llmUsage } from "@appstrate/db/schema";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
@@ -89,6 +89,54 @@ describe("resolveChatModel", () => {
     } else {
       throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
     }
+  });
+
+  describe("a subscription whose access token expired", () => {
+    const realFetch = globalThis.fetch;
+    afterEach(() => {
+      globalThis.fetch = realFetch;
+    });
+
+    async function expiredSubscription(tokenEndpoint: () => Response): Promise<string> {
+      const row = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        label: "Test OAuth",
+        accessToken: "stale",
+        refreshToken: "test-refresh",
+        expiresAt: Date.now() - 10_000,
+        createdBy: ctx.user.id,
+      });
+      globalThis.fetch = (async () => tokenEndpoint()) as unknown as typeof fetch;
+      return createOrgModel(ctx.orgId, "Subscribed", "test-model", ctx.user.id, row.id);
+    }
+
+    it("resolves to a reconnect when the provider refuses the refresh token", async () => {
+      const presetId = await expiredSubscription(() =>
+        Response.json({ error: "invalid_grant" }, { status: 400 }),
+      );
+
+      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+        subscription: true,
+        needsReconnection: true,
+      });
+      // The flag is stored: the next turn asks for a reconnect without a refresh.
+      globalThis.fetch = (async () => {
+        throw new Error("the token endpoint must not be called again");
+      }) as unknown as typeof fetch;
+      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+        subscription: true,
+        needsReconnection: true,
+      });
+    });
+
+    it("throws, and asks for no reconnect, when the token endpoint is down", async () => {
+      const presetId = await expiredSubscription(() => new Response("down", { status: 503 }));
+
+      await expect(resolveChatModel(ctx.orgId, presetId)).rejects.toThrow();
+      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
+      expect(row?.needs_reconnection ?? false).toBe(false);
+    });
   });
 
   it("returns { subscription: false } for an unknown preset", async () => {
