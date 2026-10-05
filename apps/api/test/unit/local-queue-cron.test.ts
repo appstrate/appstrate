@@ -190,6 +190,31 @@ describe("LocalQueue cron firing", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Poll alignment
+// ---------------------------------------------------------------------------
+
+describe("LocalQueue cron poll alignment", () => {
+  const delayAt = (iso: string): number =>
+    (new LocalQueue<unknown>("test-cron-align") as any).cronPollDelay(new Date(iso).getTime());
+
+  it("aims the next poll at the wall-clock :00/:30, whatever second the worker started on", () => {
+    // Started at :22.8 — the poll must land just past :30, then just past :00,
+    // not at :52.8 / :22.8 forever (every minute schedule fired ~22 s late).
+    const fromMidMinute = delayAt("2026-01-15T10:30:22.800Z");
+    expect(fromMidMinute).toBeGreaterThanOrEqual(7_200);
+    expect(fromMidMinute).toBeLessThan(7_300);
+
+    const fromLateMinute = delayAt("2026-01-15T10:30:59.000Z");
+    expect(fromLateMinute).toBeGreaterThanOrEqual(1_000);
+    expect(fromLateMinute).toBeLessThan(1_100);
+  });
+
+  it("never lands before the boundary it aims at", () => {
+    expect(delayAt("2026-01-15T10:30:00.000Z")).toBeGreaterThan(30_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Scheduler integration (upsertScheduler + evaluateCron + removeScheduler)
 // ---------------------------------------------------------------------------
 
