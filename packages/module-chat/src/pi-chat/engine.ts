@@ -606,9 +606,10 @@ export function runPiChat(input: PiChatInput): Response {
         // localizes the stable category.
         const meta = mapper.result();
         const stepCount = mapper.stepCount();
+        const turnError =
+          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
         const closing = closePiTurn({
-          error:
-            meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined),
+          error: turnError,
           finishReason: meta.finishReason,
           streamStarted,
           aborted: turnAbort.signal.aborted,
@@ -623,6 +624,18 @@ export function runPiChat(input: PiChatInput): Response {
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
         });
+        // The commonest failure — the provider answered with an error and the
+        // loop returned — throws nothing, so the catch below never sees it. Log
+        // it here under the id the user is shown: that id is only worth
+        // displaying if it finds this line. The raw text stays server-side.
+        if (closing.clientError) {
+          logger.warn("chat turn failed on a model error", {
+            requestId: closing.clientError.requestId,
+            chatSessionId: input.chatSessionId,
+            category: closing.clientError.category,
+            err: turnError,
+          });
+        }
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
         // — an `error` chunk is transient and never becomes a persisted part.
@@ -662,11 +675,6 @@ export function runPiChat(input: PiChatInput): Response {
         if (streamFinished) {
           logger.error("Pi chat failed after its finish chunk", { err: String(err) });
         } else {
-          logger.error("Pi chat turn failed", {
-            err: String(err),
-            chatSessionId: input.chatSessionId,
-            requestId: input.requestId,
-          });
           const aborted = turnAbort.signal.aborted;
           const closing = closePiTurn({
             // An abort is a normal ending (the user already knows) — there is
@@ -682,6 +690,13 @@ export function runPiChat(input: PiChatInput): Response {
             modelId: input.presetId,
             modelLabel: input.modelLabel,
             ...(input.requestId ? { requestId: input.requestId } : {}),
+          });
+          // The id logged is the one the closure reports to the user.
+          logger.error("Pi chat turn failed", {
+            err: String(err),
+            chatSessionId: input.chatSessionId,
+            requestId: closing.clientError?.requestId ?? input.requestId,
+            ...(closing.clientError ? { category: closing.clientError.category } : {}),
           });
           for (const chunk of closing.chunks) write(chunk);
         }

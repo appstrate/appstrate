@@ -145,6 +145,8 @@ interface PiTurnClosure {
   chunks: UIMessageChunk[];
   /** The turn was cut by the wall-clock ceiling — the caller logs it. */
   deadlineReached: boolean;
+  /** What the client was told of the turn's error, when it carried one — the caller logs it. */
+  clientError?: ClientTurnError;
 }
 
 /**
@@ -209,5 +211,9 @@ export function closePiTurn(input: {
       modelLabel: input.modelLabel,
     }),
   });
-  return { chunks, deadlineReached: closure.deadlineReached };
+  return {
+    chunks,
+    deadlineReached: closure.deadlineReached,
+    ...(clientError ? { clientError } : {}),
+  };
 }

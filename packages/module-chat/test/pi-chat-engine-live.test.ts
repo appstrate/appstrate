@@ -136,6 +136,9 @@ let providerPark: {
   settle: (clientAborted: boolean) => void;
 } | null = null;
 
+/** When set, the provider stub refuses the completions request with this status. Reset in `afterEach`. */
+let providerRefusal: number | null = null;
+
 /** How long the parked request waits for a teardown before reporting none. */
 const PARK_GIVE_UP_MS = 3_000;
 
@@ -146,6 +149,12 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
+      if (providerRefusal !== null) {
+        return Response.json(
+          { error: { message: "Authentication Fails", type: "authentication_error" } },
+          { status: providerRefusal },
+        );
+      }
       if (!providerPark) return openAiSse();
       const park = providerPark;
       park.arrived();
@@ -171,6 +180,7 @@ afterAll(() => server.stop(true));
 afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
+  providerRefusal = null;
   mcpSurface = EMPTY_SURFACE;
 });
 
@@ -199,7 +209,12 @@ async function runTurn(
   mintBearer: () => string,
   abortSignal?: AbortSignal,
   platformFetch?: typeof fetch,
-  turn: { model?: OrgModel; generation?: PiChatInput["generation"]; surfaceKey?: string } = {},
+  turn: {
+    model?: OrgModel;
+    generation?: PiChatInput["generation"];
+    surfaceKey?: string;
+    requestId?: string;
+  } = {},
 ) {
   const binding = createPiProxyModelBinding({
     model: turn.model ?? orgModel(),
@@ -223,6 +238,7 @@ async function runTurn(
       orgId: "org_live",
       userId: "user_live",
       chatSessionId: null,
+      ...(turn.requestId ? { requestId: turn.requestId } : {}),
       messages: userTurn("dis bonjour"),
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
@@ -383,6 +399,46 @@ describe("runPiChat against a stub provider", () => {
       modelId: "preset_live",
       modelLabel: LIVE_MODEL_LABEL,
     });
+  }, 30_000);
+
+  it("logs a provider-reported failure under the request id the user is shown", async () => {
+    // The commonest failure: the provider answers with an error, the loop
+    // returns, nothing throws. The id on the turn is only worth showing if a
+    // server log line carries it — with the cause the client never sees.
+    providerRefusal = 401;
+    const logged: Array<Record<string, unknown>> = [];
+    const spy = (msg: string, data?: Record<string, unknown>) => void logged.push({ msg, ...data });
+    const original = { warn: logger.warn, error: logger.error };
+    logger.warn = spy as unknown as typeof logger.warn;
+    logger.error = spy as unknown as typeof logger.error;
+    let chunks: Awaited<ReturnType<typeof runTurn>>["chunks"];
+    try {
+      ({ chunks } = await runTurn(() => "loopback-refused", undefined, undefined, {
+        requestId: "req_turn1",
+      }));
+    } finally {
+      Object.assign(logger, original);
+    }
+
+    const turn = (
+      chunks.find((c) => c.type === "finish") as {
+        messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+      }
+    ).messageMetadata?.appstrate?.turn;
+    expect(turn).toMatchObject({
+      finishReason: "error",
+      errorCategory: "credential_unavailable",
+      requestId: "req_turn1",
+    });
+    expect(chunks.find((c) => c.type === "error")).toMatchObject({
+      errorText: "appstrate:chat-turn-error:credential_unavailable:req_turn1",
+    });
+    const line = logged.find((data) => data.requestId === turn?.requestId);
+    expect(line).toMatchObject({
+      msg: "chat turn failed on a model error",
+      category: "credential_unavailable",
+    });
+    expect(String(line?.err)).toContain("Authentication Fails");
   }, 30_000);
 
   it("tears the live Pi session down when a stop lands mid-inference", async () => {
