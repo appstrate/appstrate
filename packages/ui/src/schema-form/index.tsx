@@ -44,13 +44,13 @@ import {
   SelectWidget,
   MultiSelectWidget,
 } from "./widgets.tsx";
+import type { FileWidgetLabels } from "./file-widget.tsx";
 import type { UploadFn } from "./upload-client.ts";
 
-import type { SchemaFormContext, SchemaFormLabels } from "./context.ts";
+import type { SchemaFormContext } from "./context.ts";
 
 export type { SchemaWrapper } from "@appstrate/core/form";
 export type { FileWidgetLabels } from "./file-widget.tsx";
-export type { SchemaFormLabels } from "./context.ts";
 export type { UploadFn } from "./upload-client.ts";
 
 const widgets = {
@@ -85,8 +85,8 @@ export interface SchemaFormProps extends Omit<
    * uploads (the widget shows an error if the user tries to attach a file).
    */
   upload?: UploadFn;
-  /** Translated strings for the FileWidget and array controls. Defaults are English. */
-  labels?: SchemaFormLabels;
+  /** Translated strings for the FileWidget. Defaults are English. */
+  labels?: FileWidgetLabels & { addItem?: string };
 }
 
 /**

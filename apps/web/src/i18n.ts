@@ -46,12 +46,9 @@ export const i18nReady = i18n
     interpolation: { escapeValue: false },
   });
 
-// `<html lang>` tells a screen reader which voice to read the page with;
-// `index.html` can only hardcode the default. `languageChanged` also fires for
-// a language restored at boot. Then persist the choice for the next visit (best-effort — a
-// blocked store must not throw out of the handler).
+// Persist language choice to localStorage for next visit (best-effort — a
+// blocked store must not throw out of the languageChanged handler).
 i18n.on("languageChanged", (lng) => {
-  if (typeof document !== "undefined") document.documentElement.lang = lng;
   try {
     localStorage.setItem("i18nextLng", lng);
   } catch {
