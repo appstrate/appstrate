@@ -53,6 +53,8 @@
   "run.status.done": "Finished",
   "run.filesTruncated": "Only the first 100 files are shown.",
   "run.noAccess": "Your role does not give access to this space's runs.",
+  "connect.popupBlocked": "The browser blocked the window.",
+  "connect.openInTab": "Open in a new tab",
   "model.needsReconnection": "Reconnection required",
   "model.answeredBy": "Answered by {{model}}",
   "model.failedWith": "Failed with {{model}}",

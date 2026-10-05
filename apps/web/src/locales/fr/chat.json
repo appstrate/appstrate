@@ -53,6 +53,8 @@
   "run.status.done": "Terminé",
   "run.filesTruncated": "Seuls les 100 premiers fichiers sont affichés.",
   "run.noAccess": "Votre rôle ne donne pas accès aux runs de cet espace.",
+  "connect.popupBlocked": "Fenêtre bloquée par le navigateur.",
+  "connect.openInTab": "Ouvrir dans un nouvel onglet",
   "model.needsReconnection": "Reconnexion requise",
   "model.answeredBy": "Répondu par {{model}}",
   "model.failedWith": "Échec avec {{model}}",
