@@ -79,15 +79,16 @@ app.onError(errorHandler);
 // Request-Id — generates req_ prefixed ID, sets header + context variable
 app.use("*", requestId());
 
-// Access log — one `debug` line per request (`LOG_LEVEL=debug` to see them).
-app.use("*", accessLog());
-
 // Telemetry — delegates to the telemetry provider's HTTP SERVER-span
 // middleware (installed by an observability module at boot, e.g.
 // `@appstrate/module-observability`). Registered right after `requestId()` so
 // the span — and its bound logger trace context — covers the full handler
 // chain. Pass-through no-op when no provider is installed.
 app.use("*", telemetry());
+
+// Access log — one `debug` line per request (`LOG_LEVEL=debug` to see them).
+// Inside the telemetry frame, so the line carries the span's trace ids.
+app.use("*", accessLog());
 
 // Client IP — captures `getConnInfo(c).remote.address` into a per-Request
 // WeakMap so downstream code that only sees the bare `Request` (Better

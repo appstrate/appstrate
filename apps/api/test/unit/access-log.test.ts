@@ -30,6 +30,10 @@ function createApp(sink: Logger) {
   app.use("*", requestId());
   app.use("*", accessLog(sink));
   app.get("/ok", (c) => c.json({ ok: true }));
+  // The two shapes a bearer token takes in a PATH: a named parameter, and the
+  // tail of a catch-all (Better Auth's `/api/auth/reset-password/<token>`).
+  app.get("/invite/:token/info", (c) => c.json({ ok: true }));
+  app.on(["GET", "POST"], "/api/auth/*", (c) => c.json({ ok: true }));
   app.post("/missing", () => {
     throw notFound("nope");
   });
@@ -47,11 +51,23 @@ describe("accessLog middleware", () => {
     expect(line!.data).toMatchObject({
       requestId: res.headers.get("Request-Id"),
       method: "GET",
-      path: "/ok",
+      route: "/ok",
       status: 200,
     });
     expect(typeof line!.data!.durationMs).toBe("number");
     expect(JSON.stringify(line)).not.toContain("SECRET_IN_QUERY");
+  });
+
+  it.each([
+    ["/invite/TOKEN_IN_PARAM/info", "/invite/:token/info"],
+    ["/api/auth/reset-password/TOKEN_IN_TAIL", "/api/auth/*"],
+  ])("logs %s as its route pattern, never the token", async (path, route) => {
+    const { lines, logger } = recordingLogger();
+    const res = await createApp(logger).request(path);
+
+    expect(res.status).toBe(200);
+    expect(lines.map((l) => l.data?.route)).toEqual([route]);
+    expect(JSON.stringify(lines)).not.toContain("TOKEN_IN_");
   });
 
   it("records the status of a request the error handler answered", async () => {
