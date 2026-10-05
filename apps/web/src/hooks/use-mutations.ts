@@ -210,7 +210,9 @@ export function useImportPackage() {
       }
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
+    // No `onError` on the two import mutations: a 409 here is a question the
+    // import modal answers, and it reports every other failure itself. A
+    // hook-level handler fires as well and toasts over the confirmation.
   });
 }
 
@@ -229,7 +231,6 @@ export function useImportFromGithub() {
       invalidatePackageFiles(qc);
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
   });
 }
 

@@ -18,7 +18,7 @@ const listPackagesSharedDescription =
   "each placement's origin and state and carries the switch that activates it. For " +
   "the organization-wide map of placements, use `GET /api/library`.";
 
-/** The 409 both import routes answer: a problem naming what `force=true` would overwrite. */
+/** The 409 both import routes answer: a problem naming what the import would overwrite. */
 const importConflictProblem = {
   allOf: [
     { $ref: "#/components/schemas/ProblemDetail" },
@@ -452,7 +452,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both).",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again.",
           content: {
             "application/problem+json": {
               schema: importConflictProblem,

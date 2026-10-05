@@ -2547,6 +2547,12 @@ export function createPackagesRouter() {
       // A forced import overwrites TWO things, and the caller must be told
       // about both before `force=true` waives them together: the unpublished
       // draft, and a published version of the same number whose bytes differ.
+      // A GitHub import has no force option, so its refusal names the way out
+      // that exists for it.
+      const remedy =
+        source === "zip"
+          ? "Use the force option to overwrite."
+          : "A GitHub import cannot overwrite: publish or discard the draft changes, or bump the version in the source manifest.";
       if (!force) {
         const importedVersion = asRecord(manifest).version;
         const [vCount, latestDate, existingVer] = await Promise.all([
@@ -2571,10 +2577,11 @@ export function createPackagesRouter() {
           const activeVersion = asRecord(existing.draftManifest).version;
           throw conflict(
             "draft_overwrite",
-            "This package has unpublished changes that will be overwritten by the import." +
+            "This package has unpublished changes that the import would overwrite." +
               (replacedVersion
                 ? ` Published version ${replacedVersion} also exists with different content and would be replaced.`
-                : ""),
+                : "") +
+              ` ${remedy}`,
             {
               packageId,
               active_version: typeof activeVersion === "string" ? activeVersion : null,
@@ -2585,7 +2592,7 @@ export function createPackagesRouter() {
         if (replacedVersion) {
           throw conflict(
             "integrity_mismatch",
-            "This version already exists with different content. Use the force option to replace.",
+            `This version already exists with different content. ${remedy}`,
             { packageId, version: replacedVersion },
           );
         }
