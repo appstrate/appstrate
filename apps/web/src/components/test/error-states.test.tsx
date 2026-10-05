@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const { RunList } = await import("../run-list.tsx");
 const { ResourceErrorState } = await import("../page-states.tsx");
 const { ErrorBoundary } = await import("../error-boundary.tsx");
-const { settledWhileOpen } = await import("../../lib/confirm-settle.ts");
+const { IDLE_CONFIRM, confirmClick, confirmCommit } = await import("../../lib/confirm-settle.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { paginatedRunsKeys } = await import("../../lib/query-keys.ts");
 const { render } = await import("../../test/render.tsx");
@@ -132,23 +132,81 @@ describe("ErrorBoundary", () => {
   });
 });
 
-// The effect that applies this cannot run without a DOM; the rule it applies is
-// the whole decision, and `ConfirmModal` only feeds it its refs and props.
-describe("ConfirmModal: a refused confirmation closes its dialog", () => {
-  const settled = { confirmed: true, wasPending: true, isPending: false, open: true };
+// The effect and the click handler that apply these cannot run without a DOM;
+// the two functions are the whole decision, `ConfirmModal` only stores the record.
+describe("ConfirmModal decisions", () => {
+  /** A dialog as the component drives it: clicks and commits over one record. */
+  const dialog = () => {
+    let record = IDLE_CONFIRM;
+    return {
+      click: () => {
+        const result = confirmClick(record);
+        record = result.record;
+        return result.accepted;
+      },
+      commit: (now: { isPending: boolean; open: boolean }) => {
+        const result = confirmCommit(record, now);
+        record = result.record;
+        return result.settled;
+      },
+    };
+  };
 
-  it("closes when the confirmed action settles on a dialog still open", () => {
-    expect(settledWhileOpen(settled)).toBe(true);
+  it("drops a second confirm click made before the first has re-rendered", () => {
+    const d = dialog();
+    d.commit({ isPending: false, open: true });
+
+    expect(d.click()).toBe(true);
+    expect(d.click()).toBe(false);
+    // Still dropped while the action runs.
+    d.commit({ isPending: true, open: true });
+    expect(d.click()).toBe(false);
   });
 
-  it("leaves the dialog alone in every other state", () => {
-    // Still running.
-    expect(settledWhileOpen({ ...settled, isPending: true })).toBe(false);
-    // Already closed by the caller's onSuccess.
-    expect(settledWhileOpen({ ...settled, open: false })).toBe(false);
-    // An unrelated mutation behind the same `isPending` settled: nobody confirmed here.
-    expect(settledWhileOpen({ ...settled, confirmed: false })).toBe(false);
-    // Nothing was pending.
-    expect(settledWhileOpen({ ...settled, wasPending: false })).toBe(false);
+  it("reports a refusal: the confirmed action settled on a dialog still open", () => {
+    const d = dialog();
+    d.commit({ isPending: false, open: true });
+    d.click();
+
+    expect(d.commit({ isPending: true, open: true })).toBe(false);
+    expect(d.commit({ isPending: false, open: true })).toBe(true);
+  });
+
+  it("does not report a success, which the caller closed first", () => {
+    const d = dialog();
+    d.commit({ isPending: false, open: true });
+    d.click();
+    d.commit({ isPending: true, open: true });
+
+    expect(d.commit({ isPending: false, open: false })).toBe(false);
+  });
+
+  it("ignores an unrelated mutation settling behind the same isPending", () => {
+    const d = dialog();
+    d.commit({ isPending: true, open: true });
+
+    expect(d.commit({ isPending: false, open: true })).toBe(false);
+  });
+
+  it("accepts a click again on a new opening", () => {
+    const d = dialog();
+    d.commit({ isPending: false, open: true });
+    d.click();
+    d.commit({ isPending: true, open: true });
+    d.commit({ isPending: false, open: false });
+
+    d.commit({ isPending: false, open: true });
+    expect(d.click()).toBe(true);
+  });
+
+  it("accepts a new confirm on a dialog kept open after a refusal", () => {
+    const d = dialog();
+    d.commit({ isPending: false, open: true });
+    d.click();
+    d.commit({ isPending: true, open: true });
+    // Role deletion: refused, and the dialog stays to show why.
+    expect(d.commit({ isPending: false, open: true })).toBe(true);
+
+    expect(d.click()).toBe(true);
   });
 });

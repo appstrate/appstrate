@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
-import { settledWhileOpen } from "../lib/confirm-settle";
+import { IDLE_CONFIRM, confirmClick, confirmCommit } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
   /** Extra content under the description, for a decision that needs more than a sentence. */
@@ -43,24 +43,18 @@ export function ConfirmModal({
   children,
 }: ConfirmModalProps) {
   const { t } = useTranslation("common");
-  const confirmed = useRef(false);
-  const wasPending = useRef(false);
+  const record = useRef(IDLE_CONFIRM);
 
   useEffect(() => {
-    const settled = settledWhileOpen({
-      confirmed: confirmed.current,
-      wasPending: wasPending.current,
-      isPending: !!isPending,
-      open,
-    });
-    wasPending.current = !!isPending;
-    if (!open || settled) confirmed.current = false;
-    if (settled && !keepOpenOnSettle) onClose();
+    const commit = confirmCommit(record.current, { isPending: !!isPending, open });
+    record.current = commit.record;
+    if (commit.settled && !keepOpenOnSettle) onClose();
   }, [isPending, open, keepOpenOnSettle, onClose]);
 
   const confirm = () => {
-    confirmed.current = true;
-    onConfirm();
+    const click = confirmClick(record.current);
+    record.current = click.record;
+    if (click.accepted) onConfirm();
   };
 
   return (
