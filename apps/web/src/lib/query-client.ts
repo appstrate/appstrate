@@ -13,39 +13,21 @@ import { onMutationError } from "./mutation-error";
 declare module "@tanstack/react-query" {
   interface Register {
     mutationMeta: {
-      /**
-       * Keeps the cache-level toast below quiet. For a mutation whose callers
-       * ALL show the failure differently (a form error, an inline result, a
-       * dedicated sentence), or a background write the user did not ask for.
-       */
+      /** Every caller shows the failure differently, or it is a background write. */
       errorHandledByCaller?: true;
     };
   }
 }
 
-/**
- * What `requirePermission` and the org/space context guards answer. It is also
- * what makes the API client re-read the caller's permissions
- * (`lib/stale-authority.ts`) — and the gates that flip as a result unmount the
- * very dialog that had promised to show the failure.
- */
-export function isPermissionRefusal(error: unknown): boolean {
+/** The API's generic 403. A lost permission is one: the gates it flips can unmount the caller before it reports. */
+function isForbidden(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403 && error.code === "forbidden";
 }
 
-/**
- * Every failed mutation is toasted here, once, through `onMutationError` (which
- * translates the refusals it knows). The one way out is the explicit
- * `meta.errorHandledByCaller`: an `onError` is NOT one, since most of them roll
- * a cache back or invalidate and report nothing. A permission refusal is
- * toasted even then: the caller that opted out may be gone before it can
- * render anything, and a lost right said twice beats one said by nobody.
- */
+/** Every failed mutation is toasted; only the `meta` opts out, and not for a `forbidden` (said twice at worst). */
 const mutationCache = new MutationCache({
   onError: (error, _variables, _context, mutation) => {
-    if (!mutation.meta?.errorHandledByCaller || isPermissionRefusal(error)) {
-      onMutationError(error);
-    }
+    if (!mutation.meta?.errorHandledByCaller || isForbidden(error)) onMutationError(error);
   },
 });
 

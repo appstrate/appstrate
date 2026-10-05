@@ -60,7 +60,6 @@ export function useDisconnectIntegrationConnection() {
       // The connection list, the agent page's reuse hints and accessible-connection lists.
       void invalidateIntegrationQueries(qc);
     },
-    // `connection_pinned` while an admin pin or the space default names it.
   });
 }
 

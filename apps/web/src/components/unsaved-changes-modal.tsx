@@ -26,7 +26,7 @@ export function UnsavedChangesModal({ blocker, onSaveDraft }: UnsavedChangesModa
       await onSaveDraft();
       blocker.proceed();
     } catch {
-      // The editor the user returns to shows why the save was refused.
+      // The editor shows why.
       blocker.reset();
     } finally {
       setIsSaving(false);

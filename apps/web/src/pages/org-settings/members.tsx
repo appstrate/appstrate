@@ -253,8 +253,7 @@ export function OrgSettingsMembersPage() {
                   revokesAccess(roleChange.from, roleChange.role)
                     ? t("orgSettings.demotionUnsharesConnections")
                     : "",
-                  // A promotion deleted the explicit space roles (RBAC spec
-                  // §3.2), so the demotion restores none of them.
+                  // A promotion deleted the explicit space roles (RBAC spec §3.2).
                   hasFullOrgAccess(roleChange.from) && !hasFullOrgAccess(roleChange.role)
                     ? t("orgSettings.demotionRestoresNoSpaceRole")
                     : "",

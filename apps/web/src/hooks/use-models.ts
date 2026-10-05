@@ -63,9 +63,7 @@ function useUpdateModel() {
 
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("delete", "/api/models/{id}", {
-    onSuccess: invalidate,
-  });
+  return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultModel() {

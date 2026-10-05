@@ -34,9 +34,7 @@ export function useAddSpaceMember(meta?: MutationMeta) {
 
 export function useUpdateSpaceMember() {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", {
-    onSuccess: invalidate,
-  });
+  return $api.useMutation("patch", "/api/spaces/{id}/members/{userId}", { onSuccess: invalidate });
 }
 
 export function useRemoveSpaceMember() {

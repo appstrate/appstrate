@@ -27,12 +27,7 @@ export function ErrorState({ message, error }: { message?: string; error?: unkno
   );
 }
 
-/**
- * A detail page whose resource could not be read. The API answers 404 for an id
- * that does not exist and for one the caller may not see alike (and 403 where
- * hiding it is pointless), so both get one panel that says so — never a silent
- * redirect, a blank page or the server's English `detail`.
- */
+/** A detail page's unreadable resource: missing and forbidden get the same panel, as the API answers them alike. */
 export function ResourceErrorState({ error }: { error: unknown }) {
   const { t } = useTranslation();
   if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {

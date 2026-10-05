@@ -89,16 +89,12 @@ export function VersionHistory({ packageId, type, canRestore, canDelete }: Versi
           if (confirmState.type === "restore") {
             restoreVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
-              // A restore WRITES a draft, so it can answer 400; with no
-              // `onError` the modal hung on its spinner.
-              onError: (err) => {
-                setConfirmState(null);
-                toastError(err);
-              },
+              // A restore WRITES a draft, so it can answer a frontmatter refusal.
+              onError: (err) => toastError(err),
             });
           } else {
             deleteVersion.mutate(confirmState.version, {
-              onSettled: () => setConfirmState(null),
+              onSuccess: () => setConfirmState(null),
             });
           }
         }}

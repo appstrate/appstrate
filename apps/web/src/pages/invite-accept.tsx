@@ -113,8 +113,7 @@ export function InviteAcceptPage() {
     if (data?.id) {
       orgStore.getState().setId(data.id);
     }
-    // Someone who was already a member keeps their role, whatever the
-    // invitation offered: say so, or the invitation reads as having applied.
+    // An existing member keeps their role, whatever the invitation offered.
     if (data && !data.created) {
       toast.info(t("invite.roleUnchanged", { role: t(roleI18nKey(data.role)) }));
     }
