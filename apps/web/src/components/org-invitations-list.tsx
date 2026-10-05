@@ -55,6 +55,7 @@ export function OrgInvitationsList({
       setCancelingId(null);
       toast.success(t("orgSettings.invitationCanceled"));
     },
+    onError: () => setCancelingId(null),
   });
 
   // Tokens are organization invitation authority, even when this list is shown in a space.

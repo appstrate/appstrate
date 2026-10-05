@@ -103,7 +103,7 @@ export function PreferencesDevicesPage() {
           if (!pendingRevoke) return;
           revokeOne.mutate(
             { body: { familyId: pendingRevoke.familyId } },
-            { onSuccess: () => setPendingRevoke(null) },
+            { onSettled: () => setPendingRevoke(null) },
           );
         }}
         onClose={() => setPendingRevoke(null)}
@@ -117,7 +117,7 @@ export function PreferencesDevicesPage() {
         variant="destructive"
         isPending={revokeAll.isPending}
         onConfirm={() => {
-          revokeAll.mutate({}, { onSuccess: () => setConfirmRevokeAll(false) });
+          revokeAll.mutate({}, { onSettled: () => setConfirmRevokeAll(false) });
         }}
         onClose={() => setConfirmRevokeAll(false)}
       />

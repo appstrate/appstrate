@@ -213,7 +213,7 @@ export function OrgSettingsProxiesPage() {
           if (confirmState) {
             deleteMutation.mutate(
               { params: { path: { id: confirmState.id } } },
-              { onSuccess: () => setConfirmState(null) },
+              { onSettled: () => setConfirmState(null) },
             );
           }
         }}

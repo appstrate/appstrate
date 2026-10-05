@@ -160,6 +160,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               : t("spaceMembers.removedNone", { name: memberLabel(member) }),
           );
         },
+        onError: () => setMemberToRemove(null),
       },
     );
   };

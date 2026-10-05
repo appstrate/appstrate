@@ -227,6 +227,7 @@ function SmtpSection() {
               setConfirmDelete(false);
               toast.success(t("settings:spaceAuth.smtpDeleted"));
             },
+            onError: () => setConfirmDelete(false),
           })
         }
       />
@@ -412,6 +413,7 @@ function SocialSection({
               setConfirmDelete(false);
               toast.success(t("settings:spaceAuth.socialDeleted"));
             },
+            onError: () => setConfirmDelete(false),
           })
         }
       />

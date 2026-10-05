@@ -352,6 +352,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
                 setConfirmOpen(false);
                 handleClose();
               },
+              onError: () => setConfirmOpen(false),
             },
           );
         }}

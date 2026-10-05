@@ -96,7 +96,7 @@ export function OrgSettingsMembersPage() {
     if (!orgId) return;
     changeRoleMutation.mutate(
       { params: { path: { orgId, userId } }, body: { role } },
-      { onSuccess },
+      { onSuccess, onError: () => setRoleChange(null) },
     );
   };
 
@@ -290,7 +290,7 @@ export function OrgSettingsMembersPage() {
           if (confirmState) {
             removeMemberMutation.mutate(
               { params: { path: { orgId: orgId ?? "", userId: confirmState.id } } },
-              { onSuccess: () => setConfirmState(null) },
+              { onSettled: () => setConfirmState(null) },
             );
           }
         }}

@@ -87,12 +87,14 @@ export function OrgSettingsGeneralPage() {
 
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
+    onError: () => setConfirmDelete(false),
   });
 
   const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
     meta: { errorHandledByCaller: true },
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
+      setConfirmLeave(false);
       // The server is the real guard (owners may have changed meanwhile).
       toast.error(
         err instanceof ApiError && err.code === "last_owner"
