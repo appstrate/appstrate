@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFiles, type FileDto } from "../hooks/use-files";

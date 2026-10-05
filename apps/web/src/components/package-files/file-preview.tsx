@@ -32,7 +32,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { MonacoEditor } from "../monaco";
 import { useTheme } from "../../stores/theme-store";

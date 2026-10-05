@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { packageFilesErrorKey } from "../lib/package-files";
 import { useNavigate } from "react-router-dom";

@@ -8,7 +8,7 @@ import {
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import type { PackageType } from "@appstrate/core/validation";
 import { $api } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";

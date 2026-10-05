@@ -9,7 +9,7 @@
  * this suite. A code no dashboard user can meet is exempted in `NOT_SURFACED`, with the reason.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -18,6 +18,11 @@ import fr from "../../locales/fr/common.json";
 import en from "../../locales/en/common.json";
 
 await i18nReady;
+
+// The i18n instance is shared by every suite of the run, and they expect French.
+afterAll(async () => {
+  await i18n.changeLanguage("fr");
+});
 
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
 

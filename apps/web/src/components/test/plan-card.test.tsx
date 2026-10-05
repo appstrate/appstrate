@@ -47,8 +47,8 @@ describe("PlanGrid storage entitlement", () => {
       },
     ]);
 
-    expect(html).toContain("1.0 GB de stockage");
-    expect(html).toContain("100 GB de stockage");
+    expect(html).toContain("1,0 Go de stockage");
+    expect(html).toContain("100 Go de stockage");
   });
 
   it("still prices a zero entitlement rather than treating it as absent", () => {
@@ -56,6 +56,6 @@ describe("PlanGrid storage entitlement", () => {
       { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: 0 },
     ]);
 
-    expect(html).toContain("0 B de stockage");
+    expect(html).toContain("0 o de stockage");
   });
 });

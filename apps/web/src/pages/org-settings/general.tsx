@@ -7,7 +7,7 @@ import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";

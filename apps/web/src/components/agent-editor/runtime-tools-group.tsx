@@ -75,7 +75,9 @@ export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps
               />
               <span className="flex min-w-0 flex-col">
                 <span className="font-mono">{tool.id}</span>
-                <span className="text-muted-foreground">{tool.description}</span>
+                <span className="text-muted-foreground">
+                  {t(`editor.runtimeTool.${tool.id}`, { defaultValue: tool.description })}
+                </span>
               </span>
             </label>
           ))}
