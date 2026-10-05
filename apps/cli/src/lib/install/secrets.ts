@@ -150,6 +150,12 @@ export interface BootstrapOverrides {
    * of the install so the operator can claim ownership of the instance.
    */
   bootstrapToken?: string;
+  /**
+   * Set when the token was minted on an UPGRADE: the installer cannot tell
+   * whether the owner already signed up, so the follow-up note says the
+   * token may have nothing left to claim.
+   */
+  ownerMayExist?: boolean;
 }
 
 /** Minimal RFC 5322 sanity check — sufficient for an install-time guard. */

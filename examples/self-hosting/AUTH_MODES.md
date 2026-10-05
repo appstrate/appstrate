@@ -109,12 +109,13 @@ create it. The platform creates it only for a caller who proves control:
 The sign-up form refuses whatever else is configured — open or closed
 sign-up, `AUTH_PLATFORM_ADMIN_EMAILS`, a pending invitation. A
 verification e-mail does not count: it shows who reads the inbox, not who
-chose the password. The refusal does not say why: the form answers what
-it answers any address it will not register (`signup_disabled`,
-`signup_domain_not_allowed`, or "User already exists"), so it never
-confirms which address is the owner's, and the address is never sent to
-the browser. The reason is in the server log
-(`refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of ownership`).
+chose the password. The refusal does not state its reason: it carries the
+status and body the form gives any address it will not register
+(`signup_disabled`, `signup_domain_not_allowed`, or "User already
+exists"), and the address is not sent to the browser. The reason is in
+the server log
+(`refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of ownership`),
+followed by the recovery step that applies to the instance's state.
 
 The named owner is exempt from `AUTH_ALLOWED_SIGNUP_DOMAINS` on every
 accepted path: the operator named that address.
@@ -124,9 +125,29 @@ nothing else to a signed-out visitor, so the token is the path to use
 whenever one is set (the installer always sets one). The social and
 magic-link paths are for an instance configured without a token.
 
-The same rule covers `AUTH_PLATFORM_ADMIN_EMAILS` for e-mail changes: an
-existing account cannot move onto a listed address. A listed admin signs
-up with that address.
+#### Known limits
+
+- **The owner's address can still be guessed and confirmed.** With sign-up
+  open and no SMTP, the refusal is answered after the password is hashed
+  while a really taken address is answered before, so response time tells
+  them apart. And a signed-in account that tries to change its e-mail to
+  the owner's address (or to one in `AUTH_PLATFORM_ADMIN_EMAILS`) gets
+  `403 email_change_refused`, which an ordinary address does not.
+  Confirming the address does not let anyone create its account.
+- **`AUTH_PLATFORM_ADMIN_EMAILS` addresses are not protected the same
+  way.** A listed address is still created by plain e-mail/password
+  sign-up, in closed mode too: the first person to register it holds it
+  (with no verification at all without SMTP), and that account passes the
+  platform-admin checks — org creation under `AUTH_DISABLE_ORG_CREATION`
+  and the platform-admin routes. Only the e-mail-change door is closed
+  for those addresses. Register every listed admin yourself right after
+  the deploy, or list only addresses that already have an account.
+- **Social sign-in links onto an existing account by address.** Google
+  and GitHub are trusted providers: signing in with one attaches it to
+  the existing account that has the same address, and that step does not
+  check whether the provider verified the address. The provider's
+  verified flag decides how a NEW account is created (including the
+  owner's, above), not linking.
 
 Idempotent: if the user already owns an org, the after-hook is a no-op.
 Slug collisions add a numeric suffix.
@@ -384,8 +405,15 @@ To go back to open mode, unset the flags and restart. No data migration.
   server log says why. Add
   `AUTH_BOOTSTRAP_TOKEN` to `.env`, restart, and claim the instance at
   `/claim`. The token is redeemable only while the instance has no
-  organization at all; on an instance that already has some, sign in with
-  Google/GitHub or a magic link, or use the script of Recipe 4.
+  organization at all.
+- **`AUTH_BOOTSTRAP_OWNER_EMAIL` on an instance that already has an
+  organization, owner account absent** — no token can claim it (`/claim`
+  answers 410) and the sign-up form refuses the address. Without Google,
+  GitHub or SMTP (magic link) the recovery is: remove
+  `AUTH_BOOTSTRAP_OWNER_EMAIL` from the environment (keep the address in
+  `AUTH_PLATFORM_ADMIN_EMAILS` if sign-up is closed), restart, sign the
+  address up on `/register`, then run
+  `bun apps/api/scripts/bootstrap-org.ts --owner=<email>` (Recipe 4).
 - **Social OIDC + closed mode** — Google/GitHub callbacks go through the
   same signup gate. An external Google user without an invitation gets a
   `signup_disabled` redirect. Add their domain to

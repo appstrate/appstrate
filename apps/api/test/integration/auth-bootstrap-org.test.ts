@@ -426,20 +426,46 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       expect(orgCreateCalls).toEqual([{ orgId: org!.id, userEmail: "owner@acme.com" }]);
     });
 
-    it("does not provision a platform org for an end-user realm row", async () => {
-      // Hand-set `emailVerified`: only the realm guard of the after-hook is
-      // under test here. The proof itself is driven through the magic-link
-      // routes above.
-      setRealmResolver(async () => "end_user:spc_test_space_id");
-      const ctx = await getAuth().$context;
-      await ctx.internalAdapter.createUser(
-        { email: "owner@acme.com", name: "Owner", emailVerified: true },
-        { method: "magic-link" },
-      );
+    describe("a social sign-in whose provider asserts the address", () => {
+      // The suite has no OAuth2 server to drive `/callback/:id`, so this is
+      // the call that route ends in: Better Auth's creation seam, with the
+      // `emailVerified` the provider's claim maps to.
+      const createFromProvider = async (emailVerified: boolean) =>
+        (await getAuth().$context).internalAdapter.createUser(
+          { email: "owner@acme.com", name: "Owner", emailVerified },
+          { method: "oauth" },
+        );
 
-      const [u] = await db.select().from(user).where(eq(user.email, "owner@acme.com")).limit(1);
-      expect(u!.realm).toBe("end_user:spc_test_space_id");
-      expect(await db.select().from(organizations)).toHaveLength(0);
+      it("creates the account and the root organization, and retires the token", async () => {
+        setPostBootstrapOrgHook(triggerPostBootstrapOrg);
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_DISABLE_SIGNUP: "true" });
+
+        await createFromProvider(true);
+
+        await expectRootOrgOwnedBy("owner@acme.com", "acme-hq");
+        expect(isBootstrapTokenPending()).toBe(false);
+      });
+
+      it("creates nothing when the provider does not assert it", async () => {
+        await expect(createFromProvider(false)).rejects.toMatchObject({
+          body: { code: TAKEN.code },
+        });
+        expect(await db.select().from(user)).toHaveLength(0);
+      });
+
+      it("in an end-user realm, creates the account and no platform organization", async () => {
+        setPostBootstrapOrgHook(triggerPostBootstrapOrg);
+        setRealmResolver(async () => "end_user:spc_test_space_id");
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+
+        await createFromProvider(true);
+
+        const [u] = await db.select().from(user).where(eq(user.email, "owner@acme.com")).limit(1);
+        expect(u!.realm).toBe("end_user:spc_test_space_id");
+        expect(await db.select().from(organizations)).toHaveLength(0);
+        // No organization was created, so the token has nothing to be retired by.
+        expect(isBootstrapTokenPending()).toBe(true);
+      });
     });
   });
 

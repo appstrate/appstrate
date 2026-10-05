@@ -14,7 +14,7 @@ const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema/index.ts";
-import { profiles, orgInvitations, user } from "./schema/index.ts";
+import { organizations, profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
@@ -424,46 +424,6 @@ export interface CreateAuthOptions {
   clientIpHeader: string;
 }
 
-/**
- * BA's OAuth callback endpoint path. Exposed as a constant so the create
- * hook and its unit tests reference the same string (if BA ever renames
- * the route, both sides fail together).
- */
-export const BA_OAUTH_CALLBACK_PATH = "/callback/:id";
-
-/**
- * Decide whether a `databaseHooks.user.create.before` invocation should
- * auto-verify the user's email.
- *
- * SECURITY: this must ONLY confirm verification the provider actually
- * asserted — never grant it unconditionally. BA already computes
- * `user.emailVerified` from the provider's real signal (Google's
- * `email_verified` id_token claim; GitHub's `/user/emails` verified flag).
- * We therefore auto-verify only when BOTH the request ran under BA's OAuth
- * callback endpoint AND the provider asserted the email is verified
- * (`providerAssertsVerified`). Blanket-verifying every OAuth callback let
- * an attacker link an UNVERIFIED GitHub email onto a victim's account
- * (pre-account-takeover), so the provider assertion is load-bearing.
- *
- * Returns `{ data: { emailVerified: true } }` (the shape BA's
- * `createWithHooks` merges into the row about to be inserted) when both
- * conditions hold, `undefined` otherwise — falling through to BA's own
- * `emailVerified` value for OAuth (which stays `false` for an unverified
- * provider email) and for email/password, magic-link, and seed paths.
- *
- * Exported for unit testing; the `databaseHooks.user.create.before` hook
- * inside `buildAuth()` is the only production caller.
- */
-export function shouldAutoVerifyEmailOnCreate(
-  context: { path?: string } | null | undefined,
-  providerAssertsVerified: boolean,
-): { data: { emailVerified: true } } | undefined {
-  if (context?.path === BA_OAUTH_CALLBACK_PATH && providerAssertsVerified) {
-    return { data: { emailVerified: true } };
-  }
-  return undefined;
-}
-
 function buildBasePlugins(
   env: ReturnType<typeof getEnv>,
   smtpTransport: ReturnType<typeof createTransport> | null,
@@ -633,8 +593,9 @@ function buildAuth(options: CreateAuthOptions) {
       },
       // No `mapProfileToUser` override: Better Auth maps Google's
       // `email_verified` id_token claim onto `user.emailVerified`, and that
-      // claim — not the fact of a Google round-trip — is what account linking
-      // and the bootstrap-owner proof in the create hook rest on.
+      // claim — not the fact of a Google round-trip — is what the
+      // bootstrap-owner proof in the create hook rests on. It does NOT govern
+      // account linking: see `trustedProviders` below.
     },
     github: {
       get clientId() {
@@ -645,9 +606,7 @@ function buildAuth(options: CreateAuthOptions) {
       },
       // No `mapProfileToUser` override either. GitHub lets a user add an
       // UNVERIFIED email to their account; BA computes the real per-email
-      // flag from `/user/emails`. Forcing it true opened a pre-account
-      // takeover: add the victim's address unverified, sign in, and BA links
-      // the trusted provider onto the victim's existing user.
+      // flag from `/user/emails`, and a new row is created with it.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
@@ -789,6 +748,11 @@ function buildAuth(options: CreateAuthOptions) {
     account: {
       accountLinking: {
         enabled: anySocialEnabled,
+        // KNOWN LIMIT: Better Auth links a trusted provider onto an existing
+        // user with the same address WITHOUT asking whether the provider
+        // verified it (`link-account.mjs`: the `emailVerified` check applies to
+        // untrusted providers only). The providers' verified flag therefore
+        // protects row creation, not linking.
         trustedProviders: [
           ...(googleEnvEnabled ? ["google" as const] : []),
           ...(githubEnvEnabled ? ["github" as const] : []),
@@ -946,8 +910,8 @@ function buildAuth(options: CreateAuthOptions) {
             // gate (`AUTH_DISABLE_SIGNUP`). An active domain allowlist
             // (`AUTH_ALLOWED_SIGNUP_DOMAINS`) remains load-bearing
             // because the operator explicitly chose to lock down which
-            // emails can register; the bootstrap owner must satisfy
-            // that policy too. A pending invitation also overrides
+            // emails can register — except for the address the operator
+            // named as owner. A pending invitation also overrides
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
@@ -961,17 +925,35 @@ function buildAuth(options: CreateAuthOptions) {
             // inbox, not who chose the password. Checked before every other
             // gate and in every realm, so no allowlist reopens it.
             //
-            // The refusal must not confirm the address to whoever guessed it:
-            // it is the answer any address without an exception gets under the
-            // current policy and, where that policy would let it in, the answer
-            // an address that is already taken gets. The explanation goes to
-            // the log, where the operator is the reader.
+            // The refusal does not NAME the reason: it carries the status and
+            // body any address without an exception gets under the current
+            // policy and, where that policy would let it in, those of an address
+            // that is already taken. That is not indistinguishable — with
+            // sign-up open and no mail verification, Better Auth answers a taken
+            // address before hashing the password and this hook runs after, so
+            // timing tells the two apart. The explanation goes to the log, where
+            // the operator is the reader.
             const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
             if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
+              // The token claims an instance that has no organization yet; past
+              // that point `/claim` answers 410 and is the wrong place to send
+              // the operator.
+              const [anyOrg] = await db
+                .select({ id: organizations.id })
+                .from(organizations)
+                .limit(1);
+              let recovery = "set AUTH_BOOTSTRAP_TOKEN, restart, and claim it at /claim";
+              if (anyOrg) {
+                recovery =
+                  "this instance already has an organization, so no bootstrap token can claim it: " +
+                  "unset AUTH_BOOTSTRAP_OWNER_EMAIL, sign the address up, then run " +
+                  "apps/api/scripts/bootstrap-org.ts";
+              } else if (getEnv().AUTH_BOOTSTRAP_TOKEN) {
+                recovery = "claim it at /claim with AUTH_BOOTSTRAP_TOKEN";
+              }
               logger.warn(
                 "auth: refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of " +
-                  "ownership — claim it at /claim with AUTH_BOOTSTRAP_TOKEN " +
-                  "(examples/self-hosting/AUTH_MODES.md)",
+                  `ownership — ${recovery} (examples/self-hosting/AUTH_MODES.md)`,
               );
               const unprivileged = evaluateUnprivilegedSignup(user.email);
               if (!unprivileged.allowed) {
@@ -1067,24 +1049,14 @@ function buildAuth(options: CreateAuthOptions) {
                     query: ctx?.query ?? null,
                   })
                 : "platform";
-            // Auto-verify ONLY when a trusted social provider produced the row
-            // (the BA OAuth callback path) AND the provider itself asserted the
-            // email is verified. BA has already set `user.emailVerified` from
-            // the provider's real signal (Google `email_verified` claim /
-            // GitHub `/user/emails` verified flag), so we pass that through as
-            // the gate — we never upgrade an unverified provider email to
-            // verified (which would enable GitHub-unverified-email account
-            // takeover). A pending invitation is likewise NOT a verification
-            // signal: it is matched on email alone, so granting `emailVerified`
-            // here would let anyone mint a verified account for any unclaimed
-            // address (create org → self-invite that email → sign up) AND would
-            // defeat the OIDC end-user adopter's `emailVerified === true`
-            // takeover guard. Invited users verify their inbox through the
-            // normal flow, like everyone else.
-            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, bornVerified);
-            const data: Record<string, unknown> = { realm };
-            if (autoVerify) data.emailVerified = true;
-            return { data };
+            // `emailVerified` is left as Better Auth computed it: true only when
+            // the creating path verified the inbox. Nothing here upgrades it — a
+            // pending invitation in particular is matched on the address alone,
+            // so treating it as verification would let anyone mint a verified
+            // account for any unclaimed address (create org → self-invite →
+            // sign up) and defeat the OIDC end-user adopter's
+            // `emailVerified === true` takeover guard.
+            return { data: { realm } };
           },
           after: async (user, context) => {
             await db.insert(profiles).values({
@@ -1135,8 +1107,12 @@ function buildAuth(options: CreateAuthOptions) {
         update: {
           // The addresses the environment grants authority to
           // (`AUTH_BOOTSTRAP_OWNER_EMAIL`, `AUTH_PLATFORM_ADMIN_EMAILS`) are
-          // acquired by creating their account, under the create hook above —
-          // never by moving an existing account onto them. Every Better Auth
+          // acquired by creating their account — never by moving an existing
+          // account onto them. For the owner's address that creation takes
+          // proof (create hook above). For a platform admin's it does NOT: the
+          // sign-up form still creates it on its name alone, so this guard
+          // closes one door onto those addresses, not the address. The 403 is
+          // also an oracle: a signed-in caller learns the address is named. Every Better Auth
           // writer of `user.email` comes through here (change-email with or
           // without verification, a provider profile update), so this is the
           // one place the rule needs stating. A write that restates the

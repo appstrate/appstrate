@@ -17,7 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   named address only, and that address is exempt from
   `AUTH_ALLOWED_SIGNUP_DOMAINS`. An existing account can no longer change
   its e-mail to that address or to one listed in `AUTH_PLATFORM_ADMIN_EMAILS`
-  (403 `email_change_refused`). A Google sign-in now takes `emailVerified`
+  (403 `email_change_refused`); a listed platform-admin address is otherwise
+  unchanged and is still created by plain sign-up. A Google sign-in now takes `emailVerified`
   from Google's `email_verified` claim instead of assuming it. An instance whose
   owner account already exists is unaffected. An instance that names an
   owner who has not signed up yet needs a token before they can: add

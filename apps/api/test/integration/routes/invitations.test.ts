@@ -374,9 +374,9 @@ describe("Invitations API", () => {
 
   // When an invited user authenticates via a social provider (Google/GitHub) on
   // the invite page, Better Auth's OAuth callback marks the brand-new account
-  // `emailVerified = true` (see shouldAutoVerifyEmailOnCreate + its unit test
-  // auth-social-email-verify.test.ts — that path can't be driven end-to-end here
-  // because the harness intentionally runs no fake OAuth2 server against BA).
+  // `emailVerified = true` when the provider asserts the address (that path
+  // can't be driven end-to-end here because the harness intentionally runs no
+  // fake OAuth2 server against BA).
   // These tests pin what the accept endpoint actually guarantees for that case:
   // ownership is enforced by the session-email ↔ invitation-email match (the
   // session email is the provider-asserted address), NOT by the platform's

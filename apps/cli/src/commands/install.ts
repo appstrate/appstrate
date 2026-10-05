@@ -222,7 +222,11 @@ export function printBootstrapFollowup(
   if (token) {
     const email = bootstrap.bootstrapOwnerEmail;
     // The platform accepts no other address on `/claim` once an owner is named.
-    const claimAs = email ? `Claim it as  ${email}  with a password of your choice.\n` : "";
+    const claimAs =
+      (email ? `Claim it as  ${email}  with a password of your choice.\n` : "") +
+      (bootstrap.ownerMayExist
+        ? "If the owner account already exists, ignore this: the token is inert\nonce the instance has an organization.\n"
+        : "");
     const stdoutIsTty = process.stdout.isTTY === true;
     if (stdoutIsTty) {
       // Interactive install: stdout IS the operator's terminal, so
@@ -362,6 +366,7 @@ export async function installCommand(
       tier,
       mode: installState.mode,
       nonInteractive,
+      existingEnv: installState.existing.existingEnv,
     });
 
     // Public URL (issue #822) — flag/env/prompt, defaults to
@@ -462,13 +467,17 @@ export async function composeUpgradeCommand(
  * Upgrades short-circuit to undefined: `mergeEnv` preserves whatever
  * `AUTH_*` keys the user already has in their `.env`, so re-running
  * `appstrate install` on a closed-mode instance never silently flips
- * the policy.
+ * the policy. A token is minted on an upgrade only when the env var names
+ * an owner and `.env` holds no token yet — never over an existing one.
  */
 export async function resolveBootstrapEmail(opts: {
   tier: Tier;
   mode: InstallMode;
   nonInteractive: boolean;
+  /** The `.env` already on disk — empty on a fresh install. */
+  existingEnv?: EnvVars;
 }): Promise<BootstrapOverrides> {
+  const existingEnv = opts.existingEnv ?? {};
   const fromEnv = process.env.APPSTRATE_BOOTSTRAP_OWNER_EMAIL?.trim();
   if (fromEnv) {
     if (!isValidBootstrapEmail(fromEnv)) {
@@ -477,13 +486,30 @@ export async function resolveBootstrapEmail(opts: {
       );
     }
     const orgName = process.env.APPSTRATE_BOOTSTRAP_ORG_NAME?.trim();
+    const named = { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
+    // `mergeEnv` keeps the token already in `.env`, so a new one would be
+    // printed and then rejected at `/claim`. The one on disk stays the one in
+    // force; nothing is minted and nothing is printed.
+    if (existingEnv.AUTH_BOOTSTRAP_TOKEN) return named;
     return {
-      bootstrapOwnerEmail: fromEnv,
-      bootstrapOrgName: orgName || undefined,
+      ...named,
       bootstrapToken: generateBootstrapToken(),
+      // An upgrade cannot tell whether the owner already signed up.
+      ...(opts.mode === "upgrade" ? { ownerMayExist: true } : {}),
     };
   }
-  if (opts.mode === "upgrade") return {};
+  if (opts.mode === "upgrade") {
+    // Nothing is written on a plain upgrade — a token arrives with the
+    // closed-mode flags, and adding those would change the instance's policy.
+    // An instance that names an owner and has no token is told how to add one.
+    if (existingEnv.AUTH_BOOTSTRAP_OWNER_EMAIL && !existingEnv.AUTH_BOOTSTRAP_TOKEN) {
+      note(
+        `This instance names its owner (AUTH_BOOTSTRAP_OWNER_EMAIL) without a bootstrap token.\nIf that account already exists, nothing to do.\nOtherwise it is created at /claim: add to <dir>/.env\n  AUTH_BOOTSTRAP_TOKEN=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')\nthen restart. See examples/self-hosting/AUTH_MODES.md.`,
+        "Owner account — bootstrap token missing",
+      );
+    }
+    return {};
+  }
   // Tier 0 (local dev) stays open — invitation-only is meaningless when
   // the platform binds to localhost and survives only as long as the
   // dev shell.

@@ -44,12 +44,11 @@ describe("auth social provider config — emailVerified comes from the provider"
     _rebuildAuthForTesting();
   });
 
-  it("github provider does NOT force emailVerified (pre-account-takeover guard)", async () => {
-    // SECURITY (P2-1): GitHub lets a user attach an UNVERIFIED email, so we must
-    // NOT blanket-force `emailVerified: true` — that let an attacker link a
-    // victim's unverified email onto a GitHub account and take over. GitHub is
-    // configured WITHOUT a `mapProfileToUser` override so Better Auth's genuine
-    // per-email `/user/emails` verified flag decides linking.
+  it("github provider does NOT force emailVerified", async () => {
+    // GitHub lets a user attach an UNVERIFIED email. Without an override,
+    // Better Auth's per-email `/user/emails` flag is what a new row is created
+    // with. It does not decide account linking: GitHub is a trusted provider,
+    // and Better Auth links those without reading the flag.
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
     const github = options.socialProviders?.github as { mapProfileToUser?: unknown } | undefined;
@@ -60,8 +59,8 @@ describe("auth social provider config — emailVerified comes from the provider"
   it("google provider does NOT force emailVerified either — the id_token claim decides", async () => {
     // Better Auth maps Google's `email_verified` claim onto `emailVerified`.
     // An override answering `true` for every profile would turn "came back
-    // from Google" into "Google asserts this address", which is what account
-    // linking and the bootstrap-owner proof rely on.
+    // from Google" into "Google asserts this address", which is what the
+    // bootstrap-owner proof relies on.
     const options = (getAuth() as { options: { socialProviders?: Record<string, unknown> } })
       .options;
     const google = options.socialProviders?.google as { mapProfileToUser?: unknown } | undefined;
