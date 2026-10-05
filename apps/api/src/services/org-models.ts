@@ -524,6 +524,14 @@ export async function updateOrgModel(
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot modify built-in model");
   }
+  // The other door to the state `setDefaultModel` refuses: switching the
+  // default itself off would leave a pointer `resolveModel` skips.
+  if (data.enabled === false && (await defaultModel.getDefaultId(orgId)) === modelDbId) {
+    throw conflict(
+      "model_disabled",
+      "The default model cannot be disabled. Pick another default model first.",
+    );
+  }
 
   // Keys of `updateModelSchema` (routes/models.ts).
   const updates = buildUpdateSet(data, [

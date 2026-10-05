@@ -309,9 +309,10 @@ interface DefaultPointer {
    */
   setDefaultIfUnset(tx: Tx, orgId: string, id: string): Promise<boolean>;
   /**
-   * After a row is deleted, clear every pointer that still names the deleted id
-   * — the org default and each agent's per-space setting — so a now-dangling
-   * pointer never outlives its row.
+   * After a row is deleted, clear the two pointers that still name the deleted
+   * id: the org default and each agent's per-space setting
+   * (`space_packages`). A schedule's or a run's own override is NOT cleared —
+   * that is governed state, and resolution falls through a missing id.
    */
   clearDanglingPointer(orgId: string, deletedId: string): Promise<void>;
 }

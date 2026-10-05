@@ -103,13 +103,16 @@ export function launchFromOptions({
 
 /**
  * What a launch with no override resolves to, for the "Inherit" row to name:
- * the agent's own setting, else the organization default. A setting whose
- * entry is gone falls to the default too, as the server's resolution does.
+ * the agent's own setting where the server would use it, else the organization
+ * default. The server skips a setting whose entry is gone or not `usable`
+ * (switched off, dead credential) and falls to the default — so does this.
  */
 export function inheritedEntry<T extends { id: string }>(
   entries: readonly T[] | undefined,
   agentSettingId: string | null,
   orgDefault: T | undefined,
+  usable: (entry: T) => boolean,
 ): T | undefined {
-  return entries?.find((entry) => entry.id === agentSettingId) ?? orgDefault;
+  const setting = entries?.find((entry) => entry.id === agentSettingId);
+  return setting && usable(setting) ? setting : orgDefault;
 }

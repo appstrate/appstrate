@@ -20,7 +20,6 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
-import { apiKeyScopesBody } from "../lib/api-key-scopes";
 
 interface Props {
   open: boolean;
@@ -72,7 +71,9 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdScopes, setCreatedScopes] = useState<string[]>([]);
-  // Least privilege: a new key carries only what was picked for it.
+  // Least privilege: a new key carries only what was picked for it. The list
+  // is always sent, and never empty — the server reads an absent or empty
+  // `scopes` as "everything the creator may delegate".
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
 
   const {
@@ -96,6 +97,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   };
 
   function onFormSubmit(data: FormData) {
+    if (selectedScopes.length === 0) return;
     const expiresAt = computeExpiresAt(data.expiresIn);
 
     createMutation.mutate(
@@ -103,7 +105,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
         body: {
           name: data.name.trim(),
           expiresAt,
-          scopes: apiKeyScopesBody(selectedScopes, availableScopes ?? []),
+          scopes: selectedScopes,
         },
       },
       {

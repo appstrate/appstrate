@@ -14,9 +14,16 @@ import {
   seedOrgModelProviderKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
+  seedPackage,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  orgModels,
+  organizations,
+  spacePackages,
+} from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { listCatalogModels, lookupCatalogModel } from "../../../src/services/model-catalog.ts";
@@ -625,6 +632,25 @@ describe("Models API", () => {
       expect(res.status).toBe(204);
     });
 
+    it("clears the setting of an agent that used the deleted model", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      const agent = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/modelled` });
+      await seedSpacePackage(ctx.defaultSpaceId, agent.id, { modelId: model.id });
+
+      const del = await app.request(`/api/models/${model.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const [placement] = await db
+        .select({ modelId: spacePackages.modelId })
+        .from(spacePackages)
+        .where(eq(spacePackages.packageId, agent.id));
+      expect(placement!.modelId).toBeNull();
+    });
+
     it("clears the org default pointer when the default model is deleted", async () => {
       const credentialId = await createProviderKey();
       // First model for the org auto-promotes to the default (pointer set).
@@ -673,6 +699,13 @@ describe("Models API", () => {
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as any;
+
+      // The first model of an org is its default, and the default cannot be
+      // switched off: release the pointer first.
+      await db
+        .update(organizations)
+        .set({ defaultModelId: null })
+        .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",
@@ -923,6 +956,13 @@ describe("Models API", () => {
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
+
+      // The first model of an org is its default, and the default cannot be
+      // switched off: release the pointer first.
+      await db
+        .update(organizations)
+        .set({ defaultModelId: null })
+        .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",
@@ -1359,6 +1399,29 @@ describe("Models API", () => {
         headers: authHeaders(ctx),
       });
       expect(delCred.status).toBe(204);
+    });
+
+    it("refuses to disable the current org default — 409 model_disabled", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      await db
+        .update(organizations)
+        .set({ defaultModelId: model.id })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const res = await app.request(`/api/models/${model.id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_disabled");
+      const [row] = await db
+        .select({ enabled: orgModels.enabled })
+        .from(orgModels)
+        .where(eq(orgModels.id, model.id));
+      expect(row!.enabled).toBe(true);
     });
 
     it("refuses a disabled model as the org default — 409 model_disabled", async () => {

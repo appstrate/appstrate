@@ -628,21 +628,27 @@ describe("modelFormRefusals", () => {
   const base = {
     modelId: "",
     manual: false,
-    isOauth: false,
-    credentialMissing: false,
+    provider: ANTHROPIC,
+    selectedCredentialId: "cred_1",
+    inlineApiKey: "",
     offeredIds: null,
-    editedModelId: null,
   };
 
   it("names the missing key on the key row, not the endpoint steps", () => {
-    expect(modelFormRefusals({ ...base, credentialMissing: true })).toEqual({
+    expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
       credentialId: "models.form.apiKeyRequired",
       modelId: null,
     });
-    expect(modelFormRefusals({ ...base, credentialMissing: true, isOauth: true })).toEqual({
-      credentialId: "models.form.connectionRequired",
-      modelId: null,
-    });
+    expect(
+      modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
+    ).toEqual({ credentialId: "models.form.connectionRequired", modelId: null });
+    // A typed key answers it; with no provider there is no key row to say it on.
+    expect(
+      modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,
+    ).toBeNull();
+    expect(modelFormRefusals({ ...base, provider: undefined, selectedCredentialId: null })).toEqual(
+      { credentialId: null, modelId: "models.form.modelStepRequired" },
+    );
   });
 
   it("names the model step once the endpoint is answered and no id is set", () => {
@@ -653,7 +659,7 @@ describe("modelFormRefusals", () => {
     expect(modelFormRefusals({ ...base, manual: true }).modelId).toBe("validation.required");
   });
 
-  it("refuses a typed id a catalog provider does not offer", () => {
+  it("refuses a typed id a catalog provider does not offer — the server does, edit included", () => {
     const catalog = { ...base, manual: true, offeredIds: ["deepseek-v4-flash"] };
     expect(modelFormRefusals({ ...catalog, modelId: "deepseek-chat" }).modelId).toBe(
       "models.form.modelNotOffered",
@@ -661,16 +667,7 @@ describe("modelFormRefusals", () => {
     expect(modelFormRefusals({ ...catalog, modelId: " deepseek-v4-flash " }).modelId).toBeNull();
   });
 
-  it("leaves a free-form provider's id and an edit's unchanged id alone", () => {
+  it("leaves a free-form provider's id alone", () => {
     expect(modelFormRefusals({ ...base, manual: true, modelId: "anything" }).modelId).toBeNull();
-    expect(
-      modelFormRefusals({
-        ...base,
-        manual: true,
-        modelId: "retired-id",
-        offeredIds: ["current-id"],
-        editedModelId: "retired-id",
-      }).modelId,
-    ).toBeNull();
   });
 });

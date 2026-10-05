@@ -103,8 +103,30 @@ export function RunOverridesPanel({
   const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
   // "Inherit" is the absence of an override, so it names what then applies:
   // the agent's own setting, and the organization default only below it.
-  const inheritedModel = inheritedEntry(orgModels, persistedModelId, orgDefaultModel);
-  const inheritedProxy = inheritedEntry(orgProxies, persistedProxyId, orgDefaultProxy);
+  const inheritedModel = inheritedEntry(
+    orgModels,
+    persistedModelId,
+    orgDefaultModel,
+    isModelSelectable,
+  );
+  const inheritedProxy = inheritedEntry(
+    orgProxies,
+    persistedProxyId,
+    orgDefaultProxy,
+    (proxy) => proxy.enabled,
+  );
+  // A stored override whose entry was deleted (a schedule keeps its own, as
+  // governed state): shown as what it is, so the select never renders blank.
+  const goneModelOverride =
+    value.model_id_override && !orgModels?.some((m) => m.id === value.model_id_override)
+      ? value.model_id_override
+      : null;
+  const goneProxyOverride =
+    value.proxy_id_override &&
+    value.proxy_id_override !== NONE &&
+    !orgProxies?.some((p) => p.id === value.proxy_id_override)
+      ? value.proxy_id_override
+      : null;
 
   const setModel = (next: string) => {
     const nextModelId = next === INHERIT ? persistedModelId : next;
@@ -170,6 +192,11 @@ export function RunOverridesPanel({
                   {inheritedModel && <ModelUnselectableNote model={inheritedModel} />}
                 </span>
               </SelectItem>
+              {goneModelOverride && (
+                <SelectItem value={goneModelOverride} disabled>
+                  {t("run.overrides.modelGone", { ns: "agents" })}
+                </SelectItem>
+              )}
               {orgModels.map((m) => {
                 const MIcon = getModelIcon(m, registry ?? []);
                 return (
@@ -231,6 +258,11 @@ export function RunOverridesPanel({
                     : t("run.overrides.proxyInherit", { ns: "agents" })}
               </SelectItem>
               <SelectItem value={NONE}>{t("run.overrides.proxyNone", { ns: "agents" })}</SelectItem>
+              {goneProxyOverride && (
+                <SelectItem value={goneProxyOverride} disabled>
+                  {t("run.overrides.proxyGone", { ns: "agents" })}
+                </SelectItem>
+              )}
               {orgProxies.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.label}

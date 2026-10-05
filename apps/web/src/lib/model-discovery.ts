@@ -10,6 +10,7 @@ import type {
   DiscoveredModelsResponse,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 import { ApiError } from "../api/errors";
 
 export interface DiscoveryState {
@@ -73,10 +74,5 @@ export function discoveryFailureOutcome(err: unknown): "throttled" | "request_fa
 
 /** An endpoint is reached over HTTP(S): any other scheme parses and then serves nothing. */
 export function parsesAsUrl(value: string): boolean {
-  try {
-    const { protocol } = new URL(value.trim());
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
-  }
+  return normalizeHttpUrl(value.trim()) !== null;
 }

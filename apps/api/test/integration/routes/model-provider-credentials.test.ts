@@ -260,6 +260,32 @@ describe("Model Provider Keys API", () => {
       const body = (await res.json()) as any;
       expect(body.errors[0].field).toBe("base_url_override");
     });
+
+    it.each([
+      [
+        "discover",
+        {
+          providerId: "openai-compatible",
+          api_key: "sk-local",
+          base_url_override: "ftp://x.test/v1",
+        },
+        "base_url_override",
+      ],
+      [
+        "test",
+        { providerId: "openai-compatible", api_key: "sk-local", base_url: "ftp://x.test/v1" },
+        "base_url",
+      ],
+    ])("refuses a non-http(s) base URL on /%s too", async (route, payload, field) => {
+      const res = await app.request(`/api/model-provider-credentials/${route}`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).errors[0].field).toBe(field);
+    });
   });
 
   describe("wire casing (snake_case family)", () => {

@@ -455,7 +455,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Update a custom model",
       description:
-        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

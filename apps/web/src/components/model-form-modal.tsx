@@ -421,15 +421,11 @@ function ModelForm({
     modelFormRefusals({
       modelId,
       manual,
-      isOauth,
-      credentialMissing:
-        !!selectedProvider &&
-        !selectedCredential &&
-        !createdCredentialId &&
-        (isOauth || !inlineApiKey.trim()),
+      provider: selectedProvider,
+      selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
+      inlineApiKey,
       offeredIds:
         source === "catalog" && selectedProvider ? selectedProvider.models.map((m) => m.id) : null,
-      editedModelId: model?.modelId ?? null,
     });
   // Said on the key row, where it is answered.
   const credentialValidate = () => {

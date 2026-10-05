@@ -8,7 +8,7 @@ import { initialCredentialValues } from "../components/integration-connect/crede
 import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
-import { closeIfPopup, publishConnectCompletion } from "../lib/connect-completion";
+import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 
 /**
@@ -40,6 +40,14 @@ type ConnectContext = Omit<
 > & { auth: IntegrationManifestAuth };
 
 type Phase = "loading" | "form" | "submitting" | "done" | "error";
+
+const closeWindow = () => {
+  try {
+    window.close();
+  } catch {
+    /* not a popup — the confirmation stays visible */
+  }
+};
 
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
@@ -104,7 +112,7 @@ export function HostedConnectPage() {
       );
       const minted = data?.handoff_steps;
       if (minted && minted.length > 0) setHandoffSteps(minted);
-      else setTimeout(() => closeIfPopup(window), 1200);
+      else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -153,9 +161,9 @@ export function HostedConnectPage() {
               className="w-full"
               data-testid="handoff-done"
               onClick={() => {
-                // A full tab stays open: fall back to the done message.
+                // In a full tab `close()` is a no-op: fall back to the done message.
                 setHandoffSteps(null);
-                closeIfPopup(window);
+                closeWindow();
               }}
             >
               {t("integration.connect.handoffPanel.doneBtn")}

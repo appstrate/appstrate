@@ -44,10 +44,17 @@ import {
   systemEntityForbidden,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-/** `z.httpUrl()` also demands a domain name: a self-hosted endpoint is often an IP or `localhost`. */
-const HTTP_PROTOCOL = /^https?$/;
+/**
+ * An endpoint base URL: HTTP(S) only, by the platform's one protocol rule
+ * (`normalizeHttpUrl`). Not `z.httpUrl()`, which also demands a domain name —
+ * a self-hosted endpoint is often an IP or `localhost`.
+ */
+const endpointUrlSchema = z
+  .url()
+  .refine((value) => normalizeHttpUrl(value) !== null, { error: "must be an http(s) URL" });
 
 export const createSchema = z
   .object({
@@ -66,10 +73,7 @@ export const createSchema = z
      * custom-endpoint entries). HTTP(S) only: any other scheme would be stored
      * and then refused by every call made against it.
      */
-    base_url_override: z
-      .url({ protocol: HTTP_PROTOCOL, error: "base_url_override must be a valid http(s) URL" })
-      .optional()
-      .nullable(),
+    base_url_override: endpointUrlSchema.optional().nullable(),
   })
   .strict();
 
@@ -91,7 +95,7 @@ export const discoverSchema = z
     credentialId: z.uuid().optional(),
     providerId: z.string().min(1).optional(),
     api_key: z.string().min(1).optional(),
-    base_url_override: z.url({ protocol: HTTP_PROTOCOL }).optional(),
+    base_url_override: endpointUrlSchema.optional(),
   })
   .strict();
 
@@ -183,7 +187,7 @@ async function resolveDiscoverTarget(
 export const testInlineSchema = z
   .object({
     providerId: z.string().min(1),
-    base_url: z.url({ protocol: HTTP_PROTOCOL }),
+    base_url: endpointUrlSchema,
     api_key: z.string().optional(),
     credentialId: z.string().optional(),
   })

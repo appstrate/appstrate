@@ -2435,7 +2435,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom model
-         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.
+         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first.
          */
         patch: operations["updateModel"];
         trace?: never;
