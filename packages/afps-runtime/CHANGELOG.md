@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It goes through `prepareApiCallRequest`: it repairs `Bearer{{field}}`,
   names the first unresolved location
   (`Unresolved placeholders in target: {{a}}`) where it listed every key,
-  and refuses a caller header value that is no HTTP field value before the
-  URL policy (`RESOLVER_HEADER_INVALID`).
+  and judges a caller header value as written, first
+  (`RESOLVER_HEADER_INVALID`): ahead of the URL policy, of an unresolved
+  placeholder elsewhere and of a body error, and for a header the resolver
+  then replaces.
 
 ### Changed — one outbound engine for every api_call path (#1641)
 

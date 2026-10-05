@@ -389,7 +389,10 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     },
   );
 
-  /** An api_key integration injecting `Authorization: Bearer <api_key>`, caller override allowed. */
+  /**
+   * An api_key integration injecting `Authorization: Bearer <api_key>`, caller override allowed.
+   * No DNS: `api.example.com` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+   */
   async function seedOverridable(
     packageId: string,
     credentials = { api_key: "platform", alt: "other" },

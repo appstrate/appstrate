@@ -72,7 +72,7 @@ describe("executeApiCall — structured failures", () => {
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
-  it("returns 400 on unresolved URL placeholders", async () => {
+  it("returns 400 on unresolved target placeholders", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -84,8 +84,11 @@ describe("executeApiCall — structured failures", () => {
       },
       makeDeps(),
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/Unresolved placeholders in target/);
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: "Unresolved placeholders in target: {{missing}}",
+    });
   });
 
   it("refuses an unresolved header placeholder ahead of the URL policy", async () => {
