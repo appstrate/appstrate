@@ -181,6 +181,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **An OAuth refresh keeps the connection's other outputs** (#1629).
+  Refreshing an integration connection rewrote its credential with
+  `access_token` and `refresh_token` only, so a manifest reading
+  `token_type`, `id_token` or `scope` worked after the connect and failed
+  with an unresolved placeholder after the first refresh. A refresh now
+  starts from the stored outputs and replaces what the provider returns.
+
 - **The integration editor's default auth allowlist is the source host**
   (#1641): a new integration's `authorized_uris` starts empty and takes the
   remote source's host (`https://<host>/**`) as the URL is typed, until the
