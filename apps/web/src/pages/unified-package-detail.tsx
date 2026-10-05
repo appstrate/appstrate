@@ -25,7 +25,6 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { isModelSelectable } from "../lib/model-selectability";
 import { hasInputFields } from "../lib/agent-input";
 import { AlertTriangle } from "lucide-react";
 
@@ -53,11 +52,10 @@ import {
 } from "../components/package-detail/agent-tabs";
 import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
-import { RunAgentButton } from "../components/run-agent-button";
+import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageCard } from "../components/package-card";
-import { useAgentReadiness } from "../hooks/use-agent-readiness";
-import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
-import { useModels, useAgentModel } from "../hooks/use-models";
+import { useAgentRunBlocker } from "../hooks/use-agent-readiness";
+import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
@@ -76,73 +74,32 @@ type DetailTab =
 /** A version that declares no parameters — distinct from "use the draft". */
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
-// ─── Agent Run Button (inline, no wrapper) ────────────────────────────
+function ModelRequiredAlert({ detail }: { detail: AgentDetail | undefined }) {
+  const { t } = useTranslation(["settings"]);
+  const blocker = useAgentRunBlocker(detail);
 
-function AgentRunButtonInline({
-  packageId,
-  versionLabel,
-}: {
-  packageId: string;
-  versionLabel: string | undefined;
-}) {
-  const { t } = useTranslation("agents");
-  const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: models } = useModels();
-  const { data: agentModel } = useAgentModel(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
-  // Launch-time integration readiness — drives the non-blocking orange badge.
-  // Same server resolver as the run-kickoff 409 (see useAgentIntegrationsReadiness).
-  const integrationsReady = useAgentIntegrationsReadiness(packageId);
-
-  if (!detail) return null;
-
-  const { hasModel, hasPrompt, hasRequiredSkills } = readiness;
-  // The run gate is `system ∨ (placed here ∧ switched on)`: an agent this space
-  // merely READS answers 404 `agent_not_active_in_space` on launch. The detail
-  // response this button already holds answers it for this very space, so the
-  // control says it without a second source to fall out of step with — and
-  // without a system carve-out: a system agent switched off here is not active
-  // here, and the run gate refuses it like any other.
-  const inactiveHere = !detail.active;
-  // Integration connection gaps don't disable Run — they surface as a warning
-  // badge here and the recovery modal at run-kickoff (409 → MissingConnectionsModal).
-  const runDisabled = inactiveHere || !hasPrompt || !hasRequiredSkills || !hasModel;
-  const runDisabledTitle = inactiveHere
-    ? t("detail.titleNotActive")
-    : !hasPrompt
-      ? t("detail.titleEmptyPrompt")
-      : !hasRequiredSkills
-        ? t("detail.titleMissingSkill")
-        : !hasModel
-          ? t("detail.titleModel")
-          : undefined;
-
-  return (
-    <RunAgentButton
-      packageId={packageId}
-      detail={detail}
-      version={versionLabel}
-      disabled={runDisabled}
-      disabledTitle={runDisabledTitle}
-      connectionWarning={!runDisabled && !integrationsReady.ready}
-      showLabel
-    />
-  );
-}
-
-function ModelRequiredAlert() {
-  const { t } = useTranslation(["settings", "agents"]);
-  const { data: models } = useModels();
-
-  const hasAnyModel = models?.some((m) => m.is_default && isModelSelectable(m));
-  if (hasAnyModel || hasAnyModel === undefined) return null;
+  // The same verdict that greys the launch buttons, so the alert never names a
+  // model problem a run of THIS agent does not have (a usable pin, say).
+  const copy =
+    blocker === "detail.titleModel"
+      ? {
+          title: t("models.alert.noModel"),
+          description: t("models.alert.noModelDescription"),
+        }
+      : blocker === "detail.titleNoDefaultModel"
+        ? {
+            title: t("models.alert.noDefaultModel"),
+            description: t("models.alert.noDefaultModelDescription"),
+          }
+        : null;
+  if (!copy) return null;
 
   return (
     <Alert variant="destructive" className="mb-4">
       <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
+      <AlertTitle>{copy.title}</AlertTitle>
       <AlertDescription className="flex items-center justify-between">
-        <span>{t("models.alert.noModelDescription", { ns: "settings" })}</span>
+        <span>{copy.description}</span>
       </AlertDescription>
     </Alert>
   );
@@ -234,7 +191,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Only a skill or an MCP server needs this: their detail response carries no
   // `active`, so the library's projection of the placement is the only answer
   // available. An agent's detail answers for itself (`AgentDetail.active`,
-  // read by `AgentRunButtonInline`, `AgentActions` and the banner below), and
+  // read by `AgentRunButton`, `AgentActions` and the banner below), and
   // asking the library too would be one page reading one fact twice — so the
   // query is not even mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
@@ -433,7 +390,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         hasUnarchivedChanges={hasTimestampChanges}
         actionsLeft={
           type === "agent" ? (
-            <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
+            <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
           ) : undefined
         }
         actionsRight={
@@ -519,7 +476,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         activeUrl={packageDetailPath(type, packageId)}
       />
 
-      {type === "agent" && <ModelRequiredAlert />}
+      {type === "agent" && <ModelRequiredAlert detail={agentDetail} />}
 
       {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that

@@ -147,31 +147,41 @@ export function RunAgentButton({
     </span>
   ) : null;
 
+  const button = showLabel ? (
+    <Button
+      variant={variant}
+      onClick={handleClick}
+      disabled={isDisabled}
+      title={blockedTitle ?? t("detail.run")}
+      className="relative"
+    >
+      {isPending ? <Spinner /> : t("detail.run")}
+      {warningDot}
+    </Button>
+  ) : (
+    <Button
+      variant={variant}
+      size={size}
+      className={`relative ${className ?? ""}`}
+      onClick={handleClick}
+      disabled={isDisabled}
+      title={blockedTitle ?? t("detail.run")}
+    >
+      {isPending ? <Spinner /> : <Play size={14} />}
+      {warningDot}
+    </Button>
+  );
+
   return (
     <>
-      {showLabel ? (
-        <Button
-          variant={variant}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-          className="relative"
-        >
-          {isPending ? <Spinner /> : t("detail.run")}
-          {warningDot}
-        </Button>
+      {/* A disabled button takes no pointer events, so its own `title` never
+          shows: the reason it is dead rides a wrapper that does. */}
+      {blockedTitle ? (
+        <span className="inline-flex" title={blockedTitle} data-testid="run-blocked-reason">
+          {button}
+        </span>
       ) : (
-        <Button
-          variant={variant}
-          size={size}
-          className={`relative ${className ?? ""}`}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-        >
-          {isPending ? <Spinner /> : <Play size={14} />}
-          {warningDot}
-        </Button>
+        button
       )}
 
       {detail && (

@@ -749,6 +749,8 @@
   "models.form.saveFailed": "Impossible d'enregistrer le modèle. Vérifie les valeurs et réessaie.",
   "models.alert.noModel": "Aucun modèle LLM configuré",
   "models.alert.noModelDescription": "Configurez un modèle dans les paramètres de l'organisation pour pouvoir exécuter cet agent.",
+  "models.alert.noDefaultModel": "Aucun modèle par défaut",
+  "models.alert.noDefaultModelDescription": "Des modèles sont configurés, mais aucun n'est le modèle par défaut. Définissez-en un dans les paramètres de l'organisation, ou choisissez un modèle pour cet agent, pour pouvoir l'exécuter.",
   "billing.tabTitle": "Facturation",
   "billing.currentPlan": "Plan actuel",
   "billing.cycleReset": "Renouvellement le {{date}}",

@@ -749,6 +749,8 @@
   "models.form.saveFailed": "Could not save the model. Check the values and try again.",
   "models.alert.noModel": "No LLM model configured",
   "models.alert.noModelDescription": "Configure a model in organization settings to run this agent.",
+  "models.alert.noDefaultModel": "No default model",
+  "models.alert.noDefaultModelDescription": "Models are configured, but none of them is the default. Set a default in the organization settings, or pick a model for this agent, to be able to run it.",
   "billing.tabTitle": "Billing",
   "billing.currentPlan": "Current plan",
   "billing.cycleReset": "Renews on {{date}}",

@@ -283,6 +283,12 @@ function ModelSectionEditor({
           })}
         </SelectContent>
       </Select>
+      {/* A pin naming a deleted model leaves the select blank: say what a run does. */}
+      {modelId && !resolvedModel && (
+        <p className="text-warning text-xs" data-testid="agent-model-pin-unavailable">
+          {t("input.modelPinUnavailable", { ns: "agents" })}
+        </p>
+      )}
       <ModelGenerationFields
         value={generation}
         capabilities={resolvedModel?.generation}

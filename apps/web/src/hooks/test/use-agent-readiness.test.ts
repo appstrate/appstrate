@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { resolvesToUsableModel } from "../use-agent-readiness";
+import type { AgentDetail } from "@appstrate/shared-types";
+import { agentRunBlocker, resolvesToUsableModel } from "../use-agent-readiness";
 import type { OrgModelInfo } from "../use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -73,5 +74,64 @@ describe("resolvesToUsableModel", () => {
 
   it("rejects an empty catalog", () => {
     expect(resolvesToUsableModel([], "m_pin")).toBe(false);
+  });
+});
+
+/** A launchable agent as a full read (`agents:read`) sees it. */
+function agent(over: Partial<AgentDetail> = {}): AgentDetail {
+  return {
+    id: "@acme/worker",
+    source: "local",
+    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
+    running_runs: 0,
+    last_run: null,
+    prompt: "Do the thing.",
+    manifest: { name: "@acme/worker" },
+    scope: "@acme",
+    version: "1.0.0",
+    definition: "published",
+    home_space_id: "spc_1",
+    home_writable: false,
+    home_deletable: false,
+    home_shareable: false,
+    effective_timeout_seconds: 300,
+    active: true,
+    ...over,
+  };
+}
+
+describe("agentRunBlocker", () => {
+  it("lets a ready agent run", () => {
+    expect(agentRunBlocker(agent(), [DEFAULT_OK], null)).toBeNull();
+  });
+
+  it("does not call a prompt empty when the read withholds it", () => {
+    // `agents:run` without `agents:read`: the summary carries no prompt, no manifest.
+    const summary = agent({ prompt: undefined, manifest: undefined });
+    expect(agentRunBlocker(summary, [DEFAULT_OK], null)).toBeNull();
+  });
+
+  it("blocks an empty prompt the caller can read", () => {
+    expect(agentRunBlocker(agent({ prompt: "  " }), [DEFAULT_OK], null)).toBe(
+      "detail.titleEmptyPrompt",
+    );
+  });
+
+  it("names the activation first, as the run gate does", () => {
+    expect(agentRunBlocker(agent({ active: false, prompt: "" }), [], null)).toBe(
+      "detail.titleNotActive",
+    );
+  });
+
+  it("tells a missing default from no model at all", () => {
+    expect(agentRunBlocker(agent(), [], null)).toBe("detail.titleModel");
+    expect(agentRunBlocker(agent(), [model({ id: "m_other" })], null)).toBe(
+      "detail.titleNoDefaultModel",
+    );
+  });
+
+  it("stays optimistic while the model catalog loads", () => {
+    expect(agentRunBlocker(agent(), undefined, null)).toBeNull();
   });
 });
