@@ -118,11 +118,9 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
-  // The slot, not the mutation, says whether a launch is in flight: see `launchFlight`.
   const [isPending, setIsPending] = useState(false);
-  const [flight] = useState(() => launchFlight<unknown>(setIsPending));
+  const [flight] = useState(() => launchFlight(setIsPending));
 
-  /** One run per click: a second call while one is in flight is dropped. */
   const send = (launch: RunLaunch, onSuccess?: () => void) => {
     flight.run(
       () => {
@@ -134,8 +132,7 @@ export function useRunLauncher(packageId: string) {
           setMissingErrors(null);
           onSuccess?.();
         },
-        // Every failure is already reported by the mutation's own `onError`;
-        // only the 409 this launcher can answer is picked up here.
+        // The mutation's own `onError` reports every failure; this picks up the 409.
         onError: (err) => {
           const errors = missingConnectionErrors(err);
           if (errors) setMissingErrors(errors);
@@ -154,7 +151,7 @@ export function useRunLauncher(packageId: string) {
       send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
     },
     dismiss: () => {
-      // A retry may still be in flight: its answer must not reopen the modal.
+      // A retry still in flight must not reopen the modal.
       flight.forget();
       setMissingErrors(null);
       runAgent.reset();

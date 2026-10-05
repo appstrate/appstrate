@@ -723,14 +723,10 @@ export class PiRunner {
       ...(this.opts.toolResultByteLimit !== undefined
         ? { toolResultByteLimit: this.opts.toolResultByteLimit }
         : {}),
-      // Early-stop: abort the SDK loop as soon as a terminal tool has
-      // executed successfully. `session.abort()` resolves once the agent
+      // Abort the SDK loop as soon as a terminal tool has settled the run
+      // (delivered, or refused too often). `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
       onTerminalTool: () => {
-        void session.abort().catch(() => {});
-      },
-      // Same stop, opposite verdict: the tool refused every attempt it was given.
-      onTerminalToolExhausted: () => {
         void session.abort().catch(() => {});
       },
     });
@@ -1374,9 +1370,9 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 
 /**
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
- * runner's OWN stop rather than a provider failure: a terminal tool either
- * succeeded or ran out of attempts ({@link MAX_TERMINAL_TOOL_REJECTIONS}), and
- * the runner aborted the SDK loop to stop paying for turns nobody will read. Extracted so all three readers — the live
+ * runner's OWN stop rather than a provider failure: a terminal tool succeeded
+ * or ran out of attempts, and the runner aborted the SDK loop to stop paying
+ * for turns nobody will read. Extracted so all three readers — the live
  * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
  * — apply one definition instead of copies that can drift apart: they must
  * agree on what is NOT a failure.
@@ -1390,13 +1386,9 @@ function isRunnerEarlyStopAbort(
 }
 
 /**
- * How many calls a terminal tool may refuse before the run is failed.
- *
- * A refused `output` call hands the model its validation errors and asks for
- * another attempt, which is right for a slip and unbounded for a payload the
- * model cannot fix — an output schema no value satisfies kept an agent
- * re-submitting the same object, one paid turn at a time, until the run
- * timeout (#1674). Five leaves room for genuine corrections on a large schema.
+ * How many calls a terminal tool may refuse before the run is failed. A refusal
+ * invites a retry, which never ends for a payload the model cannot fix (an
+ * output schema no value satisfies).
  */
 export const MAX_TERMINAL_TOOL_REJECTIONS = 5;
 
@@ -1407,16 +1399,11 @@ interface SessionBridgeOptions {
    */
   terminalTools?: string[];
   /**
-   * Invoked once, synchronously, when a terminal tool completes without
-   * error. The runner uses this to abort the SDK loop early.
+   * Invoked once, synchronously, when a terminal tool settles the run: its
+   * first success, or {@link MAX_TERMINAL_TOOL_REJECTIONS} refusals (the run
+   * then fails). The runner uses this to abort the SDK loop.
    */
   onTerminalTool?: () => void;
-  /**
-   * Invoked once, synchronously, when a terminal tool has refused
-   * {@link MAX_TERMINAL_TOOL_REJECTIONS} calls. The runner aborts the SDK loop;
-   * the bridge then reports the run as failed ({@link SessionBridgeHandle.getTerminalError}).
-   */
-  onTerminalToolExhausted?: () => void;
   /**
    * Context window (tokens) the session actually runs against, straight off
    * {@link derivePiCompactionSettings}, stamped on every turn breadcrumb so the
@@ -1445,11 +1432,8 @@ export function installSessionBridge(
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
-  // Refused terminal-tool calls so far, and the verdict once they run out.
   let terminalToolRejections = 0;
   let terminalToolExhausted: RunError | undefined;
-  // Either way the runner aborted the loop itself: the trailing `aborted`
-  // turn is its own doing, not a provider failure to report.
   const runnerStoppedLoop = (): boolean =>
     terminalToolCompleted || terminalToolExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
@@ -1762,11 +1746,8 @@ export function installSessionBridge(
             },
           ),
         );
-        // A terminal tool ends the loop either way: early-stop on its first
-        // SUCCESSFUL call, failure once it has refused its budget of attempts
-        // (below that, the model gets its retry turn). The first verdict
-        // stands: calls of the same batch still settle after the abort, and
-        // must neither revive a failed run nor fail a delivered one.
+        // The first verdict stands: calls of the same batch still settle
+        // after the abort.
         if (runnerStoppedLoop() || !terminalTools.includes(tool)) break;
         if (e.isError !== true) {
           terminalToolCompleted = true;
@@ -1781,10 +1762,8 @@ export function installSessionBridge(
               `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
               "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
           };
-          // The same sentence on the log stream: `runs.error` alone would leave
-          // `run_logs` ending on a refused call with no verdict after it.
           fire(buildError({ runId, timestamp: Date.now() }, terminalToolExhausted.message));
-          options.onTerminalToolExhausted?.();
+          options.onTerminalTool?.();
         }
         break;
       }

@@ -148,7 +148,6 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
       <p className="text-muted-foreground text-xs" data-testid="run-resolved-model">
         {t("input.modelResolved", { name: resolved.label, source })}
       </p>
-      {/* The fallback is the server's (`resolveModel`); it must not be a silent one. */}
       {isModelPinUnavailable(orgModels, agentModel?.modelId) && (
         <p className="text-warning text-xs" data-testid="run-model-pin-unavailable">
           {t("input.modelPinUnavailable")}

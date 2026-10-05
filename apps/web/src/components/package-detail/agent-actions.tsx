@@ -72,8 +72,7 @@ export function AgentActions({
   // about (a `runner` holds `agents:run` and no `agents:read`, so the space
   // library lists no agents at all) still gets a verdict here.
   const activeHere = detail.active;
-  // Only what no option can cure: the modal this opens picks the model and
-  // the version, so a missing default or an empty draft is not its refusal.
+  // Not the full run verdict: the options modal picks the model and the version.
   const refusal = agentLaunchRefusal(detail);
   const runBlockedReason = refusal ? t(refusal) : undefined;
 

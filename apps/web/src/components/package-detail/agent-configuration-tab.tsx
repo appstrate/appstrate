@@ -283,7 +283,6 @@ function ModelSectionEditor({
           })}
         </SelectContent>
       </Select>
-      {/* A deleted pin leaves the select blank, a dead one looks chosen: say what a run does. */}
       {isModelPinUnavailable(orgModels, modelId) && (
         <p className="text-warning text-xs" data-testid="agent-model-pin-unavailable">
           {t("input.modelPinUnavailable", { ns: "agents" })}

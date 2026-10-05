@@ -26,27 +26,19 @@ export function resolvesToUsableModel(
   return orgModels.some((m) => m.is_default && isModelSelectable(m));
 }
 
-/**
- * True when there is nothing this caller could launch: the package has no
- * published version (`definition === "draft"` is all the detail route could
- * render) and the working copy is not theirs to run. A launch would send no
- * selector and the server would answer `404 no_published_version`.
- */
+/** Nothing published, and the working copy is not this caller's to run (`404 no_published_version`). */
 export function isNeverPublishedForReader(detail: AgentDetail | undefined): boolean {
   return !!detail && detail.definition === "draft" && !detail.home_writable;
 }
 
-/** i18n key (namespace `agents`) of a refusal no launch option can cure. */
 type AgentLaunchRefusal = "detail.titleNotActive" | "detail.titleNeverPublished";
+type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
+type AgentRunBlocker =
+  AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
 
 /**
- * The two refusals every launch of this agent meets, whatever options it is
- * sent with: switched off in this space, or nothing published and a working
- * copy that is not the caller's. "Run with options" gates on these alone — a
- * model, a version or a prompt it can still change there.
- *
- * Switched off HERE comes first: its cure is one click away on the page, while
- * publishing is somebody else's act.
+ * The refusals no launch option can cure, as i18n keys (namespace `agents`).
+ * Switched off here comes first: its cure is one click away on the page.
  */
 export function agentLaunchRefusal(detail: AgentDetail): AgentLaunchRefusal | null {
   if (!detail.active) return "detail.titleNotActive";
@@ -54,54 +46,27 @@ export function agentLaunchRefusal(detail: AgentDetail): AgentLaunchRefusal | nu
   return null;
 }
 
-/** i18n key (namespace `agents`) of the model problem that blocks a run. */
-type AgentModelBlocker = "detail.titleModel" | "detail.titleNoDefaultModel";
-
-/** i18n key (namespace `agents`) of the reason a run of an agent cannot start. */
-type AgentRunBlocker =
-  AgentLaunchRefusal | "detail.titleEmptyPrompt" | "detail.titleMissingSkill" | AgentModelBlocker;
-
-/**
- * The model half of the verdict, on its own: it depends on the catalog and the
- * agent's pin, not on the agent's definition, so the page can state it even
- * when something else blocks the run first.
- */
+/** The model half of the verdict. A catalog still loading is not a blocker. */
 export function agentModelBlocker(
   orgModels: OrgModelInfo[] | undefined,
   agentModelId?: string | null,
 ): AgentModelBlocker | null {
-  // Unknown catalog (still loading) is optimistic — don't flash "no model".
   if (orgModels === undefined || resolvesToUsableModel(orgModels, agentModelId)) return null;
-  // Models the org could run on, none of them the default: a different fix.
   return orgModels.some(isModelSelectable) ? "detail.titleNoDefaultModel" : "detail.titleModel";
 }
 
 /**
- * What blocks a plain run of this agent in this space, or `null`. The two Run
- * buttons of the agent page (header, empty runs list) read this one verdict,
- * so they cannot disagree about the same agent.
- *
- * {@link agentLaunchRefusal} first, then what the definition lacks, then the
- * model.
- *
- * Unfilled parameters are deliberately NOT a gate: an agent declares one
- * `input` schema and every field it does not already decide (author `default`
- * or an editor value) is asked at launch. The only configuration that could
- * make a required field unsatisfiable — locking it with nothing behind it —
- * is refused at write time (400 `locked_required_field_empty`), so it cannot
- * reach a launch surface. Missing integration connections are not one either:
- * the launch answers them with the recovery modal.
+ * What blocks a plain run of this agent in this space. Unfilled parameters and
+ * missing integration connections are not gates: the launch asks for them.
  */
 export function agentRunBlocker(
   detail: AgentDetail,
-  orgModels: OrgModelInfo[] | undefined,
-  agentModelId?: string | null,
+  modelBlocker: AgentModelBlocker | null,
 ): AgentRunBlocker | null {
   const refusal = agentLaunchRefusal(detail);
   if (refusal) return refusal;
-  // A summary read (`agents:run` without `agents:read`) OMITS the prompt:
-  // absent is unknown, and the server judges at launch. A full read always
-  // carries a string (`package-catalog.ts` reads a null draft as "").
+  // A summary read (`agents:run` without `agents:read`) omits the prompt:
+  // absent is unknown, not empty.
   if (detail.prompt !== undefined && isPromptEmpty(detail.prompt)) {
     return "detail.titleEmptyPrompt";
   }
@@ -112,19 +77,19 @@ export function agentRunBlocker(
   if (findMissingDependencies(requiredSkills, placedSkills).length > 0) {
     return "detail.titleMissingSkill";
   }
-  return agentModelBlocker(orgModels, agentModelId);
+  return modelBlocker;
 }
 
-/** {@link agentRunBlocker} for the agent a page is showing. */
-export function useAgentRunBlocker(detail: AgentDetail | undefined): AgentRunBlocker | null {
-  const { data: orgModels } = useModels();
-  const { data: agentModel } = useAgentModel(detail?.id);
-  return detail ? agentRunBlocker(detail, orgModels, agentModel?.modelId) : null;
-}
-
-/** {@link agentModelBlocker} for the agent a page is showing. */
 export function useAgentModelBlocker(packageId: string): AgentModelBlocker | null {
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   return agentModelBlocker(orgModels, agentModel?.modelId);
+}
+
+export function useAgentRunBlocker(
+  packageId: string,
+  detail: AgentDetail | undefined,
+): AgentRunBlocker | null {
+  const modelBlocker = useAgentModelBlocker(packageId);
+  return detail ? agentRunBlocker(detail, modelBlocker) : null;
 }

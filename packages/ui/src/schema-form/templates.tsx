@@ -55,11 +55,8 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
             : schema.format === "time"
               ? "time"
               : "text";
-  // `number` / `integer` get a numeric input instead of free text the
-  // validator then has to refuse. Only the TYPE is taken from RJSF: the
-  // schema's `minimum` / `maximum` / `multipleOf` stay with the validator,
-  // whose message sits under the field in the app's own wording — as native
-  // `min` / `max` / `step` they would raise the browser's own bubble instead.
+  // Only the type is taken from RJSF: native `min` / `max` / `step` would raise
+  // the browser's own bubble where the validator's message belongs.
   const inputType = getInputProps<T>(
     schema,
     type ?? (formatType === "text" ? undefined : formatType),
@@ -74,10 +71,8 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
     <input
       id={id}
       type={inputType}
-      // "any" keeps the browser from refusing a decimal on its own.
       step={inputType === "number" ? "any" : undefined}
-      // RJSF keeps a `number` as text where the locale's decimal separator is
-      // not "." (a native number input drops it): still ask for the numeric pad.
+      // RJSF keeps a `number` as text under a comma-decimal locale.
       inputMode={isNumeric && inputType === "text" ? "decimal" : undefined}
       value={(value as string | number | undefined) ?? ""}
       required={required}
@@ -116,28 +111,7 @@ export function FieldTemplate(props: FieldTemplateProps) {
     classNames,
   } = props;
 
-  /** `named` prefixes each message with the field's label, for a field with no visible one. */
-  const errorList = (named: boolean) =>
-    rawErrors && rawErrors.length > 0 ? (
-      <ul className="space-y-0.5">
-        {rawErrors.map((err, i) => (
-          <li key={i} className="text-destructive text-xs">
-            {named && label ? `${label}: ${err}` : err}
-          </li>
-        ))}
-      </ul>
-    ) : null;
-
-  // The field is hidden, its errors are not: with the summary list off
-  // (`SchemaForm`), this is the only place they can be read.
-  if (hidden) {
-    return (
-      <>
-        <div className="hidden">{children}</div>
-        {errorList(true)}
-      </>
-    );
-  }
+  if (hidden) return <div className="hidden">{children}</div>;
 
   // File widget renders its own label so we skip the FieldTemplate label.
   const widget = (uiSchema as Record<string, unknown>)?.["ui:widget"];
@@ -163,7 +137,15 @@ export function FieldTemplate(props: FieldTemplateProps) {
       )}
       {showDescription && <p className="text-muted-foreground text-xs">{rawDescription}</p>}
       {children}
-      {errorList(false)}
+      {rawErrors && rawErrors.length > 0 && (
+        <ul className="space-y-0.5">
+          {rawErrors.map((err, i) => (
+            <li key={i} className="text-destructive text-xs">
+              {err}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

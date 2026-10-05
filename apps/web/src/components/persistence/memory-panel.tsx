@@ -52,10 +52,8 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
 
   const deleteMemory = useDeleteMemory(packageId);
   const deletePinned = useDeletePinnedSlot(packageId);
-  // The delete routes guard on `persistence:delete`; a reader gets no bin.
   const { can } = usePermissions();
   const canDelete = !isRunView && can("persistence:delete");
-  // A deletion is irreversible and one click away from a row: it is confirmed.
   const [toDelete, setToDelete] = useState<{ kind: "pinned" | "memory"; id: number } | null>(null);
   const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 

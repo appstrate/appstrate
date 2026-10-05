@@ -39,46 +39,33 @@ export interface RunLaunch {
 }
 
 /**
- * Lets one launch through at a time, and reports its outcome to whoever started
- * it. The mutation's `isPending` cannot do the first: it is render state, so two
- * clicks landing in the same frame both read it `false` and both create a run.
- *
- * The slot follows the launch's own promise, never a subscription to it: it is
- * freed when the request settles, whatever happened to its listeners meanwhile.
+ * Lets one launch through at a time. A mutation's `isPending` cannot: it is
+ * render state, so two clicks in one frame both read it `false`. The slot
+ * follows the request's promise, so it is freed whatever became of its
+ * listeners, and `onBusyChange` is the launcher's pending flag.
  */
-export function launchFlight<T>(
-  /**
-   * Told when the slot is taken and when it is freed — the launcher's
-   * `isPending`. The mutation's own flag cannot serve: it drops on `forget`
-   * while the slot is still held, and a live-looking button would then swallow
-   * its click.
-   */
-  onBusyChange?: (busy: boolean) => void,
-): {
-  /** Starts the launch, or returns `false` while another one is in flight. */
+export function launchFlight(onBusyChange: (busy: boolean) => void): {
+  /** Starts the launch; a call while one is in flight is dropped. */
   run: (
-    start: () => Promise<T>,
-    handlers: { onSuccess?: (value: T) => void; onError?: (error: Error) => void },
-  ) => boolean;
-  /**
-   * Stop reporting the launch in flight (its surface was dismissed). It keeps
-   * the slot until it settles: the run is still being created.
-   */
+    start: () => Promise<unknown>,
+    handlers: { onSuccess?: () => void; onError?: (error: Error) => void },
+  ) => void;
+  /** Stops reporting the launch in flight. It keeps the slot until it settles. */
   forget: () => void;
 } {
   let busy = false;
   let reported: object | null = null;
   return {
     run: (start, handlers) => {
-      if (busy) return false;
+      if (busy) return;
       busy = true;
-      onBusyChange?.(true);
+      onBusyChange(true);
       const flight = {};
       reported = flight;
       void start()
         .then(
-          (value) => {
-            if (reported === flight) handlers.onSuccess?.(value);
+          () => {
+            if (reported === flight) handlers.onSuccess?.();
           },
           (error: Error) => {
             if (reported === flight) handlers.onError?.(error);
@@ -86,9 +73,8 @@ export function launchFlight<T>(
         )
         .finally(() => {
           busy = false;
-          onBusyChange?.(false);
+          onBusyChange(false);
         });
-      return true;
     },
     forget: () => {
       reported = null;

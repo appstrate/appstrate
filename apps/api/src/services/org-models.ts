@@ -867,23 +867,16 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
   };
 }
 
-/** Which step of the model cascade answered. */
-export type ModelCascadeStep = "explicit" | "org_default" | "system_default";
-
-/**
- * The model a run gets, and the cascade step that supplied it. An explicit id
- * that no longer loads (row deleted or disabled, dead credential) does not fail
- * the resolution: it falls through, and `step` is how the caller knows.
- */
+/** The model a run gets, and whether the explicit id supplied it or a default did. */
 export async function resolveModelCascade(
   orgId: string,
   packageId: string,
   modelId: string | null,
-): Promise<{ model: ResolvedModel; step: ModelCascadeStep } | null> {
+): Promise<{ model: ResolvedModel; fromExplicit: boolean } | null> {
   // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
-    if (result) return { model: result, step: "explicit" };
+    if (result) return { model: result, fromExplicit: true };
     logger.warn("Agent model override not found, falling through to org default", {
       packageId,
       modelId,
@@ -896,14 +889,14 @@ export async function resolveModelCascade(
   const pointer = await defaultModel.getDefaultId(orgId);
   if (pointer) {
     const resolved = await loadModel(orgId, pointer);
-    if (resolved) return { model: resolved, step: "org_default" };
+    if (resolved) return { model: resolved, fromExplicit: false };
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return { model: buildSystemResolvedModel(def), step: "system_default" };
+      return { model: buildSystemResolvedModel(def), fromExplicit: false };
     }
   }
 

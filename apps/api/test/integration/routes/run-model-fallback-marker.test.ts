@@ -2,7 +2,7 @@
 
 /**
  * End-to-end: a run whose pinned model no longer loads falls back to a default
- * (`resolveModelCascade`) and says so in `run_logs` (#1674). Without the
+ * (`resolveModelCascade`) and says so in `run_logs`. Without the
  * marker the run is indistinguishable from one that ran on the model its
  * agent or schedule was set to.
  */

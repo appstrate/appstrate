@@ -162,10 +162,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
   return lines.join("\n");
 }
 
-/**
- * What the launch answers: `201` with the run resource itself (the shape of
- * `GET /api/runs/{id}`), abridged to the two fields a caller acts on.
- */
+/** The launch answers `201` with the run resource; abridged here. */
 const RUN_RESPONSE_EXAMPLE = `{
   "id": "run_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "status": "pending",

@@ -698,8 +698,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
 
   // Degradation marker — one `warn` run log per integration the agent
   // declared but that could not be resolved (not active / not connected /
-  // unresolvable reference), per stored generation setting the model refuses,
-  // and for a pinned model the run fell back from. Without it a degraded run is indistinguishable from a healthy
+  // unresolvable reference), and per stored generation setting the model
+  // refuses. Without it a degraded run is indistinguishable from a healthy
   // one: an agent that chose not to call a tool, a setting that took effect.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is
   // ordered BEFORE the container's own logs; it is the empty-array no-op on

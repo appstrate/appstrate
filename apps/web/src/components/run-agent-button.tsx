@@ -111,8 +111,6 @@ export function RunAgentButton({
   const neverPublished = isNeverPublishedForReader(detail);
   const isPending = isFetching || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
-  // The caller's reason first: the agent page hands the ordered verdict of
-  // `agentRunBlocker`. A card passes none, and can only be dead for this one.
   const blockedTitle =
     disabled && disabledTitle
       ? disabledTitle
@@ -139,7 +137,7 @@ export function RunAgentButton({
       variant={variant}
       onClick={handleClick}
       disabled={isDisabled}
-      title={blockedTitle ?? t("detail.run")}
+      title={t("detail.run")}
       className="relative"
     >
       {isPending ? <Spinner /> : t("detail.run")}
@@ -152,7 +150,7 @@ export function RunAgentButton({
       className={`relative ${className ?? ""}`}
       onClick={handleClick}
       disabled={isDisabled}
-      title={blockedTitle ?? t("detail.run")}
+      title={t("detail.run")}
     >
       {isPending ? <Spinner /> : <Play size={14} />}
       {warningDot}
@@ -161,8 +159,7 @@ export function RunAgentButton({
 
   return (
     <>
-      {/* A disabled button takes no pointer events, so its own `title` never
-          shows: the reason it is dead rides a wrapper that does. */}
+      {/* A disabled button takes no pointer events: its reason needs a wrapper. */}
       {blockedTitle ? (
         <span className="inline-flex" title={blockedTitle} data-testid="run-blocked-reason">
           {button}

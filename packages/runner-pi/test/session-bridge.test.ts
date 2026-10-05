@@ -1112,7 +1112,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     let exhausted = 0;
     const bridge = installSessionBridge(session, sink, RUN_ID, {
       terminalTools: ["output"],
-      onTerminalToolExhausted: () => {
+      onTerminalTool: () => {
         exhausted += 1;
       },
     });
@@ -1160,33 +1160,33 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     });
 
     // Refused out of attempts, then a sibling call succeeds: still failed.
-    let delivered = 0;
+    let stops = 0;
     const failed = createFakeSession();
     const failedBridge = installSessionBridge(failed, createInternalCapture(), RUN_ID, {
       terminalTools: ["output"],
       onTerminalTool: () => {
-        delivered += 1;
+        stops += 1;
       },
     });
     for (let i = 0; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) failed.emit(end(true));
     failed.emit(end(false));
-    expect(delivered).toBe(0);
+    expect(stops).toBe(1);
     expect(failedBridge.terminalToolCompleted).toBe(false);
     expect(failedBridge.getTerminalError()).toMatchObject({ code: "terminal_tool_rejected" });
 
     // Delivered, then sibling calls are refused: still a success.
-    let exhausted = 0;
+    stops = 0;
     const done = createFakeSession();
     const doneSink = createInternalCapture();
     const doneBridge = installSessionBridge(done, doneSink, RUN_ID, {
       terminalTools: ["output"],
-      onTerminalToolExhausted: () => {
-        exhausted += 1;
+      onTerminalTool: () => {
+        stops += 1;
       },
     });
     done.emit(end(false));
     for (let i = 0; i < MAX_TERMINAL_TOOL_REJECTIONS; i += 1) done.emit(end(true));
-    expect(exhausted).toBe(0);
+    expect(stops).toBe(1);
     expect(doneBridge.terminalToolCompleted).toBe(true);
     expect(doneBridge.getTerminalError()).toBeUndefined();
     expect(doneSink.events.find((e) => e.type === "appstrate.error")).toBeUndefined();

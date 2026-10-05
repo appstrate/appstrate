@@ -109,51 +109,55 @@ function agent(over: Partial<AgentDetail> = {}): AgentDetail {
 
 describe("agentRunBlocker", () => {
   it("lets a ready agent run", () => {
-    expect(agentRunBlocker(agent(), [DEFAULT_OK], null)).toBeNull();
+    expect(agentRunBlocker(agent(), agentModelBlocker([DEFAULT_OK], null))).toBeNull();
   });
 
   it("does not call a prompt empty when the read withholds it", () => {
     // `agents:run` without `agents:read`: the summary carries no prompt, no manifest.
     const summary = agent({ prompt: undefined, manifest: undefined });
-    expect(agentRunBlocker(summary, [DEFAULT_OK], null)).toBeNull();
+    expect(agentRunBlocker(summary, agentModelBlocker([DEFAULT_OK], null))).toBeNull();
   });
 
   it("blocks an empty prompt the caller can read", () => {
-    expect(agentRunBlocker(agent({ prompt: "  " }), [DEFAULT_OK], null)).toBe(
+    expect(agentRunBlocker(agent({ prompt: "  " }), agentModelBlocker([DEFAULT_OK], null))).toBe(
       "detail.titleEmptyPrompt",
     );
   });
 
   it("blocks a never-published agent for a reader who cannot run its draft", () => {
     const unpublished = agent({ definition: "draft", home_writable: false });
-    expect(agentRunBlocker(unpublished, [DEFAULT_OK], null)).toBe("detail.titleNeverPublished");
-    expect(agentRunBlocker({ ...unpublished, active: false }, [DEFAULT_OK], null)).toBe(
-      "detail.titleNotActive",
+    expect(agentRunBlocker(unpublished, agentModelBlocker([DEFAULT_OK], null))).toBe(
+      "detail.titleNeverPublished",
     );
+    expect(
+      agentRunBlocker({ ...unpublished, active: false }, agentModelBlocker([DEFAULT_OK], null)),
+    ).toBe("detail.titleNotActive");
   });
 
   it("keeps the model verdict readable behind an earlier blocker", () => {
     // The buttons say "empty prompt"; the page alert still has to say "no model".
-    expect(agentRunBlocker(agent({ prompt: "" }), [], null)).toBe("detail.titleEmptyPrompt");
+    expect(agentRunBlocker(agent({ prompt: "" }), agentModelBlocker([], null))).toBe(
+      "detail.titleEmptyPrompt",
+    );
     expect(agentModelBlocker([], null)).toBe("detail.titleModel");
     expect(agentModelBlocker([DEFAULT_OK], null)).toBeNull();
   });
 
   it("names the activation first, as the run gate does", () => {
-    expect(agentRunBlocker(agent({ active: false, prompt: "" }), [], null)).toBe(
+    expect(agentRunBlocker(agent({ active: false, prompt: "" }), agentModelBlocker([], null))).toBe(
       "detail.titleNotActive",
     );
   });
 
   it("tells a missing default from no model at all", () => {
-    expect(agentRunBlocker(agent(), [], null)).toBe("detail.titleModel");
-    expect(agentRunBlocker(agent(), [model({ id: "m_other" })], null)).toBe(
+    expect(agentRunBlocker(agent(), agentModelBlocker([], null))).toBe("detail.titleModel");
+    expect(agentRunBlocker(agent(), agentModelBlocker([model({ id: "m_other" })], null))).toBe(
       "detail.titleNoDefaultModel",
     );
   });
 
   it("stays optimistic while the model catalog loads", () => {
-    expect(agentRunBlocker(agent(), undefined, null)).toBeNull();
+    expect(agentRunBlocker(agent(), agentModelBlocker(undefined, null))).toBeNull();
   });
 });
 
@@ -169,8 +173,8 @@ describe('agentLaunchRefusal — the gate of "run with options"', () => {
     // No usable default (a model override cures it) and an empty draft prompt
     // (another version may not be): a plain run is blocked, this launch is not.
     const curable = agent({ prompt: "" });
-    expect(agentRunBlocker(curable, [], null)).toBe("detail.titleEmptyPrompt");
-    expect(agentRunBlocker(agent(), [model({ id: "m_other" })], null)).toBe(
+    expect(agentRunBlocker(curable, agentModelBlocker([], null))).toBe("detail.titleEmptyPrompt");
+    expect(agentRunBlocker(agent(), agentModelBlocker([model({ id: "m_other" })], null))).toBe(
       "detail.titleNoDefaultModel",
     );
     expect(agentLaunchRefusal(curable)).toBeNull();

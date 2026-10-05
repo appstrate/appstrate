@@ -76,8 +76,7 @@ const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", propertie
 
 function ModelRequiredAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
-  // The model half of the launch buttons' verdict, read on its own: it holds
-  // whatever else blocks the run, and never names a problem a usable pin solves.
+  // The model verdict alone: it holds whatever else blocks the run first.
   const blocker = useAgentModelBlocker(packageId);
 
   const copy =

@@ -144,12 +144,7 @@ export async function buildRunContext(params: {
    * these — see {@link recordDroppedGenerationSettings}.
    */
   droppedGenerationSettings: DroppedGenerationSetting[];
-  /**
-   * Id of the stored model pin (space setting, a schedule's override) this run
-   * could NOT use: `modelLabel` is then the default it fell back to. `null`
-   * when the run uses what was asked. The caller MUST surface it — see
-   * {@link recordModelFallback}.
-   */
+  /** The model pin this run fell back from — see {@link recordModelFallback}. */
   unavailablePinnedModelId: string | null;
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
@@ -233,12 +228,9 @@ export async function buildRunContext(params: {
     throw new ModelCredentialMissingError(modelResult.label);
   }
 
-  // The cascade falls back to a default when the pin no longer loads. The run
-  // is legitimate; running it on another model without a word is not. Read off
-  // the cascade's own step — the pin is free text, so comparing ids would call
-  // a differently-cased UUID that resolved a fallback.
+  // Not an id comparison: the pin is free text, and a differently-cased UUID resolves.
   const unavailablePinnedModelId =
-    effectiveModelId && modelCascade.step !== "explicit" ? effectiveModelId : null;
+    effectiveModelId && !modelCascade.fromExplicit ? effectiveModelId : null;
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
@@ -469,13 +461,9 @@ export async function recordDroppedGenerationSettings(
   }
 }
 
-/** Run-log `event` name for a run that fell back from its pinned model. */
 export const MODEL_FALLBACK_EVENT = "model_fallback";
 
-/**
- * Same marker as {@link recordDroppedGenerationSettings}, for the pinned model
- * {@link buildRunContext} could not use. A no-op when the pin resolved.
- */
+/** Same marker as {@link recordDroppedGenerationSettings}, for a model pin that no longer loads. */
 export async function recordModelFallback(
   scope: OrgScope,
   runId: string,

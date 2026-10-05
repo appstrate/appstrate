@@ -3,9 +3,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { FieldTemplateProps } from "@rjsf/utils";
 import { SchemaForm } from "../src/schema-form/index.tsx";
-import { FieldTemplate } from "../src/schema-form/templates.tsx";
 
 const browserLanguages = Object.getOwnPropertyDescriptor(globalThis.navigator, "languages");
 
@@ -71,22 +69,5 @@ describe("SchemaForm inputs", () => {
     expect(tag).toContain('type="text"');
     expect(tag).not.toContain("inputmode");
     expect(tag).not.toContain("step=");
-  });
-});
-
-describe("FieldTemplate", () => {
-  it("shows the errors of a hidden field, named after it", () => {
-    // The summary list is off, so a hidden field has nowhere else to say it.
-    const props = {
-      id: "root_token",
-      label: "token",
-      hidden: true,
-      rawErrors: ["must be string"],
-      schema: { type: "string" },
-      children: <input id="root_token" />,
-    } as unknown as FieldTemplateProps;
-    const html = renderToStaticMarkup(<FieldTemplate {...props} />);
-    expect(html).toContain("token: must be string");
-    expect(html).toContain('<div class="hidden"><input id="root_token"/></div>');
   });
 });

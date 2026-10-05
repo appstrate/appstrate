@@ -25,10 +25,7 @@ export function isModelSelectable(model: OrgModelInfo): boolean {
   return model.enabled && !model.needs_reconnection;
 }
 
-/**
- * A model pin (an agent's setting) the server cascade will skip: the row is
- * gone, or it is listed but not selectable. Runs then use a default model.
- */
+/** A model pin the server cascade will skip: gone, or listed but not selectable. */
 export function isModelPinUnavailable(
   orgModels: OrgModelInfo[],
   pinnedModelId: string | null | undefined,
