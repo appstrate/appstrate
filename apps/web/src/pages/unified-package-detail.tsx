@@ -25,14 +25,16 @@ import { LoadingState, ErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
+import { isModelSelectable } from "../lib/model-selectability";
 import { hasInputFields } from "../lib/agent-input";
+import { AlertTriangle } from "lucide-react";
 
 // Shared components
 import { ConfirmModal } from "../components/confirm-modal";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { FileExplorer } from "../components/package-files/file-explorer";
@@ -43,7 +45,6 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
-import { ModelRequiredAlert } from "../components/package-detail/model-required-alert";
 import {
   AgentRunsTab,
   AgentSchedulesTab,
@@ -126,6 +127,33 @@ function AgentRunButtonInline({
       connectionWarning={!runDisabled && !integrationsReady.ready}
       showLabel
     />
+  );
+}
+
+function ModelRequiredAlert() {
+  const { t } = useTranslation(["settings", "agents"]);
+  const { data: models } = useModels();
+  const { can } = usePermissions();
+
+  const hasAnyModel = models?.some((m) => m.is_default && isModelSelectable(m));
+  if (hasAnyModel || hasAnyModel === undefined) return null;
+
+  return (
+    <Alert variant="destructive" className="mb-4">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
+      <AlertDescription className="flex items-center justify-between">
+        <span>
+          {t(
+            // Only `models:write` can act on "configure a model" (POST /api/models).
+            can("models:write")
+              ? "models.alert.noModelDescription"
+              : "models.alert.noModelAskAdmin",
+            { ns: "settings" },
+          )}
+        </span>
+      </AlertDescription>
+    </Alert>
   );
 }
 

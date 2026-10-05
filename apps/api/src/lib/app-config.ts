@@ -40,13 +40,12 @@ export function buildAppConfig(): AppConfig {
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: isSmtpConfigured(),
-      // Self-hosting closed mode (issue #228) — flag exposed so the SPA can
-      // hide signup affordances when the platform is locked down. Sensitive
+      // Self-hosting closed mode (issue #228) — flag exposed so the SPA
+      // can hide signup affordances when the platform is locked down (who
+      // may create an org is per user: `can_create_org` on the profile). Sensitive
       // companions (PLATFORM_ADMIN_EMAILS, ALLOWED_SIGNUP_DOMAINS) stay
       // server-side; BOOTSTRAP_OWNER_EMAIL is surfaced separately below
-      // so RegisterForm can pre-fill + lock the email field. Whether THIS
-      // user may create an organization is per caller, not per instance:
-      // `GET /api/profile` answers it (`can_create_org`).
+      // so RegisterForm can pre-fill + lock the email field.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       // Surface ONLY the boolean — the token value stays server-side,
       // gated by timing-safe compare in /api/auth/bootstrap/redeem.
