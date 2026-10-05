@@ -407,7 +407,19 @@ export async function handleChatStream(
     turn,
     enforcedSkills,
   ]);
-  const chosen = pickModel(models, modelId);
+  let chosen;
+  try {
+    chosen = pickModel(models, modelId);
+  } catch (error) {
+    // A 400 the user is shown as a generic failed turn: this line is the only
+    // place the actual reason (no model, a dead one, an unknown id) is named.
+    logger.info("chat turn refused: no usable model", {
+      orgId,
+      requested: modelId ?? null,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   let generationSettings;
   try {
     generationSettings = resolveModelGenerationSettings({
