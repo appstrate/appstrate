@@ -30,6 +30,7 @@ import { ToolsPolicySection } from "../components/integration-editor/tools-polic
 import { Spinner } from "../components/spinner";
 import { NoAccessState } from "../components/route-gate";
 import { ApiError } from "../api/errors";
+import { isQueryInFlight } from "../lib/query-state";
 import { EditorShell } from "../components/editor-shell";
 
 import { newPackageContent } from "../lib/package-file-drafts";
@@ -614,7 +615,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // The detail read gates itself on the permission set, and a disabled query is
   // not loading: without `ready` a hard reload would redirect before it lands.
   const { ready } = usePermissions();
-  const isLoading = !ready || (type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading);
+  const isLoading = !ready || isQueryInFlight(type === "agent" ? agentQuery : pkgQuery);
   const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {

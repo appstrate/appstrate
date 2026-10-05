@@ -24,6 +24,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
+import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
 import { hasInputFields } from "../lib/agent-input";
@@ -201,17 +202,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const {
-    data: versionDetail,
-    isPending: versionPending,
-    fetchStatus: versionFetchStatus,
-    error: versionError,
-  } = useVersionDetail(type, packageId, versionParam);
-  // Not `isLoading`: React Query PAUSES a retry while the tab is in the
-  // background, and a paused query is neither loading nor failed — the version
-  // redirect below would then read "no such version" into a request still in
-  // flight, and hide the very error it is about to report.
-  const versionLoading = versionPending && versionFetchStatus !== "idle";
+  const versionQuery = useVersionDetail(type, packageId, versionParam);
+  const { data: versionDetail, error: versionError } = versionQuery;
+  // Not `isLoading` — see `isQueryInFlight`: the version redirect below must
+  // not read "no such version" into a request whose retry is merely paused.
+  const versionLoading = isQueryInFlight(versionQuery);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
