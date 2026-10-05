@@ -32,7 +32,10 @@ describe("SchemaForm in French", () => {
       "La valeur n'a pas le type attendu.",
     );
     expect(render(<ValidationMessage keyword="minLength" params={{ limit: 3 }} />)).toContain(
-      "Saisissez au moins 3 caractère(s).",
+      "Saisissez au moins 3 caractères.",
+    );
+    expect(render(<ValidationMessage keyword="minLength" params={{ limit: 1 }} />)).toContain(
+      "Saisissez au moins 1 caractère.",
     );
   });
 

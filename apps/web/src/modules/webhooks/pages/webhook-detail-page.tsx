@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getErrorMessage } from "@appstrate/core/errors";
 
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
@@ -10,7 +11,6 @@ import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
 import { WebhookSettingsTab } from "../components/webhook-settings-tab";
 import { useTabWithHash } from "@/hooks/use-tab-with-hash";
 import { useWebhook } from "../hooks/use-webhooks";
-import { errorMessage } from "../../../lib/mutation-error";
 
 export function WebhookDetailPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -20,7 +20,7 @@ export function WebhookDetailPage() {
   const [tab, setTab] = useTabWithHash(["deliveries", "settings"] as const, "deliveries");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={errorMessage(error)} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!webhook) return <ErrorState />;
 
   return (

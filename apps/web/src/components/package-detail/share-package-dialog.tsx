@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   Select,
   SelectContent,
@@ -343,7 +344,7 @@ export function SharePackageDialog({
                           },
                           {
                             onSuccess: () => toast.success(t("packages.shareRevoked")),
-                            onError: (error) => toast.error(errorMessage(error)),
+                            onError: (error) => toast.error(getErrorMessage(error)),
                           },
                         )
                       }

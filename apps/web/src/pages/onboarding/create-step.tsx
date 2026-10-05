@@ -16,7 +16,7 @@ import { useAuth } from "../../hooks/use-auth";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
-import { errorMessage } from "../../lib/mutation-error";
+import { errorField, errorMessage } from "../../lib/mutation-error";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },
@@ -94,7 +94,10 @@ export function OnboardingCreateStep() {
     },
     onError: (err) => {
       const message = errorMessage(err);
-      if (err instanceof ApiError && err.code === "slug_taken") {
+      // A taken slug, or a slug the body validation refused: the field is folded by default.
+      const aboutSlug =
+        (err instanceof ApiError && err.code === "slug_taken") || errorField(err) === "slug";
+      if (aboutSlug) {
         setSlugOpen(true);
         setError("slug", { message });
       } else {

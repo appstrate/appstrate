@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import type { components } from "../api/client";
@@ -16,7 +17,6 @@ import { ConfirmModal } from "./confirm-modal";
 import { CopyLinkButton } from "./copy-link-button";
 import { Modal } from "./modal";
 import { OrgInvitationForm } from "./org-invitation-form";
-import { errorMessage } from "../lib/mutation-error";
 
 type Invitation = components["schemas"]["OrgInvitationInfo"];
 
@@ -56,7 +56,7 @@ export function OrgInvitationsList({
       setCancelingId(null);
       toast.success(t("orgSettings.invitationCanceled"));
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   // Tokens are organization invitation authority, even when this list is shown in a space.

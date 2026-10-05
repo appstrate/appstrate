@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getErrorMessage } from "@appstrate/core/errors";
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -127,7 +128,7 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           setPending(null);
           toast.success(t("spaces.personal.converted"));
         },
-        onError: (error) => toast.error(errorMessage(error)),
+        onError: (error) => toast.error(getErrorMessage(error)),
       });
       return;
     }
@@ -141,7 +142,7 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           }),
         );
       },
-      onError: (error) => toast.error(errorMessage(error)),
+      onError: (error) => toast.error(getErrorMessage(error)),
     });
   };
 

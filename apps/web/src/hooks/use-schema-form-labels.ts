@@ -27,8 +27,13 @@ export function useSchemaFormLabels(): Required<SchemaFormLabels> {
     removeItem: t("btn.remove", { ns: "common" }),
     moveItemUp: t("btn.moveUp", { ns: "common" }),
     moveItemDown: t("btn.moveDown", { ns: "common" }),
-    // Ajv's `params` carry the bound (`limit`), the expected `type`, the `format`…
+    // Ajv's `params` carry the bound (`limit`, also the plural `count`), the `format`…
     validationError: (keyword, params) =>
-      t(`validation.schema.${keyword}`, { ...params, ns: "common", defaultValue: "" }) || undefined,
+      t(`validation.schema.${keyword}`, {
+        ...params,
+        count: typeof params.limit === "number" ? params.limit : undefined,
+        ns: "common",
+        defaultValue: "",
+      }) || undefined,
   };
 }

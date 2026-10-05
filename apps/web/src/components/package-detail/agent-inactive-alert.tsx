@@ -3,13 +3,13 @@
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
-import { errorMessage } from "../../lib/mutation-error";
 
 /**
  * The agent is placed in this space and switched OFF.
@@ -58,7 +58,7 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
                 // tab between the render and the click: the optimistic write
                 // is rolled back and, without this, the button un-presses
                 // itself without a word.
-                { onError: (err) => toast.error(errorMessage(err)) },
+                { onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")) },
               )
             }
           >

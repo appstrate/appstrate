@@ -5,10 +5,19 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import i18n from "../i18n";
 import { ApiError } from "../api/errors";
 
+/** SKILL.md frontmatter refusals; their sentences quote the checker's own `{{detail}}`. */
+export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
+  skill_invalid_frontmatter: "editor.errorSkillInvalidFrontmatter",
+  skill_missing_frontmatter_name: "editor.errorSkillFrontmatterName",
+  skill_invalid_frontmatter_name: "editor.errorSkillInvalidName",
+  skill_missing_frontmatter_description: "editor.errorSkillFrontmatterDescription",
+  skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
+};
+
 /**
- * Refusals whose sentence is agent-domain copy other components reuse (`agents:error.*`); the
- * lock codes interpolate the field named in `param`. From `pinned_connection_unavailable` on,
- * the codes are the resolver's per-integration `errors[]` items. Every other code resolves by
+ * Refusals whose sentence is agent-domain copy other components reuse (`agents:*`); the lock
+ * codes interpolate the field named in `param`. From `pinned_connection_unavailable` on, the
+ * codes are the resolver's per-integration `errors[]` items. Every other code resolves by
  * convention — see `refusalMessage`.
  */
 const REFUSAL_ERROR_KEYS: Record<string, string> = {
@@ -28,6 +37,7 @@ const REFUSAL_ERROR_KEYS: Record<string, string> = {
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
+  ...SKILL_FRONTMATTER_ERROR_KEYS,
 };
 
 /** What a refusal carries: a problem body, or one item of its `errors[]`. */
@@ -41,55 +51,77 @@ interface Refusal {
 /**
  * The translated sentence for a server refusal `code`, or `null` when it has none. A code is
  * translated by adding `apiError.<code>` to `locales/{fr,en}/common.json` — nothing to register
- * here; `test/api-error-codes.test.ts` fails on a code the API emits without one. Better Auth's
- * UPPER_SNAKE codes share the table, lower-cased.
+ * here. A sentence that cannot say everything the server said ends with its `{{message}}`.
+ * Better Auth's and the importers' UPPER_SNAKE codes share the table, lower-cased.
  */
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
+  const message = err.message ?? "";
   const agentsKey = REFUSAL_ERROR_KEYS[code];
-  const key = agentsKey ?? `apiError.${code}`;
-  const ns = agentsKey ? "agents" : "common";
-  if (!i18n.exists(key, { ns })) return null;
-  // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
-  // the first segment is the prefix.
-  const field = err.field ?? (err.param?.slice(err.param.indexOf(".") + 1) || err.param || "");
-  return i18n.t(key, { field, message: err.message ?? "", ns });
+  if (agentsKey) {
+    // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
+    // the first segment is the prefix.
+    const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
+    return i18n.t(agentsKey, { field, message, detail: message, ns: "agents" });
+  }
+  const key = `apiError.${code}`;
+  if (!i18n.exists(key, { ns: "common" })) return null;
+  return i18n.t(key, { field: err.field ?? err.param ?? "", message, ns: "common" });
 }
 
-/** The first `errors[]` item of a `validation_failed`: its own code names the actual refusal. */
-function firstFieldError(err: ApiError): Refusal | null {
-  const first: unknown = Array.isArray(err.details) ? err.details[0] : undefined;
-  if (typeof first !== "object" || first === null) return null;
-  const { code, field, message } = first as Record<string, unknown>;
-  if (typeof code !== "string") return null;
-  return {
-    code,
-    field: typeof field === "string" ? field : undefined,
-    message: typeof message === "string" ? message : undefined,
-  };
+/** The `errors[]` items of a `validation_failed`: each one's own code names a refusal. */
+function fieldErrors(err: ApiError): Refusal[] {
+  const items: unknown = err.details;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item: unknown) => {
+    if (typeof item !== "object" || item === null) return [];
+    const { code, field, message } = item as Record<string, unknown>;
+    if (typeof code !== "string") return [];
+    return [
+      {
+        code,
+        field: typeof field === "string" ? field : undefined,
+        message: typeof message === "string" ? message : undefined,
+      },
+    ];
+  });
+}
+
+/** The request member a refusal blames (`param`, or the first `errors[]` item's `field`). */
+export function errorField(err: unknown): string | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  return err.param ?? fieldErrors(err)[0]?.field;
+}
+
+/** The translated sentence for a failure, or `null` when it carries no code this SPA knows. */
+function translated(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const [first, ...others] = err.code === "validation_failed" ? fieldErrors(err) : [];
+  if (!first) return refusalMessage(err);
+  // An item code with no sentence keeps the server's own summary, count included.
+  const sentence = refusalMessage(first);
+  if (!sentence) return null;
+  if (others.length === 0) return sentence;
+  return `${sentence} ${i18n.t("error.moreErrors", { count: others.length, ns: "common" })}`;
 }
 
 /**
- * The sentence to show for any failure. A server refusal is named by its translated `code`,
- * never by its English `detail`; only a failure that carries no known code (network error,
- * a code from a module this SPA build has no copy for) falls back to the raw message.
+ * The sentence to show for any failure, in an inline slot (a form error, an error panel). A
+ * server refusal is named by its translated `code`; a failure that carries no known code (a
+ * network error, a code from a module this SPA build has no copy for) keeps its own message.
  */
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const item = err.code === "validation_failed" ? firstFieldError(err) : null;
-    const refusal = (item && refusalMessage(item)) ?? refusalMessage(err);
-    if (refusal) return refusal;
-  }
-  return i18n.t("error.prefix", { message: getErrorMessage(err) });
+  return translated(err) ?? getErrorMessage(err);
 }
 
+/** The one place a failed write is toasted. */
 export function onMutationError(err: Error) {
   // A run launch answers this 409 with its recovery modal, a schedule form inline, and a
   // surface with no picker with `toastScheduleConnectionChoice`.
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
-  toast.error(errorMessage(err));
+  toast.error(translated(err) ?? i18n.t("error.prefix", { message: getErrorMessage(err) }));
 }
 
 /**

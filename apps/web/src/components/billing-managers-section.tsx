@@ -15,6 +15,7 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { roleI18nKey } from "../hooks/use-permissions";
@@ -101,7 +102,8 @@ export function BillingManagersSection() {
           void queryClient.invalidateQueries({ queryKey: managersKey });
           toast.success(t("billingManagers.saveSuccess"));
         },
-        onError: (err) => toast.error(errorMessage(err)),
+        onError: (err) =>
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

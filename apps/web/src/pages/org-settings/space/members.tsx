@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Users } from "lucide-react";
 import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -118,7 +119,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     { enabled: canSeeInvitations && !!currentOrg?.id },
   );
 
-  const onError = (err: unknown) => toast.error(errorMessage(err));
+  const onError = (err: unknown) =>
+    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
 
   /**
    * One control, two routes: an explicit row is PATCHed, an implicit member

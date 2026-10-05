@@ -21,7 +21,9 @@ export function TestResultSpan({
 }) {
   const { t } = useTranslation(["settings"]);
   // The outcome is named by its code; a code with no sentence keeps the server's own message.
-  const failure = result.error ? refusalMessage({ code: result.error }) : null;
+  const failure = result.error
+    ? refusalMessage({ code: result.error, message: result.message })
+    : null;
   return (
     <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
       {result.ok

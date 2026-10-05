@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { FolderInput, Package, Share2, X } from "lucide-react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
@@ -271,7 +272,7 @@ function ActivationCheckbox({
         setActive.mutate(
           { spaceId: space.id, packageId: pkg.id, active: !active },
           {
-            onError: (err) => toast.error(errorMessage(err)),
+            onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")),
           },
         );
       }}
@@ -487,7 +488,7 @@ function PlacementMap({
                                     },
                                   },
                                 },
-                                { onError: (err) => toast.error(errorMessage(err)) },
+                                { onError: (err) => toast.error(getErrorMessage(err)) },
                               )
                             }
                           >

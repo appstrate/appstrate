@@ -41,7 +41,6 @@ import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { Play } from "lucide-react";
 import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
-import { errorMessage } from "../lib/mutation-error";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -233,7 +232,7 @@ export function RunDetailPage() {
 
   if (isLoading) return <LoadingState />;
 
-  if (error || !run) return <ErrorState message={error ? errorMessage(error) : undefined} />;
+  if (error || !run) return <ErrorState message={error?.message} />;
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";

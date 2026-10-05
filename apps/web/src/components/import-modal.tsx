@@ -7,9 +7,8 @@ import { Modal } from "./modal";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
-import { toast } from "sonner";
 import { ApiError } from "../api/errors";
-import { errorMessage } from "../lib/mutation-error";
+import { errorMessage, onMutationError } from "../lib/mutation-error";
 
 interface ImportModalProps {
   open: boolean;
@@ -126,7 +125,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               });
               return;
             }
-            toast.error(errorMessage(err));
+            onMutationError(err);
           },
         },
       );

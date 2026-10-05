@@ -8,6 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { formatBytes } from "../../lib/format-bytes";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
@@ -78,7 +79,7 @@ export function OrgSettingsGeneralPage() {
       setEditingName(false);
     },
     onError: (err) => {
-      toast.error(errorMessage(err));
+      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
     },
   });
 
@@ -91,7 +92,7 @@ export function OrgSettingsGeneralPage() {
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
-      toast.error(errorMessage(err));
+      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
     },
   });
 
@@ -241,7 +242,7 @@ export function OrgSettingsGeneralPage() {
                       );
                     },
                     onError: (err) => {
-                      toast.error(errorMessage(err));
+                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                     },
                   },
                 )
@@ -290,7 +291,7 @@ export function OrgSettingsGeneralPage() {
                         );
                       },
                       onError: (err) => {
-                        toast.error(errorMessage(err));
+                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                       },
                     },
                   )

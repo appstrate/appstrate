@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useQueryClient } from "@tanstack/react-query";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -76,7 +77,8 @@ export function OrgSettingsMembersPage() {
     void invalidateIntegrationQueries(queryClient);
   };
 
-  const toastMemberError = (err: unknown) => toast.error(errorMessage(err));
+  const toastMemberError = (err: unknown) =>
+    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
     onSuccess: invalidateOrg,

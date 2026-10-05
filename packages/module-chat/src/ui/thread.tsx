@@ -34,7 +34,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
-import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Collapsible,
@@ -170,6 +169,7 @@ function ScrollToBottom() {
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const size = useAuiState((s) => s.attachment.file?.size ?? 0);
+  const { formatBytes } = useChatHost();
   return (
     <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />

@@ -59,7 +59,6 @@ import { useAgentReadiness } from "../hooks/use-agent-readiness";
 import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
-import { errorMessage } from "../lib/mutation-error";
 
 type DetailTab =
   | "overview"
@@ -492,7 +491,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     // shows the switch taken and its rollback says nothing, so
                     // the server's refusal is reported here or nowhere.
                     {
-                      onError: (err) => toast.error(errorMessage(err)),
+                      onError: (err) =>
+                        toast.error(err instanceof Error ? err.message : t("error.generic")),
                     },
                   );
                 }}
@@ -690,13 +690,19 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               { spaceId: currentSpaceId, packageId, active: false },
               {
                 onSuccess: close,
-                onError: (err) => toast.error(errorMessage(err)),
+                onError: (err) =>
+                  toast.error(err instanceof Error ? err.message : t("error.generic")),
               },
             );
           } else {
             deletePkgMutation.mutate(packageId, {
               onSuccess: close,
-              onError: (err) => toast.error(errorMessage(err)),
+              onError: (err) =>
+                toast.error(
+                  err instanceof Error
+                    ? err.message
+                    : t("packages.deleteDependedOn", { ns: "settings" }),
+                ),
             });
           }
         }}

@@ -16,7 +16,6 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
 import { Lock } from "lucide-react";
-import { errorMessage } from "../lib/mutation-error";
 
 export function ScheduleEditPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -31,7 +30,7 @@ export function ScheduleEditPage() {
   const mayWrite = useCanWriteSchedule(schedule);
 
   if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error ? errorMessage(error) : undefined} />;
+  if (error || !schedule) return <ErrorState message={error?.message} />;
   // Reached by URL on a schedule running as another member: every write would 403.
   if (!mayWrite) {
     return (

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "../../lib/format-bytes";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -82,7 +83,7 @@ export function OrgSettingsBillingPage() {
   const firstUpgradeId = upgradeIds[0];
 
   const onMutationError = (err: unknown) => {
-    toast.error(errorMessage(err));
+    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
   };
 
   const handleManage = () => {

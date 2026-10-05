@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
@@ -38,7 +39,6 @@ import {
 } from "../hooks/use-model-provider-pairing";
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
-import { errorMessage } from "../lib/mutation-error";
 
 interface OAuthPairingBodyProps {
   providerId: string;
@@ -145,7 +145,9 @@ export function OAuthPairingBody({
         registeredRef.current = true;
       }
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(
+        err instanceof Error ? getErrorMessage(err) : t("credentials.oauth.pairingCreateFailed"),
+      );
     }
   }
 

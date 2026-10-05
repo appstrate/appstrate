@@ -33,7 +33,6 @@ import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permission
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
-import { errorMessage } from "../../lib/mutation-error";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -198,7 +197,7 @@ export function ResourceSection({
         return [...prev, { id: newId, version: caretRange(newVersion) }];
       });
     } catch (err) {
-      toast.error(errorMessage(err));
+      toast.error(err instanceof Error ? err.message : t("error.unknown"));
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
