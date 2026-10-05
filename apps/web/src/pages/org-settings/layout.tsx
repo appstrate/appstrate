@@ -22,6 +22,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useSpace } from "../../hooks/use-spaces";
 import { useOrgSettings } from "../../hooks/use-org-settings";
+import { activeSettingsItem } from "../../lib/settings-nav";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
@@ -135,10 +136,10 @@ export function OrgSettingsLayout() {
       : []),
   ];
 
-  const allItems = sections.flatMap((s) => s.items);
-  const activeItem =
-    allItems.find((i) => location.pathname === i.to) ??
-    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
+  const activeItem = activeSettingsItem(
+    sections.flatMap((s) => s.items),
+    location.pathname,
+  );
   const isSpaceRoute = location.pathname.startsWith("/org-settings/space/");
 
   // A space page is reached through the org's Spaces list, not through the

@@ -6,6 +6,7 @@ import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import { AppVersion } from "./app-version";
 import { useCollapsedGlobalSidebar } from "../hooks/use-collapsed-global-sidebar";
+import { activeSettingsItem } from "../lib/settings-nav";
 import {
   Sidebar,
   SidebarContent,
@@ -53,9 +54,7 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
     .filter((s) => s.items.length > 0);
 
   const allItems = visibleSections.flatMap((s) => s.items);
-  const activeItem =
-    allItems.find((i) => location.pathname === i.to) ??
-    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
+  const activeItem = activeSettingsItem(allItems, location.pathname);
 
   return (
     <SidebarProvider
@@ -105,12 +104,11 @@ export function SettingsLayout({ sections, title, emoji, breadcrumbs }: Settings
 
         {/* Mobile: dropdown selector (sidebar hidden) */}
         <div className="mb-4 md:hidden">
-          <Select
-            value={activeItem?.to ?? allItems[0]?.to ?? ""}
-            onValueChange={(v) => navigate(v)}
-          >
+          {/* No tab is selected on a page this caller has no tab for (a refused
+              URL): naming the first one would title the page with another's. */}
+          <Select value={activeItem?.to ?? ""} onValueChange={(v) => navigate(v)}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder={title} />
             </SelectTrigger>
             <SelectContent>
               {allItems.map((item) => (
