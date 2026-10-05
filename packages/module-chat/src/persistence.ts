@@ -423,11 +423,15 @@ function titleCandidate(message: UIMessage): string | null {
 /** Longest title kept whole; a longer text is cut to at most `TITLE_HEAD` chars plus an ellipsis. */
 const TITLE_MAX = 60;
 const TITLE_HEAD = 57;
+/** A word boundary earlier than this would throw away most of the head: cut the word instead. */
+const TITLE_BOUNDARY_FLOOR = 30;
 
 /**
  * A message's text as a title; null when empty. A text past {@link TITLE_MAX}
- * is cut at the last word boundary inside its head, so a title never ends in
- * half a word — unless the head is one unbroken word, which is cut as is.
+ * is cut at the last word boundary inside its head, so a title does not end in
+ * half a word — unless that boundary sits before {@link TITLE_BOUNDARY_FLOOR}
+ * (a short word, then a long unbroken token such as a URL), where a hard cut
+ * keeps more of the message than the boundary would.
  */
 function titleFromText(text: string): string | null {
   if (!text) return null;
@@ -435,7 +439,8 @@ function titleFromText(text: string): string | null {
   const head = text.slice(0, TITLE_HEAD);
   const midWord = /\S/.test(text.charAt(TITLE_HEAD)) && /\S$/.test(head);
   const boundary = head.search(/\s+\S*$/);
-  const kept = midWord && boundary > 0 ? head.slice(0, boundary) : head.trimEnd();
+  const kept =
+    midWord && boundary >= TITLE_BOUNDARY_FLOOR ? head.slice(0, boundary) : head.trimEnd();
   // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE (#1501).
   return toPgSafe(`${kept}…`);
 }

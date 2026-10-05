@@ -67,6 +67,12 @@ describe("the title derived from a first message", () => {
     expect(await titleOf(`${head} ${"c".repeat(20)}`)).toBe(`${head}…`);
   });
 
+  it("cuts inside a long token rather than keep only the short word before it", async () => {
+    // The only boundary is after "Regarde": cutting there would leave "Regarde…".
+    const text = `Regarde https://example.com/${"a".repeat(80)}`;
+    expect(await titleOf(text)).toBe(`${text.slice(0, 57)}…`);
+  });
+
   it("cuts one unbroken word where the head ends", async () => {
     expect(await titleOf("x".repeat(80))).toBe(`${"x".repeat(57)}…`);
   });
