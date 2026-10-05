@@ -240,10 +240,6 @@ async function doRefresh(
   // that don't rotate it — preserve whatever the current ciphertext held in
   // that case so the next refresh still works.
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
-  const newCreds: Record<string, string> = {
-    access_token: parsed.accessToken,
-    refresh_token: finalRefreshToken,
-  };
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
   // Niveau 2 Phase 6 — only treat the response's `scope` as authoritative
@@ -253,6 +249,17 @@ async function doRefresh(
   // revocation. Distinguish by checking the raw wire payload directly.
   const responseHadScopeField = typeof tokenData.scope === "string" && tokenData.scope.length > 0;
   const responseScopes = responseHadScopeField ? parsed.scopesGranted : null;
+
+  // The stored outputs, with what this response carries: a field the IdP does not
+  // send again (`token_type`, `id_token`, `scope`) keeps the value the connect stored.
+  const newCreds: Record<string, string> = {
+    ...current,
+    access_token: parsed.accessToken,
+    refresh_token: finalRefreshToken,
+    ...(typeof tokenData.token_type === "string" ? { token_type: tokenData.token_type } : {}),
+    ...(typeof tokenData.id_token === "string" ? { id_token: tokenData.id_token } : {}),
+    ...(responseScopes !== null ? { scope: responseScopes.join(" ") } : {}),
+  };
 
   // Read the existing `scopes_granted` so we can detect shrinkage. One
   // extra SELECT per refresh is acceptable — refresh is the slow path.

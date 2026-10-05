@@ -26,7 +26,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { decryptCredentialsToStringMap, encryptCredentialEnvelope } from "@appstrate/connect";
 import { forceRefreshIntegrationConnection } from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
 
@@ -185,6 +185,61 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .where(eq(integrationConnections.id, connId));
     // Untouched — `scope` was absent on the wire so the high-water-mark stays.
     expect(row!.scopesGranted).toEqual(["read", "send"]);
+  });
+
+  it("keeps the outputs a refresh response does not send again, and takes those it does", async () => {
+    const connId = await seedConnection(["read", "send"]);
+    await db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({
+          outputs: {
+            access_token: "old-access",
+            refresh_token: "rt-1",
+            token_type: "Bearer",
+            id_token: "idt-1",
+            scope: "read send",
+          },
+        }),
+      })
+      .where(eq(integrationConnections.id, connId));
+    const refresh = async () =>
+      (
+        await forceRefreshIntegrationConnection(
+          connId,
+          PACKAGE_ID,
+          "primary",
+          (await fetchEncrypted(connId))!,
+          { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+        )
+      ).fields;
+
+    token.setResponse({ access_token: "access-2", expires_in: 3600 });
+    const kept = {
+      access_token: "access-2",
+      refresh_token: "rt-1",
+      token_type: "Bearer",
+      id_token: "idt-1",
+      scope: "read send",
+    };
+    expect(await refresh()).toEqual(kept);
+    expect(decryptCredentialsToStringMap((await fetchEncrypted(connId))!)).toEqual(kept);
+
+    token.setResponse({
+      access_token: "access-3",
+      refresh_token: "rt-2",
+      token_type: "DPoP",
+      id_token: "idt-2",
+      scope: "read",
+      expires_in: 3600,
+    });
+    expect(await refresh()).toEqual({
+      access_token: "access-3",
+      refresh_token: "rt-2",
+      token_type: "DPoP",
+      id_token: "idt-2",
+      scope: "read",
+    });
   });
 
   it("writes back scopesGranted unchanged when the IdP echoes the same set", async () => {
