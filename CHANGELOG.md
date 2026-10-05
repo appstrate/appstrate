@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **An integration calling an internal API from a run needs its host in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). Until now an `api_call` made in a
+  run reached a private, loopback or link-local address when the
+  integration's `authorized_uris` named the host literally. It is now refused
+  (403) unless the operator lists that host, as the platform credential proxy
+  already required. Before the deploy, list every org integration whose
+  `authorized_uris` names a host on your internal network and add those
+  hosts to the variable. The `afps` CLI is unchanged.
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
   lists every draft or version holding a template or runtime expression the
@@ -286,6 +294,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **A run's `api_call` reaches an internal host only when the operator lists
+  it** (#1657). The sidecar skipped the SSRF gate for a host an
+  integration's `authorized_uris` named literally, so the author of a
+  manifest chose which addresses of the operator's network a run could
+  reach. The sidecar now exempts only `EGRESS_ALLOW_INTERNAL_HOSTS`, the rule
+  of the platform credential proxy; such a host is exempt under
+  `allow_all_uris` and for a host rendered from a connection value too, as
+  on the platform. The CLI resolver keeps the literal exemption: it runs on
+  the caller's own machine.
 - **A credential no HTTP header can carry is refused, never quoted** (#1641).
   A stored or rendered credential holding CR, LF, NUL, another control
   character or a character above U+00FF made `Headers` throw an error quoting

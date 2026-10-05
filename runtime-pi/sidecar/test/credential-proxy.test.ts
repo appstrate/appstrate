@@ -13,6 +13,7 @@ import { cookieScope } from "@appstrate/afps-runtime/resolvers";
 import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 
 /** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
 const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
@@ -1124,7 +1125,8 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
   // hostname, IPv6); the rest is covered by the ssrf.ts unit tests.
   for (const target of [
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-    "http://localhost/admin",
+    // Not `localhost`: the test preload lists it in EGRESS_ALLOW_INTERNAL_HOSTS.
+    "http://host.docker.internal/admin",
     "http://[::1]/",
   ]) {
     it(`refuses redirect to SSRF-blocked target (${target})`, async () => {
@@ -2029,25 +2031,41 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("literal-host allowlist exempts an internal-resolving host (operator topology)", async () => {
-    // On-prem case: the operator explicitly named the host; it resolving
-    // into a private range is their declared network, not an agent pivot.
+  /** One literal `authorized_uris` host, resolving into a private range. */
+  const internalHostDeps = (host: string, fetchFn: ReturnType<typeof mock>) =>
+    makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      declaredUris: [`https://${host}/**`],
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok" },
+        authorizedUris: [`https://${host}/**`],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+      resolveHost: async () => ["10.0.0.5"],
+    });
+
+  it("a literal authorized_uris host resolving into a private range is refused", async () => {
+    // The manifest author names the host; the network it would reach is the operator's.
+    const fetchFn = mock(async () => new Response("leaked", { status: 200 }));
+    const result = await call(
+      internalHostDeps("intranet.corp.example", fetchFn),
+      "https://intranet.corp.example/api/x",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(403);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("an EGRESS_ALLOW_INTERNAL_HOSTS host resolving into a private range is reached", async () => {
+    // `intranet.corp` is in the test preload's list (`test/setup/preload.ts`).
+    expect(isOperatorTrustedEgressHost("intranet.corp")).toBe(true);
     const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const result = await call(
-      makeDeps({
-        fetchFn: fetchFn as unknown as typeof fetch,
-        declaredUris: ["https://intranet.corp.example/**"],
-        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
-          credentials: { access_token: "tok" },
-          authorizedUris: ["https://intranet.corp.example/**"],
-          allowAllUris: false,
-          credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer ",
-          credentialFieldName: "access_token",
-        })),
-        resolveHost: async () => ["10.0.0.5"],
-      }),
-      "https://intranet.corp.example/api/x",
+      internalHostDeps("intranet.corp", fetchFn),
+      "https://intranet.corp/api/x",
     );
     expect(result.ok).toBe(true);
     expect(fetchFn).toHaveBeenCalledTimes(1);
