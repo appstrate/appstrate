@@ -46,7 +46,6 @@ import {
   redactionFields,
   redactCredentialHost,
   templateHost,
-  unresolvedPlaceholders,
   urlPolicyRefusalMessage,
   type ApiCallRequestIssue,
   type CookieJar,
@@ -288,19 +287,24 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
 
-  // 3. The target and the caller's headers, substituted (fail fast: an unresolved `{{var}}` or
-  //    an invalid header value is refused, never sent), as on the platform proxy and the CLI.
-  const prepared = prepareApiCallRequest(targetUrl, args.callerHeaders, creds.credentials);
-  if (!prepared.ok) return requestIssueFailure(prepared.issue);
+  // 3. The target, the caller's headers and every string the body substitutes (text, multipart
+  //    fields, JSON leaves), as on the platform proxy and the CLI: an unresolved `{{var}}` or an
+  //    invalid header value is refused before anything is sent.
+  const prepareFor = (fields: Record<string, string>) =>
+    prepareApiCallRequest({
+      target: targetUrl,
+      headers: args.callerHeaders,
+      bodyTemplates: substituteBody ? [...substitutedBodyStrings(body)] : [],
+      fields,
+    });
+  const prepared = prepareFor(creds.credentials);
+  if (!prepared.ok) return requestIssueFailure(prepared.issues[0]);
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
-    templates: [
-      ...prepared.request.templates,
-      ...(substituteBody ? substitutedBodyStrings(body) : []),
-    ],
+    templates: prepared.request.templates,
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
     declaredUris: deps.declaredUris,
@@ -317,23 +321,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
-
-  // 6. The same on every string the body substitutes (text, multipart fields, JSON leaves).
-  if (substituteBody) {
-    const unresolvedInBody = new Set<string>();
-    for (const template of substitutedBodyStrings(body)) {
-      for (const key of unresolvedPlaceholders(template, creds.credentials)) {
-        unresolvedInBody.add(key);
-      }
-    }
-    if (unresolvedInBody.size) {
-      return {
-        ok: false,
-        status: 400,
-        error: `Unresolved placeholders in body: {{${[...unresolvedInBody].join()}}}`,
-      };
-    }
-  }
 
   /** Build the request body with credential substitution applied. */
   const buildBody = (
@@ -447,7 +434,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   };
 
-  // 7. First outbound request. Network/timeout errors surface as a
+  // 5. First outbound request. Network/timeout errors surface as a
   //    structured failure rather than a raw exception.
   const requestStartedAt = performance.now();
   let upstream: Response;
@@ -471,7 +458,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return wrapRequestError(err, integrationId, targetHost);
   }
 
-  // 7b. Retry on 401 — force a refresh and re-issue the call. The platform
+  // 5b. Retry on 401 — force a refresh and re-issue the call. The platform
   //     `/refresh` flags the connection needsReconnection when the credential
   //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
   //     401'd), so a `null` result means "do not retry". A non-null result is
@@ -485,11 +472,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     !reportedAuthFailures.has(scope)
   ) {
     const fresh = await refreshCredentials(integrationId, answered).catch(() => null);
-    if (fresh) {
+    // The caller's templates are substituted again from the refreshed set. One that no longer
+    // fills them is not replayed: the 401 stands.
+    const again = fresh ? prepareFor(fresh.credentials) : null;
+    if (fresh && again?.ok) {
       redactFields = redactionFields(policy, fresh.credentials);
-      // The caller's headers are substituted again from the refreshed set.
-      const again = prepareApiCallRequest(targetUrl, args.callerHeaders, fresh.credentials);
-      if (!again.ok) return requestIssueFailure(again.issue);
       try {
         const r = await doUpstreamRequest(fresh, again.request);
         upstream = r.response;
@@ -504,7 +491,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
   }
 
-  // 8. Log a persistent auth failure once per connection per run. The flag is
+  // 6. Log a persistent auth failure once per connection per run. The flag is
   //    set platform-side by the `/refresh` call above (which returns null on a
   //    terminal credential); here we only gate the one-refresh-attempt-per-run
   //    behaviour and surface a log line.
@@ -518,7 +505,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
-  // 9. Success-path diagnostic envelope (#404). One structured line per
+  // 7. Success-path diagnostic envelope (#404). One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,
   //    and the request/response header *names* (values redacted). Only
   //    emitted at LOG_LEVEL=debug, so it is silent in default production
@@ -548,7 +535,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   return { ok: true, response: upstream, finalUrl: upstreamFinalUrl };
 }
 
-/** The caller's own target or header, refused as written (keys and header names, never a value). */
+/** The caller's own target, header or body, refused as written (keys and header names, never a value). */
 function requestIssueFailure(issue: ApiCallRequestIssue): ApiCallFailure {
   if (issue.kind === "invalid_header") {
     return {
@@ -557,7 +544,8 @@ function requestIssueFailure(issue: ApiCallRequestIssue): ApiCallFailure {
       error: `Header "${issue.header}" is not a valid HTTP field value`,
     };
   }
-  const where = issue.in === "target" ? "URL" : `header "${issue.header}"`;
+  const where =
+    issue.in === "header" ? `header "${issue.header}"` : issue.in === "target" ? "URL" : "body";
   return {
     ok: false,
     status: 400,

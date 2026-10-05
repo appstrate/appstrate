@@ -56,6 +56,7 @@ export { substituteVars, templateHost, unresolvedPlaceholders } from "./template
 export {
   prepareApiCallRequest,
   type ApiCallRequestIssue,
+  type ApiCallRequestTemplates,
   type PreparedApiCallRequest,
 } from "./api-call-request.ts";
 

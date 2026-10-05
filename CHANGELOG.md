@@ -195,18 +195,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **`appstrate run` repairs `Bearer{{field}}` like the other api_call
-  paths** (#1660). With `--integrations=local`, a kept `Authorization` or
-  `Proxy-Authorization` header written without the space after its scheme
-  was substituted as `Bearerghp_…` and answered 401; the platform proxy and
-  the sidecar already repaired the template. The three paths now prepare the
-  target and the caller's headers through one function
-  (`prepareApiCallRequest`, `@appstrate/afps-runtime`): unresolved
-  placeholders, a caller value that is no HTTP field value, scheme repair,
-  substitution, and the names of the headers a credential went into. A call
-  with two defects is now refused on its headers before the URL policy runs
-  (a 400 where the platform proxy and the sidecar answered the policy's
-  403); nothing is sent either way.
+- **The three api_call paths prepare the caller's request through one
+  function** (#1660). The platform proxy, the sidecar and the local resolver
+  of `appstrate run` each checked and substituted the target, the caller's
+  headers and the body templates in their own order; they now call
+  `prepareApiCallRequest` (`@appstrate/afps-runtime`). What changes:
+  - `appstrate run --integrations=local` repairs an `Authorization` header
+    written `Bearer{{field}}` (no space after the scheme), as the two other
+    paths did; it was substituted as `Bearerghp_…` and answered 401. Only a
+    manifest that lets the caller override `Authorization` keeps that header.
+  - A malformed request is refused before the URL policy is consulted, on
+    every path: an unresolved placeholder in a header or the body, or a
+    caller header value that is no HTTP field value, answers its own error
+    (400 on the platform proxy and the sidecar, `RESOLVER_BODY_INVALID` /
+    `RESOLVER_HEADER_INVALID` on the CLI) where a call that also broke the
+    policy answered the policy's. Nothing is sent either way.
+  - On the platform proxy, an unresolved placeholder in a later header now
+    wins over a credential that makes an earlier header invalid (400
+    `unresolved_placeholder`, was 502 `credential_unusable`).
+  - In a run, a 401 is no longer replayed when the refreshed credentials do
+    not hold a field the caller's target, headers or body name: the replay
+    used to go out with the literal `{{field}}`. The 401 is returned.
 - **An OAuth refresh keeps the connection's other outputs** (#1629).
   Refreshing an integration connection rewrote its credential with
   `access_token` and `refresh_token` only, so a manifest reading

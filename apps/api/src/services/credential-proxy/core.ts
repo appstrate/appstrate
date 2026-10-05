@@ -36,7 +36,6 @@ import {
   prepareApiCallRequest,
   redactionFields,
   templateHost,
-  unresolvedPlaceholders,
   urlPolicyRefusalMessage,
   type ApiCallRequestIssue,
   type CookieJar,
@@ -225,14 +224,19 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // The target and the caller's headers, substituted (fail-closed: an unresolved `{{foo}}` or an
   // invalid header value is refused, never sent), as on the sidecar and the local CLI.
   const fields = resolved.credentials;
-  const prepared = prepareApiCallRequest(input.target, input.headers ?? {}, fields);
-  if (!prepared.ok) throw requestIssueError(prepared.issue);
-  const { url: target, templates } = prepared.request;
   const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
+  const prepared = prepareApiCallRequest({
+    target: input.target,
+    headers: input.headers ?? {},
+    bodyTemplates: bodyTemplate !== null ? [bodyTemplate] : [],
+    fields,
+  });
+  if (!prepared.ok) throw requestIssueError(prepared.issues[0]);
+  const { url: target, templates } = prepared.request;
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
-    templates: [...templates, ...(bodyTemplate !== null ? [bodyTemplate] : [])],
+    templates,
     fields,
     allowAllUris: resolved.allowAllUris,
     declaredUris,
@@ -249,12 +253,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const redactFields = redactionFields(policy, fields);
   const redactedHost = templateHost(input.target);
 
-  // Resolve caller headers, then let the shared injector add the pinned
-  // credential header server-side (mirror of the sidecar — single source
-  // of truth in `@appstrate/connect/proxy-primitives`).
+  // The caller's headers as prepared, then the pinned credential header, added server-side by
+  // the shared injector (`@appstrate/connect/proxy-primitives`).
   //
-  // Every header carrying a decrypted credential (any vendor name, or a caller `{{field}}`),
-  // collected at injection time: a redirect leaving the allowlist strips them.
+  // Every header carrying a decrypted credential (a caller `{{field}}`, or the injected one under
+  // any vendor name): a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>(prepared.request.credentialHeaders);
   const headers = new Headers();
   let credentialInjection;
@@ -282,13 +285,6 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     if (isStreamBody) {
       body = input.body as ReadableStream<Uint8Array>;
     } else if (bodyTemplate !== null) {
-      const unresolved = unresolvedPlaceholders(bodyTemplate, fields);
-      if (unresolved.length > 0) {
-        throw new ProxyCallError(
-          "unresolved_placeholder",
-          `Unresolved placeholders in body: {{${unresolved.join(",")}}}`,
-        );
-      }
       body = substituteVars(bodyTemplate, fields);
     } else {
       body = input.body as string | Uint8Array;
@@ -479,12 +475,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   };
 }
 
-/** The caller's own target or header, refused as written (keys and header names, never a value). */
+/** The caller's own target, header or body, refused as written (keys and header names, never a value). */
 function requestIssueError(issue: ApiCallRequestIssue): ProxyCallError {
   if (issue.kind === "invalid_header") {
     return new ProxyCallError("invalid_request", new InvalidHeaderValueError(issue.header).message);
   }
-  const where = issue.in === "target" ? "target" : `header "${issue.header}"`;
+  const where = issue.in === "header" ? `header "${issue.header}"` : issue.in;
   return new ProxyCallError(
     "unresolved_placeholder",
     `Unresolved placeholders in ${where}: {{${issue.keys.join(",")}}}`,

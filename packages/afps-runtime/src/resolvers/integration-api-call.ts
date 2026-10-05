@@ -67,8 +67,8 @@ import {
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
-import { prepareApiCallRequest } from "./api-call-request.ts";
+import { substituteVars, templateHost } from "./template-vars.ts";
+import { prepareApiCallRequest, type ApiCallRequestIssue } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
@@ -459,25 +459,16 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         }
         callerHeaders[key] = value;
       }
-      // The target and the kept headers, substituted, as on the platform proxy and the sidecar.
-      const prepared = prepareApiCallRequest(req.target, callerHeaders, fields);
-      if (!prepared.ok) {
-        if (prepared.issue.kind === "invalid_header") {
-          throw headerInvalid(
-            meta.name,
-            new InvalidHeaderValueError(prepared.issue.header).message,
-          );
-        }
-        throw unresolvedError(meta.name, prepared.issue.keys);
-      }
-      const { url: target, headers, credentialHeaders } = prepared.request;
-      // Every substituted string: target, kept header values, a string body (never multipart).
-      const templates = [...prepared.request.templates];
-      if (typeof req.body === "string") {
-        const unresolvedInBody = unresolvedPlaceholders(req.body, fields);
-        if (unresolvedInBody.length > 0) throw unresolvedError(meta.name, unresolvedInBody);
-        templates.push(req.body);
-      }
+      // The target, the kept headers and a string body (never multipart), checked and substituted
+      // as on the platform proxy and the sidecar. Every unresolved placeholder is named at once.
+      const prepared = prepareApiCallRequest({
+        target: req.target,
+        headers: callerHeaders,
+        bodyTemplates: typeof req.body === "string" ? [req.body] : [],
+        fields,
+      });
+      if (!prepared.ok) throw requestIssuesError(meta.name, prepared.issues);
+      const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
       // an out-of-boundary cross-origin hop.
@@ -581,11 +572,24 @@ function refusalError(refusal: UrlPolicyRefusal, integration: string, target: st
     : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
 }
 
-/** A `{{field}}` the credential bag does not hold, in the target, a header or the body. */
-function unresolvedError(integration: string, keys: readonly string[]): ResolverError {
+/** Every `{{field}}` the credential bag does not hold, named at once; else the first invalid header. */
+function requestIssuesError(
+  integration: string,
+  issues: readonly ApiCallRequestIssue[],
+): ResolverError {
+  const unresolved = new Set<string>();
+  const invalid: string[] = [];
+  for (const issue of issues) {
+    if (issue.kind === "invalid_header") invalid.push(issue.header);
+    else for (const key of issue.keys) unresolved.add(key);
+  }
+  const [header] = invalid;
+  if (unresolved.size === 0 && header !== undefined) {
+    return headerInvalid(integration, new InvalidHeaderValueError(header).message);
+  }
   return new ResolverError(
     "RESOLVER_BODY_INVALID",
-    `Integration ${integration}: unresolved placeholders: {{${[...new Set(keys)].join()}}}`,
+    `Integration ${integration}: unresolved placeholders: {{${[...unresolved].join()}}}`,
     { integration },
   );
 }

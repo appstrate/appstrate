@@ -810,7 +810,10 @@ describe("LocalIntegrationResolver", () => {
     });
     const resolver = new LocalIntegrationResolver({
       resolveHost: async () => ["203.0.113.7"],
-      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "server" } } } },
+      creds: {
+        version: 1,
+        integrations: { "@acme/api": { fields: { api_key: "server", alt: "other" } } },
+      },
       fetch: ((url: string, init: RequestInit) => {
         calls.push({ url, init });
         return Promise.resolve(new Response("{}", { status: 200 }));
@@ -825,12 +828,13 @@ describe("LocalIntegrationResolver", () => {
       {
         method: "GET",
         target: "https://api.acme.com/v1/me",
-        headers: { authorization: "Bearer{{api_key}}" },
+        // Not the injected field: the caller's value is what must reach the wire.
+        headers: { authorization: "Bearer{{alt}}" },
       },
       ctx,
     );
     expect(Object.fromEntries(new Headers(calls[0]!.init.headers))).toEqual({
-      authorization: "Bearer server",
+      authorization: "Bearer other",
     });
   });
 
@@ -1377,6 +1381,43 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     ]);
     await call("https://intranet.corp/x");
     expect(hits).toEqual(["https://intranet.corp/x"]);
+  });
+
+  it("names every unresolved {{field}} at once (target, header, body), ahead of an invalid header", async () => {
+    const hits: string[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/wp", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/wp", { authorizedUris: ["https://api.acme.com/**"] })
+          .integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/wp": { fields: { api_key: "k" } } } },
+      fetch: ((url: string) => {
+        hits.push(url);
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/wp", version: "^1" }],
+      makeBundle(root, [integ]),
+    );
+    const call = tools[0]!.execute(
+      {
+        method: "POST",
+        target: "https://api.acme.com/{{a}}",
+        headers: { "X-Bad": "x\ny", "X-B": "{{b}}" },
+        body: "{{c}} {{a}}",
+      },
+      makeCtx().ctx,
+    );
+    await expect(call).rejects.toMatchObject({
+      code: "RESOLVER_BODY_INVALID",
+      message: "Integration @acme/wp: unresolved placeholders: {{a,b,c}}",
+    });
+    expect(hits).toEqual([]);
   });
 
   it("refuses a {{field}} the credential bag does not hold, naming it, unsent", async () => {
