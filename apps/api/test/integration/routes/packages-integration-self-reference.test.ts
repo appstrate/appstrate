@@ -54,6 +54,7 @@ describe("an integration naming itself as its mcp-server", () => {
 
   it("is refused at draft save and leaves the draft untouched", async () => {
     const created = await create(manifest("@selforg/server"));
+    expect(created.status).toBe(201);
     const res = await app.request(`/api/packages/integrations/${ID}`, {
       method: "PATCH",
       headers: authHeaders(ctx, {
@@ -70,9 +71,5 @@ describe("an integration naming itself as its mcp-server", () => {
       .from(packages)
       .where(eq(packages.id, ID));
     expect(row?.draftManifest).toMatchObject({ source: { server: { name: "@selforg/server" } } });
-  });
-
-  it("naming another package is accepted", async () => {
-    expect((await create(manifest("@selforg/server"))).status).toBe(201);
   });
 });

@@ -247,8 +247,6 @@ export function PackageFilesEditor({
           onSubmit={(to) => stage([{ op: "move", from: dialog.path, to }], to)}
         />
       )}
-      {/* Mounted only while open, like the two above: kept mounted, it named
-          an empty path for as long as its closing transition lasted. */}
       {dialog?.kind === "delete" && (
         <ConfirmModal
           open

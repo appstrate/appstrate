@@ -204,8 +204,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const versionQuery = useVersionDetail(type, packageId, versionParam);
   const { data: versionDetail, error: versionError } = versionQuery;
-  // Not `isLoading` — see `isQueryInFlight`: the version redirect below must
-  // not read "no such version" into a request whose retry is merely paused.
   const versionLoading = isQueryInFlight(versionQuery);
 
   // The server's own flag gates publishing (the header badge and the publish

@@ -114,11 +114,11 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               });
               // The same forced import also replaces a published version: say both.
               if (err.details?.version)
-                setConfirmIntegrity({ version: String(err.details.version) });
+                setConfirmIntegrity({ version: err.details.version as string });
               return;
             }
             if (err instanceof ApiError && err.code === "integrity_mismatch") {
-              setConfirmIntegrity({ version: String(err.details?.version ?? "") });
+              setConfirmIntegrity({ version: err.details?.version as string });
               return;
             }
             toast.error(i18n.t("error.prefix", { message: err.message }));

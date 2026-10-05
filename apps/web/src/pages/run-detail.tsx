@@ -41,20 +41,10 @@ import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { Play } from "lucide-react";
 import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
+import { isQueryInFlight } from "../lib/query-state";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
-
-/**
- * Has this React Query subscription reached a state that will not change on its
- * own? Either it answered (data or error, so no longer `pending`), or it is
- * disabled and will never run (`pending` with an idle fetch). A query still
- * `fetching` — including the very first render, where v5 already reports the
- * optimistic `fetching` — has not.
- */
-function isQuerySettled(query: { isPending: boolean; fetchStatus: string }): boolean {
-  return !query.isPending || query.fetchStatus === "idle";
-}
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -148,7 +138,7 @@ export function RunDetailPage() {
   // while on a run that DID write memory. The tab controller captures its
   // default pane once and must not capture it from that transient 0 — hand it
   // the settled flag rather than the count alone.
-  const memorySettled = isQuerySettled(runMemoriesQuery) && isQuerySettled(runPinnedQuery);
+  const memorySettled = !isQueryInFlight(runMemoriesQuery) && !isQueryInFlight(runPinnedQuery);
 
   // File count for the tab badge — read off the run DTO the page already
   // has (same field `run-row.tsx` renders). Listing the run's files just to

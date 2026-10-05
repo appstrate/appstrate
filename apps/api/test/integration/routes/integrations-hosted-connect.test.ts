@@ -54,7 +54,7 @@ function apiKeyManifest(name = "@myorg/gmail"): IntegrationManifest {
     display_name: "Gmail",
     description: "Gmail integration",
     icon: "logos:google-gmail",
-    source: { kind: "local", server: { name, version: "^0.1.0" } },
+    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
     auths: {
       api: {
         type: "api_key",
@@ -327,7 +327,7 @@ function oauthManifest(name = "@myorg/gsuite"): IntegrationManifest {
     display_name: "Google Workspace",
     description: "Google Workspace integration",
     icon: "logos:google",
-    source: { kind: "local", server: { name, version: "^0.1.0" } },
+    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
     auths: {
       google: {
         type: "oauth2",

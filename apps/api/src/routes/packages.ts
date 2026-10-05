@@ -2494,6 +2494,8 @@ export function createPackagesRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const { manifest, content, files, type: packageType, packageId } = parsed;
+    const manifestVersion = asRecord(manifest).version;
+    const importedVersion = typeof manifestVersion === "string" ? manifestVersion : undefined;
     await makePermissionGuard(packagePermission(packageType, "write"))(c, async () => {});
 
     // System packages are immutable
@@ -2544,23 +2546,18 @@ export function createPackagesRouter() {
           detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
         });
       }
-      // A forced import overwrites TWO things, and the caller must be told
-      // about both before `force=true` waives them together: the unpublished
-      // draft, and a published version of the same number whose bytes differ.
-      // A GitHub import has no force option, so its refusal names the way out
-      // that exists for it.
-      const remedy =
-        source === "zip"
-          ? "Use the force option to overwrite."
-          : "A GitHub import cannot overwrite: publish or discard the draft changes, or bump the version in the source manifest.";
+      // `force=true` waives two overwrites at once — the unpublished draft and a
+      // published version of the same number with other bytes — so one refusal
+      // names both. A GitHub import has no force option.
       if (!force) {
-        const importedVersion = asRecord(manifest).version;
+        const remedy =
+          source === "zip"
+            ? "Use the force option to overwrite."
+            : "A GitHub import cannot overwrite: publish or discard the draft changes, or bump the version in the source manifest.";
         const [vCount, latestDate, existingVer] = await Promise.all([
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
-          typeof importedVersion === "string"
-            ? getVersionForDownload(packageId, importedVersion)
-            : null,
+          importedVersion ? getVersionForDownload(packageId, importedVersion) : null,
         ]);
         const replacedVersion =
           existingVer && existingVer.integrity !== computeIntegrity(new Uint8Array(artifact))
@@ -2639,7 +2636,6 @@ export function createPackagesRouter() {
     }
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
-    const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
     await recordAuditFromContext(c, {
       action: existing ? "package.updated" : "package.created",
       resourceType: "package",

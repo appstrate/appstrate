@@ -210,9 +210,7 @@ export function useImportPackage() {
       }
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    // No `onError` on the two import mutations: a 409 here is a question the
-    // import modal answers, and it reports every other failure itself. A
-    // hook-level handler fires as well and toasts over the confirmation.
+    // No `onError`: the import modal is the one reporter of both import mutations.
   });
 }
 
@@ -367,9 +365,7 @@ export function useCreatePackage(type: PackageType) {
       }
     },
     onSuccess: (data) => {
-      // The create route publishes the initial version only when the manifest
-      // would pass the publish gate; otherwise the package exists as a draft
-      // that is neither versioned nor active, and nothing else says so.
+      // The create route skips the initial version when the publish gate would refuse it.
       if (data.version_count === 0) toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });

@@ -2754,20 +2754,8 @@ describe("Packages API", () => {
         return ((await res.json()) as { has_unarchived_changes: boolean }).has_unarchived_changes;
       };
 
-      it("names the version a forced import would replace (integrity_mismatch)", async () => {
-        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
-
-        const res = await importArchive(archive("1.0.0", "Different."));
-        expect(res.status).toBe(409);
-        expect(await res.json()).toMatchObject({
-          code: "integrity_mismatch",
-          packageId: id,
-          version: "1.0.0",
-        });
-      });
-
-      it("names the draft a forced import would overwrite (draft_overwrite)", async () => {
-        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+      /** Save an edit on top of the imported draft. */
+      const dirtyDraft = async () => {
         const before = await app.request(`/api/packages/skills/${id}`, {
           headers: authHeaders(ctx),
         });
@@ -2782,6 +2770,23 @@ describe("Packages API", () => {
           }),
         });
         expect(edit.status).toBe(200);
+      };
+
+      it("names the version a forced import would replace (integrity_mismatch)", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+
+        const res = await importArchive(archive("1.0.0", "Different."));
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({
+          code: "integrity_mismatch",
+          packageId: id,
+          version: "1.0.0",
+        });
+      });
+
+      it("names the draft a forced import would overwrite (draft_overwrite)", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        await dirtyDraft();
 
         const res = await importArchive(archive("1.1.0", "Second."));
         expect(res.status).toBe(409);
@@ -2806,20 +2811,7 @@ describe("Packages API", () => {
         // One `force=true` waives both checks: the refusal that asks for it
         // must name both things it will overwrite.
         expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
-        const before = await app.request(`/api/packages/skills/${id}`, {
-          headers: authHeaders(ctx),
-        });
-        const edit = await app.request(`/api/packages/skills/${id}`, {
-          method: "PATCH",
-          headers: authHeaders(ctx, {
-            "Content-Type": "application/json",
-            ...ifMatch(etagVersion(before)),
-          }),
-          body: JSON.stringify({
-            content: "---\nname: conflicting-skill\ndescription: A skill.\n---\n\nEdited.",
-          }),
-        });
-        expect(edit.status).toBe(200);
+        await dirtyDraft();
 
         const res = await importArchive(archive("1.0.0", "Different."));
         expect(res.status).toBe(409);
