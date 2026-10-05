@@ -44,14 +44,14 @@ import {
  * which is acceptable because the run-time resolver gate enforces the
  * server-side truth anyway.
  */
-function handleConnectionUpdate(qc: QueryClient, options?: InvalidateOptions) {
+function handleConnectionUpdate(qc: QueryClient) {
   // Connections page (`/preferences/connections`, whose orange "Reconnection
   // required" badge reads off `/api/me/connections`), integration list
   // (sidebar status, integrations page count) + detail subtree (auth
   // statuses, connection lists, agent-resolution verdicts, the resolution
   // verdict that powers the agent picker dropdown) — all refreshed by the
   // shared helper, which matches on the typed key's path element.
-  void invalidateIntegrationQueries(qc, options);
+  void invalidateIntegrationQueries(qc);
 }
 
 /**
@@ -187,8 +187,8 @@ export function createBroadInvalidator(
 }
 
 /**
- * Single writer of the run-detail cache from a `run_update` frame; `false`
- * when the frame is dropped:
+ * Single writer of the run-detail cache from a `run_update` frame; returns the
+ * verdict, `false` when the frame is dropped:
  * a per-connection snapshot can predate a live frame, and status only moves on.
  */
 export function patchRunDetail(
@@ -234,56 +234,27 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
  * the run-detail page appends live frames into that cache and a refetch would
  * drop the per-turn breadcrumbs it holds (see `invalidateRunLogs`).
  */
-function reconcileRunQueries(qc: QueryClient, orgId: string, options: InvalidateOptions) {
+function reconcileRunQueries(qc: QueryClient, orgId: string) {
   // Run detail/list caches are patched in place by live frames, so only a gap
   // needs them refetched — they are not part of the per-event throttle.
   for (const queryKey of [runKeys.all, ...broadRunKeys(orgId)]) {
-    qc.invalidateQueries({ queryKey }, options);
+    qc.invalidateQueries({ queryKey }, KEEP_IN_FLIGHT);
   }
 }
 
 /**
- * What a connection owes the caches. The protocol is signal-only: a frame
- * emitted while no stream was listening is lost for good, so every family a
- * frame would have moved is refetched once a stream is back. That is what lets
- * the notification and chat polls be slow backstops instead of the freshness
- * mechanism.
- *
- * A connection owes nothing only when it is the first one this scope (org,
- * space, persona) ever had, on its first attempt: the caches of that scope are
- * being created beside it, by the page load or by the switch, and reconciling
- * there issued each of them a second time. Everything else follows a gap — a
- * failed attempt (`missed`: the caches then age through the whole backoff), a
- * stream that ended, or a scope a stream already covered and then left (a
- * switch away and back, a change of grants), whose caches may still be served
- * although nothing listened for them in between.
- *
- * "Already covered" is remembered IN the query cache, under
- * `streamCoverageKey`, so that it lives exactly as long as the caches it
- * speaks for: an org switch or a role preview wipes both, a layout remount over
- * surviving caches finds both, and garbage collection drops both. A stream
- * aborted before it connected (StrictMode's first effect run) leaves no trace.
- *
- * A read already in flight when the stream connects is left to finish rather
- * than cancelled and issued again (`KEEP_IN_FLIGHT`): it left after the gap it
- * would be reconciled for — typically the mount read of the scope just
- * switched back to — so restarting it buys nothing but a second request.
- *
- * Residual race, accepted: a frame emitted between a query's read and the
- * stream's subscription is seen by neither. The window is the stream's own
- * round trip, and the polls are what eventually correct it.
- *
- * The run families are rate-limited on top: the server writes a frame on every
- * connection, so a repeatedly dropped stream would reconcile at ~1 Hz and storm
- * itself. Exported for its test.
+ * A connection after a gap refetches what the lost frames would have moved.
+ * Only the first attempt of a scope's first stream owes nothing: its caches are
+ * created beside it. Coverage lives in the query cache, so a wipe forgets it.
+ * A frame between a read and the subscription is left to the polls.
  */
 export function trackStreamGaps(
   getQueryClient: () => QueryClient,
   orgId: string,
   scope: string,
-  runReconcileMinIntervalMs = 10_000,
 ): StreamGaps {
-  const coverageKey = streamCoverageKey(scope);
+  getQueryClient().setQueryDefaults(STREAM_COVERAGE, { gcTime: Infinity });
+  const coverageKey = [...STREAM_COVERAGE, scope];
   let gap = getQueryClient().getQueryData(coverageKey) !== undefined;
   let lastRunReconcileAt = 0;
   return {
@@ -294,28 +265,27 @@ export function trackStreamGaps(
       const qc = getQueryClient();
       qc.setQueryData(coverageKey, true);
       if (!gap) {
-        // Whatever connects next does so after this stream went away.
         gap = true;
         return;
       }
       handleChatSessionUpdate(qc, undefined, KEEP_IN_FLIGHT);
       invalidateNotificationQueries(qc, KEEP_IN_FLIGHT);
-      if (now - lastRunReconcileAt >= runReconcileMinIntervalMs) {
+      // A stream dropped in a loop would otherwise sweep the run caches at ~1 Hz.
+      if (now - lastRunReconcileAt >= RUN_RECONCILE_MIN_INTERVAL_MS) {
         lastRunReconcileAt = now;
-        reconcileRunQueries(qc, orgId, KEEP_IN_FLIGHT);
-        // `connection_update` frames were missed on the same stream.
-        handleConnectionUpdate(qc, KEEP_IN_FLIGHT);
+        reconcileRunQueries(qc, orgId);
+        handleConnectionUpdate(qc);
       }
     },
   };
 }
 
+// A read in flight at connect time left after the gap: restarting it issues it twice.
 const KEEP_IN_FLIGHT: InvalidateOptions = { cancelRefetch: false };
-
-const streamCoverageKey = (scope: string) => ["realtime-covered", scope] as const;
+const RUN_RECONCILE_MIN_INTERVAL_MS = 10_000;
+const STREAM_COVERAGE = ["realtime-covered"] as const;
 
 interface StreamGaps {
-  /** An attempt failed, or the stream ended: the next connect follows a gap. */
   missed: () => void;
   connected: (now: number) => void;
 }
@@ -340,8 +310,8 @@ function handleSSEMessage(
   // Frame dropped as stale — nothing below may move on it either.
   if (!patchRunDetail(qc, orgId, spaceId, evt)) return;
 
-  // Broad invalidations are throttled (~2s) — the in-place cache patch above
-  // keeps the visible run live in the meantime.
+  // Broad invalidations are throttled (~2s) — the in-place cache patches above
+  // keep the visible run data live in the meantime.
   for (const key of broadRunKeys(orgId)) broad.schedule(key);
 
   // Invalidate schedule-specific caches

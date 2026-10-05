@@ -13,10 +13,10 @@
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
  *  4. the reconciliation running on the FIRST connect too, which issued every
- *     notification and chat-session query twice on every page load (#1678);
+ *     notification and chat-session query twice on every page load;
  *  5. the agent page fetching the agent's runs a second time, unpaginated and
- *     under a key of its own, to learn whether there is any (#1678);
- *  6. a launch refetching the run lists of the page it is leaving (#1678);
+ *     under a key of its own, to learn whether there is any;
+ *  6. a launch refetching the run lists of the page it is leaving;
  *  7. a skill or MCP-server page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
@@ -48,7 +48,7 @@ function recordingReconciler() {
     keys: () =>
       calls.flatMap((call) => ("queryKey" in call ? [JSON.stringify(call.queryKey)] : [])),
     /** Open a stream over `scope`, as one run of the hook's effect does. */
-    open: (scope = "org_1/spc_1") => trackStreamGaps(() => qc, "org_1", scope, 10_000),
+    open: (scope = "org_1/spc_1") => trackStreamGaps(() => qc, "org_1", scope),
   };
 }
 
@@ -124,7 +124,7 @@ describe("agent page", () => {
 });
 
 describe("package pages other than an agent's", () => {
-  // #1678: a skill page loaded the org's models and proxies, which only the
+  // A skill page loaded the org's models and proxies, which only the
   // agent configuration tab shows.
   it("do not read the model and proxy lists", () => {
     const detail = read("../../pages/unified-package-detail.tsx");
@@ -193,11 +193,21 @@ describe("run cache reconciliation on reconnect", () => {
     expect(keys()).toContain(BADGE);
   });
 
-  it("reconciles on the first connect of a stream reopened over the same scope", () => {
-    const { keys, open } = recordingReconciler();
-    open("org_1/spc_1").connected(0);
-    open("org_1/spc_1").connected(1_000);
-    expect(keys()).toContain(BADGE);
+  // The memory must outlive the cache's own collection delay: a stream that
+  // stayed up longer than that still leaves a gap behind when it reopens.
+  it("still knows a covered scope after the cache's collection delay", async () => {
+    const calls: unknown[] = [];
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: 5 } } });
+    qc.invalidateQueries = (filters) => {
+      calls.push(filters);
+      return Promise.resolve();
+    };
+    trackStreamGaps(() => qc, "org_1", "org_1/spc_1").connected(0);
+    expect(qc.getQueryDefaults(["realtime-covered", "org_1/spc_1"]).gcTime).toBe(Infinity);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    trackStreamGaps(() => qc, "org_1", "org_1/spc_1").connected(1_000);
+    expect(calls.length).toBeGreaterThan(0);
   });
 
   // StrictMode's first effect run, or a switch faster than the round trip.
