@@ -97,8 +97,8 @@ describe("Enriched run projection", () => {
       lastEventSequence: 12,
       resolvedConnections: {
         "@acme/gmail": [
-          { connectionId: "conn_1", label: "Work", accountId: "a@b.c", source: "pin" },
-          { connectionId: "conn_2", label: "Perso", accountId: "p@b.c", source: "pin" },
+          { connectionId: "conn_1", label: "Work", accountId: "a@b.c", source: "admin_pin" },
+          { connectionId: "conn_2", label: "Perso", accountId: "p@b.c", source: "admin_pin" },
         ],
       },
     });
@@ -140,11 +140,21 @@ describe("Enriched run projection", () => {
     expect(body.unread).toBeBoolean();
     // `resolvedConnections` reaches the client only in its display-safe form —
     // one entry per BOUND connection, so the two connections of this single
-    // integration produce two entries sharing an `integration_id`, and the raw
+    // integration produce two entries sharing an `integration_package_id`, and the raw
     // `connectionId` appears in neither.
     expect(body.connections_used).toEqual([
-      { integration_id: "@acme/gmail", label: "Work", account_id: "a@b.c", source: "pin" },
-      { integration_id: "@acme/gmail", label: "Perso", account_id: "p@b.c", source: "pin" },
+      {
+        integration_package_id: "@acme/gmail",
+        label: "Work",
+        account_id: "a@b.c",
+        source: "admin_pin",
+      },
+      {
+        integration_package_id: "@acme/gmail",
+        label: "Perso",
+        account_id: "p@b.c",
+        source: "admin_pin",
+      },
     ]);
   }
 

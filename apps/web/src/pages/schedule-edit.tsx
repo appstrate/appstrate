@@ -71,7 +71,7 @@ export function ScheduleEditPage() {
           name: schedule.name ?? "",
           cron_expression: schedule.cron_expression,
           timezone: schedule.timezone,
-          enabled: schedule.enabled ?? true,
+          enabled: schedule.enabled,
           input: schedule.input ?? {},
           model_id_override: schedule.model_id_override ?? null,
           generation_config_override: schedule.generation_config_override ?? null,

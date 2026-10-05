@@ -75,6 +75,24 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 }
 
 /**
+ * The `before`/`after` of an update: each field whose value changed, `null`
+ * standing for absent. An `after` of `undefined` is a field the write did not
+ * touch. `null` when nothing changed — the caller records no event.
+ */
+export function auditDiff(
+  fields: Record<string, readonly [before: unknown, after: unknown]>,
+): { before: AuditPayload; after: AuditPayload } | null {
+  const before: AuditPayload = {};
+  const after: AuditPayload = {};
+  for (const [key, [from, to]] of Object.entries(fields)) {
+    if (to === undefined || Bun.deepEquals(from ?? null, to ?? null)) continue;
+    before[key] = from ?? null;
+    after[key] = to ?? null;
+  }
+  return Object.keys(after).length > 0 ? { before, after } : null;
+}
+
+/**
  * In-flight audit inserts. A caller that must not wait for the insert on its
  * response path (the MCP router — every chat tool call goes through it) hands
  * the promise to `trackAudit` instead of awaiting it; graceful shutdown then

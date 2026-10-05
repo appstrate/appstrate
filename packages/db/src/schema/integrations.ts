@@ -98,9 +98,10 @@ export const integrationConnections = pgTable(
     // escalates such a connection to `needsReconnection` so the preflight
     // resolver catches it with an actionable cause instead of every run dying
     // opaquely at integration boot. Also counts upstream 401s on an auth that
-    // cannot refresh (no expiry gate) — cumulative since the last reconnect,
-    // not consecutive. Reset to 0 on any successful credential write
-    // (`persistCredentialBundle`).
+    // cannot refresh (no expiry gate) as a streak: on a non-OAuth2 connection
+    // any successful upstream call through the credential resets it
+    // (`clearUpstreamRejections`); an OAuth2 count is not reset by one. Reset
+    // to 0 on any successful credential write (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,

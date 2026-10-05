@@ -81,7 +81,7 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
-import { recordAuditFromContext } from "../services/audit.ts";
+import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -971,6 +971,21 @@ export function createSpacesRouter() {
       });
     }
     const updated = await getSpacePackage(scope, packageId);
+    // One event for every setting the write moved (`chat_enforced` keeps its own pair above).
+    const diff = auditDiff({
+      modelId: [placement?.modelId, updated?.modelId ?? null],
+      proxyId: [placement?.proxyId, updated?.proxyId ?? null],
+      generationConfig: [placement?.generation_config, updated?.generation_config ?? null],
+    });
+    if (diff) {
+      await recordAuditFromContext(c, {
+        action: "package.placement.updated",
+        resourceType: "package",
+        resourceId: packageId,
+        before: { spaceId, ...diff.before },
+        after: { spaceId, ...diff.after },
+      });
+    }
     return c.json({ object: "space_package", ...updated });
   });
 

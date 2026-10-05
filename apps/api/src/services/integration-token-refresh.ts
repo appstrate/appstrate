@@ -29,7 +29,6 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
-import { toSupportedTokenEndpointAuthMethod } from "./integration-manifest-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -230,11 +229,9 @@ async function doRefresh(
       // token is expired past the grace window, so a transient upstream blip on
       // a still-valid token never bricks the connection.
       const env = getEnv();
-      await recordIntegrationRefreshFailure(
-        connectionId,
-        env.INTEGRATION_REFRESH_MAX_FAILURES,
-        env.INTEGRATION_REFRESH_GRACE_SECONDS,
-      );
+      await recordIntegrationRefreshFailure(connectionId, env.INTEGRATION_REFRESH_MAX_FAILURES, {
+        graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS,
+      });
     }
     throw err;
   }
@@ -464,12 +461,5 @@ export async function buildIntegrationOAuthRefreshContext(
   // The resolver returns the method already paired with the secret it hands
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
-  const { clientId, clientSecret, tokenEndpointAuthMethod } = client;
-  const supportedAuthMethod = toSupportedTokenEndpointAuthMethod(tokenEndpointAuthMethod);
-  return {
-    tokenEndpoint,
-    clientId,
-    clientSecret,
-    ...(supportedAuthMethod ? { tokenEndpointAuthMethod: supportedAuthMethod } : {}),
-  };
+  return { tokenEndpoint, ...client };
 }

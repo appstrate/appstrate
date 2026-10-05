@@ -78,49 +78,16 @@ crypto envelope). `encryptCredentialEnvelope` writes a tagged
   expired session. Read ONLY by the connect-login path; never by the credential
   injection path nor the agent. Omitted when empty.
 
-A legacy untagged flat `Record<string,string>` blob (no `v: 2` tag) reads back
-as `{ outputs: <whole blob>, inputs: {} }` — zero DDL, zero re-encryption.
+`decryptCredentialEnvelope` throws on any other plaintext — an untagged flat
+blob included; there is no legacy read path.
 
-### Online key rotation playbook
+### Key rotation
 
-Rotation does not require downtime or an offline batch re-encrypt. The version
-tag plus key id let the platform run with a multi-key keyring during the
-transition window.
-
-```
-# 1. Generate a new key
-NEW_KEY=$(openssl rand -base64 32)
-
-# 2. Move the current key into the retired keyring (decrypt-only)
-#    and promote the new key as primary.
-export CONNECTION_ENCRYPTION_KEYS='{"k1":"<current CONNECTION_ENCRYPTION_KEY value>"}'
-export CONNECTION_ENCRYPTION_KEY=$NEW_KEY
-export CONNECTION_ENCRYPTION_KEY_ID=k2
-
-# 3. Restart the platform. New writes emit `v1:k2:...`. Existing `v1:k1:...`
-#    blobs remain readable: their embedded kid resolves to the retired key.
-
-# 4. Run a background re-encrypt sweep (read → decrypt → encrypt → write) to
-#    rewrite every `integration_connections.credentials_encrypted` row. Idempotent.
-#    The sweep re-keys v1:<old-kid> blobs to v1:<active-kid>.
-
-# 5. Only after the sweep confirms no blob still depends on the retired key,
-#    drop it:
-unset CONNECTION_ENCRYPTION_KEYS
-```
-
-Restrictions:
-
-- `CONNECTION_ENCRYPTION_KEY_ID` must match `^[A-Za-z0-9_-]{1,32}$`.
-- Retired keys must use a different kid than the active one (validated at boot).
-- Each retired key must be 32 bytes (256-bit) base64-encoded.
-
-**Step ordering invariant.** A key may be removed from
-`CONNECTION_ENCRYPTION_KEYS` (step 5) **only after** the sweep (step 4)
-confirms zero rows still encrypted under that kid. Removing it sooner makes
-every blob whose envelope names that kid undecryptable — `getKey()` throws
-"No encryption key registered for kid" rather than silently corrupting data,
-but the credentials are unrecoverable until the key is restored.
+The `kid` lets the keyring hold retired keys (`CONNECTION_ENCRYPTION_KEYS`,
+decrypt-only) beside the active one, so rotation needs no downtime. Procedure,
+including the re-encryption of every encrypted column
+(`scripts/rekey-encrypted-columns.ts`) before a retired key is dropped:
+[`docs/ENV.md` § "Rotating `CONNECTION_ENCRYPTION_KEY`"](../../docs/ENV.md#rotating-connection_encryption_key).
 
 ## Dependencies
 

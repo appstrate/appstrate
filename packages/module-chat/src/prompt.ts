@@ -226,7 +226,7 @@ interface CallerContext {
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
   connections?:
     | {
-        integration_id: string;
+        integration_package_id: string;
         name: string;
         source: string;
         version?: string;
@@ -480,7 +480,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     const list = ctx.connections
       .map((c) => {
         const ver = c.version ? `@${c.version}` : "";
-        return `${c.name} — \`${c.integration_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
+        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
       })
       .join(", ");
     // Render the connected integrations as data only — the `@scope/name` id (+

@@ -2,8 +2,13 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-export function textResult(payload: unknown, isError = false): CallToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }], isError };
+/**
+ * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
+ * an error carries the text only.
+ */
+export function jsonResult(payload: Record<string, unknown>, isError = false): CallToolResult {
+  const content = [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }];
+  return isError ? { content, isError } : { content, structuredContent: payload, isError };
 }
 
 export function asString(value: unknown): string | undefined {

@@ -1168,3 +1168,45 @@ describe("undeclared tool arguments", () => {
     expect(new URL(calls[0]!.url).searchParams.get("runId")).toBe("run_1");
   });
 });
+
+/** MCP 2025-06-18 structured output: the JSON answer, mirrored as text. */
+describe("structured tool output", () => {
+  const fileList = () =>
+    new Response(
+      JSON.stringify({
+        data: [{ id: "file_1", uri: "appfile://file_1", name: "a.txt", size: 3 }],
+        hasMore: false,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  it("answers each JSON tool with structuredContent, mirrored as text", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const cases: Array<[string, Record<string, unknown>, () => Response]> = [
+      ["search_operations", { query: "agent" }, fileList],
+      ["describe_operation", { operation_id: op.operationId }, fileList],
+      ["invoke_operation", { operation_id: op.operationId }, fileList],
+      ["get_me", {}, fileList],
+      ["list_files", {}, fileList],
+      ["get_runtime_capabilities", {}, fileList],
+    ];
+    for (const [name, args, respond] of cases) {
+      const { byName } = makeTools(FULL_SURFACE, false, undefined, respond);
+      const result = await byName.get(name)!.handler(args, noExtra);
+      expect({ name, isError: result.isError }).toEqual({ name, isError: false });
+      expect(result.structuredContent).toEqual(parseResult(result));
+    }
+  });
+
+  it("carries no structuredContent on a tool error", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName } = makeTools(FULL_SURFACE, false, undefined, () =>
+      Response.json({ title: "nope" }, { status: 500 }),
+    );
+    const result = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId }, noExtra);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+  });
+});

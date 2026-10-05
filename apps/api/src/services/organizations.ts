@@ -534,7 +534,12 @@ async function removeMemberInTx(
   // departed identity, whose user row survives (CRIT-13).
   const disabled = await tx
     .update(schedules)
-    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
+    .set({
+      enabled: false,
+      disabledReason: "actor_left_org",
+      nextRunAt: null,
+      updatedAt: new Date(),
+    })
     .where(
       and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
     )

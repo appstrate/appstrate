@@ -29,7 +29,7 @@ import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import { computeRunSpend } from "../../../src/services/state/runs.ts";
 import { writeRunnerLedgerRow } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import { db } from "@appstrate/db/client";
-import { llmUsage, type InferenceRoute } from "@appstrate/db/schema";
+import { llmUsage, type CredentialSource, type InferenceRoute } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
@@ -341,7 +341,7 @@ describe("runner ledger row — the run's inference route decides", () => {
 
   async function writeRunnerRow(
     run: { id: string; inferenceRoute: InferenceRoute | null },
-    modelSource: string,
+    modelSource: CredentialSource,
   ) {
     const row = {
       cost: 1,

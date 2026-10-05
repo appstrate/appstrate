@@ -20,8 +20,8 @@
  *
  * Allowlist rationale: we never ship `set-cookie` (state-bearing
  * cookies are owned by the sidecar's cookie jar, not the agent),
- * `www-authenticate` (auth challenges are translated to
- * `X-Auth-Refreshed` semantics), or any header that could let a
+ * `www-authenticate` (the sidecar answers auth challenges itself),
+ * or any header that could let a
  * malicious upstream influence the agent's runtime configuration.
  * Everything required by Google-resumable / S3-multipart / tus /
  * Microsoft-Graph upload protocols is on the list, plus a small set of

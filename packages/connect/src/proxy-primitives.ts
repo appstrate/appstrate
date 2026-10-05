@@ -18,32 +18,24 @@
  */
 
 import {
+  HOP_BY_HOP_HEADERS,
   planHttpDeliveryInjection,
   substituteVars as substituteVarsCore,
   type HttpDeliveryInjectionDecision,
 } from "@appstrate/afps-runtime/resolvers";
+import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 
 /**
  * Substitute `{{field}}` placeholders in `input` using `credentials`.
  *
  * Whitespace inside the `{{…}}` is tolerated so hand-written templates
  * can keep `{{ field }}`. Unknown placeholders are **left intact**
- * (`keepUnresolved`) — callers MAY inspect the result via
- * {@link findUnresolvedPlaceholders} to fail closed, matching the
- * sidecar's defensive pattern. Delegates to the single canonical
- * implementation in `@appstrate/afps-runtime`.
+ * (`keepUnresolved`): callers fail closed on the template with
+ * `unresolvedPlaceholders` before sending. Delegates to the single
+ * canonical implementation in `@appstrate/afps-runtime`.
  */
 export function substituteVars(input: string, credentials: Record<string, string>): string {
   return substituteVarsCore(input, credentials, { keepUnresolved: true });
-}
-
-/** Return the names of every unresolved `{{field}}` still present in `input`. */
-export function findUnresolvedPlaceholders(input: string): string[] {
-  const out: string[] = [];
-  for (const match of input.matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {
-    out.push(match[1]!);
-  }
-  return out;
 }
 
 /**
@@ -68,7 +60,7 @@ export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 export interface ProxyCredentialsPayload {
   /** Credential fields keyed by name (e.g. `access_token`, `api_key`, `subdomain`, ...). */
   credentials: Record<string, string>;
-  /** URL allowlist per AFPS §7.5 — `null` means no whitelist, SSRF safety net applies. */
+  /** URL allowlist per AFPS §7.9 — `null` or empty authorizes nothing unless `allowAllUris`. */
   authorizedUris: string[] | null;
   /** When true, skip allowlist enforcement (still block private/internal ranges). */
   allowAllUris: boolean;
@@ -102,6 +94,8 @@ export interface ProxyCredentialsPayload {
    * single switch that controls injection.
    */
   credentialFieldName: string;
+  /** Revision of the stored credential these fields came from: a verdict on the call names it. */
+  credentialRevision?: string;
 }
 
 /**
@@ -154,7 +148,8 @@ export function buildInjectedCredentialHeader(
  * Apply {@link buildInjectedCredentialHeader} onto an existing header
  * map in-place. The platform credential replaces a case-insensitive caller
  * match by default. A caller header is preserved only when the manifest
- * explicitly declares `allowServerOverride: true`.
+ * explicitly declares `allowServerOverride: true`. A credential that is no HTTP
+ * field value throws `InvalidHeaderValueError` (`@appstrate/afps-shared/delivery-http`).
  */
 export function applyInjectedCredentialHeader(
   headers: Record<string, string>,
@@ -162,6 +157,7 @@ export function applyInjectedCredentialHeader(
 ): HttpDeliveryInjectionDecision {
   const decision = planInjectedCredentialHeader(creds, Object.keys(headers));
   if (decision.kind !== "inject") return decision;
+  assertHttpFieldValue(decision.header.name, decision.header.value);
   const lower = decision.header.name.toLowerCase();
   for (const key of Object.keys(headers)) {
     if (key.toLowerCase() === lower) delete headers[key];
@@ -181,8 +177,21 @@ export function applyInjectedCredentialHeaderToHeaders(
 ): HttpDeliveryInjectionDecision {
   const decision = planInjectedCredentialHeader(creds, [...headers.keys()]);
   if (decision.kind !== "inject") return decision;
+  assertHttpFieldValue(decision.header.name, decision.header.value);
   headers.set(decision.header.name, decision.header.value);
   return decision;
+}
+
+/**
+ * The header carrying the credential after an injection decision — the injected one or the
+ * caller's allowed override — so a redirect leaving the allowlist strips it.
+ */
+export function credentialCarryingHeader(
+  decision: HttpDeliveryInjectionDecision,
+): string | undefined {
+  if (decision.kind === "inject") return decision.header.name;
+  if (decision.kind === "caller_override") return decision.headerName;
+  return undefined;
 }
 
 /**
@@ -226,23 +235,6 @@ export function normalizeAuthSchemeTemplates(
 }
 
 /**
- * RFC 7230 §6.1 hop-by-hop headers — MUST NOT be forwarded by a proxy.
- * Used by both credential-proxy entrypoints to scrub forwarded headers
- * before they travel upstream or back downstream.
- */
-export const HOP_BY_HOP_HEADERS = new Set<string>([
-  "connection",
-  "keep-alive",
-  "proxy-connection",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
-
-/**
  * Clone an UPSTREAM RESPONSE's headers for relay downstream, dropping the
  * headers a proxy must not forward: RFC 7230 hop-by-hop headers plus
  * `content-encoding`/`content-length`. Bun's `fetch` auto-decompresses the
@@ -262,34 +254,6 @@ export function stripUpstreamResponseHeaders(src: Headers, extraSkip?: Set<strin
     if (extraSkip?.has(lower)) return;
     out.set(key, value);
   });
-  return out;
-}
-
-/**
- * Strip host, content-length, and RFC 7230 hop-by-hop headers. `extraSkip`
- * provides a hook for entrypoint-specific control headers (e.g.
- * `x-integration`, `x-target`) that must also be kept out of the upstream
- * request.
- *
- * Preserves the original header casing from the caller.
- */
-export function filterHeaders(
-  headers: Record<string, string>,
-  extraSkip?: Set<string>,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    const lower = key.toLowerCase();
-    if (
-      lower === "host" ||
-      lower === "content-length" ||
-      HOP_BY_HOP_HEADERS.has(lower) ||
-      extraSkip?.has(lower)
-    ) {
-      continue;
-    }
-    out[key] = value;
-  }
   return out;
 }
 

@@ -7,12 +7,12 @@
  * (layer 4 of the resolver cascade). The HTTP contract has three gates:
  *
  *   1. Auth: cookie-or-API-key required (no Appstrate-User end-user surface).
- *   2. Wire shape: PUT body is snake_case `{ agent_package_id,
- *      integration_package_id, connection_ids }`. The frontend serialiser was
- *      just fixed to match this — this file pins the backend gate so a future
- *      drift back to camelCase is caught.
- *   3. End-user 401 on PUT + DELETE (impersonated callers can't pin); end-user
- *      GET returns an empty list rather than 401 so the picker renders cleanly.
+ *   2. Addressing: PUT and DELETE name the pin in the path,
+ *      `/api/me/integration-pins/{agent}/integrations/{integration}`, like
+ *      the admin pins; the PUT body is `{ connection_ids }` alone.
+ *   3. End-user 403 on PUT + DELETE (a valid credential with no member-pin
+ *      surface, not a dead one); end-user GET returns an empty list so the
+ *      picker renders cleanly.
  *   4. A delegated credential is capped by its scope ceiling: the read needs
  *      `integrations:read`, the writes `integrations:connect`.
  *
@@ -35,8 +35,8 @@ import {
 import { seedPackage, seedEndUser, seedApiKey, seedSchedule } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
-import { integrationConnections, schedules } from "@appstrate/db/schema";
-import { inArray } from "drizzle-orm";
+import { auditEvents, integrationConnections, schedules } from "@appstrate/db/schema";
+import { asc, eq, inArray } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -105,16 +105,32 @@ describe("/api/me/integration-pins", () => {
     return row!.id;
   }
 
+  const pinPath = (agent = AGENT) =>
+    `/api/me/integration-pins/${agent}/integrations/${INTEGRATION}`;
+
   function putPin(connectionIds: string[], headers = authHeaders(ctx), agent = AGENT) {
-    return app.request("/api/me/integration-pins", {
+    return app.request(pinPath(agent), {
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agent_package_id: agent,
-        integration_package_id: INTEGRATION,
-        connection_ids: connectionIds,
-      }),
+      body: JSON.stringify({ connection_ids: connectionIds }),
     });
+  }
+
+  function deletePin(headers = authHeaders(ctx)) {
+    return app.request(pinPath(), { method: "DELETE", headers });
+  }
+
+  /** The pin audit rows, oldest first. */
+  async function pinAudits(action: string) {
+    return db
+      .select({
+        resourceId: auditEvents.resourceId,
+        before: auditEvents.before,
+        after: auditEvents.after,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, action))
+      .orderBy(asc(auditEvents.id));
   }
 
   beforeEach(async () => {
@@ -145,7 +161,7 @@ describe("/api/me/integration-pins", () => {
 
   // ─── PUT — wire-shape snake_case body validation ───────
 
-  describe("PUT /integration-pins (snake_case body)", () => {
+  describe("PUT /integration-pins/{agent}/integrations/{integration}", () => {
     it("ALLOW: 200 with valid snake_case body", async () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
 
@@ -206,26 +222,39 @@ describe("/api/me/integration-pins", () => {
       expect((await putPin([connId])).status).toBe(200);
     });
 
-    it("DENY: 400 when body uses camelCase keys (regression guard — frontend was just fixed)", async () => {
+    it("DENY: 400 when the body still names the ids the path now carries", async () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
 
-      const res = await app.request("/api/me/integration-pins", {
+      const res = await app.request(pinPath(), {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentPackageId: AGENT,
-          integrationId: INTEGRATION,
-          connectionId,
+          agent_package_id: AGENT,
+          integration_package_id: INTEGRATION,
+          connection_ids: [connectionId],
         }),
       });
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { errors?: Array<{ field: string }> };
-      // The Zod schema lists all 3 missing snake_case fields.
-      const fieldPaths = (body.errors ?? []).map((e) => e.field);
-      expect(fieldPaths).toContain("agent_package_id");
-      expect(fieldPaths).toContain("integration_package_id");
-      expect(fieldPaths).toContain("connection_ids");
+      // Control: the same set, the ids in the path only.
+      expect((await putPin([connectionId])).status).toBe(200);
+    });
+
+    it("audits every write with the set before and after, under the admin pins' resource id", async () => {
+      const first = await seedConnectionFor(ctx.user.id);
+      const second = await seedConnectionFor(ctx.user.id);
+      expect((await putPin([first])).status).toBe(200);
+      expect((await putPin([second])).status).toBe(200);
+      expect((await deletePin()).status).toBe(204);
+
+      const resourceId = `${INTEGRATION}#${AGENT}`;
+      expect(await pinAudits("integration.member_pin.upserted")).toEqual([
+        { resourceId, before: null, after: { connectionIds: [first] } },
+        { resourceId, before: { connectionIds: [first] }, after: { connectionIds: [second] } },
+      ]);
+      expect(await pinAudits("integration.member_pin.deleted")).toEqual([
+        { resourceId, before: { connectionIds: [second] }, after: null },
+      ]);
     });
 
     it("DENY: 400 when a connection id is not a UUID", async () => {
@@ -279,14 +308,7 @@ describe("/api/me/integration-pins", () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connectionId])).status).toBe(200);
 
-      const qs = new URLSearchParams({
-        agent_package_id: AGENT,
-        integration_package_id: INTEGRATION,
-      });
-      const res = await app.request(`/api/me/integration-pins?${qs.toString()}`, {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
+      const res = await deletePin();
 
       expect(res.status).toBe(204);
 
@@ -298,23 +320,12 @@ describe("/api/me/integration-pins", () => {
       const body = (await list.json()) as { data: unknown[] };
       expect(body.data).toEqual([]);
     });
-
-    it("DENY: rejects when query params are missing", async () => {
-      const res = await app.request("/api/me/integration-pins", {
-        method: "DELETE",
-        headers: authHeaders(ctx),
-      });
-
-      // Route raises unauthorized() when required query params are missing.
-      // Either 400 or 401 is acceptable — the gate exists, that's what matters.
-      expect([400, 401]).toContain(res.status);
-    });
   });
 
   // ─── End-user impersonation gates ──────────────────────
 
   describe("end-user impersonation", () => {
-    it("PUT returns 401 when an end-user impersonates via Appstrate-User header", async () => {
+    it("PUT returns 403 forbidden when an end-user impersonates via Appstrate-User header", async () => {
       const endUser = await seedEndUser({
         spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
@@ -335,12 +346,14 @@ describe("/api/me/integration-pins", () => {
         "Appstrate-User": endUser.id,
       });
 
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as { detail?: string };
-      expect(JSON.stringify(body)).toMatch(/end-user/i);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("WWW-Authenticate")).toBeNull();
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("forbidden");
+      expect(body.detail).toMatch(/end-user/i);
     });
 
-    it("DELETE returns 401 when an end-user impersonates", async () => {
+    it("DELETE returns 403 forbidden when an end-user impersonates", async () => {
       const endUser = await seedEndUser({
         spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
@@ -349,24 +362,19 @@ describe("/api/me/integration-pins", () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
         name: "pin-test-key-del",
         scopes: ["integrations:connect"],
       });
 
-      const qs = new URLSearchParams({
-        agent_package_id: AGENT,
-        integration_package_id: INTEGRATION,
-      });
-      const res = await app.request(`/api/me/integration-pins?${qs.toString()}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${apiKey.rawKey}`,
-          "X-Space-Id": ctx.defaultSpaceId,
-          "Appstrate-User": endUser.id,
-        },
+      const res = await deletePin({
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "Appstrate-User": endUser.id,
       });
 
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe("forbidden");
     });
 
     it("GET returns 200 + empty list when an end-user impersonates (no special-case for picker UI)", async () => {
@@ -404,11 +412,7 @@ describe("/api/me/integration-pins", () => {
 
   describe("credential ceiling", () => {
     const listPath = `/api/me/integration-pins?agent_package_id=${encodeURIComponent(AGENT)}`;
-    const deleteQuery = new URLSearchParams({
-      agent_package_id: AGENT,
-      integration_package_id: INTEGRATION,
-    });
-    const deletePath = `/api/me/integration-pins?${deleteQuery.toString()}`;
+    const deletePath = `/api/me/integration-pins/${AGENT}/integrations/${INTEGRATION}`;
 
     async function keyHeaders(scopes: string[]): Promise<Record<string, string>> {
       const apiKey = await seedApiKey({

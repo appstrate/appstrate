@@ -39,7 +39,7 @@ import {
   picksAfterActorChange,
   refusalForActor,
 } from "../lib/connection-choice";
-import { withConnectionOverride } from "../lib/connection-set";
+import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
@@ -296,11 +296,17 @@ export function ScheduleForm({
   const firedVersion = versionOverride ?? VERSION_PUBLISHED;
   const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
     ?.dependencies.integrations;
+  // The saved map replaces the stored one: a key the fired version no longer declares is
+  // dropped (the server refuses it), whichever picker — or none — the form shows.
+  const declaredOverrides = withDeclaredConnections(
+    overrides,
+    firedIntegrations?.map((i) => i.id),
+  );
   const showActorChoice =
     !actorIsViewer &&
     ((firedIntegrations?.length ?? 0) > 0 ||
       refused.length > 0 ||
-      Object.keys(overrides.connection_overrides ?? {}).length > 0);
+      Object.keys(declaredOverrides.connection_overrides ?? {}).length > 0);
 
   const {
     register,
@@ -341,7 +347,7 @@ export function ScheduleForm({
     // anyway, so the two paths agree.
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
-    setSubmitted({ runsAs, picks: overrides.connection_overrides ?? {} });
+    setSubmitted({ runsAs, picks: declaredOverrides.connection_overrides ?? {} });
     onSubmit({
       name: data.name || undefined,
       cron_expression: data.cron_expression,
@@ -350,7 +356,7 @@ export function ScheduleForm({
       ...(isEdit ? { enabled: data.enabled } : {}),
       ...scheduleOverridePayload({
         isEdit,
-        overrides,
+        overrides: declaredOverrides,
         versionOverride,
         versionOverrideChanged,
         actor,
@@ -562,7 +568,7 @@ export function ScheduleForm({
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
                     choices={refused}
-                    value={overrides.connection_overrides ?? {}}
+                    value={declaredOverrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />
                 )}

@@ -24,7 +24,7 @@
  * the caller and run on the result.
  */
 
-import { HOP_BY_HOP_HEADERS } from "./proxy-primitives.ts";
+import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 const DROPPED = new Set([
   ...HOP_BY_HOP_HEADERS,

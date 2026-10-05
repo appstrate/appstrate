@@ -38,7 +38,7 @@ import {
   rateLimited,
   paymentServiceUnavailable,
 } from "../http-errors.ts";
-import { ApiError, invalidRequest } from "@appstrate/core/api-errors";
+import { ApiError, internalError, invalidRequest } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
 import type { AuditPayload } from "@appstrate/core/module";
 import {
@@ -412,7 +412,9 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
   router.post("/api/billing/webhooks", async (c) => {
     const rawBody = await c.req.text();
     const signature = c.req.header("stripe-signature");
-    if (!signature) return c.text("Missing stripe-signature header", 400);
+    if (!signature) {
+      return problemJson(c, invalidRequest("Missing stripe-signature header", "stripe-signature"));
+    }
 
     try {
       await handleWebhook(rawBody, signature);
@@ -420,12 +422,12 @@ export function createBillingRoutes(appUrl: string): Hono<EeEnv> {
     } catch (err) {
       if (err instanceof Stripe.errors.StripeSignatureVerificationError) {
         logger.warn("Stripe webhook signature verification failed");
-        return c.text("Invalid signature", 400);
+        return problemJson(c, invalidRequest("Invalid signature", "stripe-signature"));
       }
       logger.error("Webhook processing error", {
         error: err instanceof Error ? err.message : String(err),
       });
-      return c.text("Webhook processing error", 500);
+      return problemJson(c, internalError());
     }
   });
 

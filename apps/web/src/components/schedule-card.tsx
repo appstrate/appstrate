@@ -23,9 +23,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
   const unreadCount = schedule.unread_count;
   const lastRunNumber = schedule.last_run_number;
 
-  const isActive = schedule.enabled ?? true;
-
-  const statusBadge = <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
+  const statusBadge = <ScheduleStatusBadge schedule={schedule} />;
 
   return (
     <Link
@@ -49,7 +47,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
       </div>
 
       {/* Next run preview -- flush to card edges */}
-      {isActive && schedule.next_run_at && (
+      {schedule.enabled && schedule.next_run_at && (
         <NextRunPreview
           runNumber={lastRunNumber + 1}
           agentName={agentName}

@@ -33,10 +33,14 @@ import { createTestContext, createTestUser, type TestContext } from "../../helpe
 import { seedPackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
-import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import {
+  clearUpstreamRejections,
+  recordUnrefreshableRejection,
+  saveIntegrationConnection,
+} from "../../../src/services/integration-connections.ts";
 import { getEnv } from "@appstrate/env";
 import {
   localIntegrationManifest,
@@ -550,14 +554,192 @@ describe("resolveLiveIntegrationCredentials", () => {
         connectionId: connId,
       },
     );
-    // The count restarts from the reconnect — it is cumulative since the last
-    // (re)connect, not a streak — and the 502 says so.
+    // The count restarts from the reconnect, and the 502 says so.
     const afterReconnect = await forced();
     expect(afterReconnect?.status).toBe(502);
     expect(afterReconnect?.message).toContain(
-      `1/${max} upstream rejections since the connection was last (re)connected`,
+      `1/${max} consecutive upstream rejections before it is flagged`,
     );
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  describe("rejections of an unrefreshable auth count as a streak a success ends", () => {
+    async function apiKeyConnection() {
+      await db
+        .update(packages)
+        .set({
+          draftManifest: localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+          }) as unknown as Record<string, unknown>,
+        })
+        .where(eq(packages.id, INTEGRATION_ID));
+      const connId = await seedConnection({ userId: ctx.user.id });
+      // A non-OAuth2 connection has no minting client (`client_ref` invariant).
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: null })
+        .where(eq(integrationConnections.id, connId));
+      const forced = () =>
+        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
+          forceRefresh: true,
+        }).then(
+          () => undefined,
+          (err: { status?: number; message?: string }) => err,
+        );
+      return { connId, forced };
+    }
+
+    async function storedCredential(connId: string) {
+      const [row] = await db
+        .select({
+          ciphertext: integrationConnections.credentialsEncrypted,
+          count: integrationConnections.refreshFailureCount,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      return row!;
+    }
+
+    /** A 2xx the platform relayed for the run's actor. */
+    const succeed = (connId: string) =>
+      clearUpstreamRejections(connId, INTEGRATION_ID, resolverContext(connId));
+
+    /** What a reconnect leaves behind: another ciphertext, here with a streak of its own. */
+    const replaceCredential = (connId: string, refreshFailureCount: number) =>
+      db
+        .update(integrationConnections)
+        .set({
+          credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "key-b" } }),
+          refreshFailureCount,
+        })
+        .where(eq(integrationConnections.id, connId));
+
+    it("a dead key rejected once per run, however far apart, is flagged on the threshold run", async () => {
+      const { connId, forced } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let run = 1; run < max; run++) expect((await forced())?.status).toBe(502);
+      expect((await forced())?.status).toBe(410);
+      expect(await needsReconnection(connId)).toBe(true);
+    });
+
+    it("the threshold flag is the count's own: a credential written right after it is not flagged", async () => {
+      const { connId, forced } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let run = 1; run < max; run++) await forced();
+      // A reconnect landing between the counting write and anything that follows it.
+      await db.execute(sql`
+        CREATE OR REPLACE FUNCTION test_reconnect_after_flag() RETURNS trigger AS $$
+        BEGIN
+          UPDATE integration_connections
+            SET credentials_encrypted = 'reconnected', needs_reconnection = false,
+                refresh_failure_count = 0
+            WHERE id = NEW.id;
+          RETURN NULL;
+        END $$ LANGUAGE plpgsql`);
+      await db.execute(sql`
+        CREATE TRIGGER test_reconnect_after_flag AFTER UPDATE ON integration_connections
+        FOR EACH ROW WHEN (NEW.needs_reconnection AND NEW.credentials_encrypted <> 'reconnected')
+        EXECUTE FUNCTION test_reconnect_after_flag()`);
+      try {
+        expect((await forced())?.status).toBe(410);
+      } finally {
+        await db.execute(sql`DROP TRIGGER test_reconnect_after_flag ON integration_connections`);
+        await db.execute(sql`DROP FUNCTION test_reconnect_after_flag()`);
+      }
+      expect((await storedCredential(connId)).ciphertext).toBe("reconnected");
+      expect(await needsReconnection(connId)).toBe(false);
+    });
+
+    it("a healthy key with one provoked 401 per run, then successes, is never flagged", async () => {
+      const { connId, forced } = await apiKeyConnection();
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      for (let run = 0; run < 2 * max; run++) {
+        const rejected = await forced();
+        expect(rejected?.status).toBe(502);
+        expect(rejected?.message).toContain(`1/${max} consecutive upstream rejections`);
+        await succeed(connId);
+      }
+      expect(await needsReconnection(connId)).toBe(false);
+    });
+
+    it("the payload announces the streak of a non-OAuth2 connection until a success ends it", async () => {
+      const { connId, forced } = await apiKeyConnection();
+      const read = () => resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId));
+      expect((await read()).rejectionStreak).toBeUndefined();
+      await forced();
+      await forced();
+      expect((await read()).rejectionStreak).toBe(2);
+      await succeed(connId);
+      expect((await read()).rejectionStreak).toBeUndefined();
+    });
+
+    it("the payload names its credential revision, and a credential write changes it", async () => {
+      const { connId } = await apiKeyConnection();
+      const read = () => resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId));
+      const before = (await read()).credentialRevision;
+      expect(before).toMatch(/^[0-9a-f]{16}$/);
+      expect((await read()).credentialRevision).toBe(before!);
+      await replaceCredential(connId, 0);
+      expect((await read()).credentialRevision).not.toBe(before!);
+    });
+
+    it("a 401 on a superseded credential counts nothing and hands back the current one", async () => {
+      const { connId } = await apiKeyConnection();
+      const held = (
+        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId))
+      ).credentialRevision!;
+      await replaceCredential(connId, 1);
+
+      const current = await resolveLiveIntegrationCredentials(
+        INTEGRATION_ID,
+        resolverContext(connId),
+        { forceRefresh: true, heldRevision: held },
+      );
+      expect(current.auths[0]!.fields.api_key).toBe("key-b");
+      expect(current.credentialRevision).not.toBe(held);
+      expect((await storedCredential(connId)).count).toBe(1);
+    });
+
+    it("a verdict from an actor who no longer reaches the connection changes nothing", async () => {
+      const { connId } = await apiKeyConnection();
+      await replaceCredential(connId, 2);
+      const stranger = await createTestUser();
+      const lostReach = {
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user" as const, id: stranger.id },
+      };
+
+      await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach);
+      expect((await storedCredential(connId)).count).toBe(2);
+      await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach);
+      expect((await storedCredential(connId)).count).toBe(2);
+    });
+
+    it("a success leaves a flagged connection's count alone", async () => {
+      const { connId } = await apiKeyConnection();
+      await db
+        .update(integrationConnections)
+        .set({ refreshFailureCount: 3, needsReconnection: true })
+        .where(eq(integrationConnections.id, connId));
+      await succeed(connId);
+      expect((await storedCredential(connId)).count).toBe(3);
+    });
+
+    it("a success leaves an OAuth2 connection's refresh-failure count alone", async () => {
+      const connId = await seedConnection({ userId: ctx.user.id });
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: "system-client", refreshFailureCount: 3 })
+        .where(eq(integrationConnections.id, connId));
+      await succeed(connId);
+      const [row] = await db
+        .select({ count: integrationConnections.refreshFailureCount })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(row!.count).toBe(3);
+    });
   });
 
   it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {

@@ -12,10 +12,13 @@ import {
 } from "../../helpers/auth.ts";
 import { seedAgent, seedApiKey, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
+import Ajv from "ajv";
 import {
+  createPackageShareNotification,
   createRunNotifications,
   markNotificationReadByRun,
 } from "../../../src/services/state/notifications.ts";
+import { notificationsPaths } from "../../../src/openapi/paths/notifications.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
@@ -267,6 +270,33 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       expect(data[0]!.payload?.packageId).toBe("@notiforg/notif-agent");
       expect(data[0]!.payload?.status).toBe("success");
       expect(data[0]!.read_at).toBeNull();
+    });
+
+    it("answers each kind in the shape its OpenAPI branch declares", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await createPackageShareNotification({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientUserId: ctx.user.id,
+        packageId: "@notiforg/shared",
+        packageType: "skill",
+        sharedByName: "Ada",
+      });
+      const item =
+        notificationsPaths["/api/notifications"].get.responses["200"].content["application/json"]
+          .schema.properties.data.items;
+      const validate = new Ajv({ strict: false, validateFormats: false }).compile(item);
+
+      const data = await listNotifications(authHeaders(ctx));
+      expect(data.map((n) => n.type).sort()).toEqual(["package_shared", "run_completed"]);
+      for (const n of data)
+        expect({ valid: validate(n), errors: validate.errors }).toEqual({
+          valid: true,
+          errors: null,
+        });
+      // A kind's payload does not validate under the other kind's branch.
+      const shared = data.find((n) => n.type === "package_shared")!;
+      expect(validate({ ...shared, type: "run_completed" })).toBe(false);
     });
 
     it("unread=true hides already-read notifications", async () => {
@@ -660,7 +690,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         recipientType: "end_user",
         recipientId: eu.id,
         type: "run_completed",
-        payload: { status: "success" },
+        payload: { packageId: null, status: "success" },
       });
       expect(await countForRecipient("end_user", eu.id)).toBe(1);
 
@@ -710,14 +740,14 @@ describe("Notifications API (per-recipient, issue #667)", () => {
   describe("GET /api/notifications/unread-counts-by-agent (null packageId)", () => {
     it("skips notifications whose payload carries no packageId", async () => {
       await seedNotifiedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
-      // Hand-insert a notification with a payload that lacks packageId.
+      // Hand-insert a notification whose agent is gone (`packageId: null`).
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: ctx.user.id,
         type: "run_completed",
-        payload: { status: "success" },
+        payload: { packageId: null, status: "success" },
       });
 
       const res = await app.request("/api/notifications/unread-counts-by-agent", {

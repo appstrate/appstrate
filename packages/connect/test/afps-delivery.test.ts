@@ -57,6 +57,16 @@ describe("resolveAfpsHttpDelivery — value-template resolution", () => {
     });
   });
 
+  it("never delivers an unrendered expression: {$outputs.<name>} throws", () => {
+    expect(() =>
+      resolveAfpsHttpDelivery(
+        "custom",
+        { token: "abc123" },
+        { in: "header", name: "Authorization", prefix: "Bearer ", value: "{$outputs.token}" },
+      ),
+    ).toThrow("unsupported template expression '{$outputs.token}'");
+  });
+
   it("resolves a multi-ref template", () => {
     const plan = resolveAfpsHttpDelivery(
       "custom",

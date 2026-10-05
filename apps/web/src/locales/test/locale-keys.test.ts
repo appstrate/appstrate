@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
  * These three guards read every source file of three workspaces on each run.
@@ -195,6 +196,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
   "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
   "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
@@ -256,4 +258,19 @@ describe("declared keys", () => {
     },
     SCAN_TIMEOUT_MS,
   );
+});
+
+describe("schedule disabled reasons", () => {
+  it("each have a sentence", () => {
+    // A Record, so a reason added to the enum without an entry here fails the typecheck.
+    const reasons = Object.keys({
+      actor_invalid: true,
+      actor_left_org: true,
+      connection_deleted: true,
+    } satisfies Record<NonNullable<ScheduleWireDto["disabled_reason"]>, true>);
+
+    expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
+      [],
+    );
+  });
 });

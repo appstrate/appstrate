@@ -26,7 +26,7 @@ import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-me
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { ModelCost } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
-import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
+import { runLogs, llmUsage, runs, type CredentialSource } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 describe("persistRunEvent", () => {
@@ -177,7 +177,7 @@ describe("persistRunEvent", () => {
   // (`modelSource` + a rate snapshot), because that is the branch production
   // takes and the one where `cost_usd` is the platform's own product of
   // `runs.model_cost` × the reported tokens rather than the container's figure.
-  // Run them without `modelSource` and they silently exercise the remote-origin
+  // Run them with a null `modelSource` and they exercise the remote-origin
   // pass-through instead, leaving the mechanism that protects real billing
   // untested on the path it actually protects.
   //
@@ -323,7 +323,7 @@ describe("persistRunEvent", () => {
   describe("runner row pricing provenance", () => {
     function persistLedger(
       e: RunEvent,
-      opts: { modelSource: string | null; modelCost: ModelCost | null },
+      opts: { modelSource: CredentialSource | null; modelCost: ModelCost | null },
     ) {
       return persist(e, { writeLedger: true, inferenceRoute: null, ...opts });
     }
@@ -434,7 +434,7 @@ describe("persistRunEvent", () => {
 
     function persistLedger(
       e: RunEvent,
-      opts: { modelSource: string | null; modelCost: ModelCost | null },
+      opts: { modelSource: CredentialSource | null; modelCost: ModelCost | null },
     ) {
       return persist(e, { writeLedger: true, inferenceRoute: null, ...opts });
     }

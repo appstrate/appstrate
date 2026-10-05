@@ -9,9 +9,8 @@ uses inside its sandboxes, extracted so the same execution semantics are
 available in any Bun environment with an LLM API key — no platform, no database,
 no containers required.
 
-> **Status: not yet published.** The package is staged for release
-> (`version: 0.0.0`) but still resolves `@appstrate/mcp-transport` as a workspace
-> dependency, and that package is private. Consume it from the monorepo for now.
+> **Status: not published.** A private workspace package (`"private": true`);
+> consume it from the monorepo (`workspace:*`).
 
 **Requires Bun ≥ 1.3.9.** Ships raw TypeScript sources; Node cannot import it
 directly.

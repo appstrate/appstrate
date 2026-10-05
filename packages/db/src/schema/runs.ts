@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
@@ -27,6 +28,7 @@ import {
   runOriginEnum,
   credentialSourceEnum,
   inferenceRouteEnum,
+  scheduleDisabledReasonEnum,
 } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaces, endUsers } from "./spaces.ts";
@@ -159,7 +161,8 @@ export const runs = pgTable(
     versionRef: text("version_ref").default("draft").notNull(),
     proxyLabel: text("proxy_label"),
     modelLabel: text("model_label"),
-    modelSource: text("model_source"),
+    // Whose credential the run's inference spends; NULL when no model was resolved.
+    modelSource: credentialSourceEnum("model_source"),
     // The model the run launched with — a system model id or an `org_models.id`,
     // the same pointer as `packages.model_id`. The platform LLM proxy serves a
     // run's own inference from it, never from a model the request names. NULL
@@ -206,17 +209,8 @@ export const runs = pgTable(
     // (`ConnectionResolutionSource` in `@appstrate/core/integration`).
     // Audit trail: a run's identity in the upstream provider logs maps
     // back through this column even after pins/connections are mutated.
-    resolvedConnections: jsonb("resolved_connections").$type<
-      Record<
-        string,
-        {
-          connectionId: string;
-          source: string;
-          label?: string | null;
-          accountId?: string | null;
-        }[]
-      >
-    >(),
+    // Read back through `resolvedConnectionMapSchema` (the `$type` is an assertion).
+    resolvedConnections: jsonb("resolved_connections").$type<ResolvedConnectionMap>(),
     // Snapshot of the integration manifest VERSION resolved per declared
     // integration at run kickoff (#686). Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.
@@ -429,6 +423,11 @@ export const runs = pgTable(
     ),
     // The proxy serves the run's pinned model, never one the request names.
     check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
+    // A remote runner brings its own model and credentials.
+    check(
+      "runs_remote_has_no_platform_model",
+      sql`run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)`,
+    ),
   ],
 );
 
@@ -782,6 +781,8 @@ export const schedules = pgTable(
       .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
+    // Set only when the system disabled the row.
+    disabledReason: scheduleDisabledReasonEnum("disabled_reason"),
     cronExpression: text("cron_expression").notNull(),
     // NOT NULL (migration 0051): the column always had `DEFAULT 'UTC'`, so a
     // NULL could only come from a writer passing one explicitly — and three
@@ -822,6 +823,10 @@ export const schedules = pgTable(
     check(
       "package_schedules_exactly_one_actor",
       sql`(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)`,
+    ),
+    check(
+      "package_schedules_enabled_has_no_disabled_reason",
+      sql`NOT enabled OR disabled_reason IS NULL`,
     ),
   ],
 );

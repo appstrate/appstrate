@@ -55,6 +55,9 @@ export function ScheduleDetailPage() {
 
   if (isLoading) return <LoadingState />;
   if (error || !schedule) return <ErrorState message={error?.message} />;
+  const disabledReason = schedule.disabled_reason
+    ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
+    : null;
 
   const handleToggle = () => {
     updateSchedule.mutate(
@@ -76,7 +79,7 @@ export function ScheduleDetailPage() {
           ]}
           actions={
             <>
-              <LiveScheduleStatusBadge schedule={schedule} />
+              <ScheduleStatusBadge schedule={schedule} />
               {can("schedules:write") && !mayWrite && (
                 <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
                   <Button
@@ -130,6 +133,12 @@ export function ScheduleDetailPage() {
           </TabsList>
         </PageHeader>
 
+        {disabledReason && (
+          <p className="border-border bg-muted/30 text-muted-foreground mb-4 rounded-lg border p-4 text-sm">
+            {disabledReason}
+          </p>
+        )}
+
         {readsRuns && (
           <TabsContent value="runs">
             <ScheduleHistory schedule={schedule} />
@@ -158,16 +167,6 @@ export function ScheduleDetailPage() {
       />
     </div>
   );
-}
-
-// ─── Live Status Badge (reactive) ────────────────────────
-
-function LiveScheduleStatusBadge({
-  schedule,
-}: {
-  schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
-}) {
-  return <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────

@@ -367,8 +367,9 @@ export function IntegrationConnectionPicker({
         ...(isVersioned(version) ? { query: { version } } : {}),
       },
     });
-    const freshCandidates = fresh?.integrations.find((i) => i.integration_id === integrationId)
-      ?.resolution.candidates;
+    const freshCandidates = fresh?.integrations.find(
+      (i) => i.integration_package_id === integrationId,
+    )?.resolution.candidates;
     const added = freshCandidates?.find((c) => !before.has(c.id));
     if (!added) {
       await refresh();

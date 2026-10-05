@@ -1,31 +1,62 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { runStatusValues } from "@appstrate/core/run-status";
+import { packageTypeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
+/**
+ * One notification kind. `type` is a `const`, which discriminates the `oneOf`
+ * below by itself — a `discriminator` over inline branches selects nothing.
+ */
+function notificationOf(kind: string, payload: Record<string, unknown>) {
+  return {
+    type: "object",
+    required: ["id", "type", "runId", "payload", "read_at", "createdAt"],
+    properties: {
+      id: { type: "string", format: "uuid", description: "Notification id" },
+      type: { type: "string", const: kind },
+      runId: {
+        type: ["string", "null"],
+        description: "Originating run id, when the notification references one",
+      },
+      payload: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        description: "Render-without-join data.",
+        ...payload,
+      },
+      read_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the recipient marked it read; null if unread",
+      },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  };
+}
+
 const notificationObject = {
-  type: "object",
-  required: ["id", "type", "runId", "payload", "read_at", "createdAt"],
-  properties: {
-    id: { type: "string", format: "uuid", description: "Notification id" },
-    type: { type: "string", description: "Notification kind, e.g. run_completed" },
-    runId: {
-      type: ["string", "null"],
-      description: "Originating run id, when the notification references one",
-    },
-    payload: {
-      type: ["object", "null"],
-      additionalProperties: true,
-      description:
-        "Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`.",
-    },
-    read_at: {
-      type: ["string", "null"],
-      format: "date-time",
-      description: "When the recipient marked it read; null if unread",
-    },
-    createdAt: { type: "string", format: "date-time" },
-  },
-} as const;
+  oneOf: [
+    notificationOf("run_completed", {
+      required: ["packageId", "status"],
+      properties: {
+        packageId: {
+          type: ["string", "null"],
+          description: "The run's agent; null once the agent is deleted.",
+        },
+        status: { type: "string", enum: [...runStatusValues] },
+      },
+    }),
+    notificationOf("package_shared", {
+      required: ["packageId", "package_type", "shared_by_name"],
+      properties: {
+        packageId: { type: "string" },
+        package_type: { type: "string", enum: [...packageTypeValues] },
+        shared_by_name: { type: "string" },
+      },
+    }),
+  ],
+};
 
 export const notificationsPaths = {
   "/api/notifications": {

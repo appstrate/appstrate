@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
+
 /**
  * Credential proxy endpoint (BYOI for external runners).
  *
@@ -30,7 +32,23 @@ const proxySharedDescription =
   "against the integration's credential schema. Set `X-Substitute-Body: 1` to run " +
   "the same substitution on the request body (verbs that carry one).\n\n" +
   "Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) " +
-  "take `1` or `0`; any other value is a 400.";
+  "take `1` or `0`; any other value is a 400.\n\n" +
+  "Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an " +
+  "upstream response relayed whatever its status (a relayed 401 carries no platform " +
+  "`WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), " +
+  "`appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` " +
+  "names the cause.";
+
+/** RFC 9209 `Proxy-Status` — shared with the LLM proxy paths. */
+export const PROXY_STATUS_HEADER = {
+  "Proxy-Status": {
+    description:
+      "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. " +
+      "`appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. " +
+      "Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
+    schema: { type: "string", example: "appstrate; received-status=401" },
+  },
+} as const;
 
 const proxyParameters = [
   {
@@ -170,8 +188,10 @@ const proxyResponses = {
       "jar scoped by `X-Session-Id` and replayed on later calls). Buffered " +
       "responses include `X-Truncated` when the body exceeded the platform truncation " +
       "cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or " +
-      "a `Content-Length` over `max_streamed_body_size`) do not carry this header.",
+      "a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other " +
+      "upstream status is relayed the same way (`default`).",
     headers: {
+      ...PROXY_STATUS_HEADER,
       "X-Truncated": {
         description:
           "Set to `true` when the buffered upstream body was truncated to " +
@@ -183,20 +203,26 @@ const proxyResponses = {
   },
   "400": {
     description:
-      "Missing or malformed control header, a finished `X-Run-Id` run, " +
+      "Missing or malformed control header, `invalid_request` — a header the caller sent " +
+      "is no valid HTTP field value before any substitution (the detail names the header, " +
+      "never the value) —, a finished `X-Run-Id` run, " +
       "`connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run " +
-      "did not bind — or `connection_not_in_org_default` — it names a connection outside the " +
-      "integration's enforced org default.",
-    content: {
-      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-    },
+      "did not bind —, `connection_not_in_org_default` — it names a connection outside the " +
+      "integration's enforced org default — or `unresolved_placeholder` — the target, a " +
+      "header or the substituted body names a `{{field}}` the connection does not hold.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "401": {
     description:
-      "Unauthorized. On a streaming-upload 401, the response carries " +
-      "`X-Auth-Refreshed: true` when credentials were refreshed server-side but the " +
-      "body could not be replayed — the caller must refresh and replay the call itself.",
+      "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, " +
+      "`Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the " +
+      "connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no " +
+      "challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the " +
+      "credentials were refreshed server-side but the body could not be replayed — the caller " +
+      "replays the call itself.",
     headers: {
+      ...PROXY_STATUS_HEADER,
       "X-Auth-Refreshed": {
         description:
           "Present and set to `true` on a streaming-upload 401 where credentials were " +
@@ -210,16 +236,25 @@ const proxyResponses = {
   },
   "403": {
     description:
-      "Forbidden — principal lacks `credential-proxy:call`, target not in " +
-      "`authorized_uris`, a credential templated into a call with no allowlist to check it " +
-      "against, session bound to a different principal, cookie session used, or `X-Run-Id` " +
-      "names another actor's run.",
+      "Forbidden. `unauthorized_target` — the target or a redirect hop is not in " +
+      "`authorized_uris`, or the connection does not render the declared list " +
+      "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
+      "blocked network range (`destination_ip_prohibited`); " +
+      "`credential_exfiltration_refused` — the call carries a credential and the allowlist " +
+      "does not name its hosts (`http_request_denied`); `forbidden` — principal lacks " +
+      "`credential-proxy:call`, session bound to a different principal, cookie session " +
+      "used, or `X-Run-Id` names another actor's run.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "404": {
     description:
-      "No credentials or connection for the requested integration — including when no " +
-      "connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or " +
-      "when `X-Run-Id` names no run of this space.",
+      "`credential_not_found` — no credentials or connection for the requested integration, " +
+      "including when no connection of it is accessible to the caller, when the `X-Run-Id` " +
+      "run bound none, or when the integration has no published version; `not_found` when " +
+      "`X-Run-Id` names no run of this space.",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "409": {
     description:
@@ -233,18 +268,44 @@ const proxyResponses = {
       "connection the caller cannot reach (deleted or unshared); an admin must fix the default. " +
       "`needs_reconnection` — the connection that would be bound (the run's bound one included), " +
       "or a member of the org default, needs its owner to reconnect it.",
-    content: {
-      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-    },
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "413": {
     description: "Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB).",
-    content: {
-      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-    },
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
   },
   "429": { $ref: "#/components/responses/RateLimited" },
   "500": { $ref: "#/components/responses/InternalServerError" },
+  "502": {
+    description:
+      "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error " +
+      "`dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed " +
+      "body broke off after its headers (`destination_unavailable`); `credential_unusable` — " +
+      "a header the connection's credential is substituted or injected into would not be a " +
+      "valid HTTP field value (CR, LF, NUL, another control character or a character above " +
+      "U+00FF); nothing was sent, the detail names the header, never the value " +
+      "(`proxy_configuration_error`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
+  "504": {
+    description:
+      "`upstream_timeout` — the upstream did not answer, or did not finish a buffered body, " +
+      "within the 30 s deadline (`Proxy-Status` error `http_response_timeout`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
+  default: {
+    description:
+      "An upstream response relayed verbatim at the upstream's own status (a status listed " +
+      "above included) with its headers and body, marked `Proxy-Status: appstrate; " +
+      "received-status=<n>` — which is how a caller tells it from the proxy's own problem " +
+      "document. `Set-Cookie` is never relayed.",
+    headers: PROXY_STATUS_HEADER,
+    content: { "*/*": {} },
+  },
 } as const;
 
 const proxyRequestBody = {

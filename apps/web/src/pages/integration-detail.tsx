@@ -116,7 +116,7 @@ import {
   useIntegrationClients,
   useSetDefaultIntegrationClient,
   useCreateIntegrationOAuthClient,
-  useRotateIntegrationOAuthClient,
+  useUpdateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
   usePromoteIntegrationOAuthClient,
   useUpdateIntegrationConnection,
@@ -152,12 +152,12 @@ import { isOauthAuthConnectable } from "../components/integration-connect/connec
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
-// OAuth client (admin) — create / rotate modal
+// OAuth client (admin) — create / edit modal
 // ─────────────────────────────────────────────
 
 /**
- * Register a new custom OAuth client (`mode: "create"`) or rotate an existing
- * one in place (`mode: "rotate"`, preloaded from its descriptor). The parent
+ * Register a new custom OAuth client (`mode: "create"`) or edit an existing
+ * one in place (`mode: "edit"`, preloaded from its descriptor). The parent
  * mounts this only while open, keyed by mode+clientRef, so field state resets
  * cleanly between invocations. The client secret is write-only — never echoed
  * back, shown as a placeholder when one is already set.
@@ -176,15 +176,15 @@ function OAuthClientModal({
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
-  mode: "create" | "rotate";
+  mode: "create" | "edit";
   existing?: IntegrationClient;
   platformRedirectUri: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
   const create = useCreateIntegrationOAuthClient(tier);
-  const rotate = useRotateIntegrationOAuthClient(tier);
-  const pending = mode === "create" ? create.isPending : rotate.isPending;
+  const update = useUpdateIntegrationOAuthClient(tier);
+  const pending = mode === "create" ? create.isPending : update.isPending;
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
@@ -205,7 +205,7 @@ function OAuthClientModal({
   // rather than in a toast, and — more importantly — stops the form from
   // sending an inferred `""`, which used to register a PUBLIC client from an
   // admin who never declared one and then showed the box ticked on reopen.
-  // Rotation is exempt: there an untouched secret field means PRESERVE.
+  // An edit is exempt: there an untouched secret field means PRESERVE.
   const secretMissing = mode === "create" && !publicClient && clientSecret === "";
   // "Reward early, punish late" (same rule as `useAppForm`'s `showError`): the
   // message appears once the admin has touched the field or tried to submit,
@@ -218,32 +218,35 @@ function OAuthClientModal({
     setAttempted(true);
     if (secretMissing) return;
     // Declared, not inferred: the server records `none` instead of guessing
-    // from a blank secret. And on rotation an untouched secret field is OMITTED
+    // from a blank secret. And on an edit an untouched secret field is OMITTED
     // rather than sent as `""` — sending it would clear the stored credential
     // and flip a confidential client public, for an edit that only meant to
     // change the redirect URI.
-    const common = {
-      client_id: clientId,
-      ...(publicClient ? { token_endpoint_auth_method: "none" as const } : {}),
-      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-    };
+    const method = publicClient ? { token_endpoint_auth_method: "none" as const } : {};
     if (mode === "create") {
       // A public client declares itself with `token_endpoint_auth_method: none`
       // and sends NO secret; a confidential one sends the typed secret. Neither
       // branch ships a blank the server would have to interpret.
+      const common = {
+        client_id: clientId,
+        ...method,
+        ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+      };
       const body = publicClient ? common : { ...common, client_secret: clientSecret };
       create.mutate({ params: { path: { packageId, authKey } }, body }, { onSuccess: onClose });
     } else {
-      // Rotation OMITS an untouched secret field rather than sending `""`.
+      // PATCH: `client_id` is immutable and never sent; a cleared redirect URI
+      // is `null`; an untouched secret field is OMITTED rather than sent as `""`.
       const body = {
-        ...common,
+        ...method,
+        redirect_uri: redirectUri || null,
         ...(publicClient
           ? { client_secret: "" }
           : clientSecret
             ? { client_secret: clientSecret }
             : {}),
       };
-      rotate.mutate(
+      update.mutate(
         { params: { path: { packageId, clientId: existing!.client_ref } }, body },
         { onSuccess: onClose },
       );
@@ -257,7 +260,7 @@ function OAuthClientModal({
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
-          : t("integration.oauthClient.modalRotateTitle")
+          : t("integration.oauthClient.modalEditTitle")
       }
     >
       <form
@@ -273,6 +276,7 @@ function OAuthClientModal({
             id={`cid-${authKey}`}
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
+            disabled={mode === "edit"}
             data-testid={`oauth-clientid-${authKey}`}
           />
         </div>
@@ -353,7 +357,7 @@ function OAuthClientModal({
           >
             {mode === "create"
               ? t("integration.oauthClient.btnRegister")
-              : t("integration.oauthClient.btnRotate")}
+              : t("integration.oauthClient.btnEdit")}
           </Button>
         </div>
       </form>
@@ -370,7 +374,7 @@ function OAuthClientModal({
  * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
  * read-only) plus N custom (BYO-app) clients — with which is the
  * default. Multi-client: an admin registers as many custom clients as needed,
- * rotates or deletes each by id, and picks the default (the model-provider
+ * edits or deletes each by id, and picks the default (the model-provider
  * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
  * client, shown read-only with a delete action that re-triggers registration;
  * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
@@ -402,7 +406,7 @@ function ClientsTable({
   const promote = usePromoteIntegrationOAuthClient();
   const { can } = usePermissions();
   const [modal, setModal] = useState<
-    { mode: "create" } | { mode: "rotate"; client: IntegrationClient } | null
+    { mode: "create" } | { mode: "edit"; client: IntegrationClient } | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
   const [confirmPromote, setConfirmPromote] = useState<IntegrationClient | null>(null);
@@ -421,7 +425,6 @@ function ClientsTable({
   // use the default client, so that client's override is the one that decides.
   const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
   const canChooseDefault = rows.length > 1;
-  const ownSource = tier === "space" ? "custom" : "org";
   // An org row shows in both tables on the page: prefix the org table's test ids.
   const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
   const hasAutoClient = rows.some((c) => c.auto_provisioned);
@@ -502,7 +505,7 @@ function ClientsTable({
             </TableHeader>
             <TableBody>
               {rows.map((client) => {
-                const deletable = client.source === ownSource;
+                const deletable = client.source === tier;
                 const editable = deletable && !client.auto_provisioned;
                 return (
                   <TableRow
@@ -513,7 +516,6 @@ function ClientsTable({
                       <SourceBadge
                         source={client.source}
                         autoProvisioned={client.auto_provisioned}
-                        customLabel="space"
                       />
                     </TableCell>
                     <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
@@ -564,9 +566,9 @@ function ClientsTable({
                             size="sm"
                             variant="ghost"
                             className="h-7 w-7 p-0"
-                            onClick={() => setModal({ mode: "rotate", client })}
-                            data-testid={tid(`oauth-client-rotate-${client.client_ref}`)}
-                            aria-label={t("integration.oauthClient.btnRotate")}
+                            onClick={() => setModal({ mode: "edit", client })}
+                            data-testid={tid(`oauth-client-edit-${client.client_ref}`)}
+                            aria-label={t("integration.oauthClient.btnEdit")}
                           >
                             <Pencil size={14} />
                           </Button>
@@ -610,13 +612,13 @@ function ClientsTable({
 
       {modal && (
         <OAuthClientModal
-          key={modal.mode === "rotate" ? modal.client.client_ref : "create"}
+          key={modal.mode === "edit" ? modal.client.client_ref : "create"}
           tier={tier}
           packageId={packageId}
           authKey={authKey}
           authDecl={authDecl}
           mode={modal.mode}
-          existing={modal.mode === "rotate" ? modal.client : undefined}
+          existing={modal.mode === "edit" ? modal.client : undefined}
           platformRedirectUri={platformRedirectUri}
           onClose={() => setModal(null)}
         />
@@ -766,7 +768,7 @@ function ConnectAuthBlock({
 /**
  * Per-auth admin configuration: the declared auth metadata (scopes, resource,
  * authorized URIs) plus the OAuth clients table (system + custom) and the
- * registration form to add/rotate/delete the org's own (BYO-app) client.
+ * registration form to add/edit/delete the org's own (BYO-app) client.
  * Separated from the runtime connections view (see {@link ConnectAuthBlock}).
  */
 function ConfigAuthBlock({
@@ -816,7 +818,7 @@ function ConfigAuthBlock({
         </div>
       )}
 
-      {/* OAuth clients (system + org + space) — list, register, rotate, delete, default. */}
+      {/* OAuth clients (system + org + space) — list, register, edit, delete, default. */}
       {isOAuth && (
         <ClientsTable
           tier="space"
@@ -1135,7 +1137,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>
-    consumingAgents?.find((a) => a.packageId === id)?.display_name ?? id;
+    consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
   const canAddPin = !!newAgent && newConnectionIds.length > 0;
 
@@ -1157,10 +1159,12 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 
   // Only include agents not already pinned.
   const alreadyPinnedAgentIds = new Set(
-    (pins ?? []).filter((p) => p.integration_package_id === packageId).map((p) => p.packageId),
+    (pins ?? [])
+      .filter((p) => p.integration_package_id === packageId)
+      .map((p) => p.agent_package_id),
   );
   const pinnableAgents = (consumingAgents ?? []).filter(
-    (a) => !alreadyPinnedAgentIds.has(a.packageId),
+    (a) => !alreadyPinnedAgentIds.has(a.agent_package_id),
   );
 
   return (
@@ -1192,8 +1196,10 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             </TableHeader>
             <TableBody>
               {(pins ?? []).map((p) => (
-                <TableRow key={p.packageId} data-testid={`pin-row-${p.packageId}`}>
-                  <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
+                <TableRow key={p.agent_package_id} data-testid={`pin-row-${p.agent_package_id}`}>
+                  <TableCell className="px-3 py-2">
+                    {agentDisplayName(p.agent_package_id)}
+                  </TableCell>
                   <TableCell className="px-3 py-2">
                     {p.connection_ids.map((id, i) => {
                       const c = pinnableConnections.find((x) => x.id === id);
@@ -1220,7 +1226,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                       disabled={deletePin.isPending}
                       onClick={() =>
                         deletePin.mutate({
-                          params: { path: { packageId, agentPackageId: p.packageId } },
+                          params: { path: { packageId, agentPackageId: p.agent_package_id } },
                         })
                       }
                       title={t("integration.admin.pinManagement.delete")}
@@ -1262,7 +1268,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
             >
               <option value="">—</option>
               {pinnableAgents.map((a) => (
-                <option key={a.packageId} value={a.packageId}>
+                <option key={a.agent_package_id} value={a.agent_package_id}>
                   {a.display_name}
                 </option>
               ))}

@@ -13,6 +13,9 @@ import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
  * client routes (`paths/org-integrations.ts`) reuse the exported shapes.
  */
 
+/** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
+const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
+
 const packageIdParam = {
   name: "packageId",
   in: "path",
@@ -45,12 +48,18 @@ export const clientIdParam = {
   schema: { type: "string", format: "uuid" },
 } as const;
 
-const agentPackageIdParam = {
+export const agentPackageIdParam = {
   name: "agentPackageId",
   in: "path",
   required: true,
   description: "Agent package id (e.g. `@acme/my-agent`).",
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+} as const;
+
+/** The integration as the second package of a two-package path (member pins). */
+export const integrationPackageIdParam = {
+  ...packageIdParam,
+  name: "integrationPackageId",
 } as const;
 
 /** A connection set as every write takes it and every pin or default returns it. */
@@ -102,9 +111,9 @@ const integrationSummarySchema = {
 } as const;
 
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
-// not by oversight. `id`, `packageId`, `expiresAt`, `createdAt`, `updatedAt`
-// are the universal DB-convention carve-outs (camelCase everywhere per
-// docs/CASING_CONVENTIONS.md); every other field (`auth_key`, `account_id`,
+// not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
+// universal DB-convention carve-outs (camelCase everywhere per
+// docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
 // `owner_id`, `shared_with_org`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
@@ -112,7 +121,7 @@ const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
-    "packageId",
+    "integration_package_id",
     "auth_key",
     "account_id",
     "identity_claims",
@@ -128,7 +137,7 @@ const integrationConnectionSchema = {
   ],
   properties: {
     id: { type: "string", format: "uuid" },
-    packageId: { type: "string" },
+    integration_package_id: { type: "string" },
     auth_key: { type: "string" },
     account_id: { type: "string" },
     identity_claims: { type: ["object", "null"], additionalProperties: true },
@@ -189,14 +198,14 @@ export const integrationClientsListSchema = {
           client_ref: { type: "string" },
           source: {
             type: "string",
-            enum: ["built-in", "org", "custom"],
+            enum: ["system", "org", "space"],
             description:
-              "`custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.",
+              "The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.",
           },
           client_id: {
             type: "string",
             description:
-              "For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
+              "For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`.",
           },
           is_default: {
             type: "boolean",
@@ -237,7 +246,7 @@ export const oauthClientSchema = {
       type: "string",
       format: "uuid",
       description:
-        "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
+        "Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.",
     },
     spaceId: {
       type: ["string", "null"],
@@ -283,21 +292,26 @@ export const oauthClientCreateBodySchema = {
 
 export const oauthClientUpdateBodySchema = {
   type: "object",
-  required: ["client_id"],
+  description:
+    "Merge semantics (RFC 7396): an absent field is left unchanged. `client_secret` and `token_endpoint_auth_method` are written together: sending neither keeps both. There is no `client_id`: the connections a client minted refresh only with the `client_id` their tokens were issued to, so a new `client_id` is a new client — register it, make it the default, then delete this one.",
   properties: {
-    client_id: { type: "string", minLength: 1 },
     client_secret: {
       type: "string",
       description:
-        "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable.",
+        "OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400.",
     },
     token_endpoint_auth_method: {
       type: "string",
       enum: ["client_secret_post", "client_secret_basic", "none"],
       description:
-        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.",
+        "Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.",
     },
-    redirect_uri: { type: "string", format: "uri" },
+    redirect_uri: {
+      type: ["string", "null"],
+      format: "uri",
+      description:
+        "Omit to keep the stored value; `null` clears it (the platform callback applies).",
+    },
   },
   additionalProperties: false,
 } as const;
@@ -665,13 +679,14 @@ export const integrationsPaths = {
     },
   },
   "/api/integrations/{packageId}/oauth-clients/{clientId}": {
-    put: {
-      operationId: "rotateIntegrationOAuthClient",
+    patch: {
+      operationId: "updateIntegrationOAuthClient",
       tags: ["Integrations"],
-      summary: "Rotate a custom OAuth client's credentials",
+      summary:
+        "Update a custom OAuth client (rotate its secret, change its redirect URI or method)",
       description:
-        "Rotates one of this space's custom clients in place, by its id (an " +
-        "org-level client id is a 404 here). Auto-provisioned " +
+        "Updates one of this space's custom clients in place, by its id (an " +
+        "org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned " +
         "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -689,7 +704,7 @@ export const integrationsPaths = {
       },
       responses: {
         "200": {
-          description: "Rotated",
+          description: "Updated",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
@@ -774,9 +789,9 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the OAuth clients registered for an integration auth",
       description:
-        "Returns this space's own custom (BYO-app) clients (`custom`, oldest " +
+        "Returns this space's own custom (BYO-app) clients (`space`, oldest " +
         "first) plus the ONE default it inherits — the org default (`org`), else " +
-        "the system client (`built-in`) — when that is not one of its own. Other " +
+        "the system client (`system`) — when that is not one of its own. Other " +
         "org and system clients are not listed: a space either uses its own " +
         "clients or inherits the org's choice. `is_default` marks the client new " +
         "connections use (no per-connect picker). Secrets are never returned. " +
@@ -1024,20 +1039,27 @@ export const integrationsPaths = {
         "400": {
           description:
             "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
+          content: htmlErrorPage,
         },
         "403": {
           description:
             "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
+          content: htmlErrorPage,
         },
-        "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+        "410": {
+          description: "Invalid, expired, or already-used token (HTML error page).",
+          content: htmlErrorPage,
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
           description:
             "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable.",
+          content: htmlErrorPage,
         },
         "502": {
           description:
             "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry.",
+          content: htmlErrorPage,
         },
       },
     },
@@ -1350,9 +1372,9 @@ export const integrationsPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["packageId", "display_name"],
+                      required: ["agent_package_id", "display_name"],
                       properties: {
-                        packageId: { type: "string" },
+                        agent_package_id: { type: "string" },
                         display_name: { type: "string" },
                       },
                     },

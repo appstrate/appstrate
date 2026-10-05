@@ -278,7 +278,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
 
       const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
-      expect(listed.map((a) => a.packageId)).toEqual(["@pinsorg/runs-here"]);
+      expect(listed.map((a) => a.agent_package_id)).toEqual(["@pinsorg/runs-here"]);
     });
 
     it("a pin is refused for an agent this space does not RUN", async () => {
@@ -302,7 +302,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
       // Same agent, switched ON — the pin lands.
       await seedSpacePackage(scope.spaceId, "@pinsorg/pin-off", { enabled: true });
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: "@pinsorg/pin-off",
         connectionIds: [connectionId],
         createdBy: ctx.user.id,
@@ -365,7 +365,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("pins N connections as one row, in the caller's order", async () => {
       const ids = await seedSharedConnections(3);
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
         createdBy: ctx.user.id,
@@ -379,16 +379,18 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("a second write REPLACES the set rather than merging into it", async () => {
       const ids = await seedSharedConnections(3);
-      await upsertIntegrationPin(scope, INTEGRATION, {
+      const first = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
         createdBy: ctx.user.id,
       });
-      await upsertIntegrationPin(scope, INTEGRATION, {
+      expect(first.previous).toBeNull();
+      const second = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: [ids[2]!],
         createdBy: ctx.user.id,
       });
+      expect(second.previous).toEqual(ids);
       const listed = await listIntegrationPins(scope, INTEGRATION);
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
@@ -398,7 +400,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     it("echoes what the next read returns, in the caller's order", async () => {
       const ids = await seedSharedConnections(2);
       const reversed = [...ids].reverse();
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: reversed.map((id) => id.toUpperCase()),
         createdBy: ctx.user.id,
@@ -450,7 +452,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         CREATE TRIGGER pin_vanish_trg AFTER INSERT OR UPDATE ON integration_pins
         FOR EACH ROW EXECUTE FUNCTION pin_vanish_fn()`);
       try {
-        const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+        const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: ids,
           createdBy: ctx.user.id,

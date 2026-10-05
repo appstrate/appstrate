@@ -37,6 +37,15 @@ describe("compileEgressPolicy — allowsAuthority", () => {
     expect(policy("sftp://h.com").allowsAuthority("h.com", 2222)).toBe(false);
   });
 
+  it("grants no host through an empty authority or a globbed scheme", () => {
+    for (const pattern of ["https:///**", "**://**", "*://api.example.com/**"]) {
+      const p = policy(pattern);
+      expect(p.allowsAuthority("evil.com", 443)).toBe(false);
+      expect(p.allowsAuthority("api.example.com", 443)).toBe(false);
+    }
+    expect(policy("https:///**").allowsUrl("https://evil.com/x")).toBe(false);
+  });
+
   it("requires an explicit port to equal the target port", () => {
     const p = policy("ssh://h.example.com:2222");
     expect(p.allowsAuthority("h.example.com", 2222)).toBe(true);
@@ -103,6 +112,14 @@ describe("compileEgressPolicy — allowsAuthority", () => {
     expect(p.allowsAuthority("evil.com@a.x.com", 443)).toBe(false);
     for (const port of [0, -1, 65536, Number.NaN, 22.5]) {
       expect(p.allowsAuthority("a.x.com", port)).toBe(false);
+    }
+  });
+
+  it("grants nothing through a malformed entry, at TCP or URL level", () => {
+    for (const pattern of ["https://@x:y@**/**", "https://%2A%2A\\**", "https://a.com@evil.test"]) {
+      const p = policy(pattern);
+      expect(p.allowsAuthority("evil.test", 443)).toBe(false);
+      expect(p.allowsUrl("https://evil.test/steal")).toBe(false);
     }
   });
 

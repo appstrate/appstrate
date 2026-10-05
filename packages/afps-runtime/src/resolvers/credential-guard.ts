@@ -3,22 +3,31 @@
 
 /** Credential-exfiltration guard of the three `api_call` paths: docs/architecture/SIDECAR.md. */
 
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
 import { referencesField } from "./template-vars.ts";
+
+/** Why a call is refused before anything is sent; {@link urlPolicyRefusalMessage} says it. */
+export type UrlPolicyRefusal = "unrendered" | "exfiltration" | "unauthorized";
 
 export interface CredentialUrlPolicy {
   substitutesCredential: boolean;
-  /** allow_all_uris after the downgrade (false whenever substitutesCredential). */
+  /** allow_all_uris after the downgrade (false whenever the call carries a credential). */
   allowAllUris: boolean;
-  /** A credential is templated and no authorized_uris is declared. */
-  refuse: boolean;
+  refuse: UrlPolicyRefusal | null;
 }
 
+/** The one pre-send decision of the three `api_call` paths; `fetchApiCall` gates the targets. */
 export function credentialUrlPolicy(input: {
   /** Every string the call runs placeholder substitution on. */
   templates: Iterable<string>;
   fields: Readonly<Record<string, string>>;
   allowAllUris: boolean;
+  /** The manifest's list, before rendering. */
+  declaredUris: readonly string[];
+  /** The list rendered for the call's connection. */
   authorizedUris: readonly string[];
+  /** The proxy itself adds a credential header to the call. */
+  injectsCredential: boolean;
 }): CredentialUrlPolicy {
   let substitutesCredential = false;
   for (const template of input.templates) {
@@ -27,11 +36,18 @@ export function credentialUrlPolicy(input: {
       break;
     }
   }
-  return {
-    substitutesCredential,
-    allowAllUris: input.allowAllUris && !substitutesCredential,
-    refuse: substitutesCredential && input.authorizedUris.length === 0,
-  };
+  const carriesCredential = substitutesCredential || input.injectsCredential;
+  const allowAllUris = input.allowAllUris && !carriesCredential;
+  const noAllowlist = input.authorizedUris.length === 0;
+  let refuse: UrlPolicyRefusal | null = null;
+  if (!allowAllUris && noAllowlist && input.declaredUris.length > 0) refuse = "unrendered";
+  else if (
+    carriesCredential &&
+    (noAllowlist || input.authorizedUris.some(isHostUnboundedUriPattern))
+  ) {
+    refuse = "exfiltration";
+  } else if (!allowAllUris && noAllowlist) refuse = "unauthorized";
+  return { substitutesCredential, allowAllUris, refuse };
 }
 
 /** Values to scrub from an echoed host: none when untemplated, where scrubbing is an oracle. */
@@ -42,22 +58,14 @@ export function redactionFields(
   return policy.substitutesCredential ? fields : {};
 }
 
-export function exfiltrationRefusal(integrationId: string): string {
-  return `Call for integration "${integrationId}" substitutes a credential into an agent-controlled URL, header, or body but the integration declares no authorized_uris allowlist; refusing to prevent credential exfiltration.`;
+/** The refusal's message. Names no value: a field that failed to render may be a secret. */
+export function urlPolicyRefusalMessage(refusal: UrlPolicyRefusal, integrationId: string): string {
+  switch (refusal) {
+    case "unrendered":
+      return `Integration "${integrationId}": the connection's URL does not render the integration's authorized_uris allowlist; fix the connection (an absolute http(s) URL).`;
+    case "exfiltration":
+      return `Call for integration "${integrationId}" carries a credential (substituted into an agent-controlled URL, header, or body, or injected by the proxy) but the integration declares no authorized_uris allowlist that names its hosts; refusing to prevent credential exfiltration.`;
+    case "unauthorized":
+      return `Integration "${integrationId}" declares no authorized_uris and not allow_all_uris; every target is forbidden.`;
+  }
 }
-
-/**
- * A declared allowlist that renders to nothing for this connection (its URL field is unset or
- * not an absolute http(s) URL): refuse every target — never the SSRF-only no-allowlist branch.
- */
-export function allowlistUnrendered(input: {
-  declaredUris: readonly string[];
-  authorizedUris: readonly string[];
-  allowAllUris: boolean;
-}): boolean {
-  return !input.allowAllUris && input.declaredUris.length > 0 && input.authorizedUris.length === 0;
-}
-
-/** Names no value: the connection field that failed to render may be a secret. */
-export const UNRENDERED_ALLOWLIST_REFUSAL =
-  "the connection's URL does not render the integration's authorized_uris allowlist; fix the connection (an absolute http(s) URL).";

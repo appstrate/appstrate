@@ -21,6 +21,12 @@
 import { loadModel, type ResolvedModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import {
+  proxyProblem,
+  relayedProxyStatus,
+  upstreamFailureDetail,
+  type UpstreamFailureCode,
+} from "../../lib/proxy-status.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -34,6 +40,10 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { getModelProvider } from "../model-providers/registry.ts";
+import {
+  clearModelCredentialRejections,
+  recordModelCredentialRejection,
+} from "../model-providers/credentials.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
 
 interface ProxyCallInputs {
@@ -244,7 +254,9 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       reason: egress.reason,
       detail: egress.detail,
     });
-    throw invalidRequest(`Model "${presetId}" resolves to a blocked address — refusing to proxy.`);
+    if (egress.detail === "resolution-failed")
+      throw unreachableUpstream(presetId, "upstream_unresolvable");
+    throw blockedUpstream(presetId);
   }
 
   const upstreamHeaders = inputs.adapter.buildUpstreamHeaders(
@@ -299,7 +311,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       },
     );
   } catch (err) {
-    if (err instanceof SsrfBlockedError) {
+    if (err instanceof SsrfBlockedError && err.reason !== "resolution-failed") {
       // A hop the pre-flight passed got blocked at wire time (DNS rebind
       // between check and connect, or an upstream redirect — refused
       // outright via maxRedirects: 0). Same caller-facing message as the
@@ -310,21 +322,44 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         reason: err.reason,
         host: err.host,
       });
-      throw invalidRequest(
-        `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
-      );
+      throw blockedUpstream(presetId);
     }
     logger.error("llm-proxy: upstream fetch failed", {
       presetId,
       upstreamUrl,
       error: getErrorMessage(err),
     });
-    throw err;
+    throw unreachableUpstream(
+      presetId,
+      err instanceof SsrfBlockedError
+        ? "upstream_unresolvable"
+        : (err as { name?: unknown } | null)?.name === "TimeoutError"
+          ? "upstream_timeout"
+          : "upstream_unreachable",
+    );
+  }
+
+  // Only an org's own credential can be revoked from under it; the headers
+  // that could forge a 401 are never forwarded (`forwardedLlmRequestHeaders`).
+  if (upstream.status === 401 && resolved.credentialId) {
+    await recordModelCredentialRejection(
+      inputs.principal.orgId,
+      resolved.credentialId,
+      resolved.apiKey,
+    );
+  } else if (upstream.ok && resolved.credentialId) {
+    clearModelCredentialRejections(inputs.principal.orgId, resolved.credentialId).catch(
+      (err: unknown) =>
+        logger.warn("llm-proxy: could not clear the credential's rejection streak", {
+          credentialId: resolved.credentialId,
+          error: getErrorMessage(err),
+        }),
+    );
   }
 
   // Forward + meter, weaving in the alias-swap (every branch) and the
   // response-cache write (non-streaming 2xx).
-  return forwardMeteredResponse(
+  const relayed = await forwardMeteredResponse(
     upstream,
     inputs.adapter,
     {
@@ -343,6 +378,24 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
         : null,
       maxFrameChars: usageFrameBound(maxBytes),
     },
+  );
+  relayed.headers.append("Proxy-Status", relayedProxyStatus(upstream.status));
+  return relayed;
+}
+
+/** The model's upstream resolves into a blocked range: never names the host or the reason. */
+function blockedUpstream(presetId: string): ApiError {
+  return proxyProblem(
+    "blocked_target",
+    `Model "${presetId}" resolves to a blocked address — refusing to proxy.`,
+  );
+}
+
+/** The model's upstream failed at transport level (502 / 504); names neither host nor cause. */
+function unreachableUpstream(presetId: string, code: UpstreamFailureCode): ApiError {
+  return proxyProblem(
+    code,
+    `${upstreamFailureDetail(`The upstream of model "${presetId}"`, code)}.`,
   );
 }
 

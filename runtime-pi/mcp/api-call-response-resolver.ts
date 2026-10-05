@@ -189,23 +189,9 @@ async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Arr
  * the body to the chosen workspace path and returns a file descriptor; else
  * auto-spills large bodies and prepends the status line.
  *
- * KNOWN LIMITATION — redirects the sidecar returns unfollowed. On the
- * streaming path the credential proxy sets `redirect: "manual"` and hands
- * back the 30x itself (see `runtime-pi/sidecar/credential-proxy.ts`), so the
- * agent is the one that would have to re-issue. It cannot: the status line
- * below is `[api_call status=<n>]` and nothing else, `callToolResultToPi`
- * forwards only `content` blocks, and the `location` sitting on `_meta` is
- * read here and dropped. The agent sees a bare 30x and no next hop.
- *
- * The workaround is to re-issue with a BUFFERED body, which routes the call
- * through the sidecar's manual redirect follower — it walks the chain
- * server-side, re-applying the URL policy on every hop, and returns the
- * terminal response. That is the supported way to drive a redirect chain
- * today. Do not close the gap by rendering `location` into this line without
- * an explicit decision to widen what the model may see: an upstream redirect
- * URL is routinely credential-bearing (an authorize hop's `?code=`, a signed
- * `?X-Amz-Signature=`), and the same URL is already redacted to a bare host
- * before it reaches an operator log.
+ * A `location` on `_meta` is never rendered into the status line: an upstream
+ * redirect URL is routinely credential-bearing (an authorize hop's `?code=`, a
+ * signed `?X-Amz-Signature=`).
  */
 export async function shapeApiCallResponse(
   result: ToolResult,

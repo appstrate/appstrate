@@ -14,9 +14,12 @@
  *   - Only `application/json` 2xx/3xx/4xx bodies are checked. `application/
  *     problem+json` (RFC 9457 errors), SSE streams, blobs, and empty bodies
  *     are skipped — error envelopes are covered by their own tests.
- *   - A request path that maps to no spec operation is skipped (e.g. `/internal`,
- *     `/invite`, module public pages). Everything under a documented path IS
- *     checked.
+ *   - A request path that maps to no spec operation is skipped (e.g. `/invite`,
+ *     module public pages). Everything under a documented path IS checked.
+ *   - A response a proxy relays from its upstream (`Proxy-Status: …;
+ *     received-status=<n>`) is the upstream's, not a platform contract: a
+ *     non-2xx one, or one whose status the operation does not list, is checked
+ *     against the operation's documented `default` response.
  *   - On a JSON response whose status is NOT declared for the matched operation,
  *     or whose body is missing a required field / carries an undeclared
  *     top-level field, the middleware THROWS. The error surfaces through the
@@ -27,6 +30,7 @@
  * per-response cost is a regex scan + a cached AJV `validate()` call.
  */
 import type { MiddlewareHandler } from "hono";
+import { isRelayedResponse } from "../../src/lib/proxy-status.ts";
 import { createOpenApiValidator } from "./openapi-validator.ts";
 
 interface SpecLike {
@@ -50,16 +54,6 @@ interface CompiledResponse {
 }
 
 const STATUS_HAS_NO_BODY = new Set(["204", "304"]);
-
-/**
- * Path prefixes whose response bodies the platform does NOT own — verbatim
- * upstream passthrough proxies. The LLM proxy forwards the provider's response
- * (and its status code, including forwarded 4xx/5xx errors) byte-for-byte, so
- * the body shape is the upstream provider's, not a platform contract, and the
- * SPA never consumes it (runner-facing). Validating it against the platform
- * spec would false-positive on every provider-specific field.
- */
-const PASSTHROUGH_PREFIXES = ["/api/llm-proxy", "/api/credential-proxy"];
 
 /** Outcome of resolving a (path, method, status) to a response schema. */
 type Resolved =
@@ -163,13 +157,14 @@ export function createResponseValidationMiddleware(spec: unknown): MiddlewareHan
 
     const method = c.req.method.toLowerCase();
     const reqPath = new URL(c.req.url).pathname;
-    if (PASSTHROUGH_PREFIXES.some((p) => reqPath.startsWith(p))) return;
     const specPath = matchSpecPath(reqPath, method);
-    if (!specPath) return; // undocumented surface (internal, invite, module pages)
+    if (!specPath) return; // undocumented surface (invite, module pages)
 
-    const status = String(res.status);
+    const relayed = isRelayedResponse(res.headers);
+    const status = relayed && res.status >= 300 ? "default" : String(res.status);
 
-    const resolved = resolve(specPath, method, status);
+    let resolved = resolve(specPath, method, status);
+    if (relayed && resolved.kind === "undeclared") resolved = resolve(specPath, method, "default");
     if (resolved.kind === "skip") return;
 
     let body: unknown;
