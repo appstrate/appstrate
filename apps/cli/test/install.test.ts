@@ -859,7 +859,11 @@ describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
       mode: "fresh",
       nonInteractive: true,
     });
-    expect(result).toEqual({ bootstrapOwnerEmail: "admin@acme.com" });
+    // A named owner never ships without the token that proves who claims it.
+    expect(result).toEqual({
+      bootstrapOwnerEmail: "admin@acme.com",
+      bootstrapToken: expect.stringMatching(/^[A-Za-z0-9_-]{40,64}$/),
+    });
   });
 
   it("forwards APPSTRATE_BOOTSTRAP_ORG_NAME when set alongside the email", async () => {
@@ -873,6 +877,7 @@ describe("resolveBootstrapEmail (issue #228) — non-interactive paths", () => {
     expect(result).toEqual({
       bootstrapOwnerEmail: "admin@acme.com",
       bootstrapOrgName: "Acme HQ",
+      bootstrapToken: expect.any(String),
     });
   });
 
@@ -981,53 +986,36 @@ describe("printBootstrapFollowup (issue #228) — post-install action", () => {
     expect(cap.calls).toHaveLength(0);
   });
 
-  it("renders the action note when bootstrap email is set", () => {
+  // The note carries the token only when stdout is a terminal (otherwise it
+  // goes to /dev/tty); the assertions below hold on both branches.
+  it("sends a named owner to /claim, naming the address to use", () => {
     const cap = makeCapture();
     printBootstrapFollowup(
       "http://localhost:3000",
-      { bootstrapOwnerEmail: "admin@acme.com" },
+      { bootstrapOwnerEmail: "admin@acme.com", bootstrapToken: "test-token-not-a-secret" },
       cap.note,
     );
     expect(cap.calls).toHaveLength(1);
     const { message, title } = cap.calls[0]!;
-    expect(title).toContain("create your owner account");
-    expect(message).toContain("http://localhost:3000/register");
+    expect(title).toContain("claim ownership");
+    expect(message).toContain("http://localhost:3000/claim");
     expect(message).toContain("admin@acme.com");
-    expect(message).toContain("pre-filled and locked");
-    // Default org name surfaces when not provided.
-    expect(message).toContain('"Default"');
-  });
-
-  it("uses the configured bootstrapOrgName when set", () => {
-    const cap = makeCapture();
-    printBootstrapFollowup(
-      "http://localhost:3000",
-      { bootstrapOwnerEmail: "admin@acme.com", bootstrapOrgName: "Acme HQ" },
-      cap.note,
-    );
-    expect(cap.calls[0]!.message).toContain('"Acme HQ"');
-    expect(cap.calls[0]!.message).not.toContain('"Default"');
+    expect(message).not.toContain("/register");
   });
 
   it("respects the appUrl argument verbatim (alternate ports / hosts)", () => {
     const cap = makeCapture();
     printBootstrapFollowup(
       "http://appstrate.acme.com",
-      { bootstrapOwnerEmail: "admin@acme.com" },
+      { bootstrapToken: "test-token-not-a-secret" },
       cap.note,
     );
-    expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/register");
+    expect(cap.calls[0]!.message).toContain("http://appstrate.acme.com/claim");
     expect(cap.calls[0]!.message).not.toContain("localhost");
   });
 });
 
 describe("postInstallBrowserUrl — post-install browser deep-link", () => {
-  it("opens /register for a named-owner install (email pre-filled server-side)", () => {
-    expect(
-      postInstallBrowserUrl("http://localhost:3000", { bootstrapOwnerEmail: "admin@acme.com" }),
-    ).toBe("http://localhost:3000/register");
-  });
-
   it("opens /register for an open-mode install (no email, no token)", () => {
     expect(postInstallBrowserUrl("http://localhost:3000", {})).toBe(
       "http://localhost:3000/register",

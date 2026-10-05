@@ -31,7 +31,6 @@ export function buildAppConfig(): AppConfig {
   const env = getEnv();
   const legalTerms = env.LEGAL_TERMS_URL;
   const legalPrivacy = env.LEGAL_PRIVACY_URL;
-  const bootstrapEmail = env.AUTH_BOOTSTRAP_OWNER_EMAIL;
   return {
     features: {
       // Core platform flags only — derived from env vars owned by core.
@@ -42,10 +41,9 @@ export function buildAppConfig(): AppConfig {
       smtp: isSmtpConfigured(),
       // Self-hosting closed mode (issue #228) — flags exposed so the SPA
       // can hide signup affordances and route org-less users away from
-      // /onboarding/create when the platform is locked down. Sensitive
-      // companions (PLATFORM_ADMIN_EMAILS, ALLOWED_SIGNUP_DOMAINS) stay
-      // server-side; BOOTSTRAP_OWNER_EMAIL is surfaced separately below
-      // so RegisterForm can pre-fill + lock the email field.
+      // /onboarding/create when the platform is locked down. Their
+      // companions (BOOTSTRAP_OWNER_EMAIL, PLATFORM_ADMIN_EMAILS,
+      // ALLOWED_SIGNUP_DOMAINS) stay server-side: each names who may get in.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       orgCreationDisabled: env.AUTH_DISABLE_ORG_CREATION,
       // Surface ONLY the boolean — the token value stays server-side,
@@ -60,7 +58,6 @@ export function buildAppConfig(): AppConfig {
           },
         }
       : {}),
-    ...(bootstrapEmail ? { bootstrapOwnerEmail: bootstrapEmail } : {}),
     trustedOrigins: env.TRUSTED_ORIGINS,
     version: getVersionInfo(),
   };

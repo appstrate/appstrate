@@ -128,7 +128,7 @@
   "pagination.next": "Suivant",
   "pagination.pageOf": "Page {{page}} sur {{total}}",
   "claim.title": "Réclamer cette instance",
-  "claim.subtitle": "Cette instance Appstrate a été installée en mode non-interactif. Collez le token affiché par le script d'install pour créer le compte propriétaire.",
+  "claim.subtitle": "Cette instance Appstrate n'a pas encore de propriétaire. Collez le token affiché par le script d'install pour créer le compte propriétaire.",
   "claim.tokenLabel": "Token de bootstrap",
   "claim.tokenPlaceholder": "Coller le token (visible dans le banner d'install ou dans .env)",
   "claim.tokenHelp": "Affiché à la fin de l'installation, ou dans la variable AUTH_BOOTSTRAP_TOKEN du fichier .env. Usage unique.",

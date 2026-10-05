@@ -47,7 +47,9 @@ export function isAllowedSignupDomain(email: string): boolean {
 
 /**
  * True when `email` matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Used by:
- *   - the signup gate to let the bootstrap account through even with
+ *   - the create hook, which refuses this account to a caller who has not
+ *     proven control of the address (`auth.ts`);
+ *   - the signup gate to let the proven bootstrap account through even with
  *     `AUTH_DISABLE_SIGNUP=true`;
  *   - the after-hook to auto-create the bootstrap organization.
  * Returns false when the env var is empty.
@@ -86,7 +88,8 @@ export type SignupPolicyDecision =
  *
  * Order matters and is documented in examples/self-hosting/AUTH_MODES.md:
  *
- *   1. bootstrap owner          — operator never locks themselves out
+ *   1. bootstrap owner          — operator never locks themselves out (the
+ *      create hook has already required proof of ownership for this address)
  *   2. platform admin allowlist — operator never locks themselves out
  *   3. pending invitation       — overrides closed mode AND domain allowlist
  *      so an invited contractor from outside the allowed domains can still

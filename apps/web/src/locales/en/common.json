@@ -128,7 +128,7 @@
   "pagination.next": "Next",
   "pagination.pageOf": "Page {{page}} of {{total}}",
   "claim.title": "Claim this instance",
-  "claim.subtitle": "This Appstrate instance was installed unattended. Paste the token printed by the installer to create the owner account.",
+  "claim.subtitle": "This Appstrate instance has no owner yet. Paste the token printed by the installer to create the owner account.",
   "claim.tokenLabel": "Bootstrap token",
   "claim.tokenPlaceholder": "Paste the token (shown in the install banner or in .env)",
   "claim.tokenHelp": "Printed at the end of the install, or stored as AUTH_BOOTSTRAP_TOKEN in your .env. Single-use.",

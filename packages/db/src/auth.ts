@@ -74,8 +74,9 @@ export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Pr
 }
 
 /**
- * Auto-create the bootstrap organization when the freshly-signed-up user
- * matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Delegates the idempotent create-or-noop
+ * Auto-create the bootstrap organization when the freshly-created user
+ * matches `AUTH_BOOTSTRAP_OWNER_EMAIL` — the create hook let that row through
+ * only on proof of ownership. Delegates the idempotent create-or-noop
  * to `createBootstrapOrg`, which is shared with `apps/api/scripts/bootstrap-org.ts`.
  *
  * Runs in the BA `after` hook, after the profile row is inserted. Errors are
@@ -961,6 +962,25 @@ function buildAuth(options: CreateAuthOptions) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            // The account at `AUTH_BOOTSTRAP_OWNER_EMAIL` is born owner of the
+            // root organization, so naming that address is not enough to
+            // create it: the caller must hold the operator's bootstrap token,
+            // or arrive by a path that verified the inbox itself. Better Auth
+            // hands this hook `emailVerified: true` only from a provider
+            // assertion or a consumed magic link — never from e-mail/password
+            // sign-up, whose later verification mail proves who reads the
+            // inbox, not who chose the password. Checked before every other
+            // gate and in every realm, so no allowlist reopens it.
+            const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
+            if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
+              logger.warn("auth: bootstrap owner sign-up refused, no proof of ownership");
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "This address is reserved for the instance owner. Its account is " +
+                  "created with the instance's bootstrap token (AUTH_BOOTSTRAP_TOKEN).",
+                code: "bootstrap_owner_proof_required",
+              });
+            }
             // A pending invitation for this exact email overrides the signup
             // gate (Infisical-style breakage avoidance) so an invited user can
             // complete signup even when signup is locked down. It is matched on
@@ -1046,9 +1066,7 @@ function buildAuth(options: CreateAuthOptions) {
             // defeat the OIDC end-user adopter's `emailVerified === true`
             // takeover guard. Invited users verify their inbox through the
             // normal flow, like everyone else.
-            const providerAssertsVerified =
-              (user as { emailVerified?: boolean }).emailVerified === true;
-            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, providerAssertsVerified);
+            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, bornVerified);
             const data: Record<string, unknown> = { realm };
             if (autoVerify) data.emailVerified = true;
             return { data };

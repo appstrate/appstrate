@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **The owner account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` is created at
+  `/claim`, with `AUTH_BOOTSTRAP_TOKEN`.** The email/password sign-up form
+  no longer creates that account (403 `bootstrap_owner_proof_required`); it
+  is created by redeeming the bootstrap token, by a Google/GitHub sign-in
+  whose provider asserts the address, or by a magic link. With both
+  variables set, the token claims the named address only. An instance whose
+  owner account already exists is unaffected. An instance that names an
+  owner who has not signed up yet needs a token before they can: add
+  `AUTH_BOOTSTRAP_TOKEN` (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`)
+  to its environment, restart, and open `<APP_URL>/claim`. The installer
+  now writes the token alongside a named owner and prints the `/claim` step. The address is no longer part of the page configuration
+  sent to browsers, and `/register` is the plain sign-up form again. See
+  `examples/self-hosting/AUTH_MODES.md`.
 - **An integration calling an internal API needs its host in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
   reach a private, loopback or link-local address as soon as the

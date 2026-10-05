@@ -19,6 +19,9 @@
  *   6. Timing-safe compare of `token` against `env.AUTH_BOOTSTRAP_TOKEN`.
  *      Failed verifies are logged at WARN with `clientIp` so SIEMs can
  *      detect a brute-force attempt.
+ *      When `AUTH_BOOTSTRAP_OWNER_EMAIL` names the owner, the submitted
+ *      e-mail must be that address — this route is then the only
+ *      password path that can create that account.
  *   7. Run BA's `signUpEmail` inside `withBootstrapTokenRedemption()` so
  *      the closed-mode gate (`AUTH_DISABLE_SIGNUP=true`) is bypassed
  *      exactly once for this request. The bypass is scoped — it does
@@ -157,8 +160,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: "Gone",
           detail:
             "No bootstrap token is currently redeemable. The instance has either " +
-            "no token configured, has already been claimed, or was bootstrapped " +
-            "via AUTH_BOOTSTRAP_OWNER_EMAIL.",
+            "no token configured or has already been claimed.",
         });
       }
 
@@ -178,6 +180,21 @@ export function createAuthBootstrapRouter(): Hono {
           code: "bootstrap_token_invalid",
           title: "Unauthorized",
           detail: "Invalid bootstrap token.",
+        });
+      }
+
+      // A named owner stays the owner: the token proves who is claiming, the
+      // env says which account they claim. Checked after the token so the
+      // answer reaches the operator only.
+      const namedOwner = getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL;
+      if (namedOwner && data.email !== namedOwner) {
+        throw new ApiError({
+          status: 403,
+          code: "bootstrap_owner_email_mismatch",
+          title: "Forbidden",
+          detail:
+            "This instance names its owner in AUTH_BOOTSTRAP_OWNER_EMAIL. " +
+            "Claim it with that e-mail address.",
         });
       }
 

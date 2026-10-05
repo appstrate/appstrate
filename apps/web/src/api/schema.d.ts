@@ -8924,7 +8924,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies. */
+            /** @description Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (`signup_domain_not_allowed`) — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8942,7 +8942,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL) */
+            /** @description No bootstrap token is currently redeemable (none configured, or already redeemed) */
             410: {
                 headers: {
                     [name: string]: unknown;
