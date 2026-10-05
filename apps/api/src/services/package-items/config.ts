@@ -12,6 +12,7 @@ import {
   findUnevaluableExpressions,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
+import { asRecord } from "@appstrate/core/safe-json";
 import { validationFailed } from "../../lib/errors.ts";
 
 // ─────────────────────────────────────────────
@@ -55,6 +56,24 @@ export interface PackageTypeConfig {
   manifestIsStoredFile: boolean;
 }
 
+/**
+ * `source.server.name` must name an `mcp-server` package, and a package has one
+ * type: an integration naming ITSELF can never resolve. Saved, it warns on every
+ * read and fails every run with `mcp_server_unresolved`.
+ */
+function findSelfReferencedServer(manifest: unknown): { path: string[]; message: string }[] {
+  const { name, source } = asRecord(manifest);
+  if (asRecord(source).kind !== "local" || typeof name !== "string") return [];
+  return asRecord(asRecord(source).server).name === name
+    ? [
+        {
+          path: ["source", "server", "name"],
+          message: `'${name}' is this integration itself; name the mcp-server package it runs`,
+        },
+      ]
+    : [];
+}
+
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   agent: {
     type: "agent",
@@ -75,6 +94,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     storageFolder: "integrations",
     labelSingular: "Integration",
     checkManifest: (manifest) => [
+      ...findSelfReferencedServer(manifest),
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
       ...findUnboundedInjectedCredentials(manifest),
       ...findUnevaluableExpressions(manifest),
