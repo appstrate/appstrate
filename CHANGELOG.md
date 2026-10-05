@@ -64,6 +64,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (API): deleting the default space answers
+  `409 default_space_not_deletable`** (#1680), was `400 invalid_request`.
+  Every refusal of `DELETE /api/spaces/{id}` that is about the space's state
+  is now a named 409.
+- **`GET /api/orgs` and `GET /api/spaces` have a defined order** (#1680).
+  Organizations are listed oldest membership first (there was no order: a
+  rename moved an organization). Spaces are listed default first, then the
+  caller's personal space, then team spaces oldest first (the personal space
+  was ranked by its creation date, a different place for each member).
+- **`GET /api/profile` reports `can_create_org`** (#1680): whether
+  `POST /api/orgs` would accept the user — true on an open instance, and for
+  platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
+  routes on it, so the `orgCreationDisabled` flag is gone from
+  `window.__APP_CONFIG__`.
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -195,6 +209,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The dashboard no longer offers what the server refuses around spaces**
+  (#1680). In a personal space the Members, API keys, end-user OAuth clients
+  and End-Users pages are not there (each write behind them was a 409), and a
+  personal space is no longer listed in an invitation's or an OAuth signup
+  policy's space assignments (400). The space selector of the space settings
+  listed closed spaces the caller cannot enter and fell back silently; it now
+  shows the same list as the sidebar. On an instance where organization
+  creation is disabled, `/onboarding/create` and "create organization" are
+  shown only to those who may create one, and a platform admin without an
+  organization lands on the creation form. The last space used in each
+  organization is restored after an organization switch and after sign-out.
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in
