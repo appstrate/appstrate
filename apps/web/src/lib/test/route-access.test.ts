@@ -10,7 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ROUTE_ACCESS, routeVerdict, type RoutePath } from "../route-access.ts";
+import { ROUTE_ACCESS, routeExists, routeVerdict, type RoutePath } from "../route-access.ts";
 import { routeOf } from "../route-match.ts";
 
 const source = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -70,6 +70,25 @@ describe("route declarations", () => {
       (text.match(/\busePermissions\(|\bcan\(|\bfeatures\./g) ?? []).map((m) => `${file}: ${m}`),
     );
     expect(local).toEqual([]);
+  });
+});
+
+describe("a route whose module is not loaded", () => {
+  it("does not exist, whatever the caller holds", () => {
+    expect(routeExists("/org-settings/billing", {})).toBe(false);
+    expect(routeExists("/org-settings/billing", { billing: true })).toBe(true);
+    expect(routeExists("/org-settings/general", {})).toBe(true);
+  });
+
+  // #1678: the layout's own reads (the space, the org settings) left for a URL
+  // whose page did not exist, and were aborted by the redirect that followed.
+  it("is not registered under a layout, which would mount before its gate runs", () => {
+    const app = source("../../app.tsx");
+    const layoutRoute = app.slice(
+      app.indexOf("function layoutRoute("),
+      app.indexOf("function BootScreen("),
+    );
+    expect(layoutRoute).toContain("routeExists(path, features)");
   });
 });
 

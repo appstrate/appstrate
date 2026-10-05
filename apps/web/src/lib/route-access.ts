@@ -152,16 +152,24 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
-/** `absent`: the module behind the route is not loaded, so the route does not exist. */
+type Features = Readonly<Record<string, boolean | undefined>>;
+
+/** False when the module behind the route is not loaded: the route does not exist. */
+export function routeExists(path: RoutePath, features: Features): boolean {
+  const access: RouteAccess = ROUTE_ACCESS[path];
+  return !access.feature || !!features[access.feature];
+}
+
+/** `absent`: the route does not exist ({@link routeExists}). */
 type RouteVerdict = "absent" | "granted" | "denied";
 
 export function routeVerdict(
   path: RoutePath,
   can: (permission: Permission) => boolean,
-  features: Readonly<Record<string, boolean | undefined>>,
+  features: Features,
 ): RouteVerdict {
+  if (!routeExists(path, features)) return "absent";
   const access: RouteAccess = ROUTE_ACCESS[path];
-  if (access.feature && !features[access.feature]) return "absent";
   if ("open" in access) return "granted";
   return access.anyOf.some(can) ? "granted" : "denied";
 }

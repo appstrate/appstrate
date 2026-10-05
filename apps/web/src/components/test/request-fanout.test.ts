@@ -16,7 +16,8 @@
  *     notification and chat-session query twice on every page load (#1678);
  *  5. the agent page fetching the agent's runs a second time, unpaginated and
  *     under a key of its own, to learn whether there is any (#1678);
- *  6. a launch refetching the run lists of the page it is leaving (#1678).
+ *  6. a launch refetching the run lists of the page it is leaving (#1678);
+ *  7. a skill or MCP-server page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -117,6 +118,16 @@ describe("agent page", () => {
       (m) => m[1]!,
     );
     expect(invalidations).toEqual(['{ queryKey: paginatedRunsKeys.all, refetchType: "none" }']);
+  });
+});
+
+describe("package pages other than an agent's", () => {
+  // #1678: a skill page loaded the org's models and proxies, which only the
+  // agent configuration tab shows.
+  it("do not read the model and proxy lists", () => {
+    const detail = read("../../pages/unified-package-detail.tsx");
+    expect(detail).toContain('useProxies(type === "agent")');
+    expect(detail).toContain('useModels(type === "agent")');
   });
 });
 
