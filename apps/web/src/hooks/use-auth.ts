@@ -6,6 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
+import { readSession } from "../lib/session-read";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -30,6 +31,21 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 }
 
 /**
+ * Set while this browser holds a session the app has seen, so the next boot
+ * knows whether to expect one: the session cookie itself is httpOnly.
+ */
+const SIGNED_IN_KEY = "appstrate_signed_in";
+
+/**
+ * Whether the boot should expect a session. A stale `true` costs what every
+ * boot used to cost (two requests answered 401 and a sign-out) and corrects
+ * itself; a stale `false` costs a signed-in user one sequential round trip.
+ */
+export function sessionExpected(): boolean {
+  return localStorage.getItem(SIGNED_IN_KEY) !== null;
+}
+
+/**
  * Centralized session teardown. Resets the auth store AND the org/space scope
  * stores (clearing their persisted localStorage ids) so a subsequent login
  * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
@@ -38,6 +54,7 @@ async function fetchProfile(): Promise<AuthProfile | null> {
  * requests after re-login.
  */
 function clearSession() {
+  localStorage.removeItem(SIGNED_IN_KEY);
   authStore.setState({ user: null, profile: null, loading: false });
   orgStore.getState().setId(null);
   spaceStore.getState().setId(null);
@@ -52,6 +69,7 @@ function setAuthenticatedUser(
   user: { id: string; email: string; emailVerified: boolean; name: string },
   profile: AuthProfile | null,
 ) {
+  localStorage.setItem(SIGNED_IN_KEY, "1");
   authStore.setState({
     user: { id: user.id, email: user.email, emailVerified: user.emailVerified, name: user.name },
     profile,
@@ -59,56 +77,26 @@ function setAuthenticatedUser(
   });
 }
 
-async function syncAuth() {
-  // `fetchProfile()` takes no argument from the session — `GET /api/profile`
-  // authenticates on the very same cookie `getSession()` reads — so the two
-  // requests are issued together instead of one behind the other. Ordering is
-  // still enforced *after* the fact: `getSession()` stays the sole authority
-  // on whether a user exists, and a profile that failed to load is treated
-  // exactly as before.
-  //
-  // For a visitor with no session both now fail instead of only the first.
-  // That is deliberate and silent: `fetchProfile()` swallows its own failure
-  // and returns null, so nothing reaches an error boundary or a toast, and
-  // the `else` branch below still lands on the login screen.
-  const [result, profile] = await Promise.all([authClient.getSession(), fetchProfile()]);
-  if (result.data?.user) {
-    if (!profile) {
+async function syncAuth(expected: boolean) {
+  const session = await readSession(expected, {
+    getSession: async () => (await authClient.getSession()).data?.user ?? null,
+    getProfile: fetchProfile,
+    // Best-effort: a failing sign-out (network blip, cookie already gone) must
+    // not strand the user — `clearSession` still resets the SPA stores.
+    dropCookies: async () => {
       await authClient.signOut().catch(() => {});
-      clearSession();
-      return;
-    }
-    setAuthenticatedUser(result.data.user, profile);
-  } else {
-    // No active session. The browser may still be carrying a stale BA
-    // cookie (signature invalid after `BETTER_AUTH_SECRET` rotation, session
-    // row gone after a redeploy, partition / domain mismatch from a config
-    // change, …). BA's `/get-session` returns null silently in that case
-    // *without* clearing the bad cookie, so it would keep re-arriving on
-    // every request and the user would bounce between `/login` and
-    // `/auth/callback` forever with no surfaceable error.
-    //
-    // `signOut()` deterministically tells the server to emit
-    // `Set-Cookie: …; Max-Age=0` for every BA cookie it knows about,
-    // matching the original Path/Domain/Partitioned so the browser
-    // actually drops them. The cost is one extra HTTP round-trip on a
-    // cold session-less load — acceptable for the recovery guarantee.
-    await authClient.signOut().catch(() => {
-      // Best-effort: a failing signOut (network blip, already-cleared
-      // cookie) must not strand the user. `clearSession` below still resets
-      // the SPA stores so the login flow restarts cleanly.
-    });
-    clearSession();
-  }
+    },
+  });
+  if (session) setAuthenticatedUser(session.user, session.profile);
+  else clearSession();
 }
 
-let initialized = false;
-function initAuth() {
-  if (initialized) return;
-  initialized = true;
-  syncAuth().catch(() => {
+let boot: Promise<void> | null = null;
+function initAuth(): Promise<void> {
+  boot ??= syncAuth(sessionExpected()).catch(() => {
     clearSession();
   });
+  return boot;
 }
 
 /**
@@ -119,17 +107,16 @@ function initAuth() {
  * initializer, which no-ops once this has run.
  */
 export function startAuthBootstrap(): void {
-  initAuth();
+  void initAuth();
 }
 
 /**
  * Thrown by `refreshAuth()` when the resync completed but did not
  * establish an authenticated user — e.g. `getSession()` returned null
  * because of a stale Better Auth cookie. Callers that depend on a
- * session being present after `refreshAuth()` (the OIDC callback, invite
- * acceptance, post-email-change) can catch this discriminant and show a
- * meaningful "please sign in again" message instead of navigating into a
- * silent loop.
+ * session being present (the OIDC callback, post-email-change) can catch
+ * this discriminant and show a meaningful "please sign in again" message
+ * instead of navigating into a silent loop.
  */
 export class AuthRefreshError extends Error {
   constructor(
@@ -159,14 +146,13 @@ export class EmailChangeError extends Error {
 
 /**
  * Resync auth state from the server cookie and assert that a user was
- * established. Use after any flow that should have left a valid session
- * behind (OIDC callback, invite accept, email change). On the no-user
- * path `syncAuth` already best-effort clears the stale cookie via
- * `signOut()`; this throw lets the caller surface the failure in the UI
- * rather than silently navigating onwards on a null user.
+ * established. Use after a flow that changed the session IN PLACE (an email
+ * change). On the no-user path the read already best-effort clears the stale
+ * cookie; this throw lets the caller surface the failure in the UI rather than
+ * silently navigating onwards on a null user.
  */
 export async function refreshAuth(): Promise<void> {
-  await syncAuth();
+  await syncAuth(true);
   if (!authStore.getState().user) {
     throw new AuthRefreshError(
       "no_session",
@@ -175,8 +161,20 @@ export async function refreshAuth(): Promise<void> {
   }
 }
 
+/**
+ * Assert the session a full-page redirect was meant to leave behind (the OIDC
+ * callback). The cookie was set before this document loaded, so its boot read
+ * IS the read of that session and a second one would only repeat it. When the
+ * boot found none it may not have been expecting one, so the resync that does
+ * — and that drops the cookie that failed — runs then, and only then.
+ */
+export async function requireBootSession(): Promise<void> {
+  await initAuth();
+  if (!authStore.getState().user) await refreshAuth();
+}
+
 export function useAuth() {
-  initAuth();
+  void initAuth();
 
   const state = useStore(authStore);
 

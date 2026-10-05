@@ -190,7 +190,7 @@ export async function startOidcSignup(redirectTo?: string, loginHint?: string): 
  * discards the tokens anyway. So when NO state was ever stored in this
  * context we skip the exchange and recover the redirect from the echoed
  * `state` payload. The caller MUST validate the session afterwards
- * (`refreshAuth()` in `auth-callback.tsx` throws when no session exists) —
+ * (`requireBootSession()` in `auth-callback.tsx` throws when no session exists) —
  * that session check is what authenticates this path. A crafted callback URL
  * gains nothing here: the attacker-supplied code is never exchanged, and the
  * decoded redirect is constrained to a same-origin relative path.

@@ -7,7 +7,7 @@ import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
 import { queryClient } from "./lib/query-client";
-import { startAuthBootstrap } from "./hooks/use-auth";
+import { sessionExpected, startAuthBootstrap } from "./hooks/use-auth";
 import { primeOrgList } from "./hooks/use-org";
 import { primeSpaceList } from "./hooks/use-spaces";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
@@ -56,8 +56,11 @@ window.addEventListener("vite:preloadError", (event) => {
 // returning user already has persisted: it starts as soon as the org list
 // confirms that membership, still ahead of the layout, and every space-scoped
 // read waits on it (`useSpaceResolver`).
+//
+// Only for a browser that last saw the app signed in. A visitor on a public
+// page gets the session read alone: the other two would be answered 401.
 startAuthBootstrap();
-primeSpaceList(primeOrgList());
+if (sessionExpected()) primeSpaceList(primeOrgList());
 
 // Warm the chat route's chunk on the same idle window. `ChatModulePage` is
 // `lazy()`, so its download only STARTS once the route element renders — which

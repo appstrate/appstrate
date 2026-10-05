@@ -21,7 +21,6 @@ type LoginFormData = {
 
 interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
   fixedEmail?: string;
-  onSuccess?: () => Promise<void>;
   header?: ReactNode | null;
   footer?: ReactNode | null;
   switchAuthSlot?: ReactNode;
@@ -31,7 +30,6 @@ interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
 export function LoginForm({
   className,
   fixedEmail,
-  onSuccess,
   header,
   footer,
   switchAuthSlot,
@@ -58,9 +56,6 @@ export function LoginForm({
   const onSubmit = async (data: LoginFormData) => {
     try {
       await login(fixedEmail ?? data.email, data.password);
-      if (onSuccess) {
-        await onSuccess();
-      }
     } catch (err) {
       setError("root", {
         message: err instanceof Error ? err.message : t("login.error"),
