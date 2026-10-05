@@ -2435,7 +2435,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom model
-         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first.
+         * @description Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`).
          */
         patch: operations["updateModel"];
         trace?: never;
@@ -16053,7 +16053,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["ModelAlreadyAdded"];
+            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     testModel: {

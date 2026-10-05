@@ -455,7 +455,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Update a custom model",
       description:
-        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first.",
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `enabled: false` on the current organization default is refused with 409 `model_disabled` — pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -525,7 +525,15 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
+        "409": {
+          description:
+            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {

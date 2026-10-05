@@ -129,10 +129,9 @@ export function RunOverridesPanel({
       : null;
 
   const setModel = (next: string) => {
-    const nextModelId = next === INHERIT ? persistedModelId : next;
+    // "Inherit" reconciles against the model it names, not a setting the server skips.
     const nextModel =
-      orgModels?.find((model) => model.id === nextModelId) ??
-      (nextModelId === null ? orgDefaultModel : undefined);
+      next === INHERIT ? inheritedModel : orgModels?.find((model) => model.id === next);
     const generation = reconcileModelGenerationSettings(
       value.generation_config_override ?? {},
       nextModel?.generation,

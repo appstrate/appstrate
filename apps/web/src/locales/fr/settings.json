@@ -749,7 +749,7 @@
   "models.form.selectionRequired": "Sélectionne au moins un modèle.",
   "models.form.providerUnavailable": "Le provider de ce modèle n'est plus disponible.",
   "models.form.saveFailed": "Impossible d'enregistrer le modèle. Vérifie les valeurs et réessaie.",
-  "models.form.modelNotOffered": "{{provider}} ne propose pas ce modèle. Choisis-le dans la liste, ou passe par « Endpoint personnalisé » pour un identifiant libre.",
+  "models.form.modelNotOffered": "{{provider}} ne propose pas ce modèle. Utilise un identifiant de son catalogue, ou passe par « Endpoint personnalisé » pour un identifiant libre.",
   "models.alert.noModel": "Aucun modèle LLM configuré",
   "models.alert.noModelDescription": "Configurez un modèle dans les paramètres de l'organisation pour pouvoir exécuter cet agent.",
   "billing.tabTitle": "Facturation",

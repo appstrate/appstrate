@@ -71,10 +71,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
 
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [createdScopes, setCreatedScopes] = useState<string[]>([]);
-  // Least privilege: a new key carries only what was picked for it. The list
-  // is always sent, and never empty — the server reads an absent or empty
-  // `scopes` as "everything the creator may delegate".
-  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
 
   const {
     register,
@@ -91,13 +88,15 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
     reset({ name: "", expiresIn: "90" });
     setCreatedKey(null);
     setCreatedScopes([]);
-    setSelectedScopes([]);
+    setSelectedScopes(null);
     createMutation.reset();
     onClose();
   };
 
+  const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
+  const allSelected = availableScopes ? effectiveScopes.length === availableScopes.length : true;
+
   function onFormSubmit(data: FormData) {
-    if (selectedScopes.length === 0) return;
     const expiresAt = computeExpiresAt(data.expiresIn);
 
     createMutation.mutate(
@@ -105,7 +104,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
         body: {
           name: data.name.trim(),
           expiresAt,
-          scopes: selectedScopes,
+          scopes: allSelected ? undefined : effectiveScopes,
         },
       },
       {
@@ -180,7 +179,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           <Button
             type="submit"
             form="create-api-key-form"
-            disabled={createMutation.isPending || selectedScopes.length === 0}
+            disabled={createMutation.isPending || effectiveScopes.length === 0}
           >
             {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
           </Button>
@@ -231,7 +230,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             <Label>{t("apiKeys.permissionSummary")}</Label>
             <ScopeMultiSelect
               available={availableScopes}
-              selected={selectedScopes}
+              selected={effectiveScopes}
               onChange={setSelectedScopes}
             />
           </div>

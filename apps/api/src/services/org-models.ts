@@ -529,7 +529,7 @@ export async function updateOrgModel(
   if (data.enabled === false && (await defaultModel.getDefaultId(orgId)) === modelDbId) {
     throw conflict(
       "model_disabled",
-      "The default model cannot be disabled. Pick another default model first.",
+      "The default model cannot be disabled. Pick another default model first, or clear the default (PUT /api/models/default with `modelId: null`).",
     );
   }
 

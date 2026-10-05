@@ -151,7 +151,9 @@ function ModelsList({
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
                         canSetDefault={canWrite}
-                        disabled={m.needs_reconnection || !m.enabled}
+                        // A switched-off system model stays eligible: the server
+                        // resolves it, and refuses only a disabled custom row.
+                        disabled={m.needs_reconnection || (!isBuiltIn && !m.enabled)}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>
