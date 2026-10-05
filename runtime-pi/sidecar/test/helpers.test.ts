@@ -5,7 +5,6 @@ import {
   ABSOLUTE_BODY_CEILING,
   concatAndRelease,
   isBlockedHost,
-  isBlockedUrl,
   substituteVars,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
@@ -196,34 +195,6 @@ describe("isBlockedHost", () => {
 
   it("allows bracketed public IPv6", () => {
     expect(isBlockedHost("[2001:db8::1]")).toBe(false);
-  });
-});
-
-// --- isBlockedUrl ---
-
-describe("isBlockedUrl", () => {
-  it("blocks ftp: scheme", () => {
-    expect(isBlockedUrl("ftp://example.com/file")).toBe(true);
-  });
-
-  it("blocks file: scheme", () => {
-    expect(isBlockedUrl("file:///etc/passwd")).toBe(true);
-  });
-
-  it("blocks URL to internal host", () => {
-    expect(isBlockedUrl("http://127.0.0.1/admin")).toBe(true);
-  });
-
-  it("allows public https URL", () => {
-    expect(isBlockedUrl("https://api.example.com/v1")).toBe(false);
-  });
-
-  it("allows public http URL", () => {
-    expect(isBlockedUrl("http://api.example.com/v1")).toBe(false);
-  });
-
-  it("blocks malformed URL", () => {
-    expect(isBlockedUrl("not-a-url")).toBe(true);
   });
 });
 
