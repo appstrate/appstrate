@@ -638,32 +638,6 @@ export async function dispatchWebhookEvents(
 }
 
 /**
- * Send a synthetic `test.ping` to one webhook through the delivery pipeline, so
- * it is signed, SSRF-guarded and recorded in the delivery history exactly like a
- * real event — which is what makes the test say anything about the endpoint. It
- * goes out whatever the webhook subscribes to, and whether or not it is enabled:
- * testing an endpoint before switching it on is the point.
- */
-export async function dispatchTestPing(webhook: {
-  id: string;
-  payloadMode: string;
-}): Promise<{ eventId: string; payload: Record<string, unknown> }> {
-  const envelope = buildEventEnvelope({
-    eventType: "test.ping",
-    run: { id: "run_test", packageId: "test", status: "success" },
-    payloadMode: webhook.payloadMode === "summary" ? "summary" : "full",
-  });
-  const queue = await getDeliveryQueue();
-  await queue.add("deliver", {
-    webhookId: webhook.id,
-    eventId: envelope.eventId,
-    eventType: "test.ping",
-    payload: JSON.stringify(envelope.payload),
-  });
-  return envelope;
-}
-
-/**
  * Process a single webhook delivery attempt.
  * Throws on failure — queue handles retry scheduling via backoffStrategy.
  * Throws PermanentJobError for permanent failures (4xx except 408/429).
