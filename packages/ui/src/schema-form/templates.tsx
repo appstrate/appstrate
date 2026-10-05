@@ -19,7 +19,7 @@ import type {
   ObjectFieldTemplateProps,
   MultiSchemaFieldTemplateProps,
 } from "@rjsf/utils";
-import { getSubmitButtonOptions } from "@rjsf/utils";
+import { getInputProps, getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../cn.ts";
 import { Button, INPUT_CLASS, LABEL_CLASS } from "./primitives.tsx";
@@ -55,7 +55,13 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
             : schema.format === "time"
               ? "time"
               : "text";
-  const inputType = type ?? formatType;
+  // `number` / `integer` get a numeric input (with the schema's step and
+  // bounds) instead of free text the validator then has to refuse.
+  const inputProps = getInputProps<T>(
+    schema,
+    type ?? (formatType === "text" ? undefined : formatType),
+    options,
+  );
 
   const isConst = schema && "const" in schema;
   const isReadOnly = readonly || isConst;
@@ -63,7 +69,10 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
   return (
     <input
       id={id}
-      type={inputType}
+      {...inputProps}
+      // RJSF keeps a `number` as text where the locale's decimal separator is
+      // not "." (a native number input drops it): still ask for the numeric pad.
+      inputMode={schema.type === "number" && inputProps.type === "text" ? "decimal" : undefined}
       value={(value as string | number | undefined) ?? ""}
       required={required}
       readOnly={isReadOnly}

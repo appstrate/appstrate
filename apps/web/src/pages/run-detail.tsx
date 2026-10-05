@@ -5,6 +5,7 @@ import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
@@ -301,8 +302,18 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      {run.status === "failed" && run.error && (
-        <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
+      {/* Every terminal status that carries a cause states it: a timeout or a
+          cancellation is otherwise a bare badge whose reason is only in the logs. */}
+      {isTerminal && run.status !== "success" && run.error && (
+        <div
+          className={cn(
+            "mb-4 rounded-md px-4 py-3 text-sm",
+            run.status === "cancelled"
+              ? "bg-muted text-muted-foreground"
+              : "bg-destructive/10 text-destructive",
+          )}
+          data-testid="run-error-banner"
+        >
           {run.error}
         </div>
       )}
