@@ -32,8 +32,7 @@ import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import { routeExists, type RoutePath } from "./lib/route-access";
-import type { AppConfig } from "@appstrate/shared-types";
+import type { RoutePath } from "./lib/route-access";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -408,13 +407,7 @@ function pageRoute(path: RoutePath) {
   );
 }
 
-/**
- * A layout mounts, and reads what its navigation shows, before the gate of the
- * page under it runs. So a page whose module is not loaded is not registered
- * under it at all: its URL falls through to the catch-all without mounting the
- * layout, instead of issuing the layout's requests only to abort them.
- */
-function layoutRoute(layout: (typeof LAYOUTS)[number], features: AppConfig["features"]) {
+function layoutRoute(layout: (typeof LAYOUTS)[number]) {
   return (
     <Route
       key={layout}
@@ -422,9 +415,7 @@ function layoutRoute(layout: (typeof LAYOUTS)[number], features: AppConfig["feat
       element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
     >
       <Route index element={<Navigate to="general" replace />} />
-      {PATHS.filter((path) => path.startsWith(`${layout}/`) && routeExists(path, features)).map(
-        pageRoute,
-      )}
+      {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
     </Route>
   );
 }
@@ -822,7 +813,7 @@ export function App() {
             {PATHS.filter(
               (path) => !LAYOUTS.some((l) => path.startsWith(`${l}/`) || path === l),
             ).map(pageRoute)}
-            {LAYOUTS.map((layout) => layoutRoute(layout, features))}
+            {LAYOUTS.map(layoutRoute)}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
