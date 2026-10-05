@@ -7,7 +7,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
+import { useLocation } from "react-router-dom";
 import { useAuth, EmailChangeError } from "../../hooks/use-auth";
+import { emailChangeLanding } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 
@@ -66,6 +68,7 @@ function EmailChangeForm() {
   const { user, changeEmail } = useAuth();
   const [success, setSuccess] = useState("");
   const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
+  const { search } = useLocation();
 
   const {
     register,
@@ -82,6 +85,12 @@ function EmailChangeForm() {
   const isDirty = newEmailValue.trim() !== "" && newEmailValue.trim() !== user?.email;
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailValue.trim());
   const canSubmit = isDirty && isValidEmail && !isSubmitting;
+
+  // What the email-change link that led here did — until the form is used again.
+  const landing =
+    user && !success && !verificationPendingEmail && !errors.root
+      ? emailChangeLanding(search, user.email)
+      : null;
 
   const onSubmit = async (data: { newEmail: string }) => {
     setSuccess("");
@@ -116,6 +125,22 @@ function EmailChangeForm() {
           <Label>{t("preferences.newEmail")}</Label>
           <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
+        {landing?.kind === "failed" && (
+          <div className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</div>
+        )}
+        {landing?.kind === "approved" && (
+          <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
+            <Trans
+              ns="settings"
+              i18nKey="preferences.emailChangeApproved"
+              values={{ email: landing.email }}
+              components={{ strong: <strong /> }}
+            />
+          </div>
+        )}
+        {landing?.kind === "changed" && (
+          <div className="text-success text-sm">{t("preferences.emailChanged")}</div>
+        )}
         {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
         {success && <div className="text-success text-sm">{success}</div>}
         {verificationPendingEmail && (

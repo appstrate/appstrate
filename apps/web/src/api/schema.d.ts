@@ -9569,6 +9569,8 @@ export interface operations {
                     /** Format: email */
                     email: string;
                     password: string;
+                    /** @description Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`. */
+                    callbackURL?: string;
                 };
             };
         };
@@ -9592,6 +9594,7 @@ export interface operations {
                      */
                     "application/json": {
                         redirect?: boolean;
+                        url?: string;
                         user?: components["schemas"]["User"];
                         token?: string | null;
                     };
@@ -9599,6 +9602,18 @@ export interface operations {
             };
             /** @description Invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9648,6 +9663,8 @@ export interface operations {
                     email: string;
                     password: string;
                     name: string;
+                    /** @description Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`. */
+                    callbackURL?: string;
                 };
             };
         };

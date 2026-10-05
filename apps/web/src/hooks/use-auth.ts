@@ -6,6 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toLoginError, toUnlinkError } from "../lib/auth-errors";
+import { afterGate, emailChangeCallbackURL, emailWasChanged } from "../lib/auth-flow";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -102,11 +103,8 @@ async function syncAuth() {
   }
 }
 
-// The boot resync. When it finds no session it signs out, to drop a stale
-// cookie — and that response deletes whatever session cookie exists by the
-// time it lands. A sign-in or sign-up sent while it is still in flight would
-// have its fresh cookie deleted right after being told it succeeded, so both
-// wait for it.
+// The boot resync, run once. Sign-in and sign-up are gated on it — see
+// `afterGate` for what goes wrong otherwise.
 let bootSync: Promise<void> | null = null;
 function initAuth(): Promise<void> {
   bootSync ??= syncAuth().catch(() => {
@@ -122,6 +120,18 @@ function initAuth(): Promise<void> {
  * queueing behind them. Idempotent — `useAuth()` still calls the same
  * initializer, which no-ops once this has run.
  */
+const signInAfterBoot = afterGate(
+  initAuth,
+  (email: string, password: string, callbackURL: string | undefined) =>
+    authClient.signIn.email({ email, password, callbackURL }),
+);
+
+const signUpAfterBoot = afterGate(
+  initAuth,
+  (email: string, password: string, name: string, callbackURL: string) =>
+    authClient.signUp.email({ email, password, name, callbackURL }),
+);
+
 export function startAuthBootstrap(): void {
   void initAuth();
 }
@@ -190,15 +200,19 @@ export function useAuth() {
    * mode these forms never render (`HostedAuthGate` redirects first), so
    * there is no redirect variant here — the gate owns that path.
    */
-  const login = useCallback(async (email: string, password: string) => {
-    await initAuth();
-    const result = await authClient.signIn.email({ email, password });
-    if (result.error) throw toLoginError(result.error);
-    const profile = await fetchProfile();
-    if (result.data?.user) {
-      setAuthenticatedUser(result.data.user, profile);
-    }
-  }, []);
+  const login = useCallback(
+    // `callbackURL` is where the verification link lands when the account
+    // turns out to be unverified (Better Auth re-sends it on this call).
+    async (email: string, password: string, callbackURL?: string) => {
+      const result = await signInAfterBoot(email, password, callbackURL);
+      if (result.error) throw toLoginError(result.error);
+      const profile = await fetchProfile();
+      if (result.data?.user) {
+        setAuthenticatedUser(result.data.user, profile);
+      }
+    },
+    [],
+  );
 
   const signup = useCallback(
     async (
@@ -209,16 +223,10 @@ export function useAuth() {
       // the page that asked for the signup (e.g. an invitation).
       callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
-      await initAuth();
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
       // page first — so signup has no OIDC branch; the gate owns that path.
-      const result = await authClient.signUp.email({
-        email,
-        password,
-        name: displayName || email,
-        callbackURL,
-      });
+      const result = await signUpAfterBoot(email, password, displayName || email, callbackURL);
       if (result.error) throw new Error(result.error.message);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
@@ -330,7 +338,13 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
-    const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
+    // A link that is spent or expired comes back to the page that can send
+    // another one.
+    const result = await authClient.signIn.magicLink({
+      email,
+      callbackURL: "/",
+      errorCallbackURL: "/magic-link",
+    });
     if (result.error) throw new Error(result.error.message);
   }, []);
 
@@ -346,16 +360,17 @@ export function useAuth() {
    */
   const changeEmail = useCallback(
     async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {
-      const result = await authClient.changeEmail({ newEmail, callbackURL: "/preferences" });
+      const result = await authClient.changeEmail({
+        newEmail,
+        callbackURL: emailChangeCallbackURL(newEmail),
+      });
       if (result.error) {
         throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
       }
       if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
-      // Better Auth answers 200 whether or not the address was free — it never
-      // says that an address has an account. Without email verification the
-      // change is immediate, so the session is what tells whether it happened.
+      // Without email verification the change is immediate.
       await refreshAuth();
-      if (authStore.getState().user?.email !== newEmail.toLowerCase()) {
+      if (!emailWasChanged(newEmail, authStore.getState().user?.email)) {
         throw new EmailChangeError(true, "");
       }
       return "changed";

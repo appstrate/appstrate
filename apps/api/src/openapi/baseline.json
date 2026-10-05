@@ -299,6 +299,10 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "callbackURL": {
+                    "type": "string",
+                    "description": "Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`."
                   }
                 }
               }
@@ -392,6 +396,10 @@
                   },
                   "password": {
                     "type": "string"
+                  },
+                  "callbackURL": {
+                    "type": "string",
+                    "description": "Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`."
                   }
                 }
               }
@@ -408,6 +416,9 @@
                   "properties": {
                     "redirect": {
                       "type": "boolean"
+                    },
+                    "url": {
+                      "type": "string"
                     },
                     "user": {
                       "$ref": "#/components/schemas/User"
@@ -431,6 +442,24 @@
           },
           "401": {
             "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
             "content": {
               "application/json": {
                 "schema": {

@@ -13,7 +13,7 @@ import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
-import { EmailNotVerifiedError } from "../lib/auth-errors";
+import { loginFailureDestination } from "../lib/auth-flow";
 
 type LoginFormData = {
   email: string;
@@ -59,13 +59,14 @@ export function LoginForm({
   const onSubmit = async (data: LoginFormData) => {
     const email = fixedEmail ?? data.email;
     try {
-      await login(email, data.password);
+      await login(email, data.password, socialCallbackURL);
       if (onSuccess) {
         await onSuccess();
       }
     } catch (err) {
-      if (err instanceof EmailNotVerifiedError) {
-        navigate("/verify-email", { state: { email, callbackURL: socialCallbackURL } });
+      const destination = loginFailureDestination(err, email, socialCallbackURL);
+      if (destination) {
+        navigate(destination.to, { state: destination.state });
         return;
       }
       setError("root", {

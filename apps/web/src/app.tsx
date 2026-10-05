@@ -12,6 +12,7 @@ import { VerifyEmailPage } from "./pages/verify-email";
 import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { MagicLinkPage } from "./pages/magic-link";
+import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
@@ -22,7 +23,7 @@ import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 
 import { useAuth } from "./hooks/use-auth";
-import { hasVerificationLinkError } from "./lib/auth-errors";
+import { signedOutDestination } from "./lib/auth-flow";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
@@ -564,16 +565,9 @@ function useExternalRedirect(isAuthenticated: boolean) {
   }, [isAuthenticated, trustedOrigins]);
 }
 
-/**
- * Where a signed-out visitor lands outside the auth routes. A verification
- * link that could not be honoured redirects to its callback URL with
- * `?error=` — say so, rather than dropping the visitor on a bare login form.
- */
 function SignedOutFallback() {
   const { search } = useLocation();
-  return (
-    <Navigate to={hasVerificationLinkError(search) ? `/verify-email${search}` : "/login"} replace />
-  );
+  return <Navigate to={signedOutDestination(search)} replace />;
 }
 
 export function App() {
@@ -711,6 +705,8 @@ export function App() {
            * signup) and login-hint derived from that data. Same seam, dynamic
            * inputs — see invite-accept.tsx.
            */}
+          {/* Not gated: only an instance without the OIDC module emails this link. */}
+          <Route path="/magic-link/confirm" element={<MagicLinkConfirmPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<SignedOutFallback />} />
         </Routes>
@@ -741,6 +737,7 @@ export function App() {
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/register" element={<Navigate to="/" replace />} />
+          <Route path="/magic-link/confirm" element={<Navigate to="/" replace />} />
           {/*
            * `/auth/callback` must be reachable while authenticated too: by
            * the time the browser lands here, the BA session cookie is
