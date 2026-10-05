@@ -1762,25 +1762,29 @@ export function installSessionBridge(
             },
           ),
         );
-        // Early-stop on the first SUCCESSFUL terminal tool. A failed call
-        // (e.g. output-schema validation error) does not qualify — the
-        // model gets its retry turn as before.
-        if (!terminalToolCompleted && e.isError !== true && terminalTools.includes(tool)) {
+        // A terminal tool ends the loop either way: early-stop on its first
+        // SUCCESSFUL call, failure once it has refused its budget of attempts
+        // (below that, the model gets its retry turn). The first verdict
+        // stands: calls of the same batch still settle after the abort, and
+        // must neither revive a failed run nor fail a delivered one.
+        if (runnerStoppedLoop() || !terminalTools.includes(tool)) break;
+        if (e.isError !== true) {
           terminalToolCompleted = true;
           options.onTerminalTool?.();
+          break;
         }
-        // …and stop retrying once it has refused its budget of attempts.
-        if (!runnerStoppedLoop() && e.isError === true && terminalTools.includes(tool)) {
-          terminalToolRejections += 1;
-          if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
-            terminalToolExhausted = {
-              code: "terminal_tool_rejected",
-              message:
-                `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
-                "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
-            };
-            options.onTerminalToolExhausted?.();
-          }
+        terminalToolRejections += 1;
+        if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
+          terminalToolExhausted = {
+            code: "terminal_tool_rejected",
+            message:
+              `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
+              "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
+          };
+          // The same sentence on the log stream: `runs.error` alone would leave
+          // `run_logs` ending on a refused call with no verdict after it.
+          fire(buildError({ runId, timestamp: Date.now() }, terminalToolExhausted.message));
+          options.onTerminalToolExhausted?.();
         }
         break;
       }
