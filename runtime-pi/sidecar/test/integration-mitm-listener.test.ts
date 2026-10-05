@@ -1239,8 +1239,96 @@ describe("MITM listener — SSRF floor", () => {
     },
   );
 
+  runIfOpenssl("answers 502 when the host no longer resolves at request time", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const events: MitmListenerEvent[] = [];
+    const creds: MitmCredentialSource = {
+      current: () => payload("v", "oauth2", { access_token: "t" }, ["https://gone.example/**"]),
+      deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+    };
+    const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+    let lookups = 0;
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      ...permissiveEgress,
+      resolveHostFn: async () => {
+        if (lookups++ === 0) return ["203.0.113.10"];
+        throw new Error("NXDOMAIN");
+      },
+      fetch: recorded.fetch,
+      onEvent: (e) => events.push(e),
+    });
+    await listener.ready;
+    try {
+      const res = await drivenFetch({
+        listenerPort: listener.address().port,
+        sni: "gone.example",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/",
+        headers: {},
+      });
+
+      expect(res.status).toBe(502);
+      expect(events.some((e) => e.kind === "upstream-error")).toBe(true);
+      expect(events.some((e) => e.kind === "request-refused")).toBe(false);
+      expect(recorded.calls.length).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("returns an upstream redirect to the runner without following it", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const creds: MitmCredentialSource = {
+      current: () => payload("v", "oauth2", { access_token: "t" }, ["https://hop.example/**"]),
+      deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+    };
+    const recorded = makeRecordingFetch(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "https://hop.example/next" } }),
+    );
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      ...permissiveEgress,
+      resolveHostFn: stubResolveHost,
+      fetch: recorded.fetch,
+    });
+    await listener.ready;
+    try {
+      const res = await drivenFetch({
+        listenerPort: listener.address().port,
+        sni: "hop.example",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/start",
+        headers: {},
+      });
+
+      expect(res.status).toBe(302);
+      expect(res.headers["location"]).toBe("https://hop.example/next");
+      expect(recorded.calls.map((c) => c.url)).toEqual(["https://hop.example/start"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
   runIfOpenssl(
-    "connects the upstream request to the validated address, the name kept on Host and TLS",
+    "hands the runtime fetch the validated address, the name kept on Host and TLS",
     async () => {
       const bundle = await makeCaBundle();
       const minter = createCertMinter({
@@ -1281,7 +1369,6 @@ describe("MITM listener — SSRF floor", () => {
         expect(url).toBe("https://203.0.113.10:8443/v1/items?page=2");
         expect(new Headers(init.headers).get("host")).toBe("pin.example:8443");
         expect((init as { tls?: { serverName?: string } }).tls?.serverName).toBe("pin.example");
-        expect(init.redirect).toBe("manual");
       } finally {
         globalThis.fetch = realFetch;
         await listener.close();

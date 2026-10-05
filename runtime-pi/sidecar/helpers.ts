@@ -13,7 +13,7 @@
 // these so this module could re-export them again; it added no behaviour and
 // no consumer imported them from there. `./ssrf.ts` keeps only the sidecar's
 // own egress-allowlist logic.
-export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
+export { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 export type { HostResolver } from "@appstrate/core/ssrf";
 
 // Imported (not just re-exported) because `readPositiveByteEnv` below defaults

@@ -178,9 +178,10 @@ interface CreateMitmListenerOptions {
   /** Upstream transport for tests; it disables the address pin. Omitted = pinned global `fetch`. */
   fetch?: typeof fetch;
   /**
-   * Injectable DNS resolver for the SNI rebind guard (tests stub it so
-   * non-resolving `*.local` SNI hosts pass; production uses the system
-   * resolver). Only consulted for non-IP-literal SNI hosts.
+   * Injectable DNS resolver for the rebind guard, at CONNECT and on each
+   * upstream request (tests stub it so non-resolving `*.local` SNI hosts
+   * pass; production uses the system resolver). Only consulted for
+   * non-IP-literal hosts.
    */
   resolveHostFn?: HostResolver;
   /** Telemetry sink — non-fatal events surface here. */
@@ -223,7 +224,8 @@ export interface MitmListenerHandle {
   close(): Promise<void>;
 }
 
-/** The upstream transport: one request, its redirect returned unfollowed. */
+/** The upstream transport: one request, its redirect returned unfollowed. The listener's own is
+ * SSRF-guarded; one handed to {@link handleInnerRequest} directly (tests) is used as given. */
 type UpstreamFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** An inner TLS server (one per upstream authority), reachable only through its unix socket. */
@@ -248,8 +250,8 @@ export function createIntegrationMitmListener(
   const fetchFn: UpstreamFetch = (url, init) =>
     guardedFetch(url, init, {
       followRedirects: false,
-      ...(options.fetch ? { fetchImpl: options.fetch } : {}),
-      ...(options.resolveHostFn ? { resolve: options.resolveHostFn } : {}),
+      fetchImpl: options.fetch,
+      resolve: options.resolveHostFn,
     });
   const emit = options.onEvent ?? (() => {});
 
