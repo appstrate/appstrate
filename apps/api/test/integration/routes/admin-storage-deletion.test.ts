@@ -121,12 +121,21 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
 
     const res = await app.request(LIST_PATH, { headers: { Cookie: operator.cookie } });
     expect(res.status).toBe(200);
+    // The mutating route too: an unknown job is a 404 from the handler.
+    const retry = await app.request(`${LIST_PATH}/sdj_unknown/retry`, {
+      method: "POST",
+      headers: { Cookie: operator.cookie },
+    });
+    expect(retry.status).toBe(404);
 
     // Control: the same header-less request from a session that is not
     // allowlisted is a 403 from the operator guard, not a 400 asking for an org.
     const outsider = await createTestUser({ email: "orgless-outsider@test.com" });
     const refused = await app.request(LIST_PATH, { headers: { Cookie: outsider.cookie } });
     expect(refused.status).toBe(403);
+    expect((await refused.json()) as { detail: string }).toMatchObject({
+      detail: "Platform admin access required",
+    });
   });
 
   it("refuses a non-session token that resolves the allowlisted operator", async () => {
