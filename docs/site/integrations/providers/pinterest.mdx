@@ -1,0 +1,58 @@
+---
+title: Pinterest
+description: Connect Pinterest to your Appstrate agents.
+---
+
+## Overview
+
+Pinterest is a visual social network, allowing your agents to manage pins, boards, and visual content.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `user_accounts:read` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `boards:read` | Read boards |
+| `boards:write` | Create and edit boards |
+| `pins:read` | Read pins |
+| `pins:write` | Create and edit pins |
+| `user_accounts:read` | Read user profile |
+| `ads:read` | Read ads data |
+| `ads:write` | Manage ads campaigns |
+| `catalogs:read` | Read product catalogs |
+| `catalogs:write` | Manage product catalogs |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.pinterest.com/*`
+
+## Connect Pinterest
+
+1. [Create a Pinterest application](https://developers.pinterest.com/apps/) on the developer portal
+2. Configure the OAuth settings and add the Appstrate redirect URI
+3. Copy the App ID and App Secret
+4. Enter these credentials in the Pinterest provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Pinterest APIs through the sidecar proxy. Example prompt:
+
+```
+For each new product added to the "Catalog" Google Sheet,
+create a Pinterest pin with the product image, title, and link
+to the product page. Add it to the "New Arrivals" board.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

@@ -1,0 +1,112 @@
+---
+title: Agents
+description: Create, configure, and customize your AI agents on Appstrate.
+---
+
+## What Is an Agent?
+
+An agent is an **LLM in a loop with tools**, running inside an isolated sandbox. You give it a goal, and it decides on its own which tools to call, in what order, to reach the goal. Unlike workflows (predefined step graphs), an agent plans and reacts as it goes.
+
+Every Appstrate agent is the combination of:
+
+- A **prompt** that states the goal, context, and constraints
+- An **LLM** (any model you bring via BYOK: Anthropic, OpenAI, Azure, Ollama, custom)
+- **Tools** (executable functions) and **skills** (portable instructions) declared as dependencies in its manifest
+- **Providers** (Gmail, Slack, Notion, …) that give it authenticated access to external services via the credential-hiding sidecar
+- Schemas for `config`, `input`, and `output` (JSON Schema 2020-12) that validate the parameters the user supplies and the result the agent emits
+
+At run time, Appstrate assembles these into a container, hands the LLM its tools, and lets it loop until it produces an output matching the schema (or hits the timeout).
+
+## Creating an Agent
+
+### Via the UI
+
+1. Open the **Agents** page from the sidebar, click **New agent**
+2. Give it a name and write your prompt
+3. (Optional) Connect providers to give access to external services
+4. Click **Run**
+
+### Via the API
+
+```bash
+curl -X POST http://localhost:3000/api/packages/agents \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "email-summarizer",
+    "description": "Summarizes recent emails"
+  }'
+```
+
+## Writing an Effective Prompt
+
+The prompt is injected into the agent container via the `AGENT_PROMPT` environment variable. It's automatically enriched with contextual sections:
+
+- **User Input** — input data provided at run launch
+- **Configuration** — the agent's current config values
+- **Previous State** — persisted state from the previous run
+- **Run History API** — URL to query past run history
+
+Tips:
+- Be specific about the task to accomplish
+- Describe the expected output format
+- Mention available providers and how to use them
+- Use the "Previous State" section for agents that maintain tracking
+
+## Configuration
+
+The config schema is a JSON Schema that defines the agent's adjustable parameters. Users fill in these fields via an auto-generated form in the UI.
+
+```json
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "maxEmails": {
+        "type": "number",
+        "description": "Maximum number of emails to process"
+      },
+      "language": {
+        "type": "string",
+        "enum": ["fr", "en"]
+      }
+    },
+    "required": ["maxEmails"]
+  }
+}
+```
+
+Validation uses AJV with `coerceTypes: true` (e.g., `"50"` accepted as a number). Additional properties are always allowed.
+
+## Input and Output
+
+The **input** schema defines the data expected at each run. The **output** schema enables result validation.
+
+If an output schema is defined:
+1. It's injected into the container via `OUTPUT_SCHEMA` for LLM constrained decoding
+2. After the run, AJV validates the result
+3. On mismatch, a warning is logged but the run still succeeds
+
+## Attaching capabilities
+
+An agent's capabilities — skills, tools, memory, and providers — each have their own Feature page. This section only covers **how to bind existing capabilities to an agent**.
+
+- **[Skills](/docs/features/skills)** — declarative markdown instructions. Attachment is **manifest-only**: declare them in `dependencies.skills` (semver ranges) and publish a new agent version. No dedicated REST endpoint.
+- **[Tools](/docs/features/tools)** — executable functions. Attach via `dependencies.tools` in the manifest **or** via `PUT /api/agents/@scope/name/tools` with a `{ "toolIds": ["@scope/name", …] }` body.
+- **[Memory](/docs/features/memory)** — persistent store scoped to this agent in this application. Agents write via the built-in `@appstrate/add-memory` tool; list and delete via `/api/agents/@scope/name/memories`.
+- **[Providers](/docs/integrations/providers)** — external services like Gmail or Slack. Declared as dependencies in the manifest; at run time the sidecar injects credentials.
+
+Example: update an agent's tool list.
+
+```bash
+curl -X PUT http://localhost:3000/api/agents/@my-org/agent-name/tools \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"toolIds": ["@my-org/word-count", "@appstrate/log"]}'
+```
+
+## Model and proxy overrides
+
+Each agent can pin its own LLM model (overriding the org default) and its own outbound proxy. See [Proxies](/docs/features/proxies) for the full cascade and the REST surface. Model overrides use `PUT /api/agents/@scope/name/model` with a `modelId`.

@@ -1,0 +1,58 @@
+---
+title: YouTube
+description: Connect YouTube to your Appstrate agents.
+---
+
+## Overview
+
+YouTube is Google's video platform, allowing your agents to manage videos, channels, and analyze metrics.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `youtube.readonly` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `youtube.readonly` | Read-only access (videos, channels, playlists) |
+| `youtube` | Full access (manage account) |
+| `youtube.upload` | Upload videos |
+| `youtube.force-ssl` | Manage videos, comments, captions (SSL required) |
+| `youtubepartner` | YouTube Partner (content and rights management) |
+| `youtube.channel-memberships.creator` | Read channel memberships |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://www.googleapis.com/youtube/*`
+- `https://youtube.googleapis.com/*`
+- `https://www.googleapis.com/upload/youtube/*`
+
+## Connect YouTube
+
+1. [Enable the YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com) in a Google Cloud project
+2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
+4. Add the Appstrate redirect URI as an authorized redirect URI
+5. Enter the Client ID and Client Secret in the YouTube provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call YouTube APIs through the sidecar proxy. Example prompt:
+
+```
+Every week, analyze the performance of the 10 latest channel videos.
+Compare views, likes, and comments with the previous week.
+Generate a report with the trends and post it to the "YouTube Analytics" Google Sheet.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

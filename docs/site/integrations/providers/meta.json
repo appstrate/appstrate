@@ -1,0 +1,23 @@
+{
+  "title": "Built-in Providers",
+  "pages": [
+    "gmail",
+    "google-drive",
+    "google-sheets",
+    "slack",
+    "notion",
+    "github",
+    "clickup",
+    "hubspot",
+    "discord",
+    "linkedin",
+    "stripe",
+    "trello",
+    "brevo",
+    "firecrawl",
+    "pinterest",
+    "reddit",
+    "x",
+    "youtube"
+  ]
+}

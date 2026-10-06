@@ -1,0 +1,56 @@
+---
+title: GitHub
+description: Connect GitHub to your Appstrate agents.
+---
+
+## Overview
+
+GitHub is a collaborative development platform, allowing your agents to manage repositories, issues, and pull requests.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `repo`, `read:user` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `repo` | Full repository access |
+| `read:user` | Read user profile |
+| `user:email` | Read user emails |
+| `read:org` | Read org membership |
+| `gist` | Create gists |
+| `notifications` | Access notifications |
+| `workflow` | Update GitHub Actions workflows |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.github.com/*`
+
+## Connect GitHub
+
+1. [Register a new OAuth application](https://github.com/settings/developers) in the GitHub developer settings
+2. Set the callback URL to the Appstrate redirect URI
+3. Copy the Client ID and Client Secret
+4. Enter these credentials in the GitHub provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call GitHub APIs through the sidecar proxy. Example prompt:
+
+```
+Every morning, check for new issues and pull requests on the "my-project" repo.
+For each PR, read the diff and write a summary of the changes.
+Post a review comment on PRs that touch the "src/api/" directory.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

@@ -1,0 +1,14 @@
+{
+  "title": "Integrations",
+  "icon": "Plug",
+  "collapsible": false,
+  "defaultOpen": true,
+  "pages": [
+    "overview",
+    "providers",
+    "custom-providers",
+    "llm-models",
+    "personal-agents",
+    "coding-agents"
+  ]
+}

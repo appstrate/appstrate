@@ -1,0 +1,149 @@
+---
+title: Built-in Providers
+description: The 60 providers shipped with every Appstrate instance, plus the connection + sidecar model that applies to all providers (built-in and custom alike).
+---
+
+A **provider** is the definition of an external service (Gmail, Slack, ClickUp...). It bundles the authentication config, the authorized URIs, and the service metadata that the sidecar uses to inject credentials at runtime.
+
+Appstrate ships with **60 built-in providers** ready to use out of the box. If yours isn't in the list, author your own: see [Custom Providers](/docs/integrations/custom-providers). Same manifest format, same `@scope/name` addressing, same sidecar protocol, nothing is second-class.
+
+## The 60 built-in providers
+
+Bundled with every instance, loaded at boot from `system-packages/`, addressable as `@appstrate/<name>`. They cover the common OAuth and API-key integrations a team needs on day one.
+
+**OAuth 2.0 (42).** PKCE is per-provider (enabled on X, disabled on most Google / Slack / Notion-style apps). Airtable, Asana, Basecamp, Calendly, Canva, ClickUp, ConvertKit, Discord, Dropbox, Dynamics 365, GitHub, Gmail, Google Calendar, Google Contacts, Google Drive, Google Forms, Google Sheets, HubSpot, Intercom, Jira, Linear, LinkedIn, Mailchimp, Microsoft Outlook, Microsoft Teams, Monday, Notion, OneDrive, PayPal, Pinterest, Pipedrive, QuickBooks Online, Reddit, Salesforce, Slack, Typeform, Wrike, X (Twitter), Xero, YouTube, Zoho CRM, Zoom.
+
+**OAuth 1.0a (1).** Trello.
+
+**API key (14).** ActiveCampaign, Brevo, Fathom, Firecrawl, Freshdesk, Freshsales, Loom, Shopify, Shortcut, Stripe, Teamwork, Telegram, Twilio, Zendesk.
+
+**Custom / multi-field (3).** Webhooks, WooCommerce, WordPress.
+
+System providers are versioned, forkable (`POST /api/packages/fork`), and overridable: if you need to extend one (new scope, extra authorized URI, branded icon) publish a fork under your own scope and your agents depend on it instead of the `@appstrate/*` original. Per-provider reference: use the sidebar on the left, or `appstrate api GET /api/providers` to enumerate what your instance actually has installed.
+
+## Need a provider we don't ship?
+
+Author your own. Custom providers use the exact same format, sidecar protocol, and connection flow as built-in ones: one `@scope/name`, one `manifest.json`, two creation paths (`POST /api/providers` for quick internal ones, AFPS package import for portable semver'd ones).
+
+Full guide with manifest examples for every auth mode, both creation paths, OAuth client config, and a troubleshoot table: **[Custom Providers](/docs/integrations/custom-providers)**.
+
+## Authentication modes
+
+Applies to both system and custom providers.
+
+| Mode | Description | Example |
+|------|-------------|---------|
+| `oauth2` | OAuth 2.0 with optional PKCE and token refresh | Gmail, Slack, Notion, X |
+| `oauth1` | OAuth 1.0a with HMAC-SHA1 | Trello |
+| `api_key` | Single key injected into a header | Firecrawl, Brevo, Stripe |
+| `basic` | Username:password in Base64 | Basic HTTP services |
+| `custom` | Multi-field credential schema (dynamic form) | WordPress, WooCommerce |
+
+## Authorized URIs
+
+Every provider defines an `authorizedUris` array that restricts which URLs the agent can call with those credentials. The sidecar verifies every outbound request against this list and rejects anything outside it, so a compromised or hallucinated URL cannot exfiltrate data to a different host.
+
+```json
+{
+  "authorizedUris": [
+    "https://gmail.googleapis.com/*",
+    "https://www.googleapis.com/gmail/*"
+  ]
+}
+```
+
+A provider can also set `allowAllUris: true` to allow any URL (use with caution, mostly reserved for HTTP proxies).
+
+## List available providers
+
+Providers are identified by `@scope/name` (e.g. `@appstrate/gmail`), not by an opaque `prov_` id. Use `/api/connections/integrations` to list every provider visible in the current application along with its connection status:
+
+```bash
+appstrate api GET /api/connections/integrations
+```
+
+The response mixes system and custom providers with the same shape, so a generic agent or UI can treat them uniformly.
+
+## Connections
+
+A **connection** is the association between a user and a provider, with their authenticated credentials (OAuth token, API key, custom fields). Credentials are encrypted at rest (AES, via `CONNECTION_ENCRYPTION_KEY`) and never leave the sidecar proxy at runtime.
+
+Connection routes take the provider as two path segments: `@scope/name`. The scope segment must start with `@`.
+
+### Connect an OAuth provider
+
+```bash
+# Initiate OAuth flow (returns an authUrl + state)
+appstrate api POST /api/connections/connect/@appstrate/gmail \
+  -H 'Content-Type: application/json' \
+  -d '{"scopes": ["https://www.googleapis.com/auth/gmail.readonly"]}'
+```
+
+The API returns `{ authUrl, state }`. Open `authUrl` in a browser; once the user authenticates, the callback at `/api/connections/callback` exchanges the code for a token and closes the popup.
+
+### Connect an API-key provider
+
+The API-key connect route uses the `/api-key` suffix on the same `@scope/name` path:
+
+```bash
+appstrate api POST /api/connections/connect/@appstrate/firecrawl/api-key \
+  -H 'Content-Type: application/json' \
+  -d '{"apiKey": "your-service-api-key"}'
+```
+
+### Connect a custom or basic provider (multi-field)
+
+`basic` and `custom` auth modes share the same `/credentials` suffix:
+
+```bash
+appstrate api POST /api/connections/connect/@acme/my-service/credentials \
+  -H 'Content-Type: application/json' \
+  -d '{"credentials": {"username": "user", "password": "pass", "domain": "acme.com"}}'
+```
+
+### Disconnect a provider
+
+```bash
+# Disconnect every connection for this provider on the current profile
+appstrate api DELETE /api/connections/@appstrate/gmail
+
+# Or delete a single connection by id
+appstrate api DELETE /api/connections/@appstrate/gmail -q connectionId=<id>
+```
+
+## Connection profiles
+
+Profiles organize connections by usage context.
+
+### User profiles
+
+Each dashboard user can have multiple connection profiles (e.g. "Personal", "Client A"). The agent uses the profile associated with the run.
+
+### Organization profiles
+
+Admins can create shared profiles at the organization level, used by all members.
+
+### Application profiles
+
+For headless integrations, connections are scoped by application via app profiles. Each application gets its own credentials, which keeps tenants isolated when you run Appstrate as a platform.
+
+## How the sidecar injects credentials
+
+At runtime, the agent calls the sidecar via `$SIDECAR_URL/proxy` with specific headers:
+
+```
+X-Provider: @appstrate/gmail                    # Which provider to use (@scope/name)
+X-Target: https://gmail.googleapis.com/...      # Target URL
+X-Proxy: https://proxy.com                      # (Optional) Outbound proxy
+X-Substitute-Body: true                         # (Optional) Also substitute in body
+```
+
+The sidecar then:
+
+1. Fetches encrypted credentials from the platform
+2. Substitutes `{{variable}}` placeholders in headers, URL, and body
+3. Validates the URL against the provider's `authorizedUris`
+4. Forwards the request to the external API with injected credentials
+5. Returns the response as-is (status + body + Content-Type)
+
+Responses over 50 KB are truncated with the `X-Truncated: true` header. The agent process never sees the raw credentials, which is what makes both system and custom providers safe to use from LLM-driven code.

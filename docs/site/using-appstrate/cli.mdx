@@ -1,0 +1,225 @@
+---
+title: CLI
+description: Reference for the appstrate command-line tool — 9 commands, flags, profile workflow.
+---
+
+The `appstrate` CLI drives an Appstrate instance: auth, profile switching, API passthrough, schema inspection, and spinning up a new local instance via `appstrate install`. It ships as a Bun package and uses the Bun runtime already on the host.
+
+## Get the CLI
+
+```bash
+bun install -g appstrate
+```
+
+Puts a permanent `appstrate` on your PATH. Requires [Bun](https://bun.sh). Works on macOS, Linux, and Windows.
+
+## Driving the CLI from a coding agent
+
+Install the [Appstrate Agent Skill](/docs/using-appstrate/skill) into your coding agent (Claude Code, Cursor, Antigravity, any [AGENTS.md-aware](https://github.com/numman-ali/openskills) host). The skill teaches the CLI, AFPS packaging, REST API, profiles, and ships a `curl → appstrate api` cheat sheet — no manual pointing required.
+
+`apps/cli/AGENTS.md` in the [appstrate-oss monorepo](https://github.com/appstrate/appstrate-oss) is also auto-discovered by agents running in the checkout. See [Coding Agents](/docs/integrations/coding-agents) for the pattern.
+
+## Commands
+
+<Accordions type="multiple">
+
+<Accordion title="appstrate install">
+
+Interactive installer for a local Appstrate instance. Prompts for a tier, writes a generated `.env` with cryptographic secrets, and brings the stack up — then opens `http://localhost:3000` once the healthcheck passes (up to 120s on Docker tiers).
+
+```bash
+appstrate install                         # interactive
+appstrate install --tier 3                # skip the tier prompt
+appstrate install --tier 0 --dir ~/demo-appstrate
+```
+
+| Flag | Values | Description |
+|---|---|---|
+| `-t`, `--tier` | `0\|1\|2\|3` | Skip the interactive tier prompt |
+| `-d`, `--dir` | path | Install directory (default: `~/appstrate`) |
+
+**Tiers**
+
+| Tier | Runtime | Services | Storage | Notes |
+|---|---|---|---|---|
+| 0 | Bun | None (PGlite in-process) | Filesystem | Hobby / evaluation. CLI auto-installs Bun if missing. |
+| 1 | Docker | PostgreSQL | Filesystem | Low-traffic single-node. In-memory scheduler / pubsub. |
+| 2 | Docker | PostgreSQL + Redis | Filesystem | Adds Redis (BullMQ, distributed rate-limiter). |
+| 3 | Docker | PostgreSQL + Redis + MinIO | S3 | Full production stack (default self-host target). |
+
+**Tier 0 specifics.** `git clone`s the `appstrate/appstrate` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
+
+**Tier 1/2/3 specifics.** Checks `docker info`, writes `docker-compose.yml` from an embedded template, writes `.env`, runs `docker compose up -d`, polls `/` for up to 120s.
+
+</Accordion>
+
+<Accordion title="appstrate login">
+
+Authenticates against an Appstrate instance using the OAuth 2.1 Device Authorization Grant (RFC 8628).
+
+```bash
+appstrate login                                              # interactive
+appstrate login --instance http://localhost:3000             # skip URL prompt
+appstrate login --profile prod --instance https://app.my.io  # named profile
+```
+
+| Flag | Description |
+|---|---|
+| `--instance` | Base URL of the Appstrate instance |
+| `--profile` | Profile name to store credentials under. Default: `default` |
+| `--org <id-or-slug>` | After the token exchange, pin this organization on the profile |
+| `--create-org <name>` | Create a new organization with this name and pin it (default app + hello-world agent are provisioned server-side) |
+| `--no-org` | Skip the post-login org-pinning step. Subsequent calls must carry `-H 'X-Org-Id: …'` |
+| `--app <id>` | After the org pin, pin this application on the profile |
+| `--create-app <name>` | Create a new application with this name after login and pin it |
+| `--no-app` | Skip the post-login app-pinning step |
+
+**Flow.** The CLI prints a short user-code + URL, opens the URL in your browser. You sign in on the instance's `/activate` page and click "Authorize". The CLI polls the token endpoint until approved, receives a 15-minute access JWT (ES256) + 30-day rotating refresh token, stores both in the OS keyring, and writes the profile to `~/.config/appstrate/config.toml`.
+
+**Automatic pinning after login:**
+
+- **Org.** One org → auto-pin. Zero orgs (fresh signup) → offer inline creation. Multiple orgs → interactive picker.
+- **App.** One app → auto-pin. Multiple apps → auto-pin the one with `isDefault: true`. Use `appstrate app switch` afterwards to change.
+
+On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / app "Default" (app_xxx)`. The pinned ids are sent as `X-Org-Id` / `X-App-Id` on every subsequent `appstrate api` call.
+
+**Session lifetime.** 15-minute access token + 30-day rotating refresh token (RFC 6819 reuse detection). The CLI transparently refreshes on 401; re-run `appstrate login` only when the refresh token family is revoked or the 30-day window elapses.
+
+</Accordion>
+
+<Accordion title="appstrate logout">
+
+Revokes the active session server-side (`POST /api/auth/sign-out`) and wipes the local keyring entry + profile from `config.toml`.
+
+```bash
+appstrate logout
+appstrate logout --profile prod
+```
+
+If the instance is unreachable, local credentials are still wiped (warning on stderr) so the CLI returns to a clean state even during outages.
+
+</Accordion>
+
+<Accordion title="appstrate whoami">
+
+Prints the identity attached to the active profile. Verifies the stored JWT is still valid by calling `GET /api/profile`; exits non-zero on 401, missing profile, or unreachable instance — useful in CI scripts that need to fail fast when auth drifts.
+
+```bash
+appstrate whoami
+appstrate whoami --profile prod
+```
+
+Output:
+
+```
+Profile:  default
+Instance: https://app.example.com
+User:     alice@example.com
+Name:     Alice
+Expires:  2026-04-25T00:36:40.285Z
+```
+
+</Accordion>
+
+<Accordion title="appstrate token">
+
+Prints metadata about the access + refresh tokens stored for a profile. **Metadata only** — the token plaintext is never written to stdout or stderr, so copy-pasting the output into a screen share, CI log, or bug report never leaks a bearer.
+
+```bash
+appstrate token
+appstrate token --profile prod
+```
+
+Output:
+
+```
+Profile:           default
+Instance:          https://app.example.com
+
+Access token
+  Status:          fresh
+  Expires:         in 14m 32s
+  Expires at:      2026-04-19T16:23:45.000Z
+
+Refresh token
+  Status:          valid
+  Expires:         in 29d 23h
+  Expires at:      2026-05-18T16:08:45.000Z
+```
+
+</Accordion>
+
+<Accordion title="appstrate org">
+
+Lists, switches, or creates organizations pinned on the active profile. When you create an org, a default application and a hello-world agent are provisioned server-side.
+
+```bash
+appstrate org                # list
+appstrate org use org_abc    # switch the active org
+appstrate org create "Acme"  # create + pin
+```
+
+</Accordion>
+
+<Accordion title="appstrate app">
+
+Same pattern as `org`, but for applications inside the active organization.
+
+```bash
+appstrate app use app_xyz
+appstrate app create "Production"
+```
+
+</Accordion>
+
+<Accordion title="appstrate api">
+
+Authenticated HTTP passthrough to the Appstrate API. The CLI composes the URL, injects the token, and prints the response. Useful when scripting or when driving the CLI from a coding agent.
+
+```bash
+appstrate api GET /api/agents
+appstrate api POST /api/agents/ag_xxx/run --body '{"input":{"query":"hi"}}'
+appstrate api POST /api/end-users --body '{"externalId":"user_alice"}'
+```
+
+</Accordion>
+
+<Accordion title="appstrate openapi">
+
+Explores the active profile's OpenAPI schema without flooding stdout.
+
+```bash
+appstrate openapi               # summary
+appstrate openapi GET /api/agents  # operation detail
+```
+
+</Accordion>
+
+</Accordions>
+
+## Profile workflow
+
+Switch between instances with `--profile`:
+
+```bash
+appstrate --profile prod login --instance https://appstrate.acme.com
+appstrate --profile prod whoami
+appstrate --profile default whoami
+```
+
+Each profile has its own instance URL, pinned org/app, and tokens under a distinct keyring entry. Profiles are persisted in `~/.config/appstrate/config.toml`.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Generic failure |
+| `2` | Invalid arguments |
+| `3` | Authentication required (run `appstrate login`) |
+| `4` | Network or instance unreachable |
+
+## Reference
+
+- Full command reference (with every flag): [`apps/cli/README.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md) in the monorepo.
+- REST API: [`/docs/api/introduction`](/docs/api/introduction).

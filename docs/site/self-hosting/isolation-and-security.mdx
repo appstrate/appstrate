@@ -1,0 +1,137 @@
+---
+title: Isolation and Security
+description: How Appstrate isolates every run, proxies credentials, and enforces SSRF protection.
+---
+
+Appstrate's isolation model has three layers: per-run Docker networks, a credential-injection sidecar proxy, and authorized-URI validation. Credentials never reach the agent container.
+
+## Per-run Docker network
+
+When a run starts (Tier 3 with `RUN_ADAPTER=docker`), Appstrate creates a fresh bridge network:
+
+```
+appstrate-exec-{runId}
+```
+
+The network is marked `internal: true`, so nothing on it can reach the host, the internet, or another run's network. Only two containers are attached to this run network:
+
+- The **agent container** (`PI_IMAGE`, default `appstrate-pi:latest`), named `appstrate-pi-{runId}`
+- A **sidecar** — either a pre-warmed `appstrate-sidecar-pool-{uuid}` or, if the pool is empty, a fresh `appstrate-sidecar-{runId}`. The sidecar is also attached to a shared `appstrate-egress` network (not internal) so it can reach the public internet on behalf of the agent.
+
+Every external call must go through the sidecar. When the run ends, the agent container and the run network are destroyed; the sidecar is removed too (pool is replenished separately, see below).
+
+The sidecar listens on **two ports**:
+
+- `:8080` — credential-aware proxy (`/proxy`, `/llm/*`, `/configure`, `/run-history`, `/health`)
+- `:8081` — transparent HTTP/HTTPS forward proxy (agents point `HTTP_PROXY` here)
+
+The agent container's environment is intentionally minimal:
+
+- No `RUN_TOKEN` (run auth is sidecar-only)
+- No `PLATFORM_API_URL` (the agent cannot reach the platform directly)
+- No `host.docker.internal` in `ExtraHosts` (only the sidecar can reach the host)
+
+## Sidecar pool
+
+To keep cold-start latency low, Appstrate pre-warms N sidecar containers on a separate network:
+
+```
+appstrate-sidecar-pool
+```
+
+The pool size is controlled by `SIDECAR_POOL_SIZE` (default: `2`, `0` to disable). At run time, one pooled sidecar is acquired, reconfigured via `POST /configure` with the run-specific context, and attached to the run's `appstrate-exec-{runId}` network. On release, the sidecar is **destroyed** (never reused) and the pool is replenished with a freshly-created container in the background — every run gets a clean sidecar, even when the pool hides the cold-start latency.
+
+## Credential injection
+
+Providers store encrypted credentials in the database (`CONNECTION_ENCRYPTION_KEY`, AES). At runtime, the agent never sees them. It sends HTTP requests to the sidecar:
+
+```
+POST http://sidecar:8080/proxy
+Headers:
+  X-Provider: prov_xxx
+  X-Target: https://api.example.com/resource
+  X-Proxy: https://proxy.example.com      # optional
+  X-Substitute-Body: true                   # optional
+```
+
+The sidecar:
+
+1. Fetches the encrypted credential for `prov_xxx` from the platform using its run token.
+2. Decrypts it in memory.
+3. Substitutes `{{placeholder}}` tokens in headers, URL, and optionally body.
+4. Validates `X-Target` against the provider's `authorizedUris` allowlist (blocks SSRF).
+5. Forwards the request with the injected credential and returns the response as-is (status, body, `Content-Type`).
+
+Responses over 50 KB are truncated with the `X-Truncated: true` header.
+
+## LLM traffic isolation
+
+LLM calls from the agent also go through the sidecar. Two entry points coexist:
+
+- The agent's SDK points `MODEL_BASE_URL` at `http://sidecar:8080/llm/*` for its own LLM API requests
+- HTTP libraries that honor `HTTP_PROXY` (curl, fetch, third-party SDKs in a skill) transparently tunnel through the forward proxy on `http://sidecar:8081`
+
+Both paths let the platform enforce:
+
+- Per-org system provider keys (`SYSTEM_PROVIDER_KEYS`) without exposing them to the agent
+- Cost tracking as the Pi SDK reports token usage back on each completion
+- Outbound proxying (`PROXY_URL`, org-level or per-run proxies — see [Proxies](/docs/features/proxies)) for air-gapped or policy-restricted deployments
+
+## Resource limits
+
+Each run container is bounded by static CPU and memory limits set at the Docker API level in `apps/api/src/services/docker.ts`:
+
+- Agent container memory: `1536 MiB`
+- Agent container CPU: `2` cores (`nanoCpus: 2_000_000_000`)
+- Sidecar container: equivalent defaults from `runtime-pi/sidecar/constants.ts`
+
+Per-run overrides are not exposed through env vars today — to change the ceilings you have to edit the defaults in-source and rebuild the images.
+
+## Run timeout ceiling
+
+A platform-wide ceiling caps the maximum runtime per run via `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` (default **1800 seconds / 30 minutes**). When the ceiling is hit, the run is terminated and emits a `run.timeout` webhook event. Any agent-declared timeout is clamped to this value.
+
+## SSRF protection
+
+The sidecar's allowlist check rejects:
+
+- Any target URL not matching one of the provider's `authorizedUris` patterns
+- Reserved network blocks (loopback, link-local, RFC 1918, IPv6 ULA/link-local, IPv4-mapped IPv6)
+
+The SSRF guard is strict with no runtime bypass; the only way to grant a provider access to a private range is to include the specific host in its `authorizedUris` allowlist.
+
+The same guard runs on webhook URLs at create and delivery time (see [Webhooks § SSRF](/docs/features/webhooks#ssrf-protection)), so both outbound provider calls and outbound webhook deliveries flow through the same protection layer.
+
+## When Docker is not available
+
+`RUN_ADAPTER` defaults to `process` — with that setting (the default for Tier 0/1 self-hosts), Appstrate spawns the sidecar as a Bun subprocess on a host port and the agent as another subprocess. Credential isolation still works because the sidecar process holds the tokens and fetches credentials the same way, but you lose:
+
+- **Network isolation** — every run shares the host's localhost; there are no per-run internal networks.
+- **Filesystem isolation** — all runs see the same working directory.
+- **Host protection** — the agent subprocess can reach any host on the Appstrate machine, not just what the sidecar lets through.
+
+This is fine for solo dev, a one-person Tier 0 install, or a trusted Tier 1 staging environment, but it is not appropriate for a multi-tenant production deployment. Set `RUN_ADAPTER=docker` for full isolation.
+
+## Air-gapped deployments
+
+Appstrate can run fully air-gapped:
+
+- `MODULES=""` disables the OIDC identity provider
+- `S3_BUCKET`/filesystem fallback for storage
+- `SYSTEM_PROXIES` + `PROXY_URL` route all outbound traffic through your egress gateway
+- Pre-pulled images for `PI_IMAGE` and `SIDECAR_IMAGE` in a private registry
+
+There is no telemetry and no phone-home.
+
+## What is not shipped
+
+Be explicit about the limits:
+
+- Appstrate does not terminate TLS. Use a reverse proxy (nginx, Caddy, Traefik, cloud load balancer).
+- There is no Docker-in-Docker. Run containers are siblings of the Appstrate container, not children.
+- There is no in-built secret rotation UX for `BETTER_AUTH_SECRET` or `CONNECTION_ENCRYPTION_KEY`. Rotating them requires a planned downtime window and a re-encryption migration (not scripted).
+
+## Next
+
+- [Configuration](/docs/self-hosting/environment-variables) — full env var reference including isolation-related settings.
+- [Production Checklist](/docs/self-hosting/production-checklist) — what to do before going live.

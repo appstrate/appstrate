@@ -1,0 +1,207 @@
+---
+title: API Reference
+description: Complete guide to the Appstrate API — authentication, versioning, error handling, rate limiting, idempotency, pagination, and SSE streaming.
+---
+
+## Base URL
+
+All requests are relative to the `/api` root of your instance:
+
+```
+http://localhost:3000/api
+```
+
+The OpenAPI specification is publicly available (no authentication required):
+
+- **JSON**: `GET /api/openapi.json`
+- **Swagger UI**: `GET /api/docs`
+
+---
+
+## Authentication
+
+The API supports two authentication methods.
+
+### Cookie session
+
+Used by the frontend. Authentication relies on [Better Auth](https://www.better-auth.com/) with email/password and optional social login (Google, GitHub). The session cookie is sent automatically by the browser.
+
+For organization-scoped routes, include the `X-Org-Id` header:
+
+```bash
+curl -b cookies.txt \
+  -H "X-Org-Id: org_abc123" \
+  http://localhost:3000/api/applications
+```
+
+### API key
+
+For headless integrations. API keys use the `ask_` prefix and are scoped to an application.
+
+```bash
+curl -H "Authorization: Bearer ask_your_key" \
+     -H "X-App-Id: app_abc123" \
+     http://localhost:3000/api/agents
+```
+
+The `X-App-Id` header is required for application-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, packages, providers, and connections.
+
+### SSE and API keys
+
+SSE (Server-Sent Events) endpoints do not support custom headers via `EventSource`. Pass the API key as a query parameter:
+
+```bash
+curl -N "http://localhost:3000/api/realtime/runs/run_abc?token=ask_your_key"
+```
+
+---
+
+## End-User Impersonation
+
+The API allows executing requests on behalf of an end-user via the `Appstrate-User` header:
+
+```bash
+curl -H "Authorization: Bearer ask_your_key" \
+     -H "X-App-Id: app_abc123" \
+     -H "Appstrate-User: eu_xyz789" \
+     http://localhost:3000/api/runs
+```
+
+Constraints:
+
+- **API key auth only** — returns `400` if used with a cookie session
+- The end-user must belong to the application associated with the API key
+- All requests are recorded in the audit log (requestId, apiKeyId, endUserId, applicationId, IP, userAgent)
+
+---
+
+## API Versioning
+
+The API uses date-based versioning, inspired by the Stripe model. Send the `Appstrate-Version` header to target a specific version:
+
+```
+Appstrate-Version: 2026-03-21
+```
+
+- **No header**: uses the organization's pinned version, or the current version by default
+- **Pinning**: configure the default version in your organization settings
+- **Deprecation**: sunset versions return a `Sunset` header with the end-of-support date
+
+---
+
+## Error Format
+
+All errors follow the [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) specification (`application/problem+json`). Every response includes a `Request-Id` header (`req_` prefix) for tracing.
+
+```json
+{
+  "type": "https://appstrate.dev/errors/validation-error",
+  "title": "Validation Error",
+  "status": 422,
+  "detail": "The 'name' field is required and cannot be empty.",
+  "instance": "/api/agents"
+}
+```
+
+The `Request-Id` is present on **all** responses (success and error):
+
+```
+Request-Id: req_a1b2c3d4e5f6
+```
+
+---
+
+## Rate Limiting
+
+Rate limiting is backed by Redis via `rate-limiter-flexible`. Keys are constructed from the method, path, and caller identity:
+
+- **Cookie session**: `method:path:userId`
+- **API key**: `method:path:apikey:apiKeyId`
+
+Every response includes standard IETF headers:
+
+```
+RateLimit: limit=20, remaining=18, reset=45
+RateLimit-Policy: 20;w=60
+```
+
+When the limit is exceeded (`429 Too Many Requests`), a `Retry-After` header indicates the delay in seconds.
+
+**Key limits**:
+
+| Category | Limit |
+|----------|-------|
+| Run endpoints | 20 requests/min |
+| Package import | 10 requests/min |
+| Resource creation | 10 requests/min |
+
+---
+
+## Idempotency
+
+Critical POST routes (end-users, webhooks, agent run) support the `Idempotency-Key` header to guarantee idempotency:
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer ask_your_key" \
+     -H "X-App-Id: app_abc123" \
+     -H "Idempotency-Key: my-unique-key-123" \
+     -H "Content-Type: application/json" \
+     -d '{"agentId": "agent_abc"}' \
+     http://localhost:3000/api/runs
+```
+
+Behavior:
+
+- Keys are stored in Redis with a **24-hour** TTL
+- A SHA-256 hash of the body is used for conflict detection
+- **`409 Conflict`**: concurrent request with the same key (processing in progress)
+- **`422 Unprocessable Entity`**: same key but different body
+- Replays return the `Idempotent-Replayed: true` header
+
+---
+
+## Pagination
+
+List endpoints use offset-based pagination:
+
+```bash
+curl -H "Authorization: Bearer ask_your_key" \
+     -H "X-App-Id: app_abc123" \
+     "http://localhost:3000/api/agents?page=2&pageSize=20"
+```
+
+Response shape:
+
+```json
+{
+  "data": [{ "id": "agent_abc", "name": "My agent" }],
+  "pagination": {
+    "page": 2,
+    "pageSize": 20,
+    "total": 47,
+    "totalPages": 3
+  }
+}
+```
+
+---
+
+## SSE Streaming (Realtime)
+
+The API exposes SSE endpoints for tracking runs in real time. Events include run status changes and log entries.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/realtime/runs/:id` | Single run (historical replay + live logs) |
+| `GET /api/realtime/agents/:id/runs` | All runs for an agent |
+| `GET /api/realtime/runs` | All runs across the application |
+
+Connection example with API key:
+
+```bash
+curl -N -H "Accept: text/event-stream" \
+     "http://localhost:3000/api/realtime/runs/run_abc?token=ask_your_key"
+```
+
+For cookie-based authentication, standard headers (`Cookie`, `X-Org-Id`) are used normally.

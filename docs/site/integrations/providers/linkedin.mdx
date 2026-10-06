@@ -1,0 +1,61 @@
+---
+title: LinkedIn
+description: Connect LinkedIn to your Appstrate agents.
+---
+
+## Overview
+
+LinkedIn is a professional social network, allowing your agents to manage profiles, publish content, and interact with contacts.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` (with PKCE) |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `openid`, `profile`, `email` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `openid` | OpenID Connect (required) |
+| `profile` | Read name and profile picture |
+| `email` | Read email address |
+| `w_member_social` | Post on behalf of member |
+| `r_organization_social` | Read organization posts |
+| `w_organization_social` | Post on behalf of organization |
+| `rw_organization_admin` | Manage organization pages |
+| `r_ads` | Read ads data |
+| `r_ads_reporting` | Read ads reporting |
+| `rw_ads` | Manage ad campaigns |
+| `r_basicprofile` | Read full profile (headline, positions) |
+| `r_liteprofile` | Read basic profile (name, photo) |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.linkedin.com/*`
+
+## Connect LinkedIn
+
+1. [Create a LinkedIn Developer App](https://www.linkedin.com/developers/apps) on the developer portal
+2. Request the required API products (Sign In with LinkedIn, Share on LinkedIn, Marketing Developer Platform)
+3. Add the Appstrate redirect URL in the app's OAuth 2.0 settings
+4. Copy the Client ID and Client Secret from the Auth tab
+5. Enter these credentials in the LinkedIn provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call LinkedIn APIs through the sidecar proxy. Example prompt:
+
+```
+Every Wednesday, draft a LinkedIn post from the latest company blog articles.
+Adapt the tone for LinkedIn (professional, engaging) and publish it on the company page.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

@@ -1,0 +1,101 @@
+---
+title: Quickstart
+description: From zero to your first agent run in 5 minutes.
+---
+
+## Install and run
+
+Three steps, local dev happy path. For server deploys, curl one-shot, Docker Compose, or driving an instance from another machine, see [Install](/docs/get-started/install).
+
+<Steps>
+
+<Step>
+
+### Install the CLI and spin up a local instance
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+Auto-detects Docker (Tier 3 if present, Tier 0 otherwise). Opens `http://localhost:3000` once the healthcheck passes.
+
+> Want to pick a specific tier interactively, install via Bun, or use Docker Compose? See [Install](/docs/get-started/install).
+
+</Step>
+
+<Step>
+
+### Sign in
+
+```bash
+appstrate login
+```
+
+The CLI prints a short user-code + URL, opens the URL in your browser. You sign up (first user owns the org), approve the device, and the exchange writes a 15-minute access token + 30-day rotating refresh token to your OS keyring.
+
+</Step>
+
+<Step>
+
+### Connect a model and run your first agent
+
+<Tabs items={['With a coding agent', 'Manually via the webapp']}>
+
+<Tab value="With a coding agent">
+
+Install the [Appstrate Agent Skill](/docs/using-appstrate/skill) into Claude Code / Cursor / Antigravity or any [AGENTS.md-aware](https://github.com/numman-ali/openskills) host. One command auto-detects your target:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appstrate/skills/main/install.sh | bash -s appstrate
+```
+
+Then delegate in plain English. Example prompts to get you from zero to a first run:
+
+- **Connect a model:**
+  > Connect my Anthropic API key so I can run agents against Claude.
+- **Build and run:**
+  > Build an agent called `hello-world` with prompt `Summarize this URL: {url}`, then run it against `https://anthropic.com` and show me the output.
+- **Inspect:**
+  > Show me the last 5 runs with their status and duration.
+
+The skill teaches your coding agent the CLI, AFPS packaging, scoped names, profiles, and the REST API. Full reference: [Using Appstrate / Skill](/docs/using-appstrate/skill).
+
+</Tab>
+
+<Tab value="Manually via the webapp">
+
+**Connect a model.** You need at least one LLM key before running an agent.
+
+1. Open the webapp at `http://localhost:3000`
+2. Go to **Settings → Models**, click **Add a model**
+3. Pick a provider (OpenAI, Anthropic, OpenRouter, any OpenAI-compatible)
+4. Paste your key, save
+
+**Run the built-in `hello-world` agent.** A `hello-world` agent is provisioned on a fresh install.
+
+1. Open the `hello-world` agent from the agents list
+2. Click **Run**, fill the input, hit go
+
+You should see a streamed response within seconds. The container is created for the run and destroyed when it finishes. Credentials never reach the agent process: they pass through a sidecar proxy.
+
+</Tab>
+
+</Tabs>
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+- A local Appstrate instance at `:3000`
+- An authenticated CLI on your machine
+- One working agent with one connected model
+- Either a webapp you drive by hand, or a coding agent that drives the CLI for you
+
+## Where to go next
+
+- [Using Appstrate / CLI](/docs/using-appstrate/cli): the full CLI reference (9 commands, flags, profile workflow)
+- [Integrations / Coding Agents](/docs/integrations/coding-agents): drive Appstrate from Cursor, Claude Code, or any coding agent
+- [Features](/docs/features/agents): the mental model behind agents, runs, skills, tools, memory
+- [Self-Hosting](/docs/self-hosting): when to leave Tier 0

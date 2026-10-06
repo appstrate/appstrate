@@ -1,0 +1,44 @@
+---
+title: ClickUp
+description: Connect ClickUp to your Appstrate agents.
+---
+
+## Overview
+
+ClickUp is a project and task management platform, allowing your agents to create, update, and organize tasks.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | None (ClickUp does not use granular scopes) |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.clickup.com/*`
+
+## Connect ClickUp
+
+1. [Create a ClickUp application](https://app.clickup.com/settings) in your workspace settings (Settings > Integrations)
+2. Add the Appstrate redirect URL
+3. Copy the Client ID and Client Secret
+4. Enter these credentials in the ClickUp provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call ClickUp APIs through the sidecar proxy. Example prompt:
+
+```
+Every Monday morning, fetch all overdue tasks in the "Dev" space.
+For each overdue task, add a comment requesting a status update
+and move it to the "Needs Review" list.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

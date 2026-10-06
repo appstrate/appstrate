@@ -1,0 +1,133 @@
+---
+title: Quickstart
+description: Make your first Appstrate API call in under 5 minutes.
+---
+
+This page walks through getting an API key and making your first request against a local Appstrate instance.
+
+## Prerequisites
+
+- A running Appstrate instance. If you don't have one, follow the [Get Started Quickstart](/docs/get-started/quickstart) to spin up Tier 0 in under 10 minutes.
+- Your dashboard is reachable at `http://localhost:3000`.
+
+## First API call
+
+<Steps>
+
+<Step>
+
+### Create an API key
+
+From the dashboard, go to **Settings → API Keys** and click **Create API Key**. Give it a name (e.g. `dev-local`) and copy the full key. It starts with `ask_` and is only shown once.
+
+You can also create a key with a curl call if you already have a cookie session:
+
+```bash
+curl -X POST http://localhost:3000/api/api-keys \
+  -H "Cookie: $YOUR_SESSION_COOKIE" \
+  -H "X-Org-Id: $YOUR_ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "dev-local",
+    "scopes": ["agents:read", "agents:run", "runs:read"]
+  }'
+```
+
+The response includes the full key under `key`. Save it; it cannot be retrieved later.
+
+</Step>
+
+<Step>
+
+### Verify the key
+
+The simplest authenticated call is listing the keys you have access to:
+
+```bash
+export APPSTRATE_KEY=ask_your_key_here
+
+curl http://localhost:3000/api/api-keys \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
+```
+
+If the key is valid you get a JSON array of API key metadata (without the key material). A `401` means the key is wrong or revoked; a `403` means the key lacks the `api-keys:read` scope.
+
+</Step>
+
+<Step>
+
+### List your agents
+
+```bash
+curl http://localhost:3000/api/agents \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
+```
+
+If your application doesn't have any agents yet, the response is an empty array. Create one from the dashboard (**Agents → New agent**) or via [`POST /api/packages/agents`](/docs/api/introduction).
+
+</Step>
+
+<Step>
+
+### Run an agent
+
+```bash
+curl -X POST http://localhost:3000/api/agents/ag_xxx/run \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": { "query": "hello" }
+  }'
+```
+
+The response is `202 Accepted` with a `runId`. The run executes asynchronously. To watch it in realtime:
+
+```bash
+curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
+```
+
+The SSE stream delivers `log`, `status`, and `result` events until the run ends.
+
+</Step>
+
+<Step>
+
+### Impersonate an end-user
+
+If you are embedding Appstrate into a multi-tenant product, you execute runs on behalf of your end-users. Create one first:
+
+```bash
+curl -X POST http://localhost:3000/api/end-users \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "externalId": "user_alice", "name": "Alice" }'
+```
+
+Then run an agent as that user by adding the `Appstrate-User` header:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/ag_xxx/run \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Appstrate-User: eu_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "query": "What meetings do I have?" } }'
+```
+
+Connections and memories used by the run are scoped to `eu_xxx`. Every impersonation is logged (request id, API key id, end-user id, IP, user agent).
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+- An API key stored in `$APPSTRATE_KEY`
+- Verified authentication
+- At least one running agent
+- An end-user and a first impersonated run
+
+## Next
+
+- [Authentication](/docs/api/authentication) — the three auth flows in detail.
+- [Multi-Tenancy](/docs/features/multi-tenancy) — organizations, applications, end-users, impersonation.
+- [API Reference](/docs/api/introduction) — the full endpoint catalog.

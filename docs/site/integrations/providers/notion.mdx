@@ -1,0 +1,47 @@
+---
+title: Notion
+description: Connect Notion to your Appstrate agents.
+---
+
+## Overview
+
+Notion is an all-in-one productivity tool, allowing your agents to manage pages, databases, and content.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | None (Notion manages permissions at the integration level) |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.notion.com/*`
+
+## Connect Notion
+
+1. [Create a Notion integration](https://www.notion.so/my-integrations)
+2. Configure OAuth settings (type "Public integration")
+3. Add the Appstrate redirect URI
+4. Copy the Client ID and Client Secret
+5. Enter these credentials in the Notion provider settings on Appstrate
+
+> **Note**: The user will need to share specific pages/databases with the integration during the connection step.
+
+## Usage in an Agent
+
+Once connected, the agent can call Notion APIs through the sidecar proxy. Example prompt:
+
+```
+After each meeting (detected from Google Calendar), create a meeting notes page
+in the "Meetings" database on Notion with the date, participants, and a notes
+template to fill in.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

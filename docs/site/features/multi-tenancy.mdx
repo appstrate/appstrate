@@ -1,0 +1,128 @@
+---
+title: Multi-Tenancy
+description: Organizations, applications, end-users, API keys, and impersonation — how Appstrate isolates tenants end to end.
+---
+
+Appstrate is multi-tenant by default. Every request is evaluated inside a strictly scoped context, and every row in the database carries a tenant key. This page describes the hierarchy, the request pipeline, and how to map your own product's tenants onto Appstrate primitives.
+
+## The hierarchy
+
+```
+Organization (UUID)
+├── Members (owner | admin | member | viewer)
+├── Application app_xxx (one or many per org)
+│   ├── End-User eu_xxx (externalId unique per app)
+│   ├── Application packages (installed agents/skills/tools/providers)
+│   ├── Provider credentials (encrypted, per app)
+│   └── Runs (carry orgId, applicationId, apiKeyId, endUserId OR dashboardUserId)
+├── API Keys ask_xxx (scoped to org AND application)
+├── Org models, proxies, system provider keys
+└── Invitations
+```
+
+### Organizations
+
+An organization is the top-level tenant. Its primary key is a UUID. Every resource (applications, runs, api keys, webhooks, ...) foreign-keys back to `orgId`.
+
+Members have one of four roles: `owner`, `admin`, `member`, `viewer`. Roles map to a static permission matrix with 60+ entries (`agents:read`, `webhooks:write`, `members:invite`, ...). Only owners can delete the organization.
+
+### Applications
+
+An application is a product surface inside an organization. The id carries the `app_` prefix. Every organization has at least one default application (`isDefault: true`). Applications separate configuration, end-users, credentials, and installed packages.
+
+Use one application per product or per tenant deployment. If your SaaS serves multiple customers, you can either:
+
+- Model **one org, one app, many end-users** (recommended for most multi-tenant products)
+- Model **one org per customer** (more isolation, higher management overhead)
+
+### End-users
+
+End-users are the users of your product. They are not Appstrate platform users: they have no password, cannot log into the dashboard, and are managed entirely through the API. Their id carries the `eu_` prefix and maps to your system's ID via `externalId` (unique per application).
+
+### API keys
+
+API keys are the authentication primitive for headless integrations. They always have both `orgId` and `applicationId` set (app-level pinning is a structural invariant, not a scope). They carry a `scopes` array that restricts the operations they can perform. See [API Keys](/docs/features/api-keys).
+
+## Request scoping
+
+Every authenticated request goes through three middlewares in order:
+
+1. **Auth** (`lib/auth-pipeline.ts`): resolves session cookie, API key, or OAuth token. Populates the request context with user or API key information.
+2. **Org context** (`middleware/org-context.ts`): validates the `X-Org-Id` header against the authenticated identity's memberships. API keys are pre-pinned to their organization; sessions require the header explicitly.
+3. **App context** (`middleware/app-context.ts`): validates the `X-App-Id` header against the organization. API keys that already point to a specific app enforce a match; a mismatch is a `403 forbidden`.
+
+Queries in services always filter by the resolved context:
+
+```ts
+// Pseudo-code of every service call
+db.query.runs.findMany({
+  where: (runs, { eq, and }) => and(
+    eq(runs.orgId, ctx.orgId),
+    eq(runs.applicationId, ctx.applicationId),
+    ctx.endUserId ? eq(runs.endUserId, ctx.endUserId) : undefined,
+  ),
+});
+```
+
+There is no implicit cross-tenant query: every list endpoint is scoped.
+
+## End-user impersonation
+
+Impersonation mirrors the Stripe pattern. Pass the `Appstrate-User: eu_xxx` header on an API key request to act on behalf of an end-user:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/ag_xxx/run \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Appstrate-User: eu_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "query": "hello" } }'
+```
+
+Rules:
+
+- Requires API key auth. Rejected on session cookies (returns `400`, `header_not_allowed`).
+- The end-user must belong to the API key's application, or the request is rejected (`403`, `invalid_end_user`).
+- Connections, memories, and run visibility are scoped to the impersonated end-user for the duration of the request.
+- Each impersonation is written to the log pipeline as a structured JSON line with exactly these fields: `requestId`, `apiKeyId`, `authenticatedMember` (the member who owns the API key), `endUserId`, `applicationId`, `method`, `path`, `ip`, `userAgent`.
+
+## Session realm isolation
+
+The core `user` and `session` tables carry a `realm` column (default `"platform"`), always present regardless of whether any module is loaded. Two values matter:
+
+- `platform` — dashboard users (members of organizations)
+- `end_user:<appId>` — end-users of a specific application
+
+The OIDC module issues sessions tagged with an `end_user:<appId>` realm when it acts as an OpenID Provider for that application's end-users. Enforcement lives in core: the `realm-guard` middleware (`middleware/realm-guard.ts`) rejects platform requests from end-user sessions and vice versa. This prevents a stolen end-user session from reaching an organization's admin API, even if both live behind the same Appstrate instance.
+
+## Credential isolation
+
+Provider credentials (OAuth tokens, API keys, custom fields) are encrypted at rest with `CONNECTION_ENCRYPTION_KEY` and scoped to an application. At runtime, agents never receive credentials directly: the sidecar proxy injects them on outbound requests. See [Self-Host / Isolation & Security](/docs/self-hosting) for the full credential flow.
+
+## Audit
+
+Appstrate does not ship a centralized audit table today. Audit is captured in two complementary ways:
+
+- **Structured logs**: every auth decision, impersonation, and permission denial is emitted as a JSON log line via `logger.info()` or `logger.warn()`.
+- **Denormalized columns on runs**: every run row stores `orgId`, `applicationId`, `apiKeyId`, `dashboardUserId`, `endUserId`, `scheduleId`, `proxyLabel`, and `modelLabel`. This gives you a permanent record of who triggered a run, on whose behalf, and which proxy + model the run actually used.
+
+For compliance-grade persistent audit (retention, export, tamper-evidence), consume the structured logs from your observability stack.
+
+## Mapping your product
+
+The most common model for a multi-tenant SaaS:
+
+| Your product | Appstrate primitive |
+|---|---|
+| Tenant / workspace / customer | Application (`app_`) |
+| User of your product | End-User (`eu_`), with `externalId` = your user id |
+| Your backend calls Appstrate | API key with scopes |
+| User triggers an agent from your UI | Your backend calls Appstrate with `Appstrate-User: eu_xxx` |
+| Provider credentials (Gmail, Slack, etc.) | Connection profile attached to the end-user |
+
+A single organization and a single application are usually enough. Add more applications only when you need hard resource isolation between deployments (e.g. dev vs. production, or distinct products).
+
+## Next
+
+- [Applications](/docs/features/applications) — create and manage applications.
+- [End-Users](/docs/features/end-users) — create end-users and impersonate them.
+- [API Keys](/docs/features/api-keys) — create scoped machine-to-machine keys.

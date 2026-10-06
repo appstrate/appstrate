@@ -1,0 +1,96 @@
+---
+title: Skill
+description: "The Appstrate Agent Skill: a portable package that teaches your coding agent the CLI, REST API, and AFPS conventions so you can delegate everything after setup."
+---
+
+The Appstrate Agent Skill is the third way to drive Appstrate, alongside the [webapp](/docs/using-appstrate/webapp) and the [CLI](/docs/using-appstrate/cli). You install it once into your coding agent (Claude Code, Cursor, Antigravity, any AGENTS.md-aware host) and from then on the agent knows how to author manifests, package AFPS, deploy, run, iterate, wire providers, rotate keys, switch profiles, and call `appstrate api` without you having to copy-paste recipes from the docs.
+
+The skill is **open source** (Apache 2.0) at [github.com/appstrate/skills](https://github.com/appstrate/skills). It is framework-agnostic: the same SKILL.md + references run under every host that supports the [Anthropic Agent Skills](https://docs.claude.com/en/docs/claude-code/skills) format.
+
+## Install
+
+One command, auto-detects your coding agent:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appstrate/skills/main/install.sh | bash -s appstrate
+```
+
+Inspect `install.sh` before piping to `bash` if you want. The installer copies the skill to the canonical path for the host it detects. Force a specific target with a flag:
+
+| Flag | Target | Path |
+|---|---|---|
+| `--claude` | Claude Code | `~/.claude/skills/appstrate/` |
+| `--cursor` | Cursor | `~/.cursor/skills/appstrate/` |
+| `--antigravity` | Antigravity | `~/.antigravity/skills/appstrate/` |
+| `--universal` | AGENTS.md-aware hosts (Windsurf, Aider, [openskills](https://github.com/numman-ali/openskills)) | `~/.agents/skills/appstrate/` |
+
+## What the skill contains
+
+```
+skills/appstrate/
+├── SKILL.md              # Entry point, loaded on trigger
+├── assets/               # Starter manifests (agent, skill, tool)
+├── references/
+│   ├── create-agent.md   # Full 5-step workflow
+│   ├── concepts.md       # Platform overview + pointers
+│   ├── manifest-schema.md
+│   ├── prompt-writing.md
+│   ├── system-tools.md   # output, state, report, log, add-memory
+│   ├── api-cheatsheet.md # appstrate api flags + skill-specific gotchas
+│   ├── inline-runs.md
+│   ├── profiles.md       # Multi-instance workflow
+│   └── setup.md          # Install edge cases
+└── scripts/
+    └── afps-pack.sh      # Pack a directory as .afps (ZIP)
+```
+
+The skill does NOT run `appstrate install` for you, by design. Install is a human decision (tier, Docker-or-not, port), so the skill assumes `appstrate whoami` already succeeds and walks you through the [manual install from the Quickstart](/docs/get-started/quickstart) when it doesn't.
+
+## Use it
+
+In a new chat with your coding agent, name the skill explicitly so it loads first:
+
+> Using the **Appstrate** skill, build me a Gmail digest agent that summarises unread mail every morning.
+
+Naming the skill is the single most reliable activation signal. Once loaded, typical prompts:
+
+- *"Create an agent called `email-triage` that reads my Gmail inbox and posts a summary to Slack. Wire the Gmail and Slack providers for end-user `eu_alice`."*
+- *"Pack my local `./my-skill` folder as an AFPS and publish it to my instance under `@acme/my-skill@1.0.0`."*
+- *"Rotate the API key named `ci-deploy`. Revoke the old one only after the new one is verified."*
+- *"Diff my `dev` profile's agent list with `prod`, tell me what's missing on prod."*
+- *"Replay run `run_01HZABC` against end-user `eu_bob` to check if the provider keys work for him too."*
+- *"List every agent that's failing more than 10% of the time this week, show me the last run's stderr."*
+
+The agent reads the relevant reference file on demand (progressive disclosure: only `create-agent.md` for authoring, only `inline-runs.md` for one-shot runs, etc.) so the context window stays small. If something fails, it stops and surfaces the error instead of retrying blindly.
+
+## Update
+
+Same command with `--update`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appstrate/skills/main/install.sh | bash -s appstrate --update
+```
+
+Re-run whenever the CLI version on the instance moves past the skill's documented commands. The skill itself has a self-update hint baked into its error table, so your agent will surface the suggestion when it hits a flag it doesn't recognise.
+
+## Uninstall
+
+Delete the directory that matches your host target from the table above. No residual config, no registry entry, no cleanup needed.
+
+## Customise it for your org
+
+The skill is just Markdown + scripts in a git repo, so an internal platform team can:
+
+- Fork [`appstrate/skills`](https://github.com/appstrate/skills), add org-specific conventions (naming rules, required provider scopes, approval workflow) to SKILL.md or a new reference, and pipe your forked `install.sh` instead.
+- Ship a second skill that wraps Appstrate with your own domain vocabulary (e.g. an `acme-agents` skill that enforces your naming scheme and pre-selects `prod-acme` as the default profile).
+- Publish either as a private repo; coding agents load from any URL, not just GitHub.
+
+See [Skill Creator](https://docs.claude.com/en/docs/claude-code/skills#creating-skills) for the format and [Compare](/docs/resources/compare) for where the Appstrate + coding-agent combo fits against agent frameworks that ship as SDKs.
+
+## Reference
+
+- [Quickstart](/docs/get-started/quickstart): the 5-step onboarding that ends with loading this skill.
+- [CLI](/docs/using-appstrate/cli): the 9 commands the skill drives under the hood.
+- [Webapp](/docs/using-appstrate/webapp): the visual counterpart when you prefer clicks to prompts.
+- [Coding Agents integration](/docs/integrations/coding-agents): use cases and why this combo beats coding-agent alone.
+- [github.com/appstrate/skills](https://github.com/appstrate/skills): source, issues, and the full skill catalog (not only `appstrate`; future skills for providers, tenants, etc. ship here).

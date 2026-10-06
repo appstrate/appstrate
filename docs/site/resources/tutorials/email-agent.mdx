@@ -1,0 +1,198 @@
+---
+title: "Tutorial: Email Digest Agent"
+description: Build a complete agent that summarizes your Gmail emails and notifies you on Slack.
+---
+
+## Goal
+
+In this tutorial, you'll create an agent that:
+1. Connects to Gmail and Slack
+2. Fetches unread emails from the last 24 hours
+3. Summarizes each email with AI
+4. Sends a recap to a Slack channel
+5. Runs automatically every morning at 8am
+
+## Prerequisites
+
+- A running Appstrate instance ([Quickstart](/en/docs/get-started/quickstart))
+- A configured LLM model (Settings > Models)
+- A Google account (for Gmail)
+- A Slack workspace (for notifications)
+
+## 1⃣ Step 1 — Create the Agent
+
+Click **New agent** in the sidebar and configure:
+
+- **Name**: `email-daily-digest`
+- **Description**: Daily email summary
+
+### Prompt
+
+```
+You are an assistant that summarizes emails.
+
+1. Use Gmail to fetch unread emails from the last 24 hours
+2. For each email, write a 2-3 line summary with:
+   - Sender
+   - Subject
+   - Key points / required actions
+3. Sort emails by priority (urgent first)
+4. Send the recap on Slack in the #daily-digest channel
+
+Slack message format:
+*Daily Digest — {date}*
+{count} unread emails
+
+---
+*URGENT*
+• {subject} — from {sender}
+  {summary}
+
+*NORMAL*
+• {subject} — from {sender}
+  {summary}
+
+If no emails are found, send "No unread emails in the last 24h "
+```
+
+## 2⃣ Step 2 — Connect Gmail
+
+1. Go to the agent's page
+2. In the **Providers** section, click **Connect** next to Gmail
+3. Authenticate with your Google account
+4. Authorize read access to emails
+
+The agent can now read your emails via the sidecar proxy, without ever having direct access to your OAuth tokens.
+
+### Via the API
+
+```bash
+curl -X POST "http://localhost:3000/api/connections/connect/@appstrate/gmail" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"scopes": ["https://www.googleapis.com/auth/gmail.readonly"]}'
+```
+
+The response contains `{ authUrl, state }`; open `authUrl` in a browser and complete the OAuth flow. The API key is pinned to an application, so you do not need an `X-App-Id` header.
+
+## 3⃣ Step 3 — Connect Slack
+
+1. In the **Providers** section, click **Connect** next to Slack
+2. Select your Slack workspace
+3. Authorize message sending
+
+### Via the API
+
+```bash
+curl -X POST "http://localhost:3000/api/connections/connect/@appstrate/slack" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"scopes": ["chat:write"]}'
+```
+
+Same pattern as Gmail: the response returns `authUrl` + `state`, complete the OAuth flow in a browser.
+
+## 4⃣ Step 4 — Test the Agent
+
+Click **Run**. The agent will:
+
+1. Start an isolated Docker container
+2. Read your emails via the sidecar (credentials auto-injected)
+3. Summarize each email with the LLM
+4. Post the recap to Slack
+5. Finish and destroy the container
+
+Follow the execution in real time through the SSE logs.
+
+### Via the API
+
+```bash
+# Start the run
+curl -X POST "http://localhost:3000/api/agents/@scope/agent-name/run" \
+  -H "Authorization: Bearer ask_your_key"
+
+# Follow logs in real time
+curl -N "http://localhost:3000/api/realtime/runs/run_xxx?token=ask_your_key"
+```
+
+## 5⃣ Step 5 — Add an Output Schema
+
+To structure the agent's result, add an output schema:
+
+```json
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "emailCount": {
+        "type": "number",
+        "description": "Number of processed emails"
+      },
+      "summaries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "from": { "type": "string" },
+            "subject": { "type": "string" },
+            "summary": { "type": "string" },
+            "priority": { "type": "string", "enum": ["urgent", "normal", "low"] }
+          }
+        }
+      },
+      "slackMessageSent": {
+        "type": "boolean"
+      }
+    }
+  }
+}
+```
+
+This schema is injected into the container for LLM constrained decoding — the agent will produce structured JSON in addition to the Slack message.
+
+## 6⃣ Step 6 — Schedule Daily Execution
+
+Create a schedule to run the agent every morning:
+
+```bash
+curl -X POST "http://localhost:3000/api/agents/@scope/email-daily-digest/schedules" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionProfileId": "cp_xxx",
+    "cronExpression": "0 8 * * 1-5",
+    "name": "Email summary 8am"
+  }'
+```
+
+The agent will now run every weekday at 8am.
+
+## 7⃣ Step 7 — Add a Webhook (Optional)
+
+To be notified on failures:
+
+```bash
+curl -X POST "http://localhost:3000/api/webhooks" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-app.com/webhooks/appstrate",
+    "events": ["run.failed", "run.timeout"],
+    "payloadMode": "summary"
+  }'
+```
+
+## Going Further
+
+- **Persistent state** — add `result.state` to remember the last processed email and avoid duplicates
+- **Configuration** — add a config schema to make the Slack channel and time window configurable
+- **Skills** — attach a skill with classification instructions specific to your business
+- **End-users** — use impersonation to run the agent on behalf of each user of your product
+
+### Resources
+
+- [Agents Guide](/en/docs/features/agents)
+- [Providers Guide](/en/docs/integrations/providers)
+- [Scheduling Guide](/en/docs/features/scheduling)
+- [Webhooks Guide](/en/docs/features/webhooks)
+- [API Reference](/en/docs/api)

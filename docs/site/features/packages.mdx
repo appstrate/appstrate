@@ -1,0 +1,177 @@
+---
+title: AFPS Packages
+description: Import, export, and version agents, skills, tools, and providers in AFPS format.
+---
+
+## Overview
+
+**AFPS** (Agent Format Packaging Standard) is Appstrate's packaging format. It defines 4 package types:
+
+| Type | Description |
+|------|-------------|
+| `agent` | AI agent with prompt, config, skills, tools |
+| `skill` | Markdown document (`SKILL.md`) extending agent knowledge, optional extension code |
+| `tool` | Callable runtime function (Pi Coding Agent SDK extension) |
+| `provider` | External service definition (OAuth, API key, credentials) |
+
+Package IDs are **scoped names** of the form `@scope/name`, not prefixed ids. The scope defaults to your organization's slug at package creation and cannot be changed afterwards. System packages shipped with Appstrate use the `@appstrate/` scope (e.g. `@appstrate/log`, `@appstrate/asana`, `@appstrate/gmail`).
+
+## Via the UI
+
+There is no single "Packages" page. Each package type has its own list + detail screens in the dashboard:
+
+- [**Agents**](/docs/features/agents) — `/agents`, `/agents/:scope/:name`
+- [**Skills**](/docs/features/skills) — `/skills`, `/skills/:scope/:name`
+- [**Tools**](/docs/features/tools) — `/tools`, `/tools/:scope/:name`
+- [**Providers**](/docs/integrations/providers) — `/providers`, `/providers/:scope/:name`
+
+Each of these pages exposes the common operations described below: create, import, fork, publish a new version, yank, download.
+
+## Package Structure
+
+An AFPS package is a ZIP file containing at minimum a `manifest.json`:
+
+```
+my-agent.afps
+├── manifest.json    # Metadata, config schema, dependencies
+├── prompt.md        # For type "agent"
+├── SKILL.md         # For type "skill" (+ optional extension file)
+├── TOOL.md          # For type "tool"
+└── {entrypoint}.ts  # For type "tool" (and optionally "skill")
+```
+
+The tool / skill entrypoint file is **not named `extension.ts` by convention** — its name is declared in the manifest's `entrypoint` field (e.g. `"entrypoint": "log.ts"` for `@appstrate/log`, `"entrypoint": "set-state.ts"` for `@appstrate/set-state`).
+
+## Importing a Package
+
+### From a ZIP File
+
+```bash
+curl -X POST http://localhost:3000/api/packages/import \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -F "file=@my-agent.afps"
+```
+
+Rate-limited to 10 imports per minute per caller.
+
+### From GitHub
+
+```bash
+curl -X POST http://localhost:3000/api/packages/import-github \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://github.com/user/repo"
+  }'
+```
+
+Only `url` is required. An optional `ref` can pin a branch, tag, or commit; if omitted, the service auto-detects. The route is `/api/packages/import-github` (hyphen), not a sub-path of `/import`.
+
+## Versioning
+
+Packages follow **semver** (semantic versioning) with constraints:
+
+- **Forward-only** — `validateForwardVersion()` rejects duplicates and any version not strictly higher than the current maximum. No downgrades.
+- **SHA-256 SRI integrity** — every uploaded version gets a `sha256-base64…` hash (`computeIntegrity()`), returned on download via the `X-Integrity` header.
+- **Dist-tags** — named pointers to versions. `latest` is auto-managed on non-prerelease publishes and is **protected** (`isProtectedTag()` refuses manual set/remove). Custom dist-tags are stored in the DB but there is no public API to create or remove them today.
+
+### Publishing a New Version
+
+```bash
+curl -X POST http://localhost:3000/api/packages/agents/@my-org/my-agent/versions \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -F "file=@my-agent-v2.afps"
+```
+
+### Listing Versions
+
+```bash
+curl http://localhost:3000/api/packages/agents/@my-org/my-agent/versions \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+## Yanking
+
+Yanking marks a version as withdrawn without deleting it. Affected dist-tags are reassigned to the highest non-yanked non-prerelease version (`findBestStableVersion()`). Yanked versions remain visible in listings with `yanked: true` and are served with `X-Yanked: true` on download.
+
+Yank is implemented as a `DELETE` on the version route (no separate `/yank` endpoint):
+
+```bash
+curl -X DELETE http://localhost:3000/api/packages/agents/@my-org/my-agent/versions/1.0.0 \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+## Dependencies
+
+Agents can declare dependencies on **skills, tools, and providers** (all three, per-version):
+
+```json
+{
+  "dependencies": {
+    "skills": { "@appstrate/web-research": "^1.0.0" },
+    "tools":  { "@my-org/word-count": "~1.2" },
+    "providers": { "@appstrate/gmail": "^1.0.0" }
+  }
+}
+```
+
+Dependencies are stored per version and extracted via `@appstrate/core/dependencies`.
+
+## Version Resolution
+
+When an agent declares a dependency, resolution follows 3 steps (`resolveVersionFromCatalog`):
+
+1. **Exact match** — `1.2.3` (includes yanked versions, so exact pinning still works after a yank)
+2. **Dist-tag** — `latest`, `beta`, … (yanked excluded)
+3. **Semver range** — `^1.0.0`, `~2.1` (yanked excluded)
+
+## System Packages
+
+System packages ship with Appstrate in the `system-packages/` directory. They are automatically loaded at boot and synced to the database with `orgId: null` (global, available to every organization without installation). System packages cannot be deleted or modified — fork them first.
+
+## Downloading a Package
+
+```bash
+curl http://localhost:3000/api/packages/@my-org/my-agent/1.0.0/download \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -o agent.afps
+```
+
+Response headers:
+
+- `X-Integrity: sha256-base64…` — the SRI hash of the ZIP
+- `X-Yanked: true` — present only when the version was yanked
+
+## Forking a Package
+
+Create an independent copy of an existing package. Scope is auto-assigned to the caller's org.
+
+```bash
+curl -X POST http://localhost:3000/api/packages/@appstrate/web-research/fork \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-custom-research"}'
+```
+
+`name` is optional and must be a slug. If omitted, the source name is reused. The returned package id is `@{your-org-slug}/{name}`.
+
+## Package lifecycle endpoints
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/packages/{scope}/{name}` | Full package detail (manifest, content, versions, dist-tags) |
+| `DELETE` | `/api/packages/{scope}/{name}` | Delete the whole package. System packages are rejected. |
+| `GET` | `/api/packages/{type}/{scope}/{name}/versions` | List versions of a specific package type (agents, skills, tools, providers) |
+| `POST` | `/api/packages/{type}/{scope}/{name}/versions` | Publish a new version (multipart) |
+| `DELETE` | `/api/packages/{type}/{scope}/{name}/versions/{version}` | Yank a version (soft delete) |
+| `GET` | `/api/packages/{scope}/{name}/{version}/download` | Download the `.afps` ZIP |
+| `POST` | `/api/packages/{scope}/{name}/fork` | Fork into the caller's org |
+| `POST` | `/api/packages/import` | Import an uploaded `.afps` ZIP |
+| `POST` | `/api/packages/import-github` | Import from a GitHub repo URL |

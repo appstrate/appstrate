@@ -1,0 +1,60 @@
+---
+title: Gmail
+description: Connect Gmail to your Appstrate agents.
+---
+
+## Overview
+
+Gmail is Google's email service, allowing your agents to read, send, and manage emails.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `gmail.readonly`, `gmail.send` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `gmail.readonly` | Read-only access |
+| `gmail.send` | Send messages |
+| `gmail.compose` | Compose and send drafts |
+| `gmail.modify` | Read and write (no delete) |
+| `gmail.labels` | Manage labels |
+| `gmail.metadata` | Read metadata only |
+| `gmail.insert` | Insert messages |
+| `gmail.settings.basic` | Manage basic settings |
+| `mail.google.com/` | Full mailbox access |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://gmail.googleapis.com/*`
+- `https://www.googleapis.com/gmail/*`
+
+## Connect Gmail
+
+1. [Create a Google Cloud project](https://console.cloud.google.com/apis/library/gmail.googleapis.com) and enable the Gmail API
+2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
+4. Add the Appstrate redirect URI as an authorized redirect URI
+5. Enter the Client ID and Client Secret in the Gmail provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Gmail APIs through the sidecar proxy. Example prompt:
+
+```
+Every morning at 8am, read my unread emails received since last night.
+For each email, write a 2-line summary.
+Send me a recap email with the list of summaries.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

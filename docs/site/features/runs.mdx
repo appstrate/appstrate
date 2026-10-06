@@ -1,0 +1,163 @@
+---
+title: Runs
+description: "How an agent executes: lifecycle, triggers, inputs, results, and monitoring."
+---
+
+A **run** is a single execution of an agent inside its own Docker container. Every run has a UUID v7 id prefixed with `run_` (e.g. `run_0194a3c2...`), a status, and an audit trail linking it back to whoever or whatever triggered it.
+
+## Run Lifecycle
+
+Every agent execution follows this lifecycle:
+
+```
+pending → running → success | failed | timeout | cancelled
+```
+
+- **pending** — run created, container not yet started
+- **running** — Docker container is active, agent executing the prompt
+- **success** — agent completed with a result
+- **failed** — an error occurred
+- **timeout** — maximum execution time exceeded
+- **cancelled** — run was cancelled manually or via API
+
+## Launching a Run Manually
+
+### Via the UI
+
+Open an agent detail page and click **Run**. If the agent declares an input schema, a modal form appears; otherwise the run starts immediately. There is no launch button on the dashboard itself (the dashboard shows recent runs and upcoming schedules).
+
+### Via the API
+
+```bash
+curl -X POST http://localhost:3000/api/agents/@scope/agent-name/run \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {"message": "Analyze this month sales"},
+    "modelId": "mod_xxx",
+    "proxyId": "px_xxx"
+  }'
+```
+
+Fields in the body:
+
+- `input` *(optional)* — payload validated against the agent's input schema
+- `modelId` *(optional)* — override the agent's LLM model for this run only
+- `proxyId` *(optional)* — override the outbound proxy (`"none"` to force direct egress)
+
+The endpoint also accepts `multipart/form-data` when `input` needs to carry file uploads.
+
+Response:
+
+```json
+{ "runId": "run_0194a3c2..." }
+```
+
+The run starts in the background. Use SSE or `GET /api/runs/:runId` to follow its status.
+
+### Pinning an agent version
+
+Append `?version=1.2.3` to execute a specific version of the agent instead of the latest:
+
+```bash
+curl -X POST "http://localhost:3000/api/agents/@scope/agent-name/run?version=1.2.3" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -d '{"input": {...}}'
+```
+
+### Inline runs
+
+For one-shot executions where you don't want to publish a package first, define the agent in the request body:
+
+```bash
+curl -X POST http://localhost:3000/api/runs/inline \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "manifest": { "type": "agent", "name": "adhoc", "version": "0.0.0" },
+    "prompt": "Summarize the attached document.",
+    "input": {...}
+  }'
+```
+
+A shadow package is created under the hood, the run is executed, and the shadow package is cleaned up after the retention window (default 30 days).
+
+`POST /api/runs/inline/validate` runs the same manifest/prompt validation without starting a container, useful as a dry-run check from CI or a coding agent.
+
+## Monitoring a Run in Real Time (SSE)
+
+Appstrate exposes Server-Sent Events for live log and status streams:
+
+```bash
+# Single run
+curl -N "http://localhost:3000/api/realtime/runs/run_xxx?token=ask_your_key"
+
+# All runs for a specific agent
+curl -N "http://localhost:3000/api/realtime/agents/ag_xxx/runs?token=ask_your_key"
+
+# All runs in the active application
+curl -N "http://localhost:3000/api/realtime/runs?token=ask_your_key"
+```
+
+SSE endpoints accept the API token via `?token=ask_...` query param because browser `EventSource` does not support custom headers. Under the hood, realtime is driven by Postgres `LISTEN/NOTIFY` on the `runs` table plus an in-memory fanout for log lines. See [Realtime](/docs/features/realtime) for event shapes.
+
+## Viewing a Completed Run
+
+```bash
+# Run details
+curl http://localhost:3000/api/runs/run_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+
+# Run logs
+curl http://localhost:3000/api/runs/run_xxx/logs \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+## Cancelling a Run
+
+```bash
+curl -X POST http://localhost:3000/api/runs/run_xxx/cancel \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+Cancellation is delivered through a pluggable PubSub adapter: in single-instance deployments (Tier 0/1) it is an in-memory `EventEmitter`, and in multi-instance deployments it uses Redis when available. On the target instance, the `run-tracker` holds an `AbortController` per in-flight run and aborts it immediately, which tears down the container.
+
+## Concurrent Runs and Limits
+
+Each run gets its own isolated Docker network (`appstrate-exec-{runId}`) so credentials and egress policy are scoped per run. The `run-tracker` keeps an `AbortController` per in-flight run for both cancellation and graceful shutdown.
+
+The runtime enforces a set of org-wide limits from `INLINE_RUN_LIMITS` (override via env):
+
+| Limit | Default | Env |
+|---|---|---|
+| Max concurrent runs per org | 50 | `max_concurrent_per_org` |
+| Global rate per org | 200 / min | `per_org_global_rate_per_min` |
+| Timeout ceiling per run | 1800 s | `timeout_ceiling_seconds` |
+| Shadow package retention (inline runs) | 30 days | `retention_days` |
+
+Agent-declared timeouts are clamped to the ceiling.
+
+## Trigger Attribution
+
+Every run records who or what launched it. Exactly one of the following fields is populated on the run record:
+
+- `userId` — a dashboard user launched the run
+- `endUserId` — the run was launched on behalf of an end-user (via the `Appstrate-User` header)
+- `apiKeyId` — the run was launched by a server-side API key
+- `scheduleId` — the run was triggered by a cron schedule
+
+`runs.proxyLabel` and `runs.modelLabel` are also denormalized on the record at launch time so that audit queries can answer "which proxy / model did this run actually use" without resolving overrides after the fact.
+
+## Cost Per Run
+
+If the LLM model has cost configuration, the dollar cost is computed from token usage and stored in `runs.cost` (nullable `double`). Only populated when greater than zero. Available via the run detail endpoint.
+
+## Execution via Scheduling
+
+Runs can also be triggered automatically via cron schedules. See [Scheduling](/docs/features/scheduling).

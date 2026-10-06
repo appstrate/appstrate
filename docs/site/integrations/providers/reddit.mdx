@@ -1,0 +1,63 @@
+---
+title: Reddit
+description: Connect Reddit to your Appstrate agents.
+---
+
+## Overview
+
+Reddit is a community discussion platform, allowing your agents to post, comment, and monitor subreddits.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `identity`, `read`, `history` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `identity` | Read user identity |
+| `read` | Read posts and comments |
+| `submit` | Submit posts and comments |
+| `edit` | Edit posts and comments |
+| `history` | Read voting and post history |
+| `subscribe` | Manage subreddit subscriptions |
+| `mysubreddits` | List subscribed subreddits |
+| `vote` | Upvote and downvote |
+| `save` | Save and unsave content |
+| `privatemessages` | Read and send private messages |
+| `report` | Report content |
+| `flair` | Manage flairs |
+| `modposts` | Moderate posts (approve/remove) |
+| `modconfig` | Manage subreddit settings |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://oauth.reddit.com/*`
+
+## Connect Reddit
+
+1. [Create a Reddit application](https://www.reddit.com/prefs/apps) (select the "web app" type)
+2. Set the redirect URI to the Appstrate callback URL
+3. Copy the Client ID (shown under the app name) and Client Secret
+4. Enter these credentials in the Reddit provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Reddit APIs through the sidecar proxy. Example prompt:
+
+```
+Monitor the r/artificial and r/MachineLearning subreddits daily.
+Filter posts with more than 100 upvotes and summarize the trending topics.
+Send the summary to the #ai-watch Slack channel.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

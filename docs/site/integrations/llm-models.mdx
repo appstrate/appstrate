@@ -1,0 +1,120 @@
+---
+title: LLM Models
+description: Configure the AI models used by your agents.
+---
+
+## Overview
+
+Every agent needs an LLM model to function. Appstrate ships native adapters for: OpenAI, Anthropic, Google (Generative AI and Vertex), Mistral, Azure OpenAI, and AWS Bedrock. Any OpenAI-compatible endpoint also works (used by Groq, Cerebras, xAI, OpenRouter, and custom gateways).
+
+Models are defined at the organization level and can be overridden per agent or per application.
+
+## Adding a Model
+
+A model points at a stored **provider key** (its API key). You first create the provider key, then create models that reference it by id.
+
+```bash
+# Step 1: create the provider key (stores the API key encrypted)
+curl -X POST http://localhost:3000/api/provider-keys \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "OpenAI prod",
+    "api": "openai-responses",
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKey": "sk-..."
+  }'
+# → { "id": "<providerKeyId>" }
+
+# Step 2: create the model referencing that key
+curl -X POST http://localhost:3000/api/models \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "GPT-4o",
+    "api": "openai-responses",
+    "baseUrl": "https://api.openai.com/v1",
+    "modelId": "gpt-4o",
+    "providerKeyId": "<providerKeyId>"
+  }'
+```
+
+The `api` field selects the wire protocol. Supported values: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `google-vertex`, `azure-openai-responses`, `bedrock-converse-stream`, `mistral-conversations`.
+
+## Provider Keys
+
+**Provider keys** are API keys for LLM providers, managed at the organization level. They can be shared across multiple models.
+
+System administrators can also configure **system provider keys** via the `SYSTEM_PROVIDER_KEYS` environment variable (JSON array).
+
+```bash
+# List provider keys
+curl http://localhost:3000/api/provider-keys \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>"
+
+# Test a provider key (replace <providerKeyId> with the uuid returned at creation)
+curl -X POST http://localhost:3000/api/provider-keys/<providerKeyId>/test \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>"
+```
+
+## Default Model
+
+A model can be set as the organization's default. The route takes no id in the URL; send the model id in the body (or `null` to clear):
+
+```bash
+curl -X PUT http://localhost:3000/api/models/default \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>" \
+  -H "Content-Type: application/json" \
+  -d '{"modelId": "<modelId>"}'
+```
+
+## Per-Agent Override
+
+Each agent can use a different model from the default:
+
+```bash
+curl -X PUT http://localhost:3000/api/agents/@scope/agent-name/model \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: <applicationId>" \
+  -H "Content-Type: application/json" \
+  -d '{"modelId": "<modelId>"}'
+```
+
+## Per-Application Override
+
+Applications can also override the model for an installed package via the `application_packages` configuration.
+
+## OpenRouter
+
+Appstrate supports [OpenRouter](https://openrouter.ai/) as a provider. OpenRouter models automatically fetch cost information from the pricing API.
+
+```bash
+# Search OpenRouter models (note: no /search segment)
+curl "http://localhost:3000/api/models/openrouter?q=claude" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>"
+```
+
+## Cost Tracking
+
+If a model has cost configuration, Appstrate calculates the dollar cost for each run from token usage. The cost chain:
+
+1. Cost config in the model (`ModelDefinition.cost`)
+2. Injected into the agent container via `MODEL_COST`
+3. Pi SDK calculates cost per message
+4. Accumulated and persisted in `runs.cost`
+
+## Testing a Model
+
+Verify a model works before using it:
+
+```bash
+curl -X POST http://localhost:3000/api/models/<modelId>/test \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: <orgId>"
+```

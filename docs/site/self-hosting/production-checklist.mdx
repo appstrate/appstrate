@@ -1,0 +1,175 @@
+---
+title: Production Checklist
+description: What to verify before taking an Appstrate instance live.
+---
+
+Appstrate ships with sensible defaults for local development. Going to production requires a handful of deliberate decisions. Walk through this checklist before opening your instance to real users.
+
+## 1. Use Tier 3
+
+Minimum production tier: PostgreSQL + Redis + S3/MinIO + `RUN_ADAPTER=docker`. Tier 0-2 are for development and evaluation. Per-run Docker isolation is required for credential safety.
+
+```
+DATABASE_URL=postgres://...
+REDIS_URL=redis://...
+S3_BUCKET=appstrate
+S3_REGION=eu-west-1
+RUN_ADAPTER=docker
+```
+
+## 2. Terminate TLS in front of Appstrate
+
+Appstrate does not terminate HTTPS. Put it behind a reverse proxy:
+
+- **nginx**, **Caddy**, **Traefik** for self-managed
+- AWS ALB, GCP Load Balancer, Cloudflare for managed
+
+Set `APP_URL=https://...` (enforced when `NODE_ENV=production`) and `TRUST_PROXY` to the number of hops your reverse proxy adds to `X-Forwarded-For`.
+
+## 3. Generate strong secrets
+
+Three secrets are required and must be unique per deployment:
+
+| Env var | Size | Rotation impact |
+|---|---|---|
+| `BETTER_AUTH_SECRET` | 32+ bytes | Invalidates all active sessions |
+| `UPLOAD_SIGNING_SECRET` | Min 16 chars | Invalidates in-flight upload tokens |
+| `CONNECTION_ENCRYPTION_KEY` | 32 bytes base64 | Requires re-encrypting all stored credentials |
+
+Generate each with `openssl rand -base64 32`. Store them in your secret manager (AWS Secrets Manager, Vault, GCP Secret Manager). Do not commit them to git.
+
+## 4. Lock down CORS
+
+`TRUSTED_ORIGINS` is comma-separated and must list the exact origins of your dashboards and integrations. Do not use wildcards. Requests from other origins are rejected by the CORS layer.
+
+## 5. Configure rate limits
+
+Defaults are already conservative (`PLATFORM_RUN_LIMITS`: `timeout_ceiling_seconds=1800`, `per_org_global_rate_per_min=200`, `max_concurrent_per_org=50`; `INLINE_RUN_LIMITS`: `rate_per_min=60`, `manifest_bytes=65536`, `prompt_bytes=200000`, `max_skills=20`, `max_tools=20`, `max_authorized_uris=50`, `wildcard_uri_allowed=false`, `retention_days=30`). Override only what you need:
+
+```bash
+PLATFORM_RUN_LIMITS='{
+  "timeout_ceiling_seconds": 600,
+  "max_concurrent_per_org": 100
+}'
+```
+
+See [Rate Limits](/docs/self-hosting/rate-limits) for the full tuning guide. Without Redis, limits are process-local and reset on restart — always pair production rate limiting with `REDIS_URL`.
+
+## 6. Set a run timeout ceiling
+
+`PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` caps every run (default `1800` seconds / 30 min). A value between 300 and 900 seconds is typical when your agents don't need 30-minute tasks. Longer-running workloads should be broken into a scheduling pattern.
+
+## 7. Enable the sidecar pool
+
+`SIDECAR_POOL_SIZE=4` (or higher) keeps pre-warmed sidecars ready. Acquiring a warm sidecar skips container creation on the hot path; scale the pool up with your expected concurrency.
+
+## 8. Pin image versions
+
+Avoid `:latest` in production. The shipped `docker-compose.yml` references all three images through a single `${APPSTRATE_VERSION:-latest}` variable:
+
+```
+# .env
+APPSTRATE_VERSION=v1.4.2
+```
+
+`APPSTRATE_VERSION` is a **docker-compose template variable**, not a runtime env var read by the application — setting it in `.env` is enough to pin the `appstrate`, `appstrate-pi`, and `appstrate-sidecar` images together. If you run your own compose file, pin the three `ghcr.io/appstrate/...` image tags explicitly.
+
+## 9. Configure email
+
+The OIDC module and dashboard invitations rely on email. The env schema marks each SMTP var as optional, but the mail service silently disables email if any one is missing at boot — so set all five together:
+
+```
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=...
+SMTP_PASS=...
+SMTP_FROM=noreply@appstrate.example.com
+```
+
+Test with a password reset or an invitation before go-live. No error is raised if the set is incomplete; the feature simply doesn't work.
+
+## 10. Load system provider keys
+
+If you host LLM keys centrally, configure `SYSTEM_PROVIDER_KEYS` with the providers you offer. Each entry specifies `id`, `label`, `api`, `baseUrl`, `apiKey`, and a `models` array. Keys are injected by the sidecar, never exposed to agents.
+
+## 11. Set up observability
+
+Appstrate emits structured JSON logs to stdout with `LOG_LEVEL=info` (raise to `debug` during incidents, lower to `warn` for steady state). Forward logs to your observability stack (Datadog, Grafana Loki, Elastic, Axiom).
+
+Key fields to alert on:
+
+- `requestId` for request correlation
+- `apiKeyId`, `endUserId`, `applicationId` for audit
+- `level=error` for failures
+- `code` for stable error codes
+
+Appstrate does not expose a Prometheus endpoint today. Derive metrics from logs or run a sidecar exporter.
+
+## 12. Plan backups
+
+- **PostgreSQL**: `pg_dump` nightly. Test restore quarterly.
+- **S3/MinIO**: bucket versioning + cross-region replication, or equivalent on your cloud.
+- **Redis**: persistence is optional if you only care about the idempotency cache and rate-limit counters. **But BullMQ also stores scheduled runs and pending webhook deliveries in Redis** — if reliability of scheduled workloads matters, enable Redis AOF/RDB persistence or a replicated Redis.
+
+Appstrate has no built-in backup tooling. Use your existing DBA playbook.
+
+## 13. Legal links
+
+Set footer URLs so users and end-users see your legal policies:
+
+```
+LEGAL_TERMS_URL=https://example.com/terms
+LEGAL_PRIVACY_URL=https://example.com/privacy
+```
+
+## 14. Disable unused modules
+
+`MODULES=oidc,webhooks` by default. If you don't use the OIDC identity provider, drop `oidc` to reduce attack surface and trim routes:
+
+```
+MODULES=webhooks
+```
+
+## 15. Restrict Docker socket access
+
+The Appstrate container needs access to `/var/run/docker.sock` to spawn run containers. Mounting the socket effectively grants root on the host, so:
+
+- On the host, make sure the socket is not world-readable (default permissions: `root:docker 0660`).
+- In the shipped `docker-compose.yml`, the Appstrate container does **not** set a `user:` directive by default. Add one yourself for a tighter posture:
+  ```yaml
+  services:
+    appstrate:
+      user: "appstrate:appstrate"   # or an existing UID:GID
+      group_add:
+        - "${DOCKER_GID:-0}"         # pass the host's docker GID in .env
+  ```
+- The `DOCKER_GID` mapping is required because the in-container user needs to match the host `docker` group to read the socket.
+
+## 16. Plan the upgrade path
+
+Database migrations run at boot (drizzle). Pin versions, test upgrades in staging, upgrade off-peak. See [Upgrading](/docs/self-hosting/upgrading).
+
+## Sanity check before go-live
+
+Run this sequence against your production instance:
+
+```bash
+# 1. Health check (JSON status + subsystem checks)
+curl https://appstrate.example.com/health
+
+# 2. API reachable, auth enforced
+curl https://appstrate.example.com/api/api-keys
+# expect 401
+
+# 3. OpenAPI served
+curl https://appstrate.example.com/api/openapi.json | jq .info
+
+# 4. Create an org, app, API key via the UI
+# 5. Run a trivial agent end to end
+# 6. Trigger a webhook to your receiver and verify the signature
+# 7. Impersonate an end-user and verify scope filtering
+```
+
+`/health` returns `{ status: "healthy" | "degraded" | "unhealthy", uptime_ms, checks: {...} }` with HTTP 200 (healthy) or 503 (unhealthy). A plain `GET /` returns the dashboard SPA HTML — fine as a reachability check, useless for automated monitoring.
+
+If all seven steps pass, you are production-ready.

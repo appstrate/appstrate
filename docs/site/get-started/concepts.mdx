@@ -1,0 +1,142 @@
+---
+title: Concepts
+description: The mental model behind Appstrate. Agents, runs, packages, providers, applications, and how they fit together.
+---
+
+Appstrate is an **Agent-as-a-Service** platform. Unlike workflow automation tools that chain predefined steps, Appstrate gives an AI agent a prompt, credentials, and context, then the AI decides how to accomplish the task. This page lays out the mental model. Each concept has its own deep-dive in [Features](/docs/features/agents).
+
+## Architecture at a glance
+
+```
+┌─ Organization ──────────────────────────────────────────────┐
+│  Members, LLM models, proxies, providers, packages          │
+│                                                             │
+│  ┌─ Application A ──────────────────────────────────────┐   │
+│  │  Installed agents, end-users, API keys, webhooks     │   │
+│  │                                                      │   │
+│  │  ┌─ Run ────────────────────────────────────────┐    │   │
+│  │  │  Isolated Docker network                     │    │   │
+│  │  │                                              │    │   │
+│  │  │  ┌──────────┐   HTTP   ┌──────────────────┐  │    │   │
+│  │  │  │  Agent   │ ───────→ │    Sidecar       │  │    │   │
+│  │  │  │ (Pi/Bun) │          │ (credential proxy│  │    │   │
+│  │  │  └──────────┘          │  + injection)    │  │    │   │
+│  │  │                        └────────┬─────────┘  │    │   │
+│  │  │                                 │            │    │   │
+│  │  │                          External API        │    │   │
+│  │  └──────────────────────────────────────────────┘    │   │
+│  │                                                      │   │
+│  │  ┌─ Run ────────────────────────────────────────┐    │   │
+│  │  │  (another concurrent run of the same agent)  │    │   │
+│  │  └──────────────────────────────────────────────┘    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─ Application B ──────────────────────────────────────┐   │
+│  │  (isolated workspace, its own agents and end-users)  │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Agents
+
+An agent is the core execution unit. It is defined by a **prompt** that describes its mission, not by a graph of steps. The LLM interprets the prompt and decides which actions to take, which tools to call, and in what order.
+
+An agent can declare:
+
+- A **config schema** (JSON Schema, validated by AJV) to expose tunable parameters without modifying the prompt.
+- **Input / output schemas** to structure the data it receives and produces.
+- **Skills**: portable Markdown knowledge (`SKILL.md` files) injected into the agent's prompt at runtime.
+- **Tools**: TypeScript extensions the LLM can call as functions. Tools are built on the [Pi Coding Agent](https://github.com/nichochar/pi-coding-agent) SDK, the same format the Appstrate runtime uses internally.
+- **Providers**: external services the agent talks to through the sidecar (Gmail, Slack, GitHub, or your own).
+
+Two persistence mechanisms exist alongside the run output:
+
+- **State**: at the end of a run, the agent returns `result.state`, which is injected as "Previous State" on the next run. Useful for cursors (last processed email, last synced timestamp).
+- **Memory**: per-application key-value storage. The agent writes learnings with the `add_memory` tool; all future runs of the agent see them injected as "Memory".
+
+Deep-dive: [Features / Agents](/docs/features/agents) and [Features / Memory](/docs/features/memory).
+
+## Providers and connections
+
+### Providers
+
+A provider is the definition of an external service (Gmail, Slack, Notion, GitHub, ClickUp, etc.). Appstrate ships **60 system providers** out of the box, and you can [author your own](/docs/integrations/providers#custom-providers) as an AFPS package. Each provider defines:
+
+- Its **authentication mode**: OAuth 2.0 (with optional PKCE + automatic token refresh), OAuth 1.0a, API key, basic auth, or custom multi-field credentials.
+- Its **authorized URIs** (`authorizedUris`), the list of external URLs the agent may call with those credentials. The sidecar rejects anything outside this list.
+- Its `credentialHeaderName` and `credentialHeaderPrefix`, which tell the sidecar how to inject credentials into outgoing requests.
+
+### Connections
+
+A connection is an authenticated instance of a provider for a given user or tenant. Connections live at three profile levels:
+
+- **User profile**: credentials tied to a single dashboard user, visible only to them.
+- **Organization profile**: shared credentials usable by every member of the org.
+- **Application profile**: credentials scoped to a single application, typical for headless / multi-tenant deployments where each application has its own identity.
+
+Credentials are encrypted at rest (AES, keyed by `CONNECTION_ENCRYPTION_KEY`) and never leave the sidecar at runtime. The agent container has no direct access to them, ever.
+
+Deep-dive: [Integrations / Providers](/docs/integrations/providers).
+
+## Runs
+
+A run is a single agent execution. Its lifecycle:
+
+`pending` → `running` → `success` | `failed` | `timeout` | `cancelled`
+
+Each run spins up an **isolated Docker network** with two containers:
+
+1. **Sidecar**: an HTTP proxy (Hono) that intercepts the agent's outgoing calls, injects the provider's credentials, and relays the request to the external API. Secrets never enter the agent container.
+2. **Agent (Pi runtime)**: a Bun container that receives the prompt (`AGENT_PROMPT`) and the sidecar URL (`SIDECAR_URL`). It has no access to the host network or keyring.
+
+To minimise startup latency, Appstrate keeps a **sidecar pool** of pre-warmed containers (sized via `SIDECAR_POOL_SIZE`). Logs stream in real time via Server-Sent Events and are persisted for replay. Multiple runs of the same agent can execute concurrently. An optional output JSON Schema enforces structure on the result, and per-run cost (in dollars, computed from LLM token usage) is tracked automatically.
+
+Deep-dive: [Features / Runs](/docs/features/runs) and [Features / Sandbox and Sidecar](/docs/features/sandbox-and-sidecar).
+
+## AFPS packages
+
+AFPS (**A**gent **F**ormat **P**ackaging **S**tandard) is the open format Appstrate uses to distribute every artefact. A package is a ZIP archive containing a `manifest.json` at the root and the associated files.
+
+Four package types, one format:
+
+| Type | What it contains |
+|------|------------------|
+| `agent` | Prompt, schemas, declared skills / tools / providers |
+| `skill` | A `SKILL.md` file (YAML frontmatter + Markdown) plus optional scripts / references |
+| `tool` | A Pi SDK extension (`index.ts`) plus its input JSON Schema |
+| `provider` | An external-service definition and its auth config |
+
+Packages follow **semver** with forward-only versions (no downgrades). Each version carries a SHA256 SRI integrity hash, and dist-tags like `latest` let you reference a version without pinning a number. System packages load from ZIP at platform boot; you import the rest via ZIP upload, GitHub URL, or the Appstrate registry.
+
+AFPS is governed as an open standard (CC-BY) at [afps.appstrate.dev](https://afps.appstrate.dev). Deep-dive: [Features / Packages](/docs/features/packages) and [Resources / AFPS Specification](/docs/resources/afps-specification).
+
+## Multi-tenancy: organizations, applications, end-users
+
+### Organizations
+
+The organization is the billing + administration unit. It centralises:
+
+- Members and their roles (`owner`, `admin`, `member`)
+- Configured LLM models and outbound proxies
+- Provider keys (OAuth client ids and secrets)
+- The installed package catalog
+- Billing (optional cloud module)
+
+### Applications
+
+An application is an **isolated workspace** inside an organization. It owns its installed agents, per-agent config, end-users, API keys, webhooks, schedules, memories, and connections. A default application is created automatically when an org is created, and you can add more (one per product surface, one per tenant group, etc.).
+
+### End-users
+
+End-users (`eu_` prefix) are the users of **your** product, distinct from Appstrate platform users. You manage them entirely through the API and can execute agents on their behalf via **impersonation** (the `Appstrate-User` header, valid only with API key auth).
+
+This is what makes Appstrate a platform primitive rather than a personal assistant: you build a SaaS product where each customer has their own connections, memories, and run history, without ever interacting with the Appstrate dashboard.
+
+Deep-dive: [Features / Multi-Tenancy](/docs/features/multi-tenancy), [Features / Applications](/docs/features/applications), [Features / End-Users](/docs/features/end-users).
+
+## Where to go next
+
+- [Quickstart](/docs/get-started/quickstart): 5 steps to a working agent.
+- [Introduction](/docs/get-started/introduction): why Appstrate exists and who it's for.
+- [Features](/docs/features/agents): one deep-dive per primitive (agents, skills, tools, packages, runs, memory, proxies, webhooks, realtime, sandbox, organizations, applications, end-users, multi-tenancy).
+- [Self-Hosting](/docs/self-hosting): when to leave Tier 0 and how to operate in production.

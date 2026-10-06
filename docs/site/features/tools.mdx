@@ -1,0 +1,162 @@
+---
+title: Tools
+description: Extend an agent with executable tools via the Pi Coding Agent SDK extension format, packaged as AFPS.
+---
+
+A **tool** is an executable function that an agent can call during a run. Tools complement skills: a skill tells the agent *what* to do and *when*, a tool gives it a concrete function to invoke.
+
+Appstrate consumes tools written against the [Pi Coding Agent SDK](https://github.com/mariozechner/pi) `ExtensionAPI` interface (pinned to `@mariozechner/pi-coding-agent@^0.67.2`), and packages them as AFPS so they can be versioned, published to a registry, and pinned by agents.
+
+## Via the UI
+
+Open the dashboard → **Tools** in the sidebar (`/tools`). From there you can:
+
+- **Browse** system and org-owned tools, search, and open a detail page
+- **Create** a new tool (`/tools/new`) — opens the package editor with a starter manifest + entrypoint
+- **Import** an existing `.afps` ZIP (drag-and-drop, file picker, or GitHub repo URL)
+- **Open a detail page** (`/tools/:scope/:name`) — content viewer, version history, diff against latest published, and "Used by" tab showing dependent agents
+- **Edit** the draft (`/tools/:scope/:name/edit`), then **publish a new version** (forward-only semver, SHA-256 integrity)
+- **Fork** a system tool to get a mutable copy under your scope
+- **Install / uninstall** on the current application
+- **Yank** a published version without deleting history
+
+Tool package IDs are scoped: `@appstrate/log`, `@my-org/word-count`. System tools live under `@appstrate/…` and are read-only.
+
+## How an agent uses a tool
+
+An agent declares tool dependencies in its `manifest.json`:
+
+```json
+{
+  "type": "agent",
+  "name": "@my-org/email-triage",
+  "dependencies": {
+    "tools": {
+      "@my-org/word-count": "^1.0.0"
+    }
+  }
+}
+```
+
+At run time, Appstrate resolves the semver range, downloads the pinned version, and registers the tool with the agent's tool list. The agent's model sees the tool description and parameters alongside the built-in tools.
+
+Tools can also be attached to an existing agent (for agents you authored in-org, not system agents) via:
+
+```bash
+curl -X PUT http://localhost:3000/api/agents/@my-org/email-triage/tools \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"toolIds": ["@my-org/word-count", "@appstrate/fetch"]}'
+```
+
+The endpoint rewrites the agent's manifest `dependencies.tools` field. Use it when you want to adjust tool wiring without re-uploading the agent ZIP.
+
+## System tools
+
+Appstrate ships five **system tools** that are available to every agent without installation:
+
+| Tool | Scoped name | Purpose |
+|---|---|---|
+| Add memory | `@appstrate/add-memory` | Persist a note in the agent's application-scoped memory |
+| Log | `@appstrate/log` | Send a user-visible progress message with a severity level |
+| Output | `@appstrate/output` | Emit the run's final result (validates against the output schema) |
+| Report | `@appstrate/report` | Emit a progress milestone mid-run |
+| Set state | `@appstrate/set-state` | Update the run's intermediate state for long-running workflows |
+
+These are loaded at boot from `system-packages/` and injected into every run without appearing in the agent's `dependencies.tools`.
+
+## Authoring your own
+
+A tool is a single TypeScript file (name declared in the manifest's `entrypoint` field; by convention `{tool-name}.ts`) that default-exports a function taking the `ExtensionAPI` and registering one or more tools:
+
+```ts
+// word-count.ts
+import { Type } from "@mariozechner/pi-ai";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "word_count",
+    label: "Word Count",
+    description: "Count the number of words in a given text.",
+    parameters: Type.Object({
+      text: Type.String({ description: "The text to count words in" }),
+    }),
+    async execute(_toolCallId, params) {
+      const { text } = params as { text: string };
+      const count = text.trim().split(/\s+/).filter(Boolean).length;
+      return {
+        content: [{ type: "text", text: `The text contains ${count} words.` }],
+        details: { count },
+      };
+    },
+  });
+}
+```
+
+Gotchas:
+
+- Default export is a **function**, not an object. It receives the `pi` API and calls `pi.registerTool(...)` imperatively.
+- `parameters` uses TypeBox (`Type.Object`, `Type.String`, `Type.Union`, `Type.Literal`, …) from `@mariozechner/pi-ai`. Appstrate converts the TypeBox schema to JSON Schema when exposing the tool to the model.
+- `execute` signature is `(toolCallId, params)`. Return `{ content: [{ type: "text", text: "..." }], details?: {...} }` — never a plain string.
+- A single file can register multiple tools by calling `pi.registerTool(...)` several times.
+
+### Package it as AFPS
+
+Wrap the entrypoint with a `manifest.json`:
+
+```
+my-tool.afps (ZIP)
+├── manifest.json       # type: "tool", name, version, entrypoint, tool metadata
+└── word-count.ts       # default-exported ExtensionAPI function
+```
+
+```json
+{
+  "$schema": "https://afps.appstrate.dev/packages/schema/v1/tool.schema.json",
+  "type": "tool",
+  "name": "@my-org/word-count",
+  "version": "1.0.0",
+  "displayName": "Word Count",
+  "description": "Count the number of words in a given text.",
+  "entrypoint": "word-count.ts",
+  "tool": {
+    "name": "word_count",
+    "description": "Count the number of words in a given text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The text to count words in" }
+      },
+      "required": ["text"]
+    }
+  }
+}
+```
+
+The `tool` block is a **static declaration** of the tool's name, description, and JSON Schema for `inputSchema`. It is used for listings and discovery; the runtime still loads the entrypoint to get the real `execute` implementation.
+
+### Publish
+
+```bash
+# First upload (creates the package)
+curl -X POST http://localhost:3000/api/packages/tools \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -F "file=@my-tool.afps"
+
+# New version of an existing tool (scoped id in the path)
+curl -X POST http://localhost:3000/api/packages/tools/@my-org/word-count/versions \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -F "file=@my-tool.afps"
+```
+
+Versions follow semver and are **forward-only** (`validateForwardVersion`): you cannot publish a version lower than or equal to an existing one. Each upload is integrity-checked with an SHA-256 SRI hash (`computeIntegrity`) and served back on download via the `X-Integrity` header.
+
+## Reference
+
+- AFPS spec: [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec)
+- Pi Coding Agent SDK: [github.com/mariozechner/pi](https://github.com/mariozechner/pi)
+- See also: [Skills](/docs/features/skills) for declarative instructions, [Sandbox & Sidecar](/docs/features/sandbox-and-sidecar) for how tool calls are isolated.

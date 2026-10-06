@@ -1,0 +1,153 @@
+---
+title: Webhooks
+description: Receive run events over HTTP, verify signatures, and handle retries.
+---
+
+Appstrate webhooks follow the [Standard Webhooks](https://www.standardwebhooks.com/) spec. Every webhook is HMAC-SHA256 signed, retried with exponential backoff, and protected against SSRF.
+
+## Register a webhook
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-app.com/webhooks/appstrate",
+    "events": ["run.started", "run.success", "run.failed"],
+    "payloadMode": "full"
+  }'
+```
+
+The response includes a `secret` (`whsec_...`) used to verify signatures. Store it securely; it is shown only once unless you rotate it.
+
+Optional fields:
+
+- `packageId` scopes the webhook to events from a specific agent package.
+- `payloadMode: "summary"` returns metadata only (no run input or result).
+
+## Event types
+
+Five event types are emitted:
+
+| Event | When |
+|---|---|
+| `run.started` | A run has transitioned to running |
+| `run.success` | A run completed without error |
+| `run.failed` | A run ended with an error |
+| `run.timeout` | A run exceeded the timeout ceiling |
+| `run.cancelled` | A run was cancelled by a user or the platform |
+
+See [Webhook Events](/docs/features/webhooks) for full payload schemas.
+
+## Signature verification
+
+Every delivery includes three headers:
+
+```
+webhook-id: msg_xxx
+webhook-timestamp: 1680000000
+webhook-signature: v1,base64-signature...
+webhook-attempt: 1
+```
+
+The signature is computed as:
+
+```
+signature = base64(HMAC-SHA256(secret, "{webhook-id}.{webhook-timestamp}.{body}"))
+```
+
+The secret is `whsec_...` (base64url-encoded after the prefix). Reject requests where:
+
+- The timestamp is more than 5 minutes in the past or future (replay protection).
+- The computed signature does not match any of the signatures in the header (multiple allowed during secret rotation).
+
+### Node.js example
+
+```js
+import crypto from 'node:crypto';
+
+function verify(secret, headers, body) {
+  const id = headers['webhook-id'];
+  const ts = headers['webhook-timestamp'];
+  const sig = headers['webhook-signature']; // e.g. "v1,xxx v1,yyy"
+
+  const drift = Math.abs(Date.now() / 1000 - Number(ts));
+  if (drift > 300) throw new Error('timestamp drift');
+
+  const rawSecret = Buffer.from(secret.replace(/^whsec_/, ''), 'base64url');
+  const expected = crypto
+    .createHmac('sha256', rawSecret)
+    .update(`${id}.${ts}.${body}`)
+    .digest('base64');
+
+  const sigs = sig.split(' ').map(s => s.split(',')[1]);
+  if (!sigs.some(s => s === expected)) throw new Error('signature mismatch');
+}
+```
+
+## Delivery and retries
+
+- **8 attempts** total.
+- **Exponential backoff**: roughly 30s, 5m, 30m, 1h, 2h, 3h, 4h, final.
+- **15 second timeout** per attempt.
+- Any non-2xx response or timeout triggers the next retry.
+- `webhook-attempt` header indicates the current attempt (1-indexed).
+
+Deliveries and their status are queryable:
+
+```bash
+curl "http://localhost:3000/api/webhooks/wh_xxx/deliveries" \
+  -H "Authorization: Bearer ask_your_key"
+```
+
+Status values: `pending`, `success`, `failed`.
+
+## Payload constraints
+
+- Content-Type: `application/json`.
+- Truncated at **256 KB**. If the run's result exceeds this, the payload carries a pointer instead of the full body.
+- JSON structure:
+
+```json
+{
+  "id": "evt_xxx",
+  "type": "run.success",
+  "apiVersion": "2026-03-21",
+  "created": "2026-04-19T10:00:00.000Z",
+  "data": { "run": { ... } }
+}
+```
+
+## SSRF protection
+
+Webhook URLs are validated at registration:
+
+- HTTPS only.
+- No loopback (`127.0.0.0/8`, `::1`).
+- No link-local (`169.254.0.0/16`, `fe80::/10`).
+- No RFC 1918 private space (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+
+Private-network webhooks require an explicit allowlist at the deployment level.
+
+## Secret rotation
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/wh_xxx/rotate-secret \
+  -H "Authorization: Bearer ask_your_key"
+```
+
+A 24-hour grace period follows rotation: both the old and the new secret produce valid signatures. Update your receiver's secret before the grace window closes.
+
+## Test ping
+
+Send a synthetic event to verify connectivity:
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/wh_xxx/test \
+  -H "Authorization: Bearer ask_your_key"
+```
+
+## Next
+
+- [Webhook Events](/docs/features/webhooks) — payload schemas for each event type.
+- [Build / Webhooks](/docs/features/webhooks) — managing webhook subscriptions from your app.

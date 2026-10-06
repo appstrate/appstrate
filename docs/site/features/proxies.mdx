@@ -1,0 +1,114 @@
+---
+title: Proxies
+description: Route every outbound HTTP request from your agents through a configured proxy — for corporate egress, air-gapped networks, or per-tenant routing.
+---
+
+A proxy in Appstrate is an **outbound HTTP proxy** that every agent request funnels through before reaching an external service. When you set one, the sidecar routes the agent container's traffic via CONNECT tunneling through the proxy URL you configure — agents can still fetch Gmail, Slack, a custom API, or any web resource, but the traffic takes your proxy path.
+
+Most real deployments need a proxy:
+
+- **Corporate egress** — your security team mandates a single outbound IP, or a Squid / Envoy gateway that logs everything.
+- **Air-gapped networks** — the only route to the public web is through a hardened proxy.
+- **Per-tenant routing** — different customers need different outbound IPs (geolocation, compliance).
+- **Residential or rotating IPs** — some external APIs rate-limit by IP; a residential proxy spreads load.
+
+## Via the UI
+
+Open the dashboard → settings icon → **Proxies** (`/org-settings/proxies`, admin-only). From there you can:
+
+- Create a custom proxy (label + URL with optional basic auth)
+- Edit or delete a custom proxy
+- Set one proxy as the organization default (exactly one default per org)
+- Test a proxy's connectivity (rate-limited to 5 attempts per minute)
+- See built-in proxies loaded from `SYSTEM_PROXIES` as read-only entries
+
+The URL is **masked** in the list view (`http://user:****@proxy.example.com:8080`) so passwords never leak in screenshots or screen shares.
+
+## Cascade resolution
+
+When a run starts, the sidecar picks the proxy URL via this cascade — first match wins:
+
+1. **Per-run override** — the `proxyId` field in the body of `POST /api/agents/.../run` (or `POST /api/runs/inline`). Use `"none"` to force direct egress for this run only.
+2. **Agent override** — a proxy pinned on the agent for this application (`application_packages.proxyId`)
+3. **Org default** — the custom or built-in proxy marked `isDefault: true` for the current organization
+4. **System default** — the first entry in `SYSTEM_PROXIES` with `isDefault: true`
+5. **`PROXY_URL` env var** — infrastructure-wide fallback on the Appstrate host
+6. **No proxy** — direct egress from the sidecar
+
+The resolved proxy label is denormalized on the run record (`runs.proxyLabel`) for audit, so you can always see which path a given run used.
+
+## Agent override
+
+An admin can pin a specific proxy on an individual agent, bypassing the org default for that agent only:
+
+```bash
+# Check what proxy an agent currently uses
+curl http://localhost:3000/api/agents/@scope/name/proxy \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+# → { "proxyId": "px_xxx", "resolved": true }
+
+# Pin a proxy on the agent
+curl -X PUT http://localhost:3000/api/agents/@scope/name/proxy \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"proxyId": "px_xxx"}'
+```
+
+The GET response returns `{ proxyId, resolved }` where `resolved` is a boolean (`true` when a proxy is pinned, `false` when the agent falls through to the cascade). It does **not** return the human-readable label — look that up separately via `GET /api/proxies`.
+
+Pass `{"proxyId": null}` to clear the override and fall back to the cascade.
+
+## REST API
+
+| Method | Route | Permission | Purpose |
+|---|---|---|---|
+| `GET` | `/api/proxies` | — (open) | List custom + system proxies, URL masked |
+| `POST` | `/api/proxies` | `proxies:write` | Create a custom proxy |
+| `PUT` | `/api/proxies/default` | `proxies:write` | Set the org default proxy |
+| `PUT` | `/api/proxies/{id}` | `proxies:write` | Update label, URL, or enabled flag |
+| `DELETE` | `/api/proxies/{id}` | `proxies:delete` | Delete a custom proxy |
+| `POST` | `/api/proxies/{id}/test` | — (rate-limited 5/min) | Probe connectivity |
+| `GET` | `/api/agents/{scope}/{name}/proxy` | — (requires valid agent) | Read the agent's proxy binding (`{ proxyId, resolved }`) |
+| `PUT` | `/api/agents/{scope}/{name}/proxy` | `agents:configure` | Pin or clear a per-agent override |
+
+Listing is open because URLs are masked in the response. Every mutation goes through the `proxies:*` permission gates.
+
+Proxy URLs are stored encrypted in the DB (`org_proxies.urlEncrypted`). System proxies loaded from `SYSTEM_PROXIES` at boot are read-only — their URLs live in your env var, not the database.
+
+## Bootstrap proxies via env var
+
+For self-hosts that want to preload a set of proxies before any user signs in, set `SYSTEM_PROXIES` at boot:
+
+```bash
+SYSTEM_PROXIES='[
+  {
+    "id": "corp-egress",
+    "label": "Corporate egress",
+    "url": "http://user:secret@proxy.internal:8080",
+    "isDefault": true,
+    "enabled": true
+  },
+  {
+    "id": "residential-us",
+    "label": "US residential",
+    "url": "http://user:secret@residential.example.com:8080",
+    "enabled": true
+  }
+]'
+```
+
+These show up in the UI as `built-in` (read-only) entries — admins can set one as the org default without modifying the underlying URL. See [Environment Variables](/docs/self-hosting/environment-variables) for the full boot schema.
+
+For a single organization-wide proxy with no UI, set `PROXY_URL` instead — it acts as the final fallback.
+
+## Under the hood
+
+The sidecar runs an **HTTP CONNECT forward proxy** on port 8081 inside the run's Docker network. The agent container's HTTP client points at `http://sidecar:8081`, and the sidecar tunnels each request:
+
+- If a proxy URL is set, CONNECT upstream through it
+- Otherwise, direct egress
+- Either way, SSRF protection blocks private IP ranges and internal hostnames
+
+This means proxy policy, credential injection (via [Sandbox & Sidecar](/docs/features/sandbox-and-sidecar)), and SSRF defense all live in the same forward-proxy hop — one chokepoint to audit and log.

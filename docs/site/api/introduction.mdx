@@ -1,0 +1,70 @@
+---
+title: Introduction
+description: The Appstrate REST API gives you 191 endpoints to embed multi-tenant AI agents in your product.
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Rocket, Key, Webhook, AlertTriangle, List } from 'lucide-react';
+
+<Cards>
+  <Card
+    icon={<Rocket />}
+    title="Quickstart"
+    description="Make your first API call in under 5 minutes."
+    href="/docs/api/quickstart"
+  />
+  <Card
+    icon={<Key />}
+    title="Authentication"
+    description="API keys, session cookies, OAuth tokens, and the required headers."
+    href="/docs/api/authentication"
+  />
+  <Card
+    icon={<Webhook />}
+    title="Webhooks"
+    description="Subscribe to run events. Standard Webhooks spec, HMAC-signed."
+    href="/docs/api/webhooks-guide"
+  />
+  <Card
+    icon={<AlertTriangle />}
+    title="Errors"
+    description="RFC 9457 problem details, stable error codes, request ids."
+    href="/docs/api/errors"
+  />
+  <Card
+    icon={<List />}
+    title="Endpoint catalog"
+    description="All 191 endpoints grouped by resource."
+    href="/docs/api/agents/listAgents"
+  />
+</Cards>
+
+## What is the Appstrate API?
+
+A REST API described by [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0). Everything the dashboard does is available over HTTP: agents, runs, schedules, webhooks, providers, end-users, organizations, applications, API keys, models, packages, and realtime streams.
+
+## Base URL
+
+A local Appstrate instance serves the API at:
+
+```
+http://localhost:3000
+```
+
+All endpoints live under `/api/...`. In production, swap the base for your deployed `APP_URL`. There is no URL version prefix: every route is versioned through the `Appstrate-Version` header (see [Authentication](/docs/api/authentication#required-headers)).
+
+## OpenAPI spec
+
+The full OpenAPI 3.1 document is served at:
+
+```
+GET /api/openapi.json
+```
+
+Swagger UI is available at `/api/docs`.
+
+## Next
+
+- [Quickstart](/docs/api/quickstart) — your first API call in curl.
+- [Authentication](/docs/api/authentication) — keys, sessions, OAuth, headers, scopes.
+- [Multi-Tenancy](/docs/features/multi-tenancy) — organizations, applications, end-users, impersonation.

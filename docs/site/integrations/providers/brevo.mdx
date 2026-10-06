@@ -1,0 +1,43 @@
+---
+title: Brevo
+description: Connect Brevo to your Appstrate agents.
+---
+
+## Overview
+
+Brevo (formerly Sendinblue) is a transactional email and marketing platform, allowing your agents to send emails and manage campaigns.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `api_key` |
+| Header | `api-key: <token>` |
+| Scopes | N/A |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.brevo.com/*`
+
+## Connect Brevo
+
+1. [Retrieve your API key](https://app.brevo.com/settings/keys/api) from the Brevo dashboard (Settings > API Keys)
+2. Create a new API v3 key if needed
+3. On Appstrate, go to the Brevo provider settings and enter the API key
+
+## Usage in an Agent
+
+Once connected, the agent can call Brevo APIs through the sidecar proxy. Example prompt:
+
+```
+Whenever a new contact is added in HubSpot, send a personalized welcome email
+via Brevo with the contact's first name and a link to the getting started
+documentation.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

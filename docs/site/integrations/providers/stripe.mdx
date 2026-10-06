@@ -1,0 +1,45 @@
+---
+title: Stripe
+description: Connect Stripe to your Appstrate agents.
+---
+
+## Overview
+
+Stripe is an online payment platform, allowing your agents to manage payments, subscriptions, and invoices.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `api_key` |
+| Header | `Authorization: Bearer <token>` |
+| Scopes | N/A |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.stripe.com/*`
+
+## Connect Stripe
+
+1. [Retrieve your API key](https://dashboard.stripe.com/apikeys) from the Stripe dashboard (Developers > API keys)
+2. Use the secret key (`sk_live_...` for production or `sk_test_...` for test mode)
+3. On Appstrate, go to the Stripe provider settings and enter the API key
+
+> **Note**: Never use the publishable key (`pk_...`). Only the secret key (`sk_...`) can access the API.
+
+## Usage in an Agent
+
+Once connected, the agent can call Stripe APIs through the sidecar proxy. Example prompt:
+
+```
+Every Monday, generate a report of payments received the previous week.
+Group by customer and calculate the total per currency.
+Send the report via email through Gmail.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

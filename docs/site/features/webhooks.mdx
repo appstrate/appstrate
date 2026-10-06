@@ -1,0 +1,244 @@
+---
+title: Webhooks
+description: Receive automatic notifications on your agent run events.
+---
+
+## Overview
+
+Webhooks let you receive automatic HTTP notifications when events occur on your agent runs. They follow the [Standard Webhooks](https://www.standardwebhooks.com/) specification with HMAC-SHA256 signing.
+
+Webhooks are **polymorphic across scoping level** (same model as OIDC OAuth clients):
+
+- `level: "org"` — fires for any application in the org. `applicationId` is `null`.
+- `level: "application"` — pinned to a single application at creation.
+
+In both cases the row is attached to `orgId`. An optional `packageId` filter narrows the webhook to a single agent/package (null = all packages in scope). Session admins can create either level; API keys can only create app-level webhooks pinned to their own application.
+
+## Via the UI
+
+Open the dashboard → **Webhooks** in the sidebar (`/webhooks`, admin-only, feature-gated). From there you can:
+
+- Create a webhook (URL, event filter, payload mode)
+- Open a webhook detail page (`/webhooks/:id`) to see delivery history with status code, latency, attempt number, and error message
+- Rotate the signing secret (replaces the current secret immediately)
+- Send a test ping to verify connectivity
+
+The REST API below gives the programmatic equivalent.
+
+## Creating a Webhook
+
+```bash
+# Application-scoped webhook (most common)
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "application",
+    "applicationId": "app_xxx",
+    "url": "https://your-app.com/webhooks/appstrate",
+    "events": ["run.success", "run.failed"],
+    "payloadMode": "full"
+  }'
+
+# Org-level webhook (session admin only — fires for every app in the org)
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "Authorization: Bearer ..." \
+  -H "Cookie: ..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "org",
+    "url": "https://your-app.com/webhooks/appstrate",
+    "events": ["run.success", "run.failed"]
+  }'
+```
+
+Body fields:
+
+- `level` *(required)* — `"org"` or `"application"` (discriminator)
+- `applicationId` *(required when `level: "application"`)* — `app_` prefixed id, must belong to the current org
+- `url` *(required)* — HTTPS URL (localhost tolerated in dev). Rejected if the hostname resolves to a private or reserved IP (SSRF guard)
+- `events` *(required)* — array of event types. No wildcards: values must match the enum exactly
+- `packageId` *(optional)* — narrows the webhook to a single agent/package. `null` = all packages in scope
+- `payloadMode` *(optional)* — `"full"` (default) or `"summary"`
+- `enabled` *(optional)* — `true` by default. Set to `false` to create a webhook without firing deliveries
+
+Response echoes the stored row, plus the `secret` (returned **only at creation**):
+
+```json
+{
+  "id": "wh_xxx",
+  "level": "application",
+  "orgId": "...",
+  "applicationId": "app_xxx",
+  "url": "https://your-app.com/webhooks/appstrate",
+  "events": ["run.success", "run.failed"],
+  "packageId": null,
+  "payloadMode": "full",
+  "enabled": true,
+  "secret": "whsec_xxx..."
+}
+```
+
+Keep the `secret` — it's needed to verify signatures and is never returned again. Max 20 webhooks per scope.
+
+## Event envelope
+
+Every payload uses the same top-level shape (Stripe-style, with an explicit `object` discriminator):
+
+```json
+{
+  "id": "evt_01HZ...",
+  "object": "event",
+  "type": "run.success",
+  "apiVersion": "2026-03-21",
+  "created": 1713607200,
+  "data": {
+    "object": { ... run ... }
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `id` | Unique event id (`evt_` prefix) |
+| `object` | Always `"event"` |
+| `type` | One of the six event types below (five `run.*` plus `test.ping`) |
+| `apiVersion` | Date-based API version pinned to this webhook |
+| `created` | Unix timestamp (seconds since epoch) |
+| `data.object` | The run at the time of the event |
+
+## Event types
+
+Appstrate emits five event types, all scoped to runs.
+
+### `run.started`
+
+Emitted when a run transitions from `pending` to `running`. Trigger: the run worker picks up the job, the agent container is created. Typical use: show a progress indicator, start a timer.
+
+### `run.success`
+
+Emitted when a run completes without error. Trigger: the agent process exits 0 and produces a result matching the output schema (if any).
+
+`data.run.status = "success"`. `data.run.result` contains the validated output (full mode) or a pointer (summary mode).
+
+### `run.failed`
+
+Emitted when a run ends with an error. Trigger: the agent process exits non-zero, produces invalid output, or throws an unhandled error.
+
+`data.run.status = "failed"`. `data.run.error` carries `{ code, message, stack }`.
+
+### `run.timeout`
+
+Emitted when a run exceeds the timeout ceiling (`PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` or a per-run timeout). The container is terminated. `data.run.status = "timeout"`.
+
+### `run.cancelled`
+
+Emitted when a user clicks cancel in the dashboard, or a client calls `POST /api/runs/:id/cancel`. `data.run.status = "cancelled"`. `data.run.cancelledBy` is set to the actor id.
+
+## Run object
+
+`data.object` carries a minimal set of fields. Extra fields appear only on terminal events (`run.success`, `run.failed`, `run.timeout`, `run.cancelled`):
+
+```json
+{
+  "id": "run_...",
+  "packageId": "pkg_...",
+  "status": "running | success | failed | timeout | cancelled",
+  "result": { ... },
+  "error": { "code": "...", "message": "...", "stack": "..." },
+  "duration": 12345,
+  "package": { "ephemeral": true }
+}
+```
+
+| Field | When present | Description |
+|---|---|---|
+| `id` | Always | Run id (`run_` prefix, UUID v7) |
+| `packageId` | Always | The package the run executed against |
+| `status` | Always | Current run status |
+| `result` | `run.success` only | Validated output (full mode). Dropped with `resultTruncated: true` if the payload exceeds 256 KB, see [Payload modes](#payload-modes) |
+| `error` | `run.failed` only | `{ code, message, stack }` |
+| `duration` | Terminal events | Total run duration in milliseconds |
+| `package.ephemeral` | Inline runs only | `true` when the run was triggered via `POST /api/runs/inline` |
+
+For the full run record (input, cost, timestamps, `apiKeyId`, `userId`, `endUserId`, `scheduleId`, `proxyLabel`, `modelLabel`, …), fetch `GET /api/runs/{id}` with the `id` from the payload — the webhook payload intentionally stays minimal.
+
+## Payload modes
+
+At subscription time, `payloadMode` selects how much data is sent:
+
+- `full` (default): includes `result` (on `run.success`) or `error` (on `run.failed`). If the payload exceeds 256 KB, `result` is dropped and `resultTruncated: true` is added to the event.
+- `summary`: metadata only. `result` is never included; fetch it via `GET /api/runs/{id}` using `data.run.id`.
+
+Use `summary` when your receiver processes events at scale or when run results are large.
+
+## Ordering and idempotency
+
+Deliveries are dispatched asynchronously through a queue. There is **no strict ordering guarantee** across or within runs — your receiver must be idempotent on `event.id`, and use `webhook-attempt` to detect redeliveries (a delivery retry after a 500 reuses the same `event.id` but bumps `webhook-attempt`).
+
+`POST /api/webhooks` also supports the `Idempotency-Key` header if you want to guarantee a single webhook row on retries during creation.
+
+## Signature Verification
+
+Each webhook request contains Standard Webhooks signature headers:
+
+```
+webhook-id: evt_xxx
+webhook-timestamp: 1680000000
+webhook-signature: v1,base64signature...
+webhook-attempt: 1
+```
+
+- `webhook-id` matches the event envelope's `id` field (same `evt_` prefix).
+- `webhook-attempt` starts at `1` and increments on each retry — use it to detect redeliveries server-side.
+
+Verify the signature by recomputing the HMAC-SHA256 of the body with your `secret`.
+
+## Retry Policy
+
+Each HTTP delivery has a **15 second timeout**. Failed deliveries (non-2xx response, network error, or timeout) are retried up to **8 attempts** with an increasing backoff: `30s → 5min → 30min → 1h → 2h → 3h → 4h` between attempts.
+
+Delivery history (status code, latency, attempt number, error message) is available via the API — request and response bodies are **not** stored:
+
+```bash
+# View delivery history
+curl http://localhost:3000/api/webhooks/wh_xxx/deliveries \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+Each delivery row returns `{ id, eventId, eventType, status, statusCode, latency, attempt, error, createdAt }`.
+
+## Secret Rotation
+
+Regenerate the signing secret. The new secret replaces the old one immediately — update your receiver before rotating, or be ready to briefly fail signature verification on in-flight deliveries:
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/wh_xxx/rotate \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+## Testing a Webhook
+
+Send a test ping to verify connectivity. The ping uses a dedicated event type, so your receiver can filter it out of business logic:
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/wh_xxx/test \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+The delivered event carries `type: "test.ping"` (not one of the five `run.*` types). The response returns `{ eventId, payload }` so you can verify what would be sent.
+
+## SSRF Protection
+
+Webhook URLs are validated on create (and again before each delivery). HTTPS is enforced (localhost tolerated in dev), and URLs that resolve to private or reserved IP ranges are rejected.
+
+## Permissions and limits
+
+- **Scopes**: `webhooks:read` (list + detail + deliveries), `webhooks:write` (create/update/rotate/test), `webhooks:delete` (delete). Assign via API key scopes.
+- **Dashboard access**: the Webhooks UI is admin-only and feature-gated (the module must be enabled via the `MODULES` env var — included by default).
+- **Per-scope limit**: 20 webhooks max per scope (per org for `level: "org"`, per application for `level: "application"`).
+- **API keys**: can only create app-level webhooks pinned to their own application. Org-level creation is rejected.

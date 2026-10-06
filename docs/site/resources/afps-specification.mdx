@@ -1,0 +1,50 @@
+---
+title: AFPS Specification
+description: The open format Appstrate uses to package agents, skills, tools, and providers.
+---
+
+**AFPS** (Agent Format Packaging Standard) is the portable format Appstrate uses to distribute agents, skills, tools, and providers. It is an open specification published under a permissive license, maintained in a separate repository from the Appstrate runtime, and intended to be implementable by other runtimes.
+
+## Why a separate format
+
+Models, toolkits, and runtimes are fragmenting fast. MCP covers tool transport. A2A covers agent-to-agent messaging. Anthropic's Agent Skills cover portable instructions. None of them covers what happens **between** the source and the runtime: versioning, integrity, dependency resolution, multi-tenant distribution, credential isolation at install time.
+
+AFPS fills that gap. It wraps a skill, tool, agent, or provider into a ZIP with a `manifest.json` that declares the type, version, integrity hash, and optional dependencies. Anything that can parse the manifest and verify the hash can install and run an AFPS package.
+
+## Where the spec lives
+
+The canonical specification, JSON Schema, and governance process are in a dedicated public repository:
+
+**[github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec)**
+
+The npm package with the TypeScript types and validators is `@afps-spec/schema`. Appstrate's runtime consumes it directly.
+
+## Scope at a glance
+
+The spec defines:
+
+- **Package types**: `agent`, `skill`, `tool`, `provider`.
+- **Manifest schema**: required fields (`type`, `name`, `version`), optional fields (`description`, `dependencies`, `definition`, `fileConstraints`, `uiHints`).
+- **Integrity**: SHA-256 SRI hashes computed over the ZIP contents.
+- **Versioning rules**: semver with forward-only constraints and dist-tag conventions.
+- **Dependency resolution**: semver range matching inside a package catalog.
+- **Compatibility with Anthropic Agent Skills**: a pure `SKILL.md` skill folder ZIPped with an AFPS manifest is a valid AFPS package.
+
+## License and governance
+
+AFPS is published under **CC-BY 4.0**. You can implement it, fork it, vendor it, or build a registry around it without asking permission. The governance process accepts proposals from any contributor via issues and pull requests on the spec repo.
+
+## Integration with Appstrate
+
+Appstrate's routes under `/api/packages/*` accept, store, and serve AFPS packages. See:
+
+- [Build / Packages](/docs/features/packages) for the consumer API (importing, pinning, forking).
+- [Extend / Skills](/docs/features/skills) for authoring and publishing.
+
+## Contributing to the spec
+
+Issues, proposals, and pull requests are welcomed on the spec repo:
+
+[github.com/appstrate/afps-spec/issues](https://github.com/appstrate/afps-spec/issues)
+
+The process is designed to absorb real-world feedback, especially from teams running multi-tenant agents in production today.

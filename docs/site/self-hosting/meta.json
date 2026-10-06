@@ -1,0 +1,17 @@
+{
+  "title": "Self-Hosting",
+  "icon": "Server",
+  "collapsible": false,
+  "defaultOpen": true,
+  "pages": [
+    "index",
+    "progressive-infrastructure",
+    "docker-compose",
+    "environment-variables",
+    "rate-limits",
+    "isolation-and-security",
+    "production-checklist",
+    "upgrading",
+    "troubleshooting"
+  ]
+}

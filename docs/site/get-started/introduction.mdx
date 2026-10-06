@@ -1,0 +1,87 @@
+---
+title: Introduction
+description: Everything you need to ship autonomous AI agents with Appstrate.
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+import { Rocket, Blocks, Server, Code2 } from 'lucide-react';
+
+<Cards>
+  <Card
+    icon={<Rocket />}
+    title="Quickstart"
+    description="Install the CLI and spin up your first agent in under 10 minutes."
+    href="/docs/get-started/quickstart"
+  />
+  <Card
+    icon={<Blocks />}
+    title="Features"
+    description="Agents, runs, skills, tools, memory, multi-tenancy, and the sandbox."
+    href="/docs/features/agents"
+  />
+  <Card
+    icon={<Server />}
+    title="Self-Host"
+    description="Docker Compose, progressive infrastructure, isolation, production."
+    href="/docs/self-hosting"
+  />
+  <Card
+    icon={<Code2 />}
+    title="API Reference"
+    description="237 endpoints, OpenAPI 3.1, auth flows, webhooks, errors."
+    href="/docs/api/introduction"
+  />
+</Cards>
+
+## What is Appstrate?
+
+Appstrate is the open‑source **platform for Managed Agents** (aka agent runtime platform). It runs autonomous AI agents inside ephemeral, isolated Docker containers. Each agent is defined by a prompt, connects to the services your business already uses (Microsoft 365, Google Workspace, Jira, GitHub, Slack, internal databases, private APIs), and processes their data autonomously.
+
+Unlike workflow builders (n8n, Make, Zapier), Appstrate doesn't rely on predefined step graphs. An agent receives a prompt, credentials, and context. The AI decides how to accomplish the task, tool call by tool call. See [Compare](/docs/resources/compare) for the full matrix versus managed runtimes (Bedrock, Claude Managed), personal agents (OpenClaw, Hermes), coding agents (Cursor, Claude Code), and workflow builders.
+
+## How it works
+
+```
+Dev → Defines an agent (prompt + skills + providers)
+            ↓
+       Starts a run
+            ↓
+     ┌───────────────────────────┐
+     │  Isolated Docker Network  │
+     │                           │
+     │  ┌─────────┐ ┌─────────┐ │
+     │  │ Sidecar │ │  Agent  │ │
+     │  │ (proxy) │ │ (Pi/Bun)│ │
+     │  └─────────┘ └─────────┘ │
+     └───────────────────────────┘
+            ↓
+     Result + State + Logs
+```
+
+The **sidecar** is an HTTP proxy that injects user credentials into outbound requests. The agent never has direct access to secrets. It calls the sidecar, which substitutes tokens before relaying to the external API.
+
+## Key features
+
+- **Ephemeral execution.** Each run creates an isolated Docker container, destroyed after use.
+- **34 system providers.** Gmail, Slack, Notion, GitHub, Jira, and [more](/docs/integrations/providers) via OAuth 2.0/PKCE, OAuth 1.0a, or API key. Bring your own with custom providers.
+- **Scheduling.** Distributed cron (BullMQ + Redis), exactly‑once, timezone‑aware.
+- **AFPS packages.** Import and share agents, skills, tools, and providers in [AFPS format](/docs/features/packages).
+- **Headless API.** 237 [OpenAPI 3.1](/docs/api/introduction) endpoints to embed Appstrate inside your own internal tools.
+- **Multi‑tenant.** Organizations, applications, roles, invitations, API keys, end‑user impersonation.
+- **End‑users.** Manage employees or contractors on whose behalf agents run, with per‑user credentials.
+- **Webhooks.** Standard Webhooks spec, HMAC‑signed, retryable (8 attempts, exponential backoff).
+- **Self‑hosting.** A single `docker compose up` to [deploy](/docs/self-hosting), including air‑gapped networks.
+- **Progressive infrastructure.** From zero‑install (PGlite + filesystem) to full Docker, [four tiers](/docs/self-hosting/progressive-infrastructure).
+
+## Who is Appstrate for?
+
+**Developers and platform teams inside enterprises** who need to automate internal workflows or embed AI agents into internal applications. You bring the prompt, the skills, and the connections to your systems. Appstrate provides the runtime, the isolation, the credential management, and the API.
+
+Appstrate is not a workflow builder and not a SaaS integration layer. If you're wiring two public SaaS products together with predefined triggers, reach for n8n or Zapier. Appstrate is for the cases where the work is genuinely agentic: the AI has to reason, branch, call internal tools, and produce output that depends on what it finds.
+
+Typical use cases:
+
+- **Internal workflow automation.** Triage support tickets against your knowledge base, classify procurement requests, route security alerts to the right on‑call, draft responses from internal policy documents.
+- **Internal applications powered by agents.** Embed an agent into your company's back office, intranet, or admin console so non‑technical staff can delegate tasks (generate reports, reconcile records, summarize threads) without leaving the tool they already use.
+- **Private data pipelines.** Run agents against internal databases, private APIs, and document stores behind your firewall, with self‑hosting and air‑gapped deployment.
+- **Engineering platform integrations.** Agents that analyze pull requests, enforce internal conventions, post triage summaries to Slack, or open Jira issues from customer reports.

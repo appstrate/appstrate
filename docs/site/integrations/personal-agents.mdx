@@ -1,0 +1,87 @@
+---
+title: Personal Agents
+description: Use Appstrate as the execution backend for OpenClaw, Hermes, or any personal agent.
+---
+
+Personal agents such as [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes](https://github.com/NousResearch/hermes-agent) were designed for one developer on one laptop. When the same developer needs to act on behalf of 50 employees, run 100 agents in parallel, or hide credentials from the LLM, their laptop becomes the bottleneck.
+
+The pattern: let the personal agent **reason** locally, and delegate **execution** to Appstrate over the REST API. Brain local, arms remote.
+
+## Why this pattern
+
+- **Parallel runs.** Appstrate schedules concurrent runs on your infrastructure (default cap: 50 per org, 200 requests per minute, tunable via `PLATFORM_RUN_LIMITS`). A personal agent is limited to what the host machine can fork.
+- **Multi-user execution.** Appstrate's `Appstrate-User` header lets a single backend orchestrate runs on behalf of distinct end-users, with per-user credentials and audit. Personal agents do not ship this primitive.
+- **Credentials hidden from the LLM.** Appstrate's sidecar injects tokens at request time. The personal agent's LLM never sees the raw token, even when it routes through Appstrate.
+- **Sandbox.** Every run lands in an isolated Docker network. Personal agents run in the same process as their host.
+
+## Wire-up
+
+The personal agent acquires an Appstrate API key once, stores it securely (OS keyring is fine), and uses it for every delegation.
+
+```bash
+export APPSTRATE_KEY=ask_your_key
+export APPSTRATE_URL=https://appstrate.yourcompany.com
+```
+
+### Delegate a single run
+
+The personal agent decides it wants to run the `@acme/triage-support-tickets` agent on behalf of `eu_alice`. Agent routes are always `@scope/name` (the scope segment must start with `@`), and the call must carry the owning application via `X-App-Id`:
+
+```bash
+curl -X POST "$APPSTRATE_URL/api/agents/@acme/triage-support-tickets/run" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "X-App-Id: $APPSTRATE_APP_ID" \
+  -H "Appstrate-User: eu_alice" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "ticket_id": 42 } }'
+```
+
+The response carries a `runId`. The personal agent then subscribes to the run's [realtime stream](/docs/features/realtime) and awaits the `result` event:
+
+```bash
+curl -N "$APPSTRATE_URL/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
+```
+
+### Delegate a fleet
+
+Fan out across end-users:
+
+```js
+const users = await listUsers();
+const runs = await Promise.all(
+  users.map((u) =>
+    fetch(`${APPSTRATE_URL}/api/agents/@acme/triage-support-tickets/run`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${APPSTRATE_KEY}`,
+        "X-App-Id": APPSTRATE_APP_ID,
+        "Appstrate-User": u.externalId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ input: u.payload }),
+    }).then((r) => r.json())
+  )
+);
+```
+
+Appstrate schedules each run in its own sandbox, with that end-user's credentials. The personal agent sits back and collects results.
+
+## Division of responsibility
+
+| Concern | Personal agent (brain) | Appstrate (arms) |
+|---|---|---|
+| Reasoning, planning | ✅ | — |
+| User-facing chat | ✅ | — |
+| Pick which agent to run | ✅ | — |
+| Execute the run in isolation | — | ✅ |
+| Hold end-user credentials | — | ✅ |
+| Parallel fan-out | — | ✅ |
+| Audit log of who did what | — | ✅ |
+
+The split gives you the best of both worlds: keep the ergonomics and ownership of your favorite personal agent, add platform-grade execution when you need scale, isolation, or multi-tenancy.
+
+## Reference
+
+- [Authentication](/docs/api/authentication) — API keys, scopes, end-user impersonation.
+- [Multi-tenancy](/docs/features/multi-tenancy) — how `Appstrate-User` composes with the org/app hierarchy.
+- [Compare](/docs/resources/compare) — the full matrix versus personal agents.

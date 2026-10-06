@@ -1,0 +1,68 @@
+---
+title: Contributing
+description: How to propose a change to Appstrate.
+---
+
+Thanks for your interest in contributing. This page is the short version. The canonical reference is the [`CONTRIBUTING.md`](https://github.com/appstrate/appstrate/blob/main/CONTRIBUTING.md) at the root of the repo. When the two drift, the repo wins.
+
+For setup, commands, and infrastructure tiers, see [Get Started](/docs/get-started/introduction). This page is only about the contribution workflow.
+
+## Getting help
+
+- [Discord](https://discord.gg/5Js2CKWNnh): quick questions, real-time chat.
+- [GitHub Discussions](https://github.com/appstrate/appstrate/discussions): long-form questions, proposals, show-and-tell.
+- [GitHub Issues](https://github.com/appstrate/appstrate/issues): bug reports and feature requests, via the provided templates.
+
+All participants are expected to follow the [Code of Conduct](https://github.com/appstrate/appstrate/blob/main/CODE_OF_CONDUCT.md).
+
+## Ways to contribute
+
+Code is one path among several. Doc fixes, translations (French / English via `apps/web/src/locales/`), triage, design feedback, and community support are all first-class contributions. Start from the [bug report](https://github.com/appstrate/appstrate/issues/new?template=bug_report.yml) or [feature request](https://github.com/appstrate/appstrate/issues/new?template=feature_request.yml) templates.
+
+## Branch naming
+
+- `feat/short-description`: new features
+- `fix/short-description`: bug fixes
+- `docs/short-description`: documentation
+- `refactor/short-description`: refactoring
+
+## Commit messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/). Enforced by commitlint (`@commitlint/config-conventional`).
+
+```
+feat: add webhook retry configuration
+fix: prevent duplicate cron runs
+docs: update API overview table
+refactor: extract credential validation into service
+```
+
+Commit signing (GPG or SSH) is recommended, not yet mandatory.
+
+## Pull request process
+
+1. Create a branch from `main` using the naming convention above.
+2. Make focused, self-contained commits.
+3. Run `bun run check` and `bun test` locally. Both must pass.
+4. Open a PR against `main` with a clear description. API changes must update the OpenAPI spec in the same PR.
+5. Sign the [CLA](https://cla-assistant.io/appstrate/appstrate) on your first contribution. The bot guides you through it.
+6. Wait for CI and review. Squash and merge after approval.
+
+### Review criteria
+
+- Quality gate passes (`bun run check` + `bun test`).
+- Changes match the PR description, no unrelated churn bundled in.
+- New features include tests. API changes include OpenAPI updates.
+
+## Response times
+
+Goals, not guarantees:
+
+- Issue acknowledgment: within 5 business days
+- Bug triage: within 10 business days
+- First PR review: within 10 business days
+- Security reports: within 48 hours (see [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md))
+
+## License
+
+By contributing, you agree that your contributions will be licensed under [Apache License 2.0](https://github.com/appstrate/appstrate/blob/main/LICENSE).

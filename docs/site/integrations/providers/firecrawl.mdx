@@ -1,0 +1,43 @@
+---
+title: Firecrawl
+description: Connect Firecrawl to your Appstrate agents.
+---
+
+## Overview
+
+Firecrawl is a web scraping and crawling service, allowing your agents to extract structured content from web pages.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `api_key` |
+| Header | `Authorization: Bearer <token>` |
+| Scopes | N/A |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.firecrawl.dev/*`
+
+## Connect Firecrawl
+
+1. [Create a Firecrawl account](https://www.firecrawl.dev/signup)
+2. [Retrieve your API key](https://www.firecrawl.dev/app/api-keys) from the dashboard (the key starts with `fc-`)
+3. On Appstrate, go to the Firecrawl provider settings and enter the API key
+
+## Usage in an Agent
+
+Once connected, the agent can call Firecrawl APIs through the sidecar proxy. Example prompt:
+
+```
+Every week, crawl the blog pages of the 5 competitors listed in the "Monitoring" Google Sheet.
+Extract the new articles published this week and write a comparative summary.
+Post the summary to the #competitive-intel Slack channel.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

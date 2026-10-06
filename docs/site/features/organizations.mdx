@@ -1,0 +1,131 @@
+---
+title: Organizations
+description: Manage organizations, members, and roles in Appstrate.
+---
+
+## Overview
+
+Appstrate is **multi-tenant**. Each organization is an isolated space with its own members, packages, models, proxies, and applications.
+
+The first signup on an instance automatically creates an organization.
+
+Organization IDs are **bare UUIDs** (no prefix). Examples below use `a1b2c3d4-...` as placeholder; replace with the real UUID returned by the API or visible in the dashboard URL.
+
+## Via the UI
+
+Open the dashboard and click the settings icon in the sidebar → **Members** (`/org-settings/members`, admin-only). From there you can:
+
+- Invite new members by email (owner/admin only)
+- Change a member's role (owner only)
+- Remove a member (admin+)
+- Manage pending invitations (revoke, resend)
+
+The REST API below gives the programmatic equivalent.
+
+## Roles
+
+| Role | Permissions |
+|------|------------|
+| `owner` | Everything, including org deletion and promoting another member to `owner` (no dedicated transfer endpoint — do it by updating the target member's role) |
+| `admin` | Member management, applications, models, proxies, provider keys; cannot delete the org or change roles |
+| `member` | Day-to-day use: agents, runs, connections, end-users read/write |
+| `viewer` | Read-only across the org |
+
+## Creating an Organization
+
+Session auth only. API keys cannot create organizations.
+
+```bash
+curl -X POST http://localhost:3000/api/orgs \
+  -H "Cookie: session=..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Corp"
+  }'
+```
+
+`name` is required. `slug` is optional and auto-derived from `name` if omitted (kebab-case).
+
+## Inviting Members
+
+```bash
+curl -X POST http://localhost:3000/api/orgs/a1b2c3d4-.../members \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "alice@acme.com",
+    "role": "member"
+  }'
+```
+
+If the user already has an Appstrate account, they are added directly. Otherwise an invitation email is sent (requires SMTP configuration). Assignable roles are `viewer`, `member`, `admin` — promoting someone to `owner` uses the change-role endpoint instead.
+
+## Managing Members
+
+```bash
+# Change role (owner only)
+curl -X PUT http://localhost:3000/api/orgs/a1b2c3d4-.../members/user_xxx \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# Remove a member (admin+)
+curl -X DELETE http://localhost:3000/api/orgs/a1b2c3d4-.../members/user_xxx \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..."
+```
+
+There is no dedicated `GET /api/orgs/:id/members` endpoint — the member list is returned inside the org detail response (`GET /api/orgs/:orgId`), alongside pending invitations.
+
+## Organization Settings
+
+```bash
+# View settings
+curl http://localhost:3000/api/orgs/a1b2c3d4-.../settings \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..."
+
+# Update (any subset of supported keys)
+curl -X PUT http://localhost:3000/api/orgs/a1b2c3d4-.../settings \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "Content-Type: application/json" \
+  -d '{"apiVersion": "2026-03-21", "dashboardSsoEnabled": false}'
+```
+
+Settings are stored in the `organizations.settings` JSONB column. Current supported keys: `apiVersion` (pins the org to a specific API version), `dashboardSsoEnabled` (toggles dashboard SSO when the `oidc` module is loaded).
+
+## Deleting an Organization
+
+Owner-only. Cascades to every application, package, run, webhook, etc.
+
+```bash
+curl -X DELETE http://localhost:3000/api/orgs/a1b2c3d4-... \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..."
+```
+
+## X-Org-Id Header
+
+With cookie authentication (dashboard), the `X-Org-Id` header indicates the active organization:
+
+```bash
+curl http://localhost:3000/api/agents \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "X-App-Id: app_xxx"
+```
+
+With an API key, the organization is implicit (pinned on the key at creation).
+
+## Organization Resources
+
+The following resources are shared at the organization level (not application-scoped):
+
+- **LLM Models** — AI provider configuration (`org_models`)
+- **Proxies** — outbound HTTP proxies (`org_proxies`)
+- **Provider keys** — API keys for LLM providers (`org_system_provider_keys`)
+- **Packages catalog** — the agents, skills, tools, and providers available in this org (`packages`). Installed instances with per-app config live in `application_packages`.
+- **Organization-level connection profiles** — shared credentials reusable across applications

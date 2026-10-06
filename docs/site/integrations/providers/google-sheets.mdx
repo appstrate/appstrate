@@ -1,0 +1,52 @@
+---
+title: Google Sheets
+description: Connect Google Sheets to your Appstrate agents.
+---
+
+## Overview
+
+Google Sheets is Google's online spreadsheet tool, allowing your agents to read, write, and manipulate spreadsheets.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `spreadsheets.readonly` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `spreadsheets` | Full spreadsheet access |
+| `spreadsheets.readonly` | Read-only access |
+| `drive.file` | Per-file access (recommended) |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://sheets.googleapis.com/*`
+
+## Connect Google Sheets
+
+1. [Create a Google Cloud project](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and enable the Google Sheets API
+2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
+4. Add the Appstrate redirect URI as an authorized redirect URI
+5. Enter the Client ID and Client Secret in the Google Sheets provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Google Sheets APIs through the sidecar proxy. Example prompt:
+
+```
+Read the "Q1 Sales" spreadsheet and calculate the total per salesperson.
+Add a totals row at the bottom of the table and update the sheet.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

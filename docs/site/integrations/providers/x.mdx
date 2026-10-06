@@ -1,0 +1,67 @@
+---
+title: X
+description: Connect X to your Appstrate agents.
+---
+
+## Overview
+
+X (formerly Twitter) is a microblogging social network, allowing your agents to post tweets, manage timelines, and interact with users.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` (with PKCE) |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `tweet.read`, `users.read`, `offline.access` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `tweet.read` | Read tweets |
+| `tweet.write` | Post and delete tweets |
+| `tweet.moderate.write` | Moderate tweet replies |
+| `users.read` | Read user profiles |
+| `follows.read` | Read followers and following |
+| `follows.write` | Follow and unfollow users |
+| `like.read` | Read likes |
+| `like.write` | Like and unlike tweets |
+| `list.read` | Read lists |
+| `list.write` | Create and manage lists |
+| `bookmark.read` | Read bookmarks |
+| `bookmark.write` | Manage bookmarks |
+| `space.read` | Read Spaces |
+| `dm.read` | Read direct messages |
+| `dm.write` | Send direct messages |
+| `offline.access` | Refresh token (long-lived access) |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.x.com/*`
+
+## Connect X
+
+1. [Create a project and app](https://developer.x.com/en/portal/dashboard) in the X Developer Portal
+2. Enable OAuth 2.0 under "User Authentication Settings"
+3. Set type to "Web App" and add the Appstrate callback URL
+4. Copy the Client ID and Client Secret
+5. Enter these credentials in the X provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call X APIs through the sidecar proxy. Example prompt:
+
+```
+Every morning, search for tweets mentioning our brand on X.
+Analyze the sentiment of each mention (positive, neutral, negative).
+For negative mentions, draft an empathetic response and post it
+to the #social-media Slack channel for approval.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

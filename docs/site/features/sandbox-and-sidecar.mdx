@@ -1,0 +1,106 @@
+---
+title: Sandbox & Sidecar
+description: Every agent run executes in an isolated Docker network with a sidecar proxy that hides credentials from the LLM.
+---
+
+Appstrate runs every agent in an ephemeral workload mediated by a dedicated **sidecar** process. The sidecar is the single chokepoint for all outbound HTTP: it injects credentials at request time, enforces SSRF protection, and applies the outbound proxy cascade, so the agent's LLM never sees a raw token.
+
+On Tier 2+ deployments, the workload is a Docker container on an internal-only network. On Tier 0/1 (the default for local dev and small self-hosts), the agent runs as a Bun subprocess on the host and the sidecar runs in-process beside it.
+
+## When do isolation guarantees apply?
+
+The `RUN_ADAPTER` env var controls how runs execute. Its default is **`process`**, not `docker`.
+
+| `RUN_ADAPTER` | Mode | Default on | Isolation |
+|---|---|---|---|
+| `process` | Bun subprocess on the host, in-process sidecar | Tier 0/1 (and the default) | None — agent shares the host network and filesystem. Sidecar still mediates outbound HTTP and hides credentials, but there is no container boundary. |
+| `docker` | Agent + sidecar containers on a dedicated, internal-only Docker network | Tier 2/3 | Full — agent cannot reach the host, cannot egress without the sidecar, cannot talk to another run. |
+
+The claims below about network isolation, cross-run separation, and "cannot bypass the proxy" **apply to `docker` mode only**. Credential hiding (agent never sees raw tokens) applies in both modes, because the sidecar is what holds credentials regardless of how it runs.
+
+## Shape of a Docker-mode run
+
+```
+┌─────────────────────────────────────────────────┐
+│  Isolated Docker network (appstrate-exec-{runId})│
+│  internal: true — no external DNS, no gateway    │
+│                                                  │
+│  ┌──────────────────┐    ┌───────────────────┐  │
+│  │  Sidecar         │◄──►│  Agent container  │  │
+│  │  (Pi coding      │    │  (Pi runtime)     │  │
+│  │   agent proxy)   │    │                   │  │
+│  │  :8080 /proxy    │    │  HTTP_PROXY=      │  │
+│  │  :8081 forward   │    │   http://sidecar  │  │
+│  └──────┬───────────┘    │        :8081      │  │
+│         │                 └───────────────────┘  │
+│         ▼                                        │
+│  Shared egress network (appstrate-egress)       │
+│         │                                        │
+│         ▼                                        │
+│  External APIs (Gmail, Slack, Notion, …)        │
+└─────────────────────────────────────────────────┘
+```
+
+For every run in Docker mode, Appstrate:
+
+1. Creates an **internal-only** Docker network named `appstrate-exec-{runId}` (no external DNS, no host gateway).
+2. Acquires a sidecar — either a fresh container named `appstrate-sidecar-{runId}`, or a pre-warmed one from the pool (`appstrate-sidecar-pool-{uuid}`). The sidecar is attached to the run network with the DNS alias `sidecar`, and to a shared `appstrate-egress` network that has outbound access.
+3. Creates the agent container with `HTTP_PROXY` / `HTTPS_PROXY` pointing to `http://sidecar:8081` and `SIDECAR_URL=http://sidecar:8080`. The agent container receives **no** `RUN_TOKEN` and **no** `PLATFORM_API_URL`.
+4. Hands the sidecar a short-lived run token + platform URL so it can fetch credentials on demand (**not pre-hydrated** — the sidecar fetches each credential lazily at request time via `/internal/credentials/{providerId}`).
+5. Runs the agent until it exits or hits the run timeout.
+6. Removes the sidecar and the network.
+
+## Two sidecar ports
+
+The sidecar container listens on two ports, each with a distinct purpose:
+
+- **`:8080`** — credential-aware proxy. Agent code posts to `$SIDECAR_URL/proxy` with `X-Provider`, `X-Target`, optional `X-Proxy`, and optional `X-Substitute-Body` headers. Also serves `/configure` (for pool re-use), `/run-history`, and the LLM gateway.
+- **`:8081`** — transparent HTTP/HTTPS forward proxy. This is the port `HTTP_PROXY` points at, so any HTTP library inside the agent container (curl, fetch, openai, anthropic SDKs, …) transparently tunnels through the sidecar.
+
+Both ports end up at the same enforcement logic: URL validation against the agent's `authorizedUris`, SSRF checks against private IP ranges, credential injection, and proxy cascade.
+
+## What the agent can and cannot do
+
+| Can | Cannot (Docker mode) |
+|---|---|
+| Call any URL on its provider allowlist | Reach the host network directly |
+| Read its own environment and filesystem | Read raw credentials (they live in the sidecar) |
+| Write logs and memories via built-in tools | Communicate with another run's sandbox |
+| Receive the result of a tool call | Bypass the HTTP proxy for outbound requests |
+
+If the agent tries to reach a host outside its provider allowlist, the sidecar responds `403` with a JSON body explaining which guard tripped. Private IP ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, link-local IPv6, ULA `fc00::/7`) and IPv4-mapped IPv6 are all blocked by the sidecar's SSRF module.
+
+## Sidecar pool
+
+Cold-booting a sandbox for every run is slow. Appstrate keeps a warm pool of pre-built sidecars. When a run starts, the pool is drained first and only falls back to fresh creation if empty. Each acquired sidecar is re-keyed via `POST /configure` with the run's token before handing control to the agent.
+
+Pool size is controlled by the `SIDECAR_POOL_SIZE` env var (default `2`, set `0` to disable pooling). The pool lives on its own shared network (`appstrate-sidecar-pool`) until acquisition.
+
+## Credential injection
+
+When the agent posts to `$SIDECAR_URL/proxy` with `X-Provider: gmail` and `X-Target: https://gmail.googleapis.com/…`, the sidecar:
+
+1. Validates the `X-Provider` matches an allowlist provider the agent has declared.
+2. Validates the target URL against the provider's `authorizedUris` and the SSRF guard.
+3. Fetches the credential from the platform (`/internal/credentials/{providerId}`) using its run token. The platform resolves the credential through the connection profile chain (end-user-scoped → user-scoped → app-scoped) based on the run's context.
+4. Substitutes `{{variable}}` placeholders in the target URL, outbound headers, and (if `X-Substitute-Body: true`) the request body with credential values. Unresolved placeholders return a `400` error.
+5. Forwards the request and relays the response transparently.
+
+The agent's code, its logs, and anything it sends to the LLM never touch the raw credential — they only see `{{access_token}}`-style placeholders before sidecar substitution.
+
+## Response truncation
+
+If an upstream response exceeds the sidecar's `MAX_RESPONSE_SIZE` (50 KB by default, tunable per request up to an absolute ceiling), the sidecar truncates the body and adds `X-Truncated: true` to the response headers so the agent can detect and re-request if needed.
+
+## Proxy cascade
+
+Outbound traffic from the sidecar can be routed through a proxy. The cascade is documented in full on the [Proxies](/docs/features/proxies) page; in short, a per-run `proxyId` beats an agent-level override, which beats the org default, which beats the `PROXY_URL` env var.
+
+## Audit
+
+Each sidecar response is forwarded to the agent as-is; there is **no structured audit log emitted by the sidecar today**. Visibility comes from two places instead:
+
+- The run's log stream — every `pi.registerTool()` execution produces log lines (status, tool name, duration) that land in `run_logs` via the agent SDK and stream to the [Realtime](/docs/features/realtime) feed.
+- The denormalized columns on the `runs` table (`proxyLabel`, `modelLabel`, `apiKeyId`, `endUserId`, `scheduleId`) — see [Multi-Tenancy § Audit](/docs/features/multi-tenancy#audit).
+
+If you need per-request audit of outbound HTTP (target URL, status, latency) you currently have to infer it from the agent's structured logs. A dedicated sidecar audit stream is on the roadmap.

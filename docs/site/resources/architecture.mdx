@@ -1,0 +1,114 @@
+---
+title: Architecture
+description: How the Appstrate monorepo is organized and how requests flow from the API to an isolated run.
+---
+
+Appstrate is a TypeScript monorepo built on Bun and Hono. Self-hosters pick an infrastructure tier (0 to 3) and bring up the stack with the matching Docker Compose file, or with nothing at all for Tier 0.
+
+## Monorepo layout
+
+```
+appstrate-oss/
+├── apps/
+│   ├── api/              # Hono backend (237 endpoints, auth pipeline, webhooks, realtime)
+│   ├── web/              # React 19 + Vite dashboard
+│   └── cli/              # appstrate binary (Bun self-contained)
+├── packages/
+│   ├── connect/          # OAuth2/PKCE, OAuth1, API key, credential encryption
+│   ├── core/             # Shared validation, storage, semver, integrity, schemas
+│   ├── db/               # Drizzle ORM schema, PGlite + PostgreSQL drivers
+│   ├── emails/           # Email template registry + renderer
+│   ├── env/              # Zod-validated env configuration
+│   ├── shared-types/     # Drizzle InferSelectModel re-exports
+│   └── ui/               # React components (schema-form, widgets) published to npm
+├── runtime-pi/            # Per-run container spec: agent + sidecar + extension wrapper
+├── system-packages/       # 60 provider + 5 tool AFPS packages shipped by default
+└── examples/
+    └── self-hosting/      # docker-compose.yml + tier1/tier2/tier3 overlays
+```
+
+Tier 0 requires only Bun (zero-install, no Docker). Tiers 1 to 3 each add a dependency: Tier 1 adds PostgreSQL, Tier 2 adds Redis, Tier 3 adds S3/MinIO and Docker-based run execution.
+
+## Request flow
+
+The real middleware chain is defined in `apps/api/src/index.ts`:
+
+```
+HTTP request
+    │
+    ▼
+Hono app (apps/api/src/index.ts)
+    │
+    ├─ onError              → ApiError becomes RFC 9457 application/problem+json
+    ├─ requestId            → attaches req_xxx on the request + response
+    ├─ cors                 → TRUSTED_ORIGINS allowlist
+    ├─ healthRouter         → /, bypasses auth
+    ├─ OpenAPI docs         → /api/openapi.json + /api/docs, bypasses auth
+    ├─ shutdown gate        → rejects new POSTs while draining
+    ├─ auth-pipeline        → module auth strategies → Bearer ask_… → cookie session
+    │                         (first match wins; resolves Appstrate-User header on API key)
+    ├─ org-context          → validates X-Org-Id + membership
+    ├─ app-context          → validates X-App-Id for app-scoped routes
+    ├─ api-version          → reads Appstrate-Version, sets response header
+    └─ route handler
+          │
+          ├─ per-route rateLimit()   → e.g. 20/min on run, 10/min on import
+          ├─ per-route idempotency() → Idempotency-Key, 24h TTL, SHA-256 body hash
+          │
+          ▼
+    service layer (apps/api/src/services/*)
+          │
+          ▼
+    Drizzle ORM → PostgreSQL / PGlite
+          │
+          ▼
+    For run triggers:
+      run-pipeline → acquires sidecar from pool
+                  → spawns agent container on an isolated Docker network
+                  → tool calls proxied through sidecar (credential injection)
+                  → run ends, container torn down
+                  → webhooks fan out, SSE stream closes
+```
+
+## Key subsystems
+
+### Auth pipeline
+
+`apps/api/src/lib/auth-pipeline.ts` evaluates strategies in order and picks the first match:
+
+1. **Module auth strategies** (generic JWT, mTLS, SAML, OIDC…). Modules contribute strategies via `authStrategies()`; they must return `null` fast when the request does not match their signature. The bundled OIDC module is one such strategy, not the only one.
+2. **API keys**: `Authorization: Bearer ask_...` validated against the hashed `api_keys` table. When `Appstrate-User: eu_...` is also present, the end-user context is attached and a full audit row is written.
+3. **Session cookies** from Better Auth are decoded last.
+
+Scope resolution happens downstream of the pipeline: `middleware/org-context.ts` validates `X-Org-Id` and sets `orgId`, `middleware/app-context.ts` validates `X-App-Id` and sets `applicationId`. `lib/scope.ts` only defines the `OrgScope` / `AppScope` types that services consume.
+
+### Run pipeline
+
+Run execution (`apps/api/src/services/run-pipeline.ts`):
+
+1. Apply rate limits, concurrent-run caps, and timeout ceilings (per org, per user, per end-user).
+2. Validate input against the agent's schema (AJV, manifest-driven).
+3. Create the run record, call the `beforeRun` hook (may block).
+4. Acquire a warm sidecar from the pool (`sidecar-pool.ts`), falling back to a fresh container.
+5. Start the agent container on an isolated Docker network (`appstrate-exec-{runId}`).
+6. Proxy tool calls through the sidecar, injecting credentials at the last moment.
+7. Collect output, validate against the agent's result schema when defined.
+8. Persist the run, emit terminal events (SSE + webhooks), stream log lines, tear down containers.
+
+### Realtime fanout
+
+PostgreSQL `pg_notify` triggers on both `runs` and `run_logs`. SSE clients subscribe through `EventSource`, the server patches React Query cache directly, no polling. No Redis dependency: this works in Tier 0 (PGlite implements LISTEN/NOTIFY) as well as Tier 3.
+
+## Data model
+
+- `organizations` → many `applications` → many `end_users` and `api_keys`
+- `packages` (with `type` = `agent | skill | tool | provider`) are org-scoped (or `orgId = null` for system packages)
+- `runs` reference an agent `package` and optionally an `end_user`, with denormalized audit columns (`apiKeyId`, `dashboardUserId`, `endUserId`, `scheduleId`)
+- `webhooks` are application-scoped and deliver to receivers with HMAC-SHA256 signed envelopes
+- `package_memories` are application + package scoped, keyed by `run_id` for traceability
+
+Core tables live in `packages/db/src/schema/`. Module-owned tables (webhooks, OIDC) live next to their module at `apps/api/src/modules/{webhooks,oidc}/schema.ts`, each tracked in its own `__drizzle_migrations_<module_id>` table.
+
+## Contributing back
+
+The code is Apache 2.0. See [Contributing](/docs/resources/contributing) for the workflow, conventions, and how to propose a change.

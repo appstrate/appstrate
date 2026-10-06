@@ -1,0 +1,38 @@
+---
+title: Coding Agents
+description: Why the coding-agent + Appstrate combo beats the dashboard for platform engineers, and which use cases it unlocks.
+---
+
+If you're the platform or internal-dev engineer rolling out Appstrate inside a company, a coding agent is your fastest path. Install the [Appstrate Agent Skill](/docs/using-appstrate/skill) into [Claude Code](https://docs.claude.com/en/docs/claude-code), [Cursor](https://cursor.com/docs/skills), [Antigravity](https://antigravity.google/docs/skills), or any [AGENTS.md-aware](https://github.com/numman-ali/openskills) host, and delegate the configuration work (authoring agents, wiring providers, rotating keys, testing impersonation, publishing AFPS packages) to an agent that already knows Appstrate's CLI, REST API, and conventions.
+
+Instead of opening the dashboard, reading the docs, and hand-typing `curl` or `appstrate api`, you describe what you want (*"wire a Gmail provider and create an agent that summarizes new emails every morning"*) and the coding agent executes against your active profile.
+
+This page is the **why and when**. For the **how** (install, targets, flags, update, customise), see [Using Appstrate / Skill](/docs/using-appstrate/skill).
+
+## Why this pattern
+
+- **Faster config loops.** Authoring an agent + provider + webhook normally takes 15 min of UI clicks or precise API calls. A coding agent does it in one prompt, with the manifest conventions baked in.
+- **Multi-instance workflows.** The skill uses named profiles (`dev`, `staging`, `prod`). Your agent can diff a config between them or replay a prod change on staging first.
+- **End-user impersonation checks.** Ask the agent to validate that the same flow works across 3 end-users. It loops through them with `Appstrate-User` headers.
+- **Less context-switching.** Ship an internal feature that uses Appstrate from the same chat where you wrote the code. No jump from IDE to dashboard to terminal.
+- **AFPS packaging.** The agent knows the manifest shape, dependencies, semver, and registry flow. It packs and publishes without you looking up the spec.
+
+## Use cases that land well
+
+Once the skill is loaded, these prompts work out of the box:
+
+- *"Create an agent called `email-triage` that reads my Gmail inbox and posts a summary to Slack. Wire the Gmail and Slack providers for end-user `eu_alice`."*
+- *"Rotate the API key named `ci-deploy`. Revoke the old one only after the new one is verified."*
+- *"Pack my local `./my-skill` folder as an AFPS and publish it to my instance under `@acme/my-skill@1.0.0`."*
+- *"List every agent that's failing more than 10% of the time this week, show me the last run's stderr."*
+- *"Replay run `run_01HZABC` against end-user `eu_bob` to check if the provider keys work for him too."*
+- *"Diff my dev profile's agent list with prod, tell me what's missing on prod."*
+
+The agent reads [the skill's SKILL.md and references](https://github.com/appstrate/skills/tree/main/skills/appstrate) on demand, picks the right CLI command or REST call, runs it, and reports back. If something fails, it stops and shows the stderr instead of retrying blindly.
+
+## Reference
+
+- [Using Appstrate / Skill](/docs/using-appstrate/skill): install, targets, flags, update, customisation.
+- [CLI reference](/docs/using-appstrate/cli): the 9 commands the skill drives.
+- [Skills as a feature](/docs/features/skills): how Appstrate itself consumes Agent Skills.
+- [Compare](/docs/resources/compare): how a coding-agent + Appstrate combo contrasts with coding-agent alone.

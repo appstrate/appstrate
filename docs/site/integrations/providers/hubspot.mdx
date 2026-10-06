@@ -1,0 +1,57 @@
+---
+title: HubSpot
+description: Connect HubSpot to your Appstrate agents.
+---
+
+## Overview
+
+HubSpot is a CRM platform, allowing your agents to manage contacts, deals, and sales interactions.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `crm.objects.contacts.read` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `crm.objects.contacts.read` | Read contacts |
+| `crm.objects.contacts.write` | Write contacts |
+| `crm.objects.companies.read` | Read companies |
+| `crm.objects.companies.write` | Write companies |
+| `crm.objects.deals.read` | Read deals |
+| `crm.objects.deals.write` | Write deals |
+| `content` | Content access |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://api.hubapi.com/*`
+
+## Connect HubSpot
+
+1. [Create a HubSpot application](https://developers.hubspot.com/) on the developer portal
+2. Configure OAuth settings and add the required scopes
+3. Add the Appstrate redirect URL
+4. Copy the Client ID and Client Secret
+5. Enter these credentials in the HubSpot provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call HubSpot APIs through the sidecar proxy. Example prompt:
+
+```
+Every day, check for new contacts created in HubSpot.
+For each contact without an associated company, look up the company
+from the email domain and associate it automatically.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

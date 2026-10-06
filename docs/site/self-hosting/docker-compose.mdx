@@ -1,0 +1,174 @@
+---
+title: Docker Compose
+description: Deploy Appstrate in production with Docker Compose.
+---
+
+The root `docker-compose.yml` in the [appstrate-oss](https://github.com/appstrate/appstrate) repository is a **Tier 3 full-stack template**: PostgreSQL + Redis + MinIO + Docker-isolated agent execution. For minimal Tier 1 or Tier 2 setups, see the tier-specific templates in `examples/self-hosting/` or use the one-liner installer (`curl -fsSL https://get.appstrate.dev | bash`) which picks a tier interactively.
+
+## Download the files
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appstrate/appstrate/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/appstrate/appstrate/main/.env.example -o .env
+```
+
+## Configure required variables
+
+Seven variables must be set for the Tier 3 compose stack to start. Four are enforced by the compose file itself (`${VAR:?...}` bash expansion fails fast if missing), the other three are enforced by the application's Zod-validated env schema.
+
+| Variable | Enforced by | Format |
+|---|---|---|
+| `POSTGRES_USER` | compose (`:?`) | Any non-empty string |
+| `POSTGRES_PASSWORD` | compose (`:?`) | Any non-empty string |
+| `MINIO_ROOT_USER` | compose (`:?`) | Any non-empty string |
+| `MINIO_ROOT_PASSWORD` | compose (`:?`) | Any non-empty string |
+| `BETTER_AUTH_SECRET` | app schema | `openssl rand -base64 32` |
+| `UPLOAD_SIGNING_SECRET` | app schema | ≥ 16 chars, `openssl rand -base64 32` is fine |
+| `CONNECTION_ENCRYPTION_KEY` | app schema | Exactly 32 bytes, base64-encoded: `openssl rand -base64 32` |
+
+Generate them in your `.env`:
+
+```bash
+echo "POSTGRES_USER=appstrate"                                >> .env
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '=/+'_=/')" >> .env
+echo "MINIO_ROOT_USER=appstrate"                              >> .env
+echo "MINIO_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -d '=/+'_=/')" >> .env
+echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"          >> .env
+echo "UPLOAD_SIGNING_SECRET=$(openssl rand -base64 32)"       >> .env
+echo "CONNECTION_ENCRYPTION_KEY=$(openssl rand -base64 32)"   >> .env
+```
+
+See the [Environment Variables reference](/docs/self-hosting/environment-variables) for the full list (optional OAuth, SMTP, cost tracking, etc).
+
+## Pin a version
+
+By default the compose file tracks `ghcr.io/appstrate/appstrate:latest`. For reproducible deploys, pin a version:
+
+```bash
+echo "APPSTRATE_VERSION=v1.2.3" >> .env
+```
+
+`APPSTRATE_VERSION` applies to the `appstrate`, `appstrate-pi`, and `appstrate-sidecar` images simultaneously.
+
+## Start
+
+```bash
+docker compose up -d
+```
+
+Database migrations run in-band during the app's boot sequence (`apps/api/src/lib/boot.ts`), so no separate `migrate` step is needed.
+
+## Verify the deployment
+
+```bash
+# Machine-readable health check (JSON)
+curl http://localhost:3000/health
+
+# Human check (serves the React dashboard HTML)
+curl http://localhost:3000/
+```
+
+`/health` returns JSON with `status: "healthy" | "degraded" | "unhealthy"` and per-subsystem check results. `/` serves the dashboard SPA index.
+
+## First org
+
+Sign up through the dashboard (`http://localhost:3000`), then create your first organization through the onboarding flow. The user who creates an org is automatically assigned the `owner` role on that org. Signup and org creation are **separate steps**: creating an account does not create an org.
+
+## Persistent data
+
+User data lives in three Docker volumes defined at the bottom of `docker-compose.yml`:
+
+- `pgdata` — PostgreSQL data directory
+- `redisdata` — Redis AOF / RDB
+- `miniodata` — MinIO object storage
+
+```bash
+# Back up
+docker run --rm -v appstrate_pgdata:/data -v $(pwd):/backup alpine \
+  tar czf /backup/pgdata-$(date +%F).tar.gz /data
+
+# Inspect
+docker volume inspect appstrate_pgdata
+
+# ⚠️ DESTRUCTIVE — wipes all data
+docker compose down -v
+```
+
+## Reverse proxy
+
+In production, place a reverse proxy in front of Appstrate to handle TLS. Set `APP_URL` to your public HTTPS domain and add that domain to `TRUSTED_ORIGINS` (comma-separated, for CORS).
+
+### Nginx
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name appstrate.example.com;
+
+    ssl_certificate     /etc/ssl/certs/appstrate.pem;
+    ssl_certificate_key /etc/ssl/private/appstrate.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE support
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+    }
+}
+```
+
+`proxy_http_version 1.1` and `proxy_set_header Connection ""` are important for stable SSE streams — without them Nginx may reuse upstream connections in ways that interfere with long-lived event streams.
+
+If you use `TRUST_PROXY`, configure it according to the number of trusted hops so `X-Forwarded-For` is parsed correctly for per-IP rate limiting. See [Environment Variables](/docs/self-hosting/environment-variables#trust_proxy).
+
+### Caddy
+
+```
+appstrate.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Caddy handles TLS certificates automatically via Let's Encrypt and supports SSE natively.
+
+## Logs
+
+The API writes structured JSON logs to stdout. Follow them with:
+
+```bash
+docker compose logs appstrate -f
+```
+
+`LOG_LEVEL` accepts `debug`, `info` (default), `warn`, `error`.
+
+## Post-install auth providers (optional)
+
+- **Google OAuth**: set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
+- **GitHub OAuth**: set `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET`.
+- **SMTP email verification**: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+
+All three are opt-in. Without them, email/password signup with no verification email is the only path.
+
+## Multi-instance
+
+Tier 2+ (Redis configured) supports running multiple Appstrate instances behind a load balancer: the scheduler uses BullMQ for exactly-once job delivery, rate limiting is Redis-backed, and run cancellation is broadcast via Redis PubSub. Point each replica at the same PostgreSQL, Redis, and (if used) S3, and share the same secrets.
+
+## Updating
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Pull new images (or update `APPSTRATE_VERSION`), then restart. Migrations run automatically at boot. See the [Upgrading](/docs/self-hosting/upgrading) page for version-specific guidance.
+
+## Supply-chain verification
+
+Appstrate images are signed. See `examples/self-hosting/README.md` in the `appstrate/appstrate` repo for `gh attestation verify` (SLSA provenance) and offline minisign verification of the installer and images.

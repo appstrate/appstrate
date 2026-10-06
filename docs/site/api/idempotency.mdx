@@ -1,0 +1,73 @@
+---
+title: Idempotency
+description: Safely retry write operations using the Idempotency-Key header.
+---
+
+Write endpoints accept an `Idempotency-Key` header. Identical keys replay the original response without creating duplicates. This makes it safe to retry after network errors, timeouts, or ambiguous `5xx` responses.
+
+## How it works
+
+1. Client generates a unique key (UUID v4 is recommended) and sends it with the request.
+2. Appstrate hashes the request body (SHA-256) and stores `(key, bodyHash, response)` in Redis.
+3. On retry with the same key and same body hash, Appstrate returns the cached response without re-executing.
+4. On retry with the same key but a different body hash, Appstrate returns a `409 conflict` error.
+5. After **24 hours**, the entry is evicted. Reusing a key after eviction treats the request as new.
+
+## Usage
+
+```bash
+curl -X POST http://localhost:3000/api/end-users \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "Idempotency-Key: 7b2d4c8e-1e8a-4f5b-9a3c-2d4e8f1a7b6c" \
+  -H "Content-Type: application/json" \
+  -d '{ "externalId": "user_alice", "name": "Alice" }'
+```
+
+Retrying the same request with the same key returns the same response body and status.
+
+## Which endpoints support it
+
+All `POST`, `PUT`, `PATCH`, and `DELETE` endpoints that mutate state. Read endpoints (`GET`) ignore the header.
+
+## Constraints
+
+- **Key format**: any string up to 255 characters.
+- **Uniqueness**: scoped per organization and per endpoint. Two different endpoints can reuse the same key without collision.
+- **TTL**: 24 hours.
+- **Body hash**: SHA-256 over the raw body. Identical bodies must produce identical responses.
+
+## Conflict error
+
+```
+HTTP/1.1 409 Conflict
+Content-Type: application/problem+json
+
+{
+  "type": "https://appstrate.dev/errors/conflict",
+  "title": "Idempotency key conflict",
+  "status": 409,
+  "code": "conflict",
+  "detail": "The key was used for a request with a different body.",
+  "requestId": "req_..."
+}
+```
+
+Do not retry after this error. Either use a fresh key, or send the original body.
+
+## When Redis is not configured
+
+Idempotency relies on Redis. Without `REDIS_URL`, the header is accepted but not enforced: every retry re-executes. This is acceptable for local development but dangerous for production.
+
+## Best practices
+
+- Generate the key client-side, before the first send.
+- Persist the key alongside the intent (e.g. in your job queue) so retries use the same one.
+- Use the same key across retries for the same logical operation. Generate a new one for a new operation.
+- Do not reuse keys older than 24 hours.
+
+## Differences from Stripe
+
+Appstrate's implementation is modeled on Stripe's, with two differences:
+
+- TTL is 24 hours (Stripe: 24 hours; same).
+- Body hash conflict detection is strict (different body = `409`). Stripe silently returns the first response in some cases.

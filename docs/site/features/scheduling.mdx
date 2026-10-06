@@ -1,0 +1,114 @@
+---
+title: Scheduling
+description: Automatically execute your agents on a schedule using cron expressions.
+---
+
+## Overview
+
+Schedules let you automatically run agents at regular intervals using cron syntax. The scheduler is backed by **BullMQ** when Redis is available (multi-instance deployments), and falls back to an in-memory `LocalQueue` when it is not (Tier 0/1 self-hosts).
+
+> **Redis is recommended but not required.** Without `REDIS_URL`, schedules still work via an in-process cron evaluator that polls every 30 seconds. The fallback has no persistence across restarts and offers no cross-instance deduplication, so for any multi-instance or production deployment you want Redis.
+
+## Via the UI
+
+Open the dashboard → **Schedules** in the sidebar (`/schedules`). From there you can:
+
+- **List** all schedules with their next-run time, last-execution status, and agent binding
+- **Create** a schedule (`/schedules/new`) — pick an agent, a cron expression, a timezone, a connection profile, and an input (form is auto-generated from the agent's input schema)
+- **Inspect** a schedule (`/schedules/:id`) — agent binding, next run, last run, provider readiness, and a run history tab
+- **Edit** a schedule (`/schedules/:id/edit`) — change cron, timezone, input, or toggle enabled/disabled (pause/resume)
+
+The UI timezone selector exposes 7 common zones (UTC, Europe/Paris, Europe/London, America/New_York, America/Chicago, America/Los_Angeles, Asia/Tokyo). Any IANA zone is accepted via the API.
+
+## Creating a Schedule
+
+```bash
+curl -X POST http://localhost:3000/api/agents/@scope/agent-name/schedules \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionProfileId": "cp_xxx",
+    "cronExpression": "0 9 * * 1-5",
+    "timezone": "Europe/Paris",
+    "name": "Daily summary 9am",
+    "input": {"message": "Morning digest"}
+  }'
+```
+
+Required fields:
+
+- `connectionProfileId` — which credentials the run should use
+- `cronExpression` — 5-field cron (see below)
+
+Optional fields: `timezone` (default `UTC`), `name`, `input` (validated against the agent's input schema at creation). Agents that declare file inputs cannot be scheduled.
+
+## Cron Syntax
+
+Standard 5-field cron. Seconds are not supported, and macros like `@daily` / `@hourly` are not accepted.
+
+```
+┌──────── minute (0-59)
+│ ┌────── hour (0-23)
+│ │ ┌──── day of month (1-31)
+│ │ │ ┌── month (1-12)
+│ │ │ │ ┌ day of week (0-7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+- `*/15 * * * *` — every 15 minutes
+- `0 */2 * * *` — every 2 hours
+- `0 9 * * 1` — every Monday at 9am
+- `0 0 1 * *` — first of every month at midnight
+
+## Managing Schedules
+
+```bash
+# List all schedules in the active application
+curl http://localhost:3000/api/schedules \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+
+# Schedules for a specific agent
+curl http://localhost:3000/api/agents/@scope/agent-name/schedules \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+
+# Update (pause/resume, change cron or timezone)
+curl -X PUT http://localhost:3000/api/schedules/sch_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+
+# Delete
+curl -X DELETE http://localhost:3000/api/schedules/sch_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+`enabled: false` keeps the schedule row in the database but removes its BullMQ job so no ticks fire. Deleting the agent cascades to its schedules.
+
+## Scheduled Run History
+
+```bash
+curl http://localhost:3000/api/schedules/sch_xxx/runs \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+Runs triggered by a schedule carry `scheduleId` on the run record, so they can be filtered in `GET /api/runs` queries and audited after the fact.
+
+## Scope and attribution
+
+Schedules are scoped to **org + application**. They are not end-user-scoped, but the resulting run inherits the `endUserId` of the connection profile when that profile is user-scoped.
+
+Schedules do **not** pin an agent version. Each tick runs the current latest version of the agent, so bumping the agent version changes what the next tick executes. Input is re-validated against the live input schema at execution time; if the schema has become incompatible since the schedule was created, the run fails.
+
+## Limits and behavior
+
+- The scheduling worker is rate-limited to **5 runs per minute per worker**. On multi-instance deployments each worker enforces its own limit independently (no global cross-worker cap).
+- Enabled schedules are synced from the `package_schedules` table to BullMQ at boot. **Missed ticks are not backfilled** — if the system was down at the scheduled time, that run is skipped.
+- Execution goes through `prepareAndExecuteRun()` (same code path as manual runs), so scheduled runs get the same Docker isolation, proxy cascade, and credential injection as any other run.

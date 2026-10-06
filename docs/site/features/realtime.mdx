@@ -1,0 +1,125 @@
+---
+title: Realtime
+description: Server-Sent Event streams for run status changes, log lines, and keep-alive events.
+---
+
+Appstrate exposes long-running run events as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) (SSE) so dashboards, bots, and agents can react to run lifecycle transitions without polling.
+
+## Via the UI
+
+Open a run at `/runs/:scope/:name/:runId`. The page has four tabs:
+
+- **#result** — the validated output (shown when the run has produced one)
+- **#logs** — live log stream, subscribed via `useRunLogsRealtime()`
+- **#state** — the persisted state snapshot written by the agent at the end of the run
+- **#info** — trigger attribution, timing, model + proxy labels
+
+Status transitions (pending → running → terminal) are wired via a separate hook `useRunRealtime()` and patch the React Query cache in place, so the page header, the sidebar badge, and the Runs list all update without a refetch. The **Cancel** button on a running job fires `POST /api/runs/:runId/cancel` behind the scenes.
+
+The REST endpoints below are the same feed the dashboard consumes; use them when you build your own dashboard, pipe events into a chat bot, or watch runs from a CI job.
+
+## Endpoints
+
+| Route | Purpose |
+|---|---|
+| `GET /api/realtime/runs` | Stream every run in the active application |
+| `GET /api/realtime/runs/:runId` | Stream a single run |
+| `GET /api/realtime/agents/:packageId/runs` | Stream every run of a specific agent |
+
+All three endpoints stay open indefinitely. They do not auto-close when a run ends; your client is responsible for closing the connection when it is done.
+
+### Authentication
+
+Two auth methods, pick one per connection:
+
+- **API key** — pass `?token=ask_your_key` in the query string. Needed because browser `EventSource` does not support custom headers. This is the only option on every other route; realtime is the one place where tokens live in the URL.
+- **Cookie session** — pass `?orgId=<org-id>` (and `?appId=<app-id>` on the multi-run / per-agent endpoints) alongside the session cookie. The cookie carries the identity; the query params carry the org + app context that headers would normally carry.
+
+```bash
+# API key
+curl -N "http://localhost:3000/api/realtime/runs/run_xxx?token=$APPSTRATE_KEY"
+
+# Cookie session (session cookie picked up automatically by curl when -b is set)
+curl -N -b cookies.txt \
+  "http://localhost:3000/api/realtime/runs?orgId=$ORG_ID&appId=$APP_ID"
+```
+
+### Verbose mode
+
+By default, large user-content fields (`result`, log `data`) are stripped from SSE payloads to keep the stream small. Append `?verbose=true` to receive the full payload:
+
+```bash
+curl -N "http://localhost:3000/api/realtime/runs/run_xxx?token=$APPSTRATE_KEY&verbose=true"
+```
+
+Use verbose mode when you want the final `result` inline in the stream. Otherwise fetch `GET /api/runs/:runId` once the run is terminal.
+
+## Event types
+
+Three event types are emitted:
+
+- `run_update` — run lifecycle transitions (`pending` → `running` → terminal). On a terminal status, the payload carries the full run record including `result` or `error`.
+- `run_log` — a structured log line from the agent process (one event per line).
+- `ping` — a keep-alive event emitted every 30 seconds. Carries no payload and can be ignored by most consumers.
+
+There is **no dedicated `result` event**. The run's `result` arrives inside the final `run_update` when the run reaches a terminal status.
+
+## Event shapes
+
+```
+event: run_update
+data: {"id":"run_0194...","status":"running","orgId":"...","applicationId":"app_xxx","packageId":"pkg_...","startedAt":"2026-04-19T10:00:01.000Z"}
+
+event: run_log
+data: {"id":"lg_...","runId":"run_0194...","level":"info","message":"fetching inbox","createdAt":"2026-04-19T10:00:01.000Z"}
+
+event: ping
+data:
+```
+
+`run_update` payload fields (nullable unless noted):
+
+- `id` *(required)* — run id, `run_` prefix, UUID v7
+- `status` *(required)* — `pending` / `running` / `success` / `failed` / `timeout` / `cancelled`
+- `orgId`, `applicationId`, `packageId` *(required)* — tenant + package context (used by the server to filter subscribers; consumers can ignore)
+- `startedAt`, `completedAt`, `duration` — populated as the run progresses
+- `result` — present on `status: "success"` only (stripped in non-verbose mode)
+- `error` — present on `status: "failed"` only
+- `dashboardUserId`, `endUserId`, `apiKeyId`, `scheduleId` — trigger attribution (exactly one is non-null)
+
+`run_log` payload fields:
+
+- `id`, `runId` — log entry id and parent run id
+- `level` — `info` / `warn` / `error`
+- `message` — log text
+- `data` — structured payload written by the agent (stripped in non-verbose mode)
+- `createdAt` — ISO 8601 with millisecond precision and `Z` suffix (e.g. `2026-04-19T10:00:01.000Z`)
+
+## Tenant isolation
+
+Subscribers only receive events for the org + app they are authenticated against. Status updates and log lines from other tenants never cross the fanout, even on the multi-run endpoint.
+
+## Under the hood
+
+Realtime is driven by Postgres `LISTEN/NOTIFY`: two triggers fire `pg_notify` on every insert/update to the `runs` table (for `run_update` events) and on every insert to the `run_logs` table (for `run_log` events). A single in-process listener reads those notifications and fans them out to each subscribed HTTP stream.
+
+No dependency on Redis or a message broker. Works in Tier 0 (PGlite) the same as Tier 3 — PGlite supports `LISTEN/NOTIFY` out of the box.
+
+## Browser reconnect warning
+
+If you are building a browser client, prefer `fetch()` + `ReadableStream` over `EventSource` for any stream you expect to stay open for minutes. Safari's `EventSource` has aggressive auto-reconnect behavior that causes repeated re-subscription storms when the network flickers; the Appstrate dashboard's global run sync uses the `fetch()` form for exactly this reason.
+
+For single-run streams opened briefly, `EventSource` is fine.
+
+## Examples
+
+```bash
+curl -N "http://localhost:3000/api/realtime/runs/run_0194?token=$APPSTRATE_KEY"
+```
+
+```js
+const src = new EventSource(`/api/realtime/runs?token=${apiKey}`);
+src.addEventListener("run_update", (e) => console.log("status", JSON.parse(e.data)));
+src.addEventListener("run_log", (e) => console.log("log", JSON.parse(e.data)));
+src.addEventListener("ping", () => {}); // ignore keep-alive
+```

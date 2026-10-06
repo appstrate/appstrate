@@ -1,0 +1,130 @@
+---
+title: Errors
+description: Every Appstrate API error follows RFC 9457 with Stripe-style extensions.
+---
+
+Errors are returned as `application/problem+json` per [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457), with a set of extensions inspired by Stripe.
+
+## Format
+
+```json
+{
+  "type": "https://appstrate.dev/errors/validation-failed",
+  "title": "Validation failed",
+  "status": 400,
+  "detail": "Request body contains invalid fields.",
+  "instance": "/api/end-users",
+  "code": "validation_failed",
+  "requestId": "req_01HZABC...",
+  "errors": [
+    { "field": "externalId", "code": "required" },
+    { "field": "email", "code": "invalid_format" }
+  ]
+}
+```
+
+### Fields
+
+| Field | Always | Description |
+|---|---|---|
+| `type` | Yes | URI identifying the error class |
+| `title` | Yes | Human-readable summary |
+| `status` | Yes | HTTP status code (mirrors the response status) |
+| `detail` | No | Human-readable explanation for this occurrence |
+| `instance` | No | URI of the request that produced the error |
+| `code` | Yes | Stable machine-readable code (see below) |
+| `requestId` | Yes | Correlation id; also in the `X-Request-Id` response header |
+| `param` | No | Single path of the offending field (Stripe-style) |
+| `errors` | No | Array of field-level errors for `validation_failed` |
+| `retryAfter` | No | Seconds to wait before retrying (on `429`) |
+
+## Stable codes
+
+| Code | Typical status | Meaning |
+|---|---|---|
+| `invalid_request` | 400 | Malformed request that does not fit validation |
+| `validation_failed` | 400 | Zod validation failed. Details in `errors[]` |
+| `unauthorized` | 401 | No credentials or credentials are invalid |
+| `forbidden` | 403 | Credentials lack the required scope or role |
+| `not_found` | 404 | Resource does not exist or is out of the caller's scope |
+| `conflict` | 409 | Resource state conflict (e.g. duplicate, idempotency key mismatch) |
+| `gone` | 410 | Resource was permanently deleted |
+| `operation_not_allowed` | 409 / 422 | Valid input, invalid state for this operation |
+
+See [Reference / Error Codes](/docs/api/errors) for the full catalog.
+
+## Field error codes
+
+When `code = validation_failed`, each entry in `errors[]` uses one of these stable field codes:
+
+| Field code | Meaning |
+|---|---|
+| `required` | Missing required field |
+| `invalid_type` | Wrong type (e.g. expected string, got number) |
+| `invalid_format` | Wrong format (e.g. not an email, not an ISO date) |
+| `out_of_range` | Value outside allowed min/max |
+| `unknown_field` | Field is not accepted by the schema |
+
+Mapped automatically from Zod issue types.
+
+## Retry guidance
+
+For `429 Too Many Requests`, the `retryAfter` field (and the `Retry-After` response header) tells you how long to wait. For `5xx` server errors, retry with exponential backoff; start at 1 second, cap at 60.
+
+`409 conflict` with `code = "conflict"` from `Idempotency-Key` mismatch (same key, different body) should not be retried; the original response is the authoritative one.
+
+## Request correlation
+
+Every response carries `X-Request-Id: req_...`. Include it in support tickets or reproduce it in your logs to correlate with Appstrate's logs. All auth decisions, permission denials, and impersonation events are emitted with the same `requestId`.
+
+## Example: authentication failure
+
+```
+HTTP/1.1 401 Unauthorized
+Content-Type: application/problem+json
+X-Request-Id: req_01HZ...
+
+{
+  "type": "https://appstrate.dev/errors/unauthorized",
+  "title": "Authentication required",
+  "status": 401,
+  "detail": "Invalid or revoked API key.",
+  "code": "unauthorized",
+  "requestId": "req_01HZ..."
+}
+```
+
+## Example: scope denial
+
+```
+HTTP/1.1 403 Forbidden
+Content-Type: application/problem+json
+
+{
+  "type": "https://appstrate.dev/errors/forbidden",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "Scope 'agents:run' is required.",
+  "code": "forbidden",
+  "requestId": "req_01HZ..."
+}
+```
+
+## Example: validation failure
+
+```
+HTTP/1.1 400 Bad Request
+Content-Type: application/problem+json
+
+{
+  "type": "https://appstrate.dev/errors/validation-failed",
+  "title": "Validation failed",
+  "status": 400,
+  "code": "validation_failed",
+  "requestId": "req_01HZ...",
+  "errors": [
+    { "field": "scopes", "code": "invalid_type" },
+    { "field": "name", "code": "required" }
+  ]
+}
+```

@@ -1,0 +1,49 @@
+---
+title: Self-Hosting
+description: Deploy Appstrate on your own infrastructure with Docker Compose.
+---
+
+## Why Self-Host Appstrate?
+
+Self-hosting gives you full control over your data, network, and configuration. Appstrate is designed to run on a personal server or a cloud cluster alike. No third-party service dependency at boot: everything runs in your own process or your own containers. Optional integrations (Google / GitHub OAuth, SMTP, LLM provider APIs) are opt-in via env vars.
+
+## Requirements
+
+Appstrate has four deployment tiers; the requirements depend on which tier you pick.
+
+| Tier | Host dependencies | Minimum RAM | Use case |
+|------|-------------------|-------------|----------|
+| 0 | Bun 1.1+ (no Docker) | 512 MB | Local dev, hobby, evaluation |
+| 1 | Docker 20.10+ + Compose v2 | 2 GB | Small prod, persistent data |
+| 2 | Docker 20.10+ + Compose v2 | 4 GB | Standard prod, multi-instance capable |
+| 3 | Docker 20.10+ + Compose v2 + `/var/run/docker.sock` accessible | 10 GB | Full prod with isolated per-run containers |
+
+The Tier 3 figure reflects the `docker-compose.yml` limits (`appstrate: 8g`, `postgres: 1g`, `redis: 256m`, `minio: 512m`). There is no enforced Docker version check at boot — 20.10+ is sufficient because that is where `docker compose` v2 became the default CLI.
+
+## Progressive Infrastructure
+
+Appstrate uses a 4-tier progressive infrastructure model. You start with zero external dependencies, then add services as your needs grow:
+
+| Tier | What you add | What you get |
+|------|-------------|--------------|
+| **0** | Nothing (Bun only) | Embedded PGlite, filesystem storage, in-process queue + PubSub |
+| **1** | PostgreSQL (`DATABASE_URL`) | Persistent data, multi-user |
+| **2** | + Redis (`REDIS_URL`) | Distributed scheduling, rate limiting, PubSub, cross-instance cancel |
+| **3** | + S3/MinIO (`S3_BUCKET`) and/or Docker (`RUN_ADAPTER=docker`) | Object storage and/or per-run container isolation — the two axes are independent |
+
+See the [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure) page for details on each tier and how the infrastructure adapters resolve at boot.
+
+## First-run flow
+
+1. Start the stack.
+2. Sign up through the dashboard (email/password, or Google/GitHub if configured).
+3. Create your first organization through the onboarding UI (`POST /api/orgs`). The user who creates an org is automatically assigned the `owner` role on that org — org creation is **explicit**, it does not happen as part of signup.
+4. Install or create your first agent.
+
+## Guides
+
+- [**Docker Compose**](/docs/self-hosting/docker-compose) — production deployment with `docker compose up -d`
+- [**Progressive Infrastructure**](/docs/self-hosting/progressive-infrastructure) — the 4 infrastructure tiers and their commands
+- [**Environment Variables**](/docs/self-hosting/environment-variables) — complete reference for all variables
+- [**Upgrading**](/docs/self-hosting/upgrading) — update your instance
+- [**Troubleshooting**](/docs/self-hosting/troubleshooting) — resolve common issues

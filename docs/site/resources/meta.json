@@ -1,0 +1,17 @@
+{
+  "title": "Resources",
+  "icon": "Library",
+  "root": true,
+  "pages": [
+    "---Learn---",
+    "compare",
+    "architecture",
+    "tutorials",
+    "---Specifications---",
+    "afps-specification",
+    "---Community---",
+    "contributing",
+    "community",
+    "changelog"
+  ]
+}

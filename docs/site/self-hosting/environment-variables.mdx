@@ -1,0 +1,114 @@
+---
+title: Environment Variables
+description: Complete reference of environment variables for configuring Appstrate.
+---
+
+Every variable below is defined in `packages/env/src/index.ts` with strict Zod validation. Required vars throw at boot if missing.
+
+## Core
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NODE_ENV` | No | `development` | `development` \| `production` \| `test` |
+| `PORT` | No | `3000` | Server port |
+| `APP_URL` | No | `http://localhost:3000` | Public URL for OAuth callbacks. Must be HTTPS when `NODE_ENV=production` |
+| `TRUSTED_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | CORS origins, comma-separated |
+| `TRUST_PROXY` | No | `false` | `false` \| `true` \| number of trusted reverse-proxy hops (X-Forwarded-For) |
+| `COOKIE_DOMAIN` | No | — | Cross-subdomain session cookies |
+| `LOG_LEVEL` | No | `info` | `debug` \| `info` \| `warn` \| `error` |
+
+## Auth and Crypto
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `BETTER_AUTH_SECRET` | Yes | — | Session signing secret |
+| `UPLOAD_SIGNING_SECRET` | Yes | — | Min 16 chars. Signs file-upload tokens (separate from `BETTER_AUTH_SECRET` so it can rotate independently) |
+| `CONNECTION_ENCRYPTION_KEY` | Yes | — | 32 bytes, base64. Encrypts stored credentials |
+| `RUN_TOKEN_SECRET` | No | — | Signs run tokens issued to sidecars. Tokens are unsigned if absent |
+| `GOOGLE_CLIENT_ID` | No | — | Enables Google sign-in. Paired with `GOOGLE_CLIENT_SECRET` |
+| `GOOGLE_CLIENT_SECRET` | No | — | Google OAuth secret |
+| `GITHUB_CLIENT_ID` | No | — | Enables GitHub sign-in. Paired with `GITHUB_CLIENT_SECRET` |
+| `GITHUB_CLIENT_SECRET` | No | — | GitHub OAuth secret |
+
+Generate the required secrets with:
+
+```bash
+openssl rand -base64 32
+```
+
+## Database
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | No | — | PostgreSQL URL. Falls back to PGlite if absent |
+| `PGLITE_DATA_DIR` | No | `./data/pglite` | PGlite data directory |
+
+## Redis
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `REDIS_URL` | No | — | Redis URL. Falls back to in-process adapters: `LocalQueue` (cron evaluator), `LocalPubSub` (EventEmitter), `RateLimiterMemory` |
+
+## Storage (S3)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `S3_BUCKET` | No | — | S3 bucket name. Absent = filesystem storage |
+| `S3_REGION` | Conditional | — | Required when `S3_BUCKET` is set |
+| `S3_ENDPOINT` | No | — | Custom S3 endpoint (MinIO, R2, etc.) |
+| `S3_PUBLIC_ENDPOINT` | No | `S3_ENDPOINT` | Browser-facing URL for presigned URLs. Falls back to `S3_ENDPOINT` |
+| `FS_STORAGE_PATH` | No | `./data/storage` | Filesystem fallback path when S3 is not configured |
+
+## Run Execution (Docker)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `RUN_ADAPTER` | No | `process` | `docker` or `process`. Docker is required for credential isolation |
+| `DOCKER_SOCKET` | No | `/var/run/docker.sock` | Path to the Docker socket |
+| `SIDECAR_POOL_SIZE` | No | `2` | Pre-warmed sidecar containers ready to accept runs. `0` disables the pool |
+| `PI_IMAGE` | No | `appstrate-pi:latest` | Agent runtime Docker image |
+| `SIDECAR_IMAGE` | No | `appstrate-sidecar:latest` | Sidecar proxy Docker image |
+| `PLATFORM_API_URL` | No | auto-detected | How the sidecar reaches the platform. Defaults to `http://host.docker.internal:{PORT}` |
+
+## Modules
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MODULES` | No | `oidc,webhooks` | Comma-separated module list. Set to empty to disable. External npm packages supported |
+| `OIDC_INSTANCE_CLIENTS` | No | `"[]"` | JSON array of instance-level OIDC OAuth clients (used by satellite dashboards) |
+
+## Run Limits
+
+Both variables accept any JSON object at the env layer; keys are strictly validated at boot by `apps/api/src/services/run-limits.ts`. See [Rate Limits](/docs/self-hosting/rate-limits) for the full semantics.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLATFORM_RUN_LIMITS` | `"{}"` | Caps every run (classic + inline + scheduled). Keys: `timeout_ceiling_seconds` (default `1800`), `per_org_global_rate_per_min` (default `200`), `max_concurrent_per_org` (default `50`) |
+| `INLINE_RUN_LIMITS` | `"{}"` | Caps `POST /api/runs/inline`. Keys: `rate_per_min` (default `60`), `manifest_bytes` (`65536`), `prompt_bytes` (`200000`), `max_skills` (`20`), `max_tools` (`20`), `max_authorized_uris` (`50`), `wildcard_uri_allowed` (`false`), `retention_days` (`30`) |
+
+## Email (SMTP)
+
+The five SMTP variables are individually optional at the schema level. When you enable email (verification, invitations), the mail service validates at boot that the full set is present — leaving any one out disables the feature without failing the boot.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SMTP_HOST` | No (required for email) | — | SMTP host |
+| `SMTP_PORT` | No | `587` | SMTP port |
+| `SMTP_USER` | No (required for email) | — | SMTP username |
+| `SMTP_PASS` | No (required for email) | — | SMTP password |
+| `SMTP_FROM` | No (required for email) | — | Sender email address |
+
+## Proxy and System Providers
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SYSTEM_PROXIES` | No | `"[]"` | JSON array of system-wide HTTP proxies selectable per-run |
+| `PROXY_URL` | No | — | Outbound HTTP proxy for sidecar containers |
+| `SYSTEM_PROVIDER_KEYS` | No | `"[]"` | JSON array of built-in LLM providers (id, label, api, baseUrl, apiKey, models[]) |
+
+## Legal
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LEGAL_TERMS_URL` | No | — | Terms of service URL shown in the UI footer |
+| `LEGAL_PRIVACY_URL` | No | — | Privacy policy URL shown in the UI footer |

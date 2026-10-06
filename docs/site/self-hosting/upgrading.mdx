@@ -1,0 +1,68 @@
+---
+title: Upgrading
+description: Update your self-hosted Appstrate instance.
+---
+
+## Update Appstrate
+
+Appstrate is distributed as Docker images hosted on GitHub Container Registry (`ghcr.io/appstrate/…`). To update, pin the new version in `.env` then pull and restart:
+
+```bash
+# Pin a release (pins appstrate + appstrate-pi + appstrate-sidecar together)
+echo "APPSTRATE_VERSION=v1.4.2" >> .env
+
+docker compose pull
+docker compose up -d
+```
+
+`APPSTRATE_VERSION` is a docker-compose template variable (not a runtime env var). The three shipped images all reference `ghcr.io/appstrate/…:${APPSTRATE_VERSION:-latest}`, so one assignment pins the full stack.
+
+Database migrations run automatically at server startup — core migrations via `applyCoreMigrations()` for PostgreSQL or `applyEmbeddedMigrations()` for PGlite, and each module's migrations via `applyModuleMigrations()` during its `init()` phase. No manual migration step.
+
+## Back up before upgrading
+
+Before each update, snapshot your persistent state.
+
+**PostgreSQL** (Tier 1+):
+
+```bash
+# POSTGRES_USER is required in .env for the shipped docker-compose.yml —
+# substitute the value you set there.
+pg_dump -U "$POSTGRES_USER" -h localhost -d appstrate > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+Adjust `-U`, `-h`, `-d` to match your deployment. The shipped root `docker-compose.yml` defaults `POSTGRES_DB` to `appstrate` and requires you to set `POSTGRES_USER` in `.env`. The `examples/self-hosting/docker-compose.yml` template additionally defaults `POSTGRES_USER` to `appstrate`.
+
+**PGlite** (Tier 0):
+
+```bash
+# Stop the instance first — copying a live PGlite directory can corrupt the backup.
+docker compose stop appstrate   # or: bun run stop
+cp -r ./data/pglite ./data/pglite.backup-$(date +%Y%m%d_%H%M%S)
+docker compose start appstrate
+```
+
+**MinIO / S3** (Tier 3): use the `mc cp --recursive` command or your cloud provider's snapshot/replication feature. **Redis**: enable AOF or RDB persistence if scheduled runs and pending webhook deliveries matter across a Redis restart — BullMQ stores them there.
+
+## Check for breaking changes
+
+Before upgrading, read the [release notes on GitHub](https://github.com/appstrate/appstrate/releases). Breaking changes are flagged with `**BREAKING**` in `CHANGELOG.md`. All migrations are idempotent and auto-run, so the changes you need to handle manually are typically env var renames, response shape changes, or API version bumps — not database steps.
+
+## If something goes wrong
+
+Pin the previous version and restart:
+
+```yaml
+# docker-compose.yml (or via .env APPSTRATE_VERSION=v1.2.3)
+services:
+  appstrate:
+    image: ghcr.io/appstrate/appstrate:v1.2.3
+```
+
+```bash
+docker compose up -d
+```
+
+If the new version ran migrations that the old version doesn't understand, restore from the PostgreSQL backup before rolling back the image.
+
+See the [Troubleshooting](/docs/self-hosting/troubleshooting) page if the issue persists.

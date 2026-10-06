@@ -1,0 +1,138 @@
+---
+title: Applications
+description: Isolate your workspaces with multi-tenant applications.
+---
+
+## Overview
+
+An **application** is an isolated workspace within an organization. It's the primary isolation unit for headless integrations.
+
+Each organization has a **default application** created automatically (unique index enforces one default per org). Admins can create additional applications to isolate environments (production, staging, clients…).
+
+## Via the UI
+
+Open the dashboard → settings icon in the sidebar → **Applications** (`/org-settings/applications`, admin-only). From there you can:
+
+- **Create** a new application
+- **Switch** the active application (persisted in `localStorage` under `appstrate_current_app`; switching invalidates every app-scoped React Query cache)
+- **Configure** per-app settings through the gear icon: general, OAuth (OIDC module), auth / SMTP (OIDC module), connection profiles
+- **Delete** an application (non-default only — the default app cannot be deleted)
+
+The REST API below gives the programmatic equivalent.
+
+## Architecture
+
+```
+Organization (catalog + shared infrastructure)
+├── Members, Models, Proxies, Provider Keys
+├── Packages (shared catalog)
+├── Webhooks (level="org", fires across every app)
+│
+├── Application "Production" (isolated workspace)
+│   ├── Installed packages + config/model/proxy overrides
+│   ├── End-users, API Keys, Schedules, Memories, Runs
+│   ├── Webhooks (level="application", pinned here)
+│   ├── Connection profiles (user-scoped OR end-user-scoped OR app-scoped)
+│   ├── OIDC module: per-app SMTP, social providers, application-provider-credentials
+│   └── App-profiles
+│
+└── Application "Staging" (isolated workspace)
+    └── …
+```
+
+Webhooks are **polymorphic**: a webhook can target the whole org (`level: "org"`, `applicationId: null`) or a single app (`level: "application"`). Connection profiles are similarly polymorphic — a DB check constraint enforces exactly one of `userId`, `endUserId`, or `applicationId` per row.
+
+## App-scoped resources
+
+The following resources have `applicationId NOT NULL` and never leak between applications:
+
+| Resource | Table |
+|----------|------|
+| Installed packages + overrides | `application_packages` (composite PK `applicationId + packageId`) |
+| End-users | `end_users` (`eu_` prefix) |
+| API keys | `api_keys` (`ask_` prefix) |
+| Schedules | `package_schedules` |
+| Memories | `package_memories` |
+| Runs | `runs` |
+
+OIDC module tables that are also app-scoped: `application_smtp_configs` (per-app verification emails), `application_social_providers` (per-app Google/GitHub OAuth client IDs), `oidc_end_user_profiles`.
+
+## Creating an Application
+
+Session auth only (API keys cannot create applications). Requires `applications:write` — available to admin, owner, and member roles (not viewer).
+
+```bash
+curl -X POST http://localhost:3000/api/applications \
+  -H "Cookie: session=..." \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production",
+    "settings": { "allowedRedirectDomains": ["app.example.com"] }
+  }'
+```
+
+Body fields:
+
+- `name` *(required)*
+- `settings` *(optional)* — object with per-app configuration (e.g. `allowedRedirectDomains` for OIDC)
+
+There is no `description` field today.
+
+## X-App-Id Header
+
+All app-scoped routes require the `X-App-Id` header:
+
+```bash
+curl http://localhost:3000/api/agents \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+With an API key, `X-App-Id` is automatically inferred from the key's associated application. Sending a conflicting `X-App-Id` header alongside an API key returns `403 forbidden`.
+
+## Per-Application Configuration
+
+Each application can override, per installed package:
+
+- **Configuration** — application-specific config values (`application_packages.config` JSONB)
+- **LLM Model** — override the organization's default model (`application_packages.modelId`)
+- **Proxy** — override the default proxy (`application_packages.proxyId`)
+
+This lets you configure the same agent differently per environment or client.
+
+## Listing and Managing
+
+```bash
+# List applications (all members can list; API keys see only their own app)
+curl http://localhost:3000/api/applications \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: a1b2c3d4-..."
+
+# Get one
+curl http://localhost:3000/api/applications/app_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: a1b2c3d4-..."
+
+# Update (partial — applications:write)
+curl -X PATCH http://localhost:3000/api/applications/app_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: a1b2c3d4-..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Production v2"}'
+
+# Delete (applications:delete, default app rejected)
+curl -X DELETE http://localhost:3000/api/applications/app_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-Org-Id: a1b2c3d4-..."
+```
+
+Update uses `PATCH` (partial update) and accepts `name` and/or `settings`.
+
+## Permissions
+
+- `applications:read` — owner, admin, member, viewer
+- `applications:write` — owner, admin, member
+- `applications:delete` — owner, admin only
+
+`GET /api/applications` is not permission-gated beyond org membership, but API key responses are auto-filtered to the key's own application.

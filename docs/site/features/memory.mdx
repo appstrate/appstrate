@@ -1,0 +1,64 @@
+---
+title: Memory
+description: Persistent, application-scoped memory that agents can write and read across runs.
+---
+
+Memory is how an agent remembers things between runs. Unlike a single-run context window, memory survives container teardown and is available to every subsequent run of the same agent in the same application.
+
+Memory is distinct from run **state**. State (via the `@appstrate/set-state` tool) stores a single overwriteable snapshot on the run record (`runs.state`); memory is an append-only log that accumulates across runs until explicitly deleted.
+
+## Via the UI
+
+Open an agent detail page (`/agents/:scope/:name`) and switch to the **Memories** tab. The tab shows the live list of memories attached to this agent in the active application, with:
+
+- Creation date and run id (link back to the run that wrote the memory)
+- Per-item delete button
+- A "Delete all" action at the top of the tab
+
+It is read + delete only. There is no form to edit a memory or add one manually; all writes go through the `@appstrate/add-memory` tool during a run.
+
+The run detail page also has a **#state** tab, but that displays the `runs.state` snapshot written by `@appstrate/set-state` — a different concept from memory.
+
+## How an agent uses memory
+
+An agent writes a memory by calling the built-in **`@appstrate/add-memory`** tool (the LLM invokes it under the tool name `add_memory`). The platform persists the entry in the `package_memories` table, scoped to the application and the agent package.
+
+```
+Run 1                                Run 2
+───────                              ───────
+agent.call(add_memory, {             agent loads memories for this
+  text: "User prefers concise        agent package + application
+  replies, signed 'A.'"              ↓
+})                                   AGENT_PROMPT gains a `## Memory`
+                                     section listing prior memories
+                                     ↓
+                                     replies in expected style
+```
+
+Read is automatic: at the start of a run, Appstrate loads memories for the active (application, agent package) pair and injects them into the agent's system prompt under a `## Memory` section (see `prompt-builder.ts`).
+
+### Limit
+
+Up to **100 memories per agent package per application**. The cap is hardcoded (`MAX_MEMORIES_PER_PACKAGE = 100`) and not overridable via env var today. When the cap is reached, further `add_memory` calls are silently dropped. There is no auto-pruning and no TTL; delete older entries via the API or the UI to free space.
+
+## Scope and multi-tenancy
+
+Memories live at the intersection of **application** and **agent package**. They are **not** shared across applications, and **not** shared across agents inside the same application. When an end-user is impersonated via `Appstrate-User`, memories remain at the application level (not per end-user) today.
+
+## API
+
+| Method | Route | Purpose | Permission |
+|---|---|---|---|
+| `GET` | `/api/agents/@scope/name/memories` | List memories for an agent in the active application | None (requires a valid agent) |
+| `DELETE` | `/api/agents/@scope/name/memories/{memId}` | Delete a single memory | `memories:delete` |
+| `DELETE` | `/api/agents/@scope/name/memories` | Wipe every memory for this agent | `memories:delete` |
+
+There is no `POST`/`PUT` memory endpoint. **Writes only flow through `@appstrate/add-memory` during a run.** The only way an external caller can influence memory is by triggering a run whose agent calls the tool.
+
+See the [API reference](/docs/api/agents/listAgentMemories) for parameters.
+
+## Pluggable memory providers (roadmap)
+
+Today memories live in Postgres. A pluggable memory provider interface is on the roadmap, modeled after [Hermes Memory Providers](https://hermes-agent.nousresearch.com/docs/user-guide/integrations/honcho-memory), so memory writes can be routed to specialized stores such as [Hindsight](https://hindsight.vectorize.io/) (semantic, vector-indexed) or [mem0](https://mem0.ai/). No interface exists in the codebase yet — this is purely aspirational.
+
+The plan is to keep the same `@appstrate/add-memory` surface so agents do not change when the backend does.

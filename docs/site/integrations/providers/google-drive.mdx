@@ -1,0 +1,56 @@
+---
+title: Google Drive
+description: Connect Google Drive to your Appstrate agents.
+---
+
+## Overview
+
+Google Drive is Google's cloud storage service, allowing your agents to manage, read, and organize files.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `drive.file` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `drive.file` | Per-file access (recommended) |
+| `drive.readonly` | Read-only access |
+| `drive` | Full access |
+| `drive.metadata.readonly` | Read metadata only |
+| `drive.appdata` | App data folder |
+| `drive.photos.readonly` | Read photos/videos |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://www.googleapis.com/drive/*`
+- `https://www.googleapis.com/upload/drive/*`
+
+## Connect Google Drive
+
+1. [Create a Google Cloud project](https://console.cloud.google.com/apis/library/drive.googleapis.com) and enable the Google Drive API
+2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
+4. Add the Appstrate redirect URI as an authorized redirect URI
+5. Enter the Client ID and Client Secret in the Google Drive provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Google Drive APIs through the sidecar proxy. Example prompt:
+
+```
+Search my Google Drive for all PDF files modified this week in the "Accounting" folder.
+Download them and summarize the content of each one.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

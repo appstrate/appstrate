@@ -1,0 +1,129 @@
+---
+title: End-Users
+description: Manage your product's users via the API and run agents on their behalf.
+---
+
+## Overview
+
+**End-users** are users of *your* product — not Appstrate platform users. They belong to an application and can be managed via the UI or the REST API.
+
+An end-user has no password and cannot log into the Appstrate dashboard. Their identifier carries the `eu_` prefix.
+
+## Via the UI
+
+Open the dashboard → **End-users** in the sidebar (`/end-users`, admin-only). From there you can:
+
+- Create a new end-user (optional `externalId`, `name`, `email`, `metadata`)
+- Search and filter the list (by name, email, externalId, or id — client-side)
+- Open the detail view to inspect, edit, or delete
+- Delete an end-user (connection profiles cascade-delete; runs orphaned via `endUserId SET NULL`)
+
+The REST API below gives the programmatic equivalent — use it when you provision end-users from your own product's signup flow.
+
+## Creating an End-User
+
+```bash
+curl -X POST http://localhost:3000/api/end-users \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Idempotency-Key: create-user-123" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "user_123",
+    "name": "Alice Martin",
+    "email": "alice@example.com",
+    "metadata": {
+      "plan": "premium",
+      "company": "Acme Inc"
+    }
+  }'
+```
+
+### Fields
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `externalId` | No | Your system's id. Nullable. If provided, must be unique per application — `409 conflict` otherwise |
+| `name` | No | Display name |
+| `email` | No | If provided, must be unique per application — `409 conflict` otherwise |
+| `metadata` | No | Free-form JSONB. Max 50 keys, 40 chars per key, 500 chars per value |
+
+Each end-user automatically gets a **default connection profile** on creation (row in `connection_profiles` with `isDefault: true`, scoped to the end-user).
+
+Rate limit: 60 requests per minute on creation. Permission: `end-users:write`. `Idempotency-Key` is honored (Redis-backed, 24h TTL, SHA-256 body hash for conflict detection).
+
+## Listing and Viewing
+
+```bash
+# List (cursor-based pagination)
+curl "http://localhost:3000/api/end-users?limit=50&externalId=user_123" \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+
+# Get one
+curl http://localhost:3000/api/end-users/eu_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+Query params on list:
+
+- `limit` — 1–100, default 20
+- `startingAfter`, `endingBefore` — cursor-based pagination (pass an `eu_` id)
+- `externalId`, `email` — exact-match filter
+
+Rate limit on list + detail: 300 requests per minute.
+
+## Impersonation
+
+The `Appstrate-User` header lets you execute actions on behalf of an end-user. This scopes connections, memories, and runs to that user.
+
+```bash
+curl -X POST http://localhost:3000/api/agents/@scope/agent-name/run \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Appstrate-User: eu_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"query": "My meetings for tomorrow"}}'
+```
+
+Rules:
+
+- Requires **API key** authentication. Sent with a cookie session it returns `400` with code `header_not_allowed`.
+- The end-user must belong to the API key's application. An unknown or foreign end-user returns `403` with code `invalid_end_user`.
+- Generates a structured JSON log line with 9 fields: `requestId`, `apiKeyId`, `authenticatedMember` (the member who owns the API key), `endUserId`, `applicationId`, `method`, `path`, `ip`, `userAgent`.
+
+## Updating an End-User
+
+Update uses `PATCH` (partial update). Any subset of `name`, `email`, `externalId`, `metadata` can be sent.
+
+```bash
+curl -X PATCH http://localhost:3000/api/end-users/eu_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Alice Martin-Dupont",
+    "metadata": {"plan": "enterprise"}
+  }'
+```
+
+`externalId` and `email` are updatable but remain unique per application (`409 conflict` if the new value collides with another end-user in the same app). Permission: `end-users:write`. Rate limit: 60 per minute.
+
+## Deleting an End-User
+
+```bash
+curl -X DELETE http://localhost:3000/api/end-users/eu_xxx \
+  -H "Authorization: Bearer ask_your_key" \
+  -H "X-App-Id: app_xxx"
+```
+
+Permission: `end-users:delete` (admin/owner only — members cannot delete). Cascades: connection profiles and agent-provider bindings are deleted; runs are preserved with `endUserId` set to `NULL` so historical data survives.
+
+## Permissions summary
+
+- `end-users:read` — owner, admin, member, viewer
+- `end-users:write` — owner, admin, member
+- `end-users:delete` — owner, admin
+
+All three are available as API key scopes.

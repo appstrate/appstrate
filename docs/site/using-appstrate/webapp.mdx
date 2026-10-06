@@ -1,0 +1,32 @@
+---
+title: Webapp
+description: "The Appstrate webapp: dashboard, agents view, runs, skills, end-users, API keys, and org settings."
+---
+
+The Appstrate webapp is the visual interface served by `apps/web/` on the same instance as the API. By default it lives at `http://localhost:3000` and uses the same [authentication](/docs/api/authentication) as the REST API (session cookies via Better Auth).
+
+## First login
+
+On a fresh instance, anyone who knows the URL can sign up. Each new account is pushed through an onboarding flow that creates its own organization, so the signup user always becomes owner of the org they just created. New accounts never auto-join an existing org.
+
+To add someone to an existing org, send them an [invitation](/docs/features/multi-tenancy#invitations) from **Settings → Members**, or enable the `oidc` module with org auto-join.
+
+## Main sections
+
+| Section | What you do here |
+|---|---|
+| **Dashboard** | Overview of recent runs, active agents, and quota usage for the current organization |
+| **Agents** | Browse agents, edit their prompt, manage dependencies (skills, tools, providers), run them ad hoc |
+| **Runs** | Live and historical runs with filters by agent, status, and end-user. Logs, cost, duration, realtime stream |
+| **Skills / Tools / Packages** | Library of installed AFPS packages. Fork system packages, publish your own versions |
+| **End-users** | Manage the end-users on whose behalf agents run. Create, disable, inspect their connections and runs |
+| **API keys** | Create, revoke, and rotate API keys pinned to the current organization and application |
+| **Settings** | Organization-level config: branding, default policies, module toggles, member invitations |
+
+## Organization switcher
+
+Every non-org-scoped action happens inside the **active organization**. The switcher at the top of the sidebar lets you move between orgs you belong to. The webapp persists your last active org per profile.
+
+## Configuration
+
+Per-org settings (defaults, policies, webhook receivers, SSO) live under **Settings**. Infrastructure-level configuration (database URL, Redis URL, rate limits, feature modules) is set through [environment variables](/docs/self-hosting/environment-variables) and is not exposed in the webapp.

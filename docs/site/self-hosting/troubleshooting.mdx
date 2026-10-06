@@ -1,0 +1,127 @@
+---
+title: Troubleshooting
+description: Resolve common issues when self-hosting Appstrate.
+---
+
+## Container won't start
+
+Three environment variables are validated at boot and will refuse to start the server if missing or invalid:
+
+- `BETTER_AUTH_SECRET` — session signing secret, any non-empty string
+- `UPLOAD_SIGNING_SECRET` — at least 16 characters (separate from the session secret so it can rotate independently)
+- `CONNECTION_ENCRYPTION_KEY` — exactly 32 bytes, base64-encoded (AES-256 for stored credentials)
+
+Generate each with:
+
+```bash
+openssl rand -base64 32
+```
+
+The Tier 3 `docker-compose.yml` enforces four more via bash `${VAR:?…}` expansion: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`. See [Docker Compose § Configure required variables](/docs/self-hosting/docker-compose#configure-required-variables) for the full generator script.
+
+## Database connection refused
+
+- Verify that `DATABASE_URL` points to an accessible PostgreSQL instance.
+- Make sure PostgreSQL is running: `docker compose ps`.
+- Test the connection manually: `psql "$DATABASE_URL"`.
+- If `DATABASE_URL` is unset, Appstrate uses PGlite (`./data/pglite/` by default) — no external database required.
+
+## Agents fail to run
+
+- For container-isolated execution set `RUN_ADAPTER=docker` (the default is `process`, which spawns Bun subprocesses with no network or filesystem isolation — fine for dev, not for prod).
+- Check Docker socket permissions: the Appstrate container must reach `/var/run/docker.sock`. On rootless Docker, you may need to map the socket explicitly and add your user to the `docker` group. See [Production Checklist § Restrict Docker socket access](/docs/self-hosting/production-checklist#15-restrict-docker-socket-access).
+- Verify the images exist locally: `docker images | grep appstrate`.
+- If missing, pull from GHCR: `docker pull ghcr.io/appstrate/appstrate-pi:latest && docker pull ghcr.io/appstrate/appstrate-sidecar:latest`.
+
+## `X-App-Id` header missing
+
+On app-scoped routes (`/api/agents`, `/api/runs`, `/api/schedules`, `/api/webhooks`, `/api/end-users`, `/api/api-keys`, `/api/packages`, …), a request without `X-App-Id` returns `400`. Either:
+
+- Use an API key — its pinned application is auto-injected, no header required.
+- Send `X-App-Id: app_xxx` alongside the session cookie.
+
+Cross-tenant mismatch (API key's pinned app ≠ `X-App-Id` header) returns `403 forbidden`.
+
+## OAuth callback fails
+
+Make sure `APP_URL` matches the public URL **exactly**, including protocol:
+
+```bash
+# ✅
+APP_URL=https://appstrate.example.com
+
+# ❌ missing protocol
+APP_URL=appstrate.example.com
+
+# ❌ wrong port when terminated by a reverse proxy on :443
+APP_URL=http://appstrate.example.com:3000
+```
+
+In production (`NODE_ENV=production`), `APP_URL` must use `https://` (the `localhost` / `127.0.0.1` carve-out is allowed). The OAuth provider (Google, GitHub, OIDC) must have the same redirect URI registered.
+
+## Redis connection issues
+
+Without Redis (default Tier 0/1), Appstrate falls back to in-process adapters:
+
+- **`LocalQueue`** — custom in-process cron evaluator that polls every 30 seconds. Scheduling still works, but jobs are **not persisted across restarts** and there is no cross-instance distribution.
+- **`LocalPubSub`** — Node `EventEmitter` for run status / log fanout.
+- **`RateLimiterMemory`** — per-process rate limit counters (reset on restart).
+
+In a multi-instance deployment, these fallbacks produce divergent state across replicas. Set `REDIS_URL` to share state. Redis also stores persistent BullMQ jobs (scheduled runs, webhook deliveries) — enable Redis persistence or replication if those matter.
+
+## Rate limit hits (`429 Too Many Requests`)
+
+Appstrate enforces per-endpoint limits keyed by `method:path:identity`. A 429 includes three IETF headers so you can back off intelligently:
+
+```
+Retry-After: 15
+RateLimit: limit=20, remaining=0, reset=15
+RateLimit-Policy: 20;w=60
+```
+
+See [Rate Limits](/docs/self-hosting/rate-limits) for the full table and for tuning `PLATFORM_RUN_LIMITS` / `INLINE_RUN_LIMITS`.
+
+## Sidecar pool errors
+
+If the pre-warmed pool is unstable, disable it and fall back to per-run creation:
+
+```bash
+SIDECAR_POOL_SIZE=0
+```
+
+Every run then creates a fresh sidecar on the hot path (adds ~500–1500 ms to run startup) but avoids any pool bookkeeping.
+
+## Port 3000 already in use
+
+```bash
+# Pick a different port on boot
+PORT=3100 bun run dev
+# or in docker-compose.yml, change the first half of the mapping:
+#   ports: ["3100:3000"]
+```
+
+The `appstrate` CLI installer defaults to `3000` but auto-picks the next free port when `--yes` is passed.
+
+## `minisign: command not found` during install
+
+The `get.appstrate.dev` one-liner verifies the CLI binary with minisign. Install minisign first (`brew install minisign`, `apt install minisign`, or `apk add minisign`), or use `bunx appstrate install` which skips the binary download entirely. Full detail: [Setup § minisign](https://github.com/appstrate/skills/blob/main/skills/appstrate/references/setup.md).
+
+## Enable verbose logging
+
+Raise the log level and restart:
+
+```bash
+LOG_LEVEL=debug
+```
+
+Debug logs include infrastructure adapter selection (Redis vs LocalQueue, S3 vs filesystem), Docker container creation details, and sidecar pool events. Drop back to `info` once the incident is understood.
+
+## Orphaned containers
+
+Appstrate marks every managed container with `appstrate.managed=true` and runs `cleanupOrphanedContainers()` at startup (via `apps/api/src/lib/boot.ts`). If stray containers remain after a crash, clean them up manually:
+
+```bash
+docker ps -a --filter "label=appstrate.managed=true" -q | xargs docker rm -f
+```
+
+The same label also covers the `appstrate-exec-*` networks, which are removed on graceful shutdown and again on the next boot.

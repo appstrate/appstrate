@@ -1,0 +1,105 @@
+---
+title: Compare
+description: How Appstrate stacks up against managed runtimes, personal agents, coding agents, and workflow builders.
+---
+
+Whichever category of tool you're evaluating us against, here's the factual matrix. We only list criteria that matter when you ship an agent to a team or embed one inside a product.
+
+Four categories, one page:
+
+- [**Managed runtimes**](#vs-managed-runtimes) : Bedrock AgentCore, Claude Managed Agents, Google Gemini Enterprise Agent Platform, Foundry Agent Service (Microsoft).
+- [**Personal agents**](#vs-personal-agents) : OpenClaw, Hermes, NanoBot, ZeroClaw, NemoClaw.
+- [**Coding agents**](#vs-coding-agents) : Cursor, Claude Code, Antigravity, Windsurf.
+- [**Workflow builders**](#vs-workflow-builders) : n8n, Zapier, Make, LangGraph, Dify.
+
+## vs Managed Runtimes
+
+AWS, Anthropic, Google, and Microsoft launched managed agent runtimes in 2026. They work if you accept cloud lock-in, proprietary SDKs, and no self-host.
+
+| | **Appstrate** | Bedrock AgentCore | Claude Managed Agents (beta) | Google Gemini Enterprise Agent Platform | Foundry Agent Service |
+|---|---|---|---|---|---|
+| Open source | ✅ **Apache 2.0** | ❌ runtime<br />❌ SDK | ❌ runtime<br />❌ SDK | ❌ runtime<br />✅ ADK SDK (Apache 2.0) | ❌ runtime<br />✅ Agent Framework SDK (MIT) |
+| Self-host | ✅ `docker compose up` | ❌ | ❌ | ❌ GCP-only | ❌ Azure-only |
+| Multi-tenant end-user | ✅ **Org / workspace / end-user** | ⚠️ org-level | ⚠️ org-level | ⚠️ org-level | ⚠️ org-level |
+| LLM choice | ✅ **Any (BYOK)** | Any (Bedrock catalog or external: OpenAI, Gemini, Llama…) | Claude only | Gemini + Model Garden (Claude, Llama, Mistral) | Any (Azure OpenAI, Claude, Bedrock, Gemini, Ollama) |
+| Air-gapped | ✅ | ⚠️ VPC / PrivateLink | ❌ | ❌ | ❌ |
+| Harness | ✅ **Pi** (open source, MIT) | AgentCore Harness (Strands-powered, Preview) | proprietary (unnamed) | Agent Runtime / ReasoningEngine (AdkApp) | Agent Runtime (Responses API) |
+| Agent SDK | ✅ **Pi** | Strands Agents SDK (Apache 2.0, or BYO) | Claude Agent SDK (proprietary) | Google ADK (Apache 2.0) | Agent Framework SDK (MIT) |
+| Agent package format | ✅ **AFPS** (Skills + semver, deps, registry) | zip / Docker container | API object (no file) | ADK Python / containerized | Python / .NET code |
+| Pricing | ✅ **Free self-host** (cloud coming soon) | $0.0895/vCPU-hr + $0.00945/GB-hr | $0.08/session-hr | $0.0864/vCPU-hr + $0.0090/GB-hr | $0.0994/vCPU-hr + $0.0118/GB-hr |
+
+**Pick a managed runtime over Appstrate if:** you're fully committed to a single cloud and happy with the vendor's harness, and lock-in isn't a concern for your use case.
+
+## vs Personal Agents
+
+OpenClaw, Hermes, NanoBot, and friends brought agents to the individual dev's laptop. NemoClaw hardened OpenClaw for regulated environments, but kept the single-node model. None are designed for teams.
+
+| | **Appstrate** | OpenClaw | NemoClaw | Hermes | NanoBot | ZeroClaw |
+|---|---|---|---|---|---|---|
+| Target audience | ✅ **Teams & orgs** | 1 dev, laptop | Platform / security engr. | 1 power user, VPS | 1 researcher | 1 dev, edge |
+| Parallel runs at scale | ✅ **Server-scaled** (self-hosted, configurable per-org) | ❌ laptop chokes | ❌ single sandbox (by design) | ⚠️ VPS-limited | ❌ laptop chokes | ❌ edge-limited |
+| Multi-user / collaborative | ✅ **Org / workspace / end-user** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| RBAC + audit logs | ✅ **66 typed permissions** | ❌ | ❌ shields log only | ❌ | ❌ | ❌ |
+| SSO / OIDC | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Sandboxing | ✅ Docker ephemeral | Docker opt. | ⚠️ Landlock best-effort + seccomp/netns (OpenShell) | 6 backends | Bubblewrap | Auto (Landlock / Bubblewrap / Docker) |
+| Harness (orchestrator) | ✅ **Pi** | Pi | Pi + OpenShell | Python runtime | Python runtime | Custom Rust |
+| Agent package format | ✅ **AFPS** (Skills + semver, deps, registry) | Skills (SKILL.md) | Skills (SKILL.md) | Skills (SKILL.md) | Skills (SKILL.md) | Skills (MD/TOML) |
+| Credentials hidden from LLM | ✅ Sidecar proxy, LLM never sees tokens | ⚠️ sanitized in sandbox | ⚠️ plaintext JSON + L7 inject | ⚠️ credential pool | ⚠️ structural (no redaction) | ⚠️ encrypted at rest |
+| API for integration | ✅ **237 REST endpoints** | ⚠️ Gateway only | ⚠️ OpenShell gateway (port 8080) | ⚠️ Web UI + OpenAI-compat (opt-in) | OpenAI-compat | ⚠️ HTTP/WS gateway |
+| Stars / community | Launching | 366K | NVIDIA-backed (alpha) | 123K | 41K | ~31K |
+
+> **AFPS vs Skills.** All five personal agents ship Anthropic's `SKILL.md` convention (or a close variant). AFPS is not a competitor to Skills: it is a **superset** that wraps them in an npm-style package model with `manifest.json`, semantic versioning, declared `dependencies`, a public registry, and private scopes. A single `SKILL.md` is still a valid AFPS unit. AFPS adds the parts npm added on top of CommonJS: reproducible installs, semver, a registry, and tooling.
+
+**Pick a personal agent over Appstrate if:** you're the only user, running on your own hardware, and don't need end-user isolation, audit, or a REST API. NemoClaw narrows some gaps for regulated environments, at the cost of GPU infrastructure and alpha-stage stability.
+
+## vs Coding Agents
+
+Cursor, Claude Code, Antigravity, and Windsurf gave developers agents in the IDE. Appstrate is different by design: it's for agents you deploy to your org, not agents you code with.
+
+| | **Appstrate** | Cursor | Claude Code | Antigravity | Windsurf |
+|---|---|---|---|---|---|
+| Surface | ✅ **API + Dashboard + CLI** | IDE (VS Code fork) | CLI / ext / desktop | IDE agent-first | IDE (VS Code fork) |
+| Audience | ✅ **Whole team** | 1 dev | 1 dev | 1 dev | 1 dev |
+| Multi-user end-user | ✅ **Org / workspace / end-user** | ⚠️ org seat | ⚠️ org seat | ⚠️ org seat | ⚠️ org seat |
+| Embed in your product | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Deploy via API | ✅ | ❌ | ⚠️ Agent SDK or Managed Agents | ❌ | ❌ |
+| Execution | ✅ **100% cloud / server** | Local + Cloud Agents | Local CLI + API | Local IDE | Local IDE |
+| Parallel runs at scale | ✅ **Server-scaled** (self-hosted, configurable per-org) | ⚠️ up to 8 Cloud Agents | ❌ chokes at 5+ CLIs | ❌ laptop-bound | ❌ laptop-bound |
+| Default agent SDK / framework | ✅ **Pi** (MIT harness, not tied to any AI lab) | Anysphere custom | Claude Agent SDK | Google ADK | Cascade (ex-Codeium, now Cognition) |
+| Agent package format | ✅ **AFPS** (Skills + semver, deps, registry) | `.cursor/rules/*.mdc` | `.md` + YAML (Agent Skills) | Agent Skills + proprietary runtime | `.windsurfrules` / `.windsurf/rules/*.md` |
+| License | ✅ **Apache 2.0** | Closed | Closed | Closed (Google) | Closed (Cognition) |
+
+Coding agents and Appstrate are complementary. You can drive an Appstrate agent from Cursor or Claude Code via the API.
+
+## vs Workflow Builders
+
+n8n, Zapier, Make, LangGraph, Dify: all great at deterministic workflows. They break when reality doesn't match the diagram. Agents adapt.
+
+| | **Appstrate** | n8n | Zapier | Make | LangGraph | Dify |
+|---|---|---|---|---|---|---|
+| Paradigm | ✅ **Autonomous agent** | DAG + code + agent | DAG + agent (Zapier Agents) | Visual DAG + agent | Graph + state | Visual + agent |
+| Adapts to unexpected paths | ✅ **Goal-driven** | ⚠️ agent node only | ⚠️ Zapier Agents only | ⚠️ Make AI Agents only | ⚠️ | ⚠️ |
+| Breaks when API changes | ✅ **Agent retries / adapts** | edit nodes | recreate zap | edit blueprint | edit graph | yes |
+| Agent with filesystem | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Agent with persistent memory | ✅ **Scoped + searchable** | ⚠️ opt-in (PostgreSQL/Redis) | ❌ | ❌ | Checkpointer (MIT lib) | Session only |
+| Sandboxed per run | ✅ **Docker eph. + sidecar** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Multi-tenant end-user | ✅ **Org / workspace / end-user** | ⚠️ workspace | ⚠️ workspace | ⚠️ workspace | N/A (lib) | ⚠️ workspace |
+| Default agent SDK / framework | ✅ **Pi** (open-source harness) | N/A (DAG nodes) | N/A (triggers) | N/A (DAG) | LangGraph is a harness lib | Built-in (closed-source) |
+| Agent package format | ✅ **AFPS** (Skills + semver, deps, registry) | Workflow JSON (proprietary) | Zap (non-portable) | Blueprint JSON (non-portable) | Python graph (code) | JSON export (non-standard) |
+| Open source | ✅ **Apache 2.0** | ⚠️ Sustainable Use License (fair-code) | ❌ | ❌ | ✅ MIT (library) | ⚠️ modified Apache 2.0 (no multi-tenant) |
+
+Workflow builders and Appstrate can coexist. You can call an Appstrate agent from an n8n node when a step needs reasoning rather than routing.
+
+## Architecture notes
+
+Two architectural choices explain most of the differences above.
+
+**Sidecar isolation.** Most platforms run agents in the same process as the server, with credentials in environment variables the LLM can read. Appstrate isolates each run in a dedicated Docker network with a sidecar proxy that injects credentials just before outbound requests. The agent never sees the secret material.
+
+**Prompt-driven, not graph-driven.** Workflow tools define a step sequence: fetch, filter, send. Appstrate gives a goal: "summarize important emails and notify me on Slack". The agent decides how. More adaptable, simpler to author, less predictable (mitigated with output schemas and retries).
+
+## Next
+
+- [Introduction](/docs/get-started/introduction) : what Appstrate is and who it's for.
+- [AFPS specification](/docs/resources/afps-specification) : the portable package format referenced across the tables above.
+- [Quickstart](/docs/get-started/quickstart) : ship a Tier 0 instance in under 10 minutes.

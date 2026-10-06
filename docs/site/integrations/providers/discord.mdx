@@ -1,0 +1,59 @@
+---
+title: Discord
+description: Connect Discord to your Appstrate agents.
+---
+
+## Overview
+
+Discord is a communication platform, allowing your agents to send messages, manage servers, and interact with communities.
+
+## Authentication Mode
+
+| Property | Value |
+|----------|-------|
+| Type | `oauth2` |
+| Header | `Authorization: Bearer <token>` |
+| Default scopes | `identify` |
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `identify` | Read user profile (id, username, avatar) |
+| `email` | Read user email address |
+| `guilds` | List user's guilds (servers) |
+| `guilds.join` | Add user to a guild |
+| `guilds.members.read` | Read user's guild member info |
+| `connections` | View user's linked accounts |
+| `bot` | Add bot to a guild |
+| `webhook.incoming` | Create incoming webhooks |
+| `applications.commands` | Register slash commands |
+| `messages.read` | Read messages in channels |
+
+## Authorized URIs
+
+The agent can access the following endpoints through the sidecar proxy:
+
+- `https://discord.com/api/*`
+
+## Connect Discord
+
+1. [Create a Discord application](https://discord.com/developers/applications)
+2. Go to OAuth2 settings and add the Appstrate redirect URI
+3. Copy the Client ID and Client Secret
+4. Enter these credentials in the Discord provider settings on Appstrate
+
+## Usage in an Agent
+
+Once connected, the agent can call Discord APIs through the sidecar proxy. Example prompt:
+
+```
+Monitor the #support channel on the Discord server.
+When a new message contains the word "bug", automatically create a
+matching GitHub issue and reply in the thread with the issue link.
+```
+
+## Related Endpoints
+
+- [Connect a provider](/en/docs/guides/providers-and-connections)
+- [API Reference — Connections](/en/docs/api)

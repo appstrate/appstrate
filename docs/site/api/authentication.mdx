@@ -1,0 +1,177 @@
+---
+title: Authentication
+description: API keys, session cookies, and OAuth tokens — the three ways to authenticate with Appstrate.
+---
+
+Appstrate supports three authentication types. They are evaluated in order; the first match wins.
+
+| Order | Type | Use |
+|---|---|---|
+| 1 | Module strategies (OAuth 2.1, via the `oidc` module) | End-user and satellite-dashboard tokens |
+| 2 | Bearer API keys (`ask_` prefix) | Headless integrations |
+| 3 | Session cookies (Better Auth) | Dashboard |
+
+## Required headers
+
+| Header | When | Description |
+|---|---|---|
+| `Authorization` | Always (unless session cookie) | `Bearer ask_...` for API keys, `Bearer eyJ...` for OAuth tokens |
+| `X-Org-Id` | Session auth, org-scoped routes | Selects the active organization. API keys are already org-pinned |
+| `X-App-Id` | App-scoped routes | Selects the application. Omitted if the API key is already app-pinned |
+| `Appstrate-User` | End-user impersonation | `eu_xxx`. API keys only, rejected on session auth |
+| `Appstrate-Version` | Optional | Pins the API version (date string, e.g. `2026-03-21`) |
+| `Idempotency-Key` | Optional, write routes | 24h TTL, SHA-256 body hash conflict detection. See [Idempotency](/docs/api/idempotency) |
+
+## API keys
+
+API keys are the default for backends, scripts, CI/CD. Prefix: `ask_`. Storage: the raw key is hashed in the database; only an 8-character `keyPrefix` is kept for identification.
+
+### Create a key
+
+```bash
+curl -X POST http://localhost:3000/api/api-keys \
+  -H "Authorization: Bearer ask_existing" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "production backend",
+    "scopes": ["agents:run", "runs:read"],
+    "expiresAt": "2027-01-01T00:00:00Z"
+  }'
+```
+
+The full key is returned **once** in the `key` field. Save it; it cannot be retrieved later.
+
+### Use a key
+
+```
+Authorization: Bearer ask_xxx
+```
+
+API keys are pinned to an organization and to an application. Scoped queries use this context automatically. You do not need to pass `X-Org-Id`. You may pass `X-App-Id` for clarity; if it conflicts with the key's pinned app, the request is rejected with a `400`.
+
+### Key properties
+
+- **No expiration by default.** Set `expiresAt` (ISO 8601) to force a TTL.
+- **No rotation.** To rotate, create a new key and revoke the old one.
+- **Revocation is immediate.** Revoked keys are soft-deleted with a `revokedAt` timestamp.
+- **Scopes are clamped.** The effective scopes are `{requested scopes} ∩ {scopes allowed by the creator's role}`.
+
+### Scope matrix
+
+API keys carry an explicit `scopes` array. The effective permissions are the intersection of `{requested scopes} ∩ {scopes allowed by the creator's role}`. The 23 grantable scopes, grouped by resource:
+
+| Resource | Scopes |
+|---|---|
+| Agents | `agents:read`, `agents:write`, `agents:run` |
+| Runs | `runs:read`, `runs:write`, `runs:cancel` |
+| Schedules | `schedules:read`, `schedules:write` |
+| Webhooks | `webhooks:read`, `webhooks:write`, `webhooks:delete` |
+| Applications | `applications:read`, `applications:write` |
+| End-Users | `end-users:read`, `end-users:write`, `end-users:delete` |
+| API Keys | `api-keys:read`, `api-keys:write`, `api-keys:delete` |
+| Providers | `providers:read`, `providers:write` |
+| Models | `models:read`, `models:write` |
+
+Organization roles map to broader permission sets. The list above is the subset that can be delegated to a machine-to-machine integration.
+
+### SSE and query-string auth
+
+`EventSource` does not support custom headers. For realtime endpoints, pass the key as a query parameter:
+
+```
+GET /api/realtime/runs?token=ask_xxx
+```
+
+This is only accepted on SSE routes; all other routes require the `Authorization` header.
+
+## Session cookies
+
+Sessions are issued by [Better Auth](https://www.better-auth.com/) for dashboard users. They are HttpOnly, `Secure` in production, and refresh on use.
+
+### Sign in
+
+```bash
+curl -X POST http://localhost:3000/api/auth/sign-in/email \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "alice@example.com", "password": "..." }' \
+  -c cookies.txt
+```
+
+Use the saved cookies in subsequent requests:
+
+```bash
+curl http://localhost:3000/api/organizations \
+  -b cookies.txt \
+  -H "X-Org-Id: org_abc"
+```
+
+### Session properties
+
+- Default lifetime: about one week, refreshed on use.
+- Sessions carry a `realm` column: `platform` for dashboard users, `end_user:<appId>` for OIDC-created end-user sessions.
+- Platform routes reject end-user sessions (and vice versa).
+
+Sessions must include `X-Org-Id` on org-scoped routes: unlike API keys, cookies do not pin an organization.
+
+## OAuth 2.1 tokens (OIDC module)
+
+When the `oidc` module is enabled, Appstrate acts as an OpenID Provider. It issues access and refresh tokens for:
+
+- **End-users** of an application (via the app's OIDC client)
+- **Satellite dashboards** via instance-level clients (`OIDC_INSTANCE_CLIENTS`)
+
+### Discovery
+
+```
+GET /.well-known/openid-configuration
+```
+
+### Token endpoint
+
+```
+POST /api/oidc/oauth2/token
+```
+
+PKCE is enforced for public clients. Standard grant types: `authorization_code`, `refresh_token`, `urn:ietf:params:oauth:grant-type:device_code` (RFC 8628).
+
+### Token properties
+
+- Access tokens: short-lived (`oauth_access_tokens.expiresAt`).
+- Refresh tokens: longer-lived (`oauth_refresh_tokens.expiresAt`).
+- Signed with rotating keys (`jwks` table).
+
+### Use an access token
+
+```
+Authorization: Bearer eyJhbGciOi...
+```
+
+The module strategy validates the token and resolves the subject (end-user or dashboard user) before the rest of the auth pipeline runs.
+
+## End-user impersonation
+
+Impersonation is a header on top of an API key request, not a separate authentication type:
+
+```
+Authorization: Bearer ask_your_key
+Appstrate-User: eu_xxx
+```
+
+Rules:
+
+- Works only with API key auth. Rejected on sessions with a `400`.
+- The end-user must belong to the API key's application.
+- Scopes the request to the end-user's connections, memories, and runs.
+- Logged with: `requestId`, `apiKeyId`, authenticated member, `endUserId`, `applicationId`, method, path, IP, user agent.
+
+See [Build / Multi-Tenancy](/docs/features/multi-tenancy) for the full impersonation pattern.
+
+## Errors
+
+| Status | Code | Meaning |
+|---|---|---|
+| 401 | `unauthorized` | No credentials or credentials are invalid |
+| 403 | `forbidden` | Credentials are valid but lack required scope or role |
+| 400 | `invalid_request` | Misuse (e.g. `Appstrate-User` with session cookie) |
+
+See [Errors](/docs/api/errors) for the full error format.
