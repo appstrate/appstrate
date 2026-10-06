@@ -216,14 +216,16 @@ export function createAuthBootstrapRouter(): Hono {
       // Step 3: signup via BA inside the bypass envelope
       const authApi = getAuth().api;
       let authResponse: Response;
+      let refusal: string | undefined;
       try {
-        authResponse = (await withBootstrapTokenRedemption(() =>
-          authApi.signUpEmail({
-            body: { email: data.email, password: data.password, name: data.name },
-            headers: c.req.raw.headers,
-            asResponse: true,
-          }),
-        )) as Response;
+        ({ result: authResponse, refusal } = await withBootstrapTokenRedemption(
+          () =>
+            authApi.signUpEmail({
+              body: { email: data.email, password: data.password, name: data.name },
+              headers: c.req.raw.headers,
+              asResponse: true,
+            }) as Promise<Response>,
+        ));
       } catch (err) {
         const msg = getErrorMessage(err);
         // Email omitted — see WARN-log comment above on the bad-token branch.
@@ -259,6 +261,19 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
+      // Read off the create hook, not the response: with mail verification on,
+      // Better Auth answers the hook's refusal as a created account.
+      if (refusal === "signup_domain_not_allowed") {
+        throw new ApiError({
+          status: 403,
+          code: "signup_domain_not_allowed",
+          title: "Forbidden",
+          detail:
+            "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
+            "Use an allowlisted email for the bootstrap owner.",
+        });
+      }
+
       if (!authResponse.ok) {
         const bodyText = await authResponse.text().catch(() => "");
         // Email omitted — see WARN-log comment above on the bad-token branch.
@@ -266,20 +281,6 @@ export function createAuthBootstrapRouter(): Hono {
           status: authResponse.status,
           body: bodyText.slice(0, 400),
         });
-        // Domain-allowlist rejection — surfaced from the auth.ts gate
-        // when the bootstrap-token bypass hits an active
-        // `AUTH_ALLOWED_SIGNUP_DOMAINS`. Remap to 403 with the
-        // structured code so the SPA can display the precise reason.
-        if (bodyText.includes("signup_domain_not_allowed")) {
-          throw new ApiError({
-            status: 403,
-            code: "signup_domain_not_allowed",
-            title: "Forbidden",
-            detail:
-              "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
-              "Use an allowlisted email for the bootstrap owner.",
-          });
-        }
         // Surface BA's status to the SPA so password-policy / duplicate-email
         // errors keep their structured semantics.
         throw new ApiError({

@@ -162,10 +162,15 @@ magic-link paths are for an instance configured without a token.
   ordinary address does not. With SMTP the request is answered like any
   other and no e-mail is sent: the refusal is only in the server log.
   Confirming the address does not let anyone create its account.
-- **An account that already holds a listed address is not re-examined.**
-  The rule is on creation. Whoever holds the account of an address you
-  add to `AUTH_PLATFORM_ADMIN_EMAILS` is a platform admin from the next
-  restart: check that you can sign in to it before listing it.
+- **An account that already holds a named address is not re-examined.**
+  The rule is on creation. Whoever holds the account of an address in
+  `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` has its
+  privilege from the next restart. Before naming an address, and once
+  after upgrading to this rule, look up its row in the `user` table: it
+  should be an account you can sign in to, with `realm = 'platform'`. A
+  row with `email_verified = false` was created by the plain sign-up form
+  with no proof of ownership — if it is not yours, delete it and create
+  the account again with proof.
 - **Social sign-in links onto an existing account by address.** Google
   and GitHub are trusted providers: signing in with one attaches it to
   the existing account that has the same address, and that step does not
@@ -215,13 +220,13 @@ State machine:
 \* Reconciled at boot: when the env still carries a token but at least
 one org already exists, the platform flips the in-memory consumed flag
 during startup so the SPA stops sending returning visitors to `/claim`.
-You can leave the token in `.env` indefinitely without UX consequences,
-but rotating it out keeps the file honest.
 
-The DB-org-count check is the durable replay guard: even if the operator
-forgets to remove the token from `.env`, once any organization exists
-the token is dead — a process restart cannot reopen the redemption
-window.
+**Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is
+claimed.** What keeps a claimed token dead across restarts is the
+organization count: the token is redeemable while the instance has no
+organization at all. A token left in `.env` is therefore redeemable
+again after a restart if every organization has since been deleted, by
+whoever can read that file or an old copy of it.
 
 > **Reverse-proxy deployments:** the redeem endpoint is rate-limited to
 > 5 requests/minute **per source IP**. If you front the platform with a

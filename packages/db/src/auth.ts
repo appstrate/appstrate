@@ -295,16 +295,20 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 // scoped to the redeem route's call to `auth.api.signUpEmail()` is the
 // minimum-blast-radius primitive — same shape as `withSmtpOverride`.
 
-const bootstrapTokenRedemptionStore = new AsyncLocalStorage<boolean>();
+const bootstrapTokenRedemptionStore = new AsyncLocalStorage<{ refusal?: string }>();
 
-/** Run `fn` with the bootstrap-token bypass active for any signup-gate eval downstream. */
-export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T> {
-  return bootstrapTokenRedemptionStore.run(true, fn);
-}
-
-/** True when the current async context is inside `withBootstrapTokenRedemption`. */
-function isBootstrapTokenRedemptionActive(): boolean {
-  return bootstrapTokenRedemptionStore.getStore() === true;
+/**
+ * Run `fn` with the bootstrap-token bypass active for any signup-gate eval
+ * downstream. `refusal` is the code the create hook refused the account with,
+ * if it did: under mail verification Better Auth answers that refusal as a
+ * created account, so the response alone does not carry it.
+ */
+export async function withBootstrapTokenRedemption<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; refusal: string | undefined }> {
+  const redemption: { refusal?: string } = {};
+  const result = await bootstrapTokenRedemptionStore.run(redemption, fn);
+  return { result, refusal: redemption.refusal };
 }
 
 /** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
@@ -1033,7 +1037,8 @@ function buildAuth(options: CreateAuthOptions) {
             // named as owner. A pending invitation also overrides
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
-            const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            const redemption = bootstrapTokenRedemptionStore.getStore();
+            const bootstrapTokenBypass = redemption !== undefined;
             // Proof for an account the environment names (owner, platform
             // admins): the bootstrap token, or a row born verified (provider
             // assertion, consumed magic link). The refusal mirrors what an
@@ -1084,6 +1089,7 @@ function buildAuth(options: CreateAuthOptions) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
                     });
+                    redemption.refusal = "signup_domain_not_allowed";
                     throw new APIError("FORBIDDEN", {
                       message: "signup_domain_not_allowed",
                       code: "signup_domain_not_allowed",

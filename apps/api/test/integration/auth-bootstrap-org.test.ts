@@ -341,6 +341,23 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       });
     });
 
+    describe("with outbound mail configured", () => {
+      enableSmtpForSuite();
+
+      it("the token's refusal outside the allowlist is the same, and leaves the token redeemable", async () => {
+        // Better Auth answers a refused creation like a created account here.
+        setEnv({
+          AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN,
+          AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test",
+        });
+        await expectRefusedWithNothingCreated(await redeem("ops@acme.com"), {
+          status: 403,
+          code: "signup_domain_not_allowed",
+        });
+        expect(isBootstrapTokenPending()).toBe(true);
+      });
+    });
+
     it("a provider-asserted social sign-in creates it in closed mode", async () => {
       await (
         await getAuth().$context
