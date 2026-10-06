@@ -1,96 +1,90 @@
 ---
-title: Skill
-description: "The Appstrate Agent Skill: a portable package that teaches your coding agent the CLI, REST API, and AFPS conventions so you can delegate everything after setup."
+title: Skills and coding agents
+description: Bring your spaces' skills and agents into Claude Code and Codex with appstrate code sync, and let a coding agent drive the CLI.
 ---
 
-The Appstrate Agent Skill is the third way to drive Appstrate, alongside the [webapp](/docs/using-appstrate/webapp) and the [CLI](/docs/using-appstrate/cli). You install it once into your coding agent (Claude Code, Cursor, Antigravity, any AGENTS.md-aware host) and from then on the agent knows how to author manifests, package AFPS, deploy, run, iterate, wire providers, rotate keys, switch profiles, and call `appstrate api` without you having to copy-paste recipes from the docs.
+Coding agents such as Claude Code and Codex can work with Appstrate in three ways, and they combine:
 
-The skill is **open source** (Apache 2.0) at [github.com/appstrate/skills](https://github.com/appstrate/skills). It is framework-agnostic: the same SKILL.md + references run under every host that supports the [Anthropic Agent Skills](https://docs.claude.com/en/docs/claude-code/skills) format.
+- **Your skills, locally.** `appstrate code sync` copies the [skills](/docs/features/skills) of the spaces you belong to into the agent's skill directories, and keeps them current.
+- **Your agents, as commands.** In Claude Code, every agent active in your pinned space becomes a `/appstrate:run-<agent>` command that launches it through the organization's MCP server.
+- **The CLI and the API.** A coding agent can call the platform through `appstrate api` without ever seeing a token. The repository ships an operating manual for exactly that: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md).
 
-## Install
+What you need first: an instance and the [CLI](/docs/using-appstrate/cli), signed in (`appstrate login`) with an organization and a space pinned. Login pins them for you when there is only one choice.
 
-One command, auto-detects your coding agent:
+## Claude Code
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/appstrate/skills/main/install.sh | bash -s appstrate
-```
-
-Inspect `install.sh` before piping to `bash` if you want. The installer copies the skill to the canonical path for the host it detects. Force a specific target with a flag:
-
-| Flag | Target | Path |
-|---|---|---|
-| `--claude` | Claude Code | `~/.claude/skills/appstrate/` |
-| `--cursor` | Cursor | `~/.cursor/skills/appstrate/` |
-| `--antigravity` | Antigravity | `~/.antigravity/skills/appstrate/` |
-| `--universal` | AGENTS.md-aware hosts (Windsurf, Aider, [openskills](https://github.com/numman-ali/openskills)) | `~/.agents/skills/appstrate/` |
-
-## What the skill contains
-
-```
-skills/appstrate/
-├── SKILL.md              # Entry point, loaded on trigger
-├── assets/               # Starter manifests (agent, skill, tool)
-├── references/
-│   ├── create-agent.md   # Full 5-step workflow
-│   ├── concepts.md       # Platform overview + pointers
-│   ├── manifest-schema.md
-│   ├── prompt-writing.md
-│   ├── system-tools.md   # output, state, report, log, add-memory
-│   ├── api-cheatsheet.md # appstrate api flags + skill-specific gotchas
-│   ├── inline-runs.md
-│   ├── profiles.md       # Multi-instance workflow
-│   └── setup.md          # Install edge cases
-└── scripts/
-    └── afps-pack.sh      # Pack a directory as .afps (ZIP)
-```
-
-The skill does NOT run `appstrate install` for you, by design. Install is a human decision (tier, Docker-or-not, port), so the skill assumes `appstrate whoami` already succeeds and walks you through the [manual install from the Quickstart](/docs/get-started/quickstart) when it doesn't.
-
-## Use it
-
-In a new chat with your coding agent, name the skill explicitly so it loads first:
-
-> Using the **Appstrate** skill, build me a Gmail digest agent that summarises unread mail every morning.
-
-Naming the skill is the single most reliable activation signal. Once loaded, typical prompts:
-
-- *"Create an agent called `email-triage` that reads my Gmail inbox and posts a summary to Slack. Wire the Gmail and Slack providers for end-user `eu_alice`."*
-- *"Pack my local `./my-skill` folder as an AFPS and publish it to my instance under `@acme/my-skill@1.0.0`."*
-- *"Rotate the API key named `ci-deploy`. Revoke the old one only after the new one is verified."*
-- *"Diff my `dev` profile's agent list with `prod`, tell me what's missing on prod."*
-- *"Replay run `run_01HZABC` against end-user `eu_bob` to check if the provider keys work for him too."*
-- *"List every agent that's failing more than 10% of the time this week, show me the last run's stderr."*
-
-The agent reads the relevant reference file on demand (progressive disclosure: only `create-agent.md` for authoring, only `inline-runs.md` for one-shot runs, etc.) so the context window stays small. If something fails, it stops and surfaces the error instead of retrying blindly.
-
-## Update
-
-Same command with `--update`:
+Install the plugin once. Claude Code then re-runs the sync in the background every session, and reloads the plugin when something changed.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/appstrate/skills/main/install.sh | bash -s appstrate --update
+appstrate login
+claude plugin marketplace add appstrate/claude-plugins
+claude plugin install appstrate@appstrate
 ```
 
-Re-run whenever the CLI version on the instance moves past the skill's documented commands. The skill itself has a self-update hint baked into its error table, so your agent will surface the suggestion when it hits a flag it doesn't recognise.
+What you get in Claude Code:
 
-## Uninstall
+| What                                      | How it appears                                                          |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| Skills of every space you are a member of | `/appstrate:<skill>`                                                    |
+| Agents active in your pinned space        | `/appstrate:run-<agent>`                                                |
+| The organization's MCP server             | A server named `plugin:appstrate:appstrate`, bound to your pinned space |
 
-Delete the directory that matches your host target from the table above. No residual config, no registry entry, no cleanup needed.
+The plugin carries no token. Open `/mcp`, select `plugin:appstrate:appstrate` and complete the browser login once. That login is separate from `appstrate login`.
 
-## Customise it for your org
+Agent commands take your request in plain words, for example `/appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf`. Claude builds the input from the agent's launch form and launches it with the MCP tool `run_and_wait`. Nothing is pre-approved: Claude Code asks before the metered run starts and shows the exact input. You need the permissions to run agents and read runs in the space, which the `runner` space role includes. To pass a file, keep it in the session's working directory or start Claude Code with `--add-dir`.
 
-The skill is just Markdown + scripts in a git repo, so an internal platform team can:
+Installing the plugin on a fresh machine is the only step that has to come first. Without a signed-in profile it installs a setup skill that tells you what is missing.
 
-- Fork [`appstrate/skills`](https://github.com/appstrate/skills), add org-specific conventions (naming rules, required provider scopes, approval workflow) to SKILL.md or a new reference, and pipe your forked `install.sh` instead.
-- Ship a second skill that wraps Appstrate with your own domain vocabulary (e.g. an `acme-agents` skill that enforces your naming scheme and pre-selects `prod-acme` as the default profile).
-- Publish either as a private repo; coding agents load from any URL, not just GitHub.
+### After switching organization or space
 
-See [Skill Creator](https://docs.claude.com/en/docs/claude-code/skills#creating-skills) for the format and [Compare](/docs/resources/compare) for where the Appstrate + coding-agent combo fits against agent frameworks that ship as SDKs.
+The plugin follows your profile. After `appstrate org switch` or `appstrate space switch`, refresh it and start a new Claude Code session, because a running session can keep the old endpoint:
+
+```bash
+claude plugin update appstrate@appstrate
+```
+
+Then check the endpoint in `/mcp` and authenticate again if asked.
+
+## Codex
+
+Codex reads skills from `~/.agents/skills/`. The Claude Code plugin already syncs that directory too. Without Claude Code, run the sync yourself, by hand or on a schedule:
+
+```bash
+appstrate code sync --target codex
+```
+
+Agent commands are not available in Codex, since nothing configures the MCP server there. To give Codex the organization's MCP server, see [MCP clients](/docs/using-appstrate/mcp-clients).
+
+## Sync options
+
+```bash
+appstrate code sync --target claude-plugin --target codex   # what the plugin runs
+appstrate code sync --target claude-user                    # into ~/.claude/skills/ without the plugin
+appstrate code sync --target codex --dry-run                # show what would change
+appstrate code sync --target claude-user --source draft     # your working copies, not published versions
+appstrate code sync --target codex --space spc_prod         # only these spaces, this run
+```
+
+- `--target` is required and repeatable: `claude-plugin`, `codex` or `claude-user`.
+- By default a sync takes the active skills of **every space you are a member of** and can read skills in. Being added to a space puts its skills on your machine at the next sync, and being removed takes them off. `--space`, or `syncSpaces` in your profile, narrows that set and never widens it.
+- It installs the organization's latest published version of each skill. `--source draft` syncs working copies instead, for authors, and needs write access to the skill.
+- The MCP connection and the agent commands come from the **pinned** space only.
+- A sync never deletes or overwrites a directory it did not create. A name already taken by your own skill is reported and skipped.
+- Installed skills are generated copies. Editing them does not change anything in Appstrate.
+
+If your organization blocks command-sourced plugins, or you use Codex only, schedule `appstrate code sync --target codex` with cron or a macOS `launchd` agent. Use `launchd` on macOS: the sync needs your keyring, which a system cron job may not reach. Scheduling details, ownership rules and every failure message are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-code-sync).
+
+## Write skills and agents from your editor
+
+`appstrate code sync` only copies down. To author a skill, agent, integration or MCP server in a local folder, push it to its draft and publish it, use [`appstrate packages`](/docs/using-appstrate/cli). To try a skill in Claude Code before publishing it, load its folder directly with `claude --plugin-dir <dir>`.
+
+## A standalone skill repository
+
+A separate open-source repository, [`appstrate/skills`](https://github.com/appstrate/skills), publishes a skill for coding agents. It is not part of this repository, so follow its own README for installation and contents.
 
 ## Reference
 
-- [Quickstart](/docs/get-started/quickstart): the 5-step onboarding that ends with loading this skill.
-- [CLI](/docs/using-appstrate/cli): the 9 commands the skill drives under the hood.
-- [Webapp](/docs/using-appstrate/webapp): the visual counterpart when you prefer clicks to prompts.
-- [Coding Agents integration](/docs/integrations/coding-agents): use cases and why this combo beats coding-agent alone.
-- [github.com/appstrate/skills](https://github.com/appstrate/skills): source, issues, and the full skill catalog (not only `appstrate`; future skills for providers, tenants, etc. ship here).
+- [CLI](/docs/using-appstrate/cli): the commands a coding agent drives.
+- [MCP clients](/docs/using-appstrate/mcp-clients): connect any MCP client to an organization.
+- [Coding Agents integration](/docs/integrations/coding-agents): why this combination is useful for platform teams.
+- [CLI README, `code sync`](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-code-sync): the full behaviour.

@@ -1,178 +1,126 @@
 ---
 title: Skills
-description: Extend agents with portable markdown instructions and optional tool code. Compatible with Anthropic Agent Skills.
+description: Reusable instructions, in the Agent Skills format, that agents and the chat assistant load on demand.
 ---
 
-A skill is a portable unit of instruction that extends an agent's knowledge or capabilities. Appstrate skills implement Anthropic's [Agent Skills](https://docs.anthropic.com/en/docs/build-with-claude/agent-skills) format: a folder containing a `SKILL.md` file with YAML frontmatter.
+A skill is a portable unit of instruction. It follows the [Agent Skills](https://agentskills.io/specification) format: a folder with a `SKILL.md` file (YAML frontmatter, then Markdown), plus any supporting files. A skill written for Claude Code or another Agent Skills host works in Appstrate unchanged. Appstrate adds the package layer: versions, a registry, integrity hashes, sharing between spaces.
 
-A skill authored for Claude (Claude Code, the Messages API, the Agent SDK) runs in Appstrate without modification. Appstrate adds one layer on top: AFPS packaging (ZIP + semver + registry + SRI integrity) so skills can be versioned, shared across tenants, and pinned by agents.
+Skills are one of the four [package types](/docs/features/packages) (`skill`).
 
-## Via the UI
-
-Open the dashboard → **Skills** in the sidebar (`/skills`). From there you can:
-
-- **Browse** the list of system and org-owned skills, search, and open a detail page
-- **Create** a new skill (`/skills/new`) — opens the package editor with a `SKILL.md` template
-- **Import** an existing `.afps` ZIP via the import modal (drag-and-drop or file picker), including GitHub repo imports
-- **Open a detail page** (`/skills/:scope/:name`) — source viewer, version history, diff against latest published version, and "Used by" tab listing agents that depend on this skill
-- **Edit** the draft (`/skills/:scope/:name/edit`), then **publish a new version** via the Create Version modal (forward-only semver, SHA-256 integrity computed server-side)
-- **Fork** a system skill to create a local, mutable copy
-- **Install / uninstall** a skill on the current application with a single toggle
-- **Yank** a published version (marks it as withdrawn without deleting history)
-
-Package IDs are scoped names: `@appstrate/my-skill`. There is no `sk_` prefix. System skills live under `@appstrate/…` and are read-only (fork them to customize).
-
-## Pure `SKILL.md` skills
-
-The minimal skill is a single file with YAML frontmatter and a Markdown body.
+## A minimal skill
 
 ```markdown
 ---
-name: word-count
-description: Counts the number of words in a given text. Use this skill when the user asks to count words or analyze text length.
+name: ticket-tone
+description: House style for answering support tickets. Use when drafting or reviewing a customer reply.
 ---
 
-# Word Count
+# Ticket tone
 
-Call this skill when you need to count words in a text input. Returns the count as a formatted string.
-
-## Usage
-
-Pass the text to analyze as a parameter. The skill returns a one-line summary.
+Answer in the customer's language. Keep it under 120 words. Never promise a delivery date.
 ```
 
-Frontmatter fields (only these two are parsed):
+Both frontmatter fields are required on every path that writes a skill (editor, publish, restore, ZIP, GitHub and bundle import). A violation is a `400` whose first error code is one of `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description`, `skill_invalid_frontmatter_description`.
 
-| Field | Required | Description |
-|---|---|---|
-| `name` | Yes | Machine identifier. Lowercase, alphanumeric, hyphens |
-| `description` | Yes | Used by the model to decide when to invoke the skill |
+| Field         | Rule                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | The bare skill slug on one line: 1 to 64 characters of lowercase `a-z`, `0-9` and `-`, with no leading, trailing or doubled hyphen. It is not the package id. |
+| `description` | Non-empty, at most 1024 characters. The model reads it to decide when to load the skill, so say when to use it.                                               |
 
-The Markdown body is injected into the agent container at `.pi/skills/{id}/SKILL.md` at run time. The model reads it alongside its system prompt.
+Save the file without a byte-order mark. The frontmatter is parsed as YAML, so anything YAML rejects is rejected too (for example `description: a: b`).
 
-## Skills with executable tools
+Other files in the folder (reference documents, scripts, templates) travel with the skill. At run time the whole folder is written to the agent's workspace under `.pi/skills/<package id>/`, and the agent reads what it needs with its file and shell tools.
 
-A skill can also ship executable code that registers callable tools. This is the Pi Coding Agent SDK extension format (Appstrate-specific, not part of the Anthropic Skills standard). The entrypoint is a TypeScript file whose name is declared in the AFPS manifest's `entrypoint` field (commonly `skill.ts` for skills, `{tool-name}.ts` for tools).
+## Package form
 
-```ts
-// skill.ts
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-export default function (pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "word_count",
-    label: "Word Count",
-    description: "Count the number of words in a given text.",
-    parameters: Type.Object({
-      text: Type.String({ description: "The text to count words in" }),
-    }),
-    async execute(_toolCallId, params) {
-      const { text } = params as { text: string };
-      const count = text.trim().split(/\s+/).filter(Boolean).length;
-      return {
-        content: [{ type: "text", text: `The text contains ${count} words.` }],
-        details: { count },
-      };
-    },
-  });
-}
-```
-
-Gotchas:
-
-- Import `Type` from `@mariozechner/pi-ai` and `ExtensionAPI` from `@mariozechner/pi-coding-agent`. Both are pinned to `^0.67.2` in the current runtime.
-- The default export is a **function** that receives the `pi` API and calls `pi.registerTool(...)` imperatively — not an object literal.
-- `parameters` uses TypeBox (`Type.Object`, `Type.String`, `Type.Union`, …). JSON Schema is generated from the TypeBox schema.
-- `execute` signature is `(_toolCallId, params)`. Return `{ content: [{ type: "text", text: "..." }], details?: {...} }`.
-
-A skill without executable code is 100% Anthropic-compatible. A skill that ships an extension requires an agent runtime that supports the Pi Coding Agent SDK.
-
-## Packaging (AFPS)
-
-To publish a skill into Appstrate, package the skill folder as an AFPS ZIP. The AFPS spec adds a `manifest.json` at the root of the ZIP that declares the package type and version:
+A skill package is an archive with a `manifest.json` next to the skill folder:
 
 ```
-my-skill.afps (ZIP)
-├── manifest.json       # type, name, version, description, integrity
-├── SKILL.md            # YAML frontmatter + markdown body
-└── skill.ts            # optional extension code
+my-skill.afps
+├── manifest.json
+├── SKILL.md
+└── references/style-guide.md
 ```
-
-`manifest.json` minimum:
 
 ```json
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/skill.schema.json",
-  "type": "skill",
-  "name": "@my-org/word-count",
+  "name": "@acme/ticket-tone",
   "version": "1.0.0",
-  "description": "Counts the number of words in a given text."
+  "type": "skill",
+  "schema_version": "0.3",
+  "display_name": "Ticket tone",
+  "description": "House style for answering support tickets."
 }
 ```
 
-`name` is a **scoped** identifier (`@scope/name`). Optional manifest fields include `displayName`, `keywords`, `license`, `repository`, and `dependencies` (for skills that depend on other skills/tools/providers). See the [AFPS spec](https://github.com/appstrate/afps-spec) for the full schema.
+`name` is the scoped package id. A ZIP that contains only a `SKILL.md` is accepted too: the platform derives the package id (`@<your org slug>/<name from the frontmatter>`) and a manifest, and bumps the patch version when the package already exists.
 
-## Publishing
+## Creating and editing
 
-Publish a skill through the REST API. There is no dedicated CLI command today (see [CLI Reference](/docs/using-appstrate/cli)).
+In the web app, **Skills** (`/skills`) lists the skills of the space, lets you create one from a template, import a ZIP or a GitHub repository, edit the draft, see the version history, and publish.
+
+Through the API:
 
 ```bash
-# First upload (creates the package)
-curl -X POST http://localhost:3000/api/packages/skills \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -F "file=@my-skill.afps"
+# Create (manifest + SKILL.md content)
+curl -X POST https://your-instance/api/packages/skills \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "manifest": { "name": "@acme/ticket-tone", "version": "1.0.0", "type": "skill", "schema_version": "0.3" },
+    "content": "---\nname: ticket-tone\ndescription: House style for answering support tickets.\n---\n\n# Ticket tone\n..."
+  }'
 
-# New version of an existing package (scoped id in the path)
-curl -X POST http://localhost:3000/api/packages/skills/@my-org/word-count/versions \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -F "file=@my-skill.afps"
+# Edit the draft (needs the ETag in If-Match), including supporting files
+curl -X PATCH https://your-instance/api/packages/skills/@acme/ticket-tone \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "If-Match: <ETag>" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "..." }'
+
+# Publish a version from the draft
+curl -X POST https://your-instance/api/packages/skills/@acme/ticket-tone/versions \
+  -H "Authorization: Bearer apst_your_key"
 ```
 
-Versions follow semver and are **forward-only**: you cannot publish a version lower than or equal to an existing one. Each upload is integrity-checked with an SHA-256 SRI hash (`computeIntegrity`) and served back on download via the `X-Integrity` header.
+An update body can also carry `operations`, an ordered list of file edits applied atomically with the manifest. Limits: 1 MiB per written file, 50 MB and 10,000 entries for the whole package.
+
+Versions are semver, forward-only and immutable. Importing an archive (`POST /api/packages/import`) creates the draft and a version at once. See [Packages](/docs/features/packages) for versions, dist-tags, import and export.
 
 ## Using a skill in an agent
 
-Skill attachment is **manifest-only**. An agent declares skill dependencies with semver ranges in its `manifest.json`:
+Skills are attached in the agent manifest and nowhere else:
 
 ```json
 {
   "type": "agent",
-  "name": "@my-org/email-triage",
+  "name": "@acme/support-triage",
   "dependencies": {
-    "skills": {
-      "@appstrate/word-count": "^1.0.0"
-    }
+    "skills": { "@acme/ticket-tone": "^1.0.0" }
   }
 }
 ```
 
-At run time, Appstrate resolves each semver range, downloads the pinned version, and injects the `SKILL.md` into the agent container at `.pi/skills/{id}/SKILL.md`. If the skill ships an extension, its tools are registered with the agent's tool list automatically.
+At launch, each range resolves to a published version and its files are placed in the sandbox. The prompt lists the available skills with their descriptions. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/docs/features/runs).
 
-There is no dedicated `PUT /api/agents/.../skills` endpoint — to change an agent's skill dependencies, update its manifest and publish a new version.
+## Skills in the chat assistant
 
-## System skills
+The [chat](/docs/using-appstrate/chat) assistant also uses the skills of the space. Each conversation has a skill mode:
 
-Appstrate ships system skills in `system-packages/` (loaded at boot with `orgId: null`). They are available to every organization without installation. Fork a system skill to create a local, mutable copy:
+| Mode             | Behaviour                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `auto` (default) | The space's skills are listed and the model loads the ones that fit.                         |
+| `manual`         | The skills you chose (up to 5) are injected, and the model may still find others on request. |
+| `strict`         | Only the skills you chose are injected.                                                      |
 
-```bash
-curl -X POST http://localhost:3000/api/packages/@appstrate/word-count/fork \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{ "name": "@my-org/word-count-custom" }'
-```
+A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced.
 
-## Portability guarantee
+## Who can see and use a skill
 
-- A pure `SKILL.md` skill moves freely between Claude Code, the Claude Agent SDK, Appstrate, and any other Agent Skills-compliant host.
-- Only the AFPS wrapper is Appstrate-specific. Inside the ZIP, the skill folder is standard.
-- AFPS is published under CC-BY at [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec).
+A skill has a **home space**, where its `skills:write` permission governs editing and publishing. Other spaces receive it through [sharing](/docs/features/library) and use it once they activate it. The `operator` and `viewer` space roles can read skills (a `runner` cannot), `builder` and `admin` can write them. See [roles and permissions](/docs/features/roles-and-permissions).
 
-## Reference
+## Portability
 
-- Example: [`examples/custom-skill/`](https://github.com/appstrate/appstrate/tree/main/examples/custom-skill) in the Appstrate monorepo.
-- Anthropic Agent Skills docs: [docs.anthropic.com/en/docs/build-with-claude/agent-skills](https://docs.anthropic.com/en/docs/build-with-claude/agent-skills).
-- AFPS spec: [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec).
+- A pure `SKILL.md` folder moves freely between Claude Code, the Claude Agent SDK, Appstrate and any Agent Skills host.
+- Only the AFPS wrapper (`manifest.json`, versions, integrity) is Appstrate-specific. The format is published at [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec).
+- A worked example lives in [`examples/custom-skill`](https://github.com/appstrate/appstrate/tree/main/examples/custom-skill).

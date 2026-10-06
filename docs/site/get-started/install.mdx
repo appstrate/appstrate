@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Where to install Appstrate, how to drive it, and how to do both from two different machines.
+description: Install an Appstrate instance and the CLI, choose an infrastructure tier, and connect to an instance from another machine.
 ---
 
 ## Install an instance
@@ -13,70 +13,109 @@ description: Where to install Appstrate, how to drive it, and how to do both fro
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Installs Appstrate on any machine (laptop, VPS, bare metal) **without requiring Bun on the host**. Downloads the signed CLI binary, drops it on PATH, then runs `appstrate install --yes` which auto-detects Docker:
+This downloads the `appstrate` CLI binary for your OS and architecture, verifies its minisign signature and SHA-256 checksum, and puts it in `~/.local/bin` (added to your shell `PATH` unless you set `APPSTRATE_NO_MODIFY_PATH=1`). It does not need Bun on the host. Supported: macOS and Linux, on x64 and arm64. On Windows, run it inside WSL2.
 
-- Docker present → **Tier 3** (PostgreSQL + Redis + MinIO + S3)
-- Docker absent → **Tier 0** (PGlite + filesystem, zero-install)
+Then it depends on where you run it:
 
-Pass `-s -- --tier N` to force a specific tier (e.g. `bash -s -- --tier 1`). Works on macOS and Linux. On Windows, run inside WSL2.
+- **In an interactive terminal**, the script stops after installing the CLI and tells you to run `appstrate install`. That command asks for the tier and the install directory and, on Docker tiers, for an optional bootstrap email and the public URL.
+- **Unattended** (you pass `--yes`, `CI=true` is set, or stdout is not a terminal), it goes on to run `appstrate install --yes` with the defaults below.
 
-Tier table:
+```bash
+# Unattended install, with overrides
+curl -fsSL https://get.appstrate.dev | bash -s -- --yes --tier 1 --dir ~/apps/appstrate --port 4000
+```
 
-| Tier | Runtime | Services | Storage |
-|---|---|---|---|
-| 0 | Bun | None (PGlite in-process) | Filesystem |
-| 1 | Docker | PostgreSQL | Filesystem |
-| 2 | Docker | PostgreSQL + Redis | Filesystem |
-| 3 | Docker | PostgreSQL + Redis + MinIO | S3 |
+With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachable and **Tier 0** otherwise. The flags are those of [`appstrate install`](/docs/using-appstrate/cli). `minisign` must be installed to verify the download. The script offers to install it with your package manager, and does so without asking when unattended.
 
-See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure) for tier trade-offs.
+| Tier | Runtime | Services                   | Storage            |
+| ---- | ------- | -------------------------- | ------------------ |
+| 0    | Bun     | None (PGlite in-process)   | Filesystem         |
+| 1    | Docker  | PostgreSQL                 | Filesystem         |
+| 2    | Docker  | PostgreSQL + Redis         | Filesystem         |
+| 3    | Docker  | PostgreSQL + Redis + MinIO | S3 (bundled MinIO) |
+
+Tier 2 is the recommended single-node production stack. See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure) for the trade-offs.
 
 </Tab>
 
 <Tab value="With Bun">
 
 ```bash
-bun install -g appstrate   # 1. CLI on your PATH
+bun install -g appstrate   # 1. the CLI on your PATH (Bun 1.3.9 or later)
 appstrate install          # 2. bootstrap the instance (interactive)
 ```
 
-Two-step alternative when you already have [Bun](https://bun.sh) and want the interactive tier prompt instead of the Docker-aware default. Step 1 installs the CLI on your PATH; step 2 bootstraps the instance. Works on macOS, Linux, and Windows.
+Use this when you already have [Bun](https://bun.sh) and prefer the package manager to a downloaded binary. You can also run it once without installing the CLI: `bunx appstrate install`. This is the route on native Windows. Upgrade with `bun update -g appstrate`.
 
 </Tab>
 
 <Tab value="Docker Compose">
 
-For a manual Docker Compose setup (CI, Kubernetes prep, custom orchestration), see [Self-Hosting / Docker Compose](/docs/self-hosting/docker-compose). You edit the compose file and the generated `.env` yourself; no installer is invoked.
+For a manual Docker Compose setup (CI, Kubernetes preparation, custom orchestration), see [Self-Hosting / Docker Compose](/docs/self-hosting/docker-compose). You edit the compose file and the `.env` yourself; the installer is not involved.
 
 </Tab>
 
 </Tabs>
 
-In all cases, the installer writes a generated `.env` with cryptographic secrets and opens `http://<host>:3000` once the healthcheck passes (up to 120s on Docker tiers).
+Whatever the route, the installer writes a `.env` with generated secrets (and, for Docker tiers, a `docker-compose.yml`) into the install directory, `~/appstrate` by default. It then waits for the healthcheck (up to 120 seconds on Docker tiers) and opens `http://localhost:3000`. The default port is 3000 (`--port` or `APPSTRATE_PORT` changes it). If it is taken, an unattended install picks the next free one and an attended install stops and asks you to free it or pick another.
+
+### Who can sign up
+
+How the first account is created depends on how you installed:
+
+- **Open instance** (Tier 0, or a Docker tier where you left the bootstrap email empty). Anyone who can reach the URL can sign up, and each new account creates its own organization.
+- **Invitation-only instance** (an unattended Docker install, or a bootstrap email given at the prompt or in `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`). Public sign-up is off. The installer generates a single-use token, prints it with the claim URL at the end of the install, and stores it in `.env` as `AUTH_BOOTSTRAP_TOKEN`. Open `<APP_URL>/claim`, paste the token and enter your name, email and password to create the first owner. Everyone else joins by invitation.
+
+The full matrix of options (domain restrictions, platform admins, magic links) is in [`AUTH_MODES.md`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). Environment variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
+
+### Behind a reverse proxy
+
+For a server reached on a public domain, give the installer the public origin so OAuth redirects, CORS and email links are correct:
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash -s -- --yes --app-url https://appstrate.example.com
+```
+
+The installer does not set up the reverse proxy or TLS. Point your proxy at `localhost:<port>`. See [Self-Hosting](/docs/self-hosting) and the [production considerations](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#production-considerations).
+
+### Manage and upgrade the install
+
+On Docker tiers the CLI wraps Docker Compose: `appstrate start`, `stop`, `restart`, `logs -f [service]`, `status` and `uninstall` (add `--purge` to delete the data too). `appstrate self-update` upgrades a CLI installed with curl. Upgrading the instance is covered in [Upgrading](/docs/self-hosting/upgrading), and the CLI channels in [Upgrading the CLI](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
+
+To verify the installer before you run it, use `curl -fsSL https://get.appstrate.dev/verify.sh | bash`. Signature and provenance details are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#verifying-the-installer).
 
 ## Drive your instance
 
-Once the instance is up, two independent ways to drive it. Both work whether the instance is on your laptop or on a remote server.
+Once the instance is up there are several ways to use it. They all work whether the instance is on your laptop or on a remote server.
 
-### Webapp
+### Webapp and chat
 
-Open the instance URL in a browser: `http://localhost:3000` locally, or `https://<your-domain>` for a remote deploy. Sign up (first user owns the org), connect a model, build and run agents. No CLI required. See [Using Appstrate / Webapp](/docs/using-appstrate/webapp).
+Open the instance URL in a browser: `http://localhost:3000` locally, or `https://<your-domain>` for a deployment. Create or claim your account, add a model, then build and run agents or talk to the [chat](/docs/using-appstrate/chat). See [Using Appstrate / Webapp](/docs/using-appstrate/webapp).
 
 ### CLI
 
-Install the CLI on whichever machine you want to drive from:
+If you installed with curl the CLI is already on your machine. To install only the CLI, with no instance:
 
 ```bash
-bun install -g appstrate
-appstrate login --instance http://localhost:3000      # local
-appstrate login --instance https://appstrate.acme.com # remote
+curl -fsSL https://get.appstrate.dev | APPSTRATE_NO_LAUNCH=1 bash   # or: bun install -g appstrate
 ```
 
-The CLI stores a named profile in your OS keyring with a 15-minute access token + 30-day rotating refresh token. Use `--profile` to juggle multiple instances (local, staging, prod). See [CLI / Profile workflow](/docs/using-appstrate/cli#profile-workflow) for the full profile reference.
+Then sign in to any instance:
+
+```bash
+appstrate login --instance http://localhost:3000       # local
+appstrate login --instance https://appstrate.acme.com  # remote
+```
+
+The CLI uses a device flow: it prints a code and a URL, you approve in the browser, and it stores a short-lived access token and a rotating refresh token in your OS keyring. A profile (instance URL, pinned organization and space) is kept in `~/.config/appstrate/config.toml`. Use `--profile <name>` to keep several instances side by side. See [CLI](/docs/using-appstrate/cli).
+
+### Coding agents and MCP clients
+
+`appstrate code sync` brings your spaces' skills and agents into Claude Code and Codex ([Skills and coding agents](/docs/using-appstrate/skill)). Any MCP client can also connect to an organization's MCP endpoint ([MCP clients](/docs/using-appstrate/mcp-clients)).
 
 ## Next steps
 
-- [Quickstart](/docs/get-started/quickstart): run your first agent end-to-end in 5 minutes
-- [Self-Hosting](/docs/self-hosting): production checklist, environment variables, Docker Compose, upgrades
-- [Using Appstrate / CLI](/docs/using-appstrate/cli): full CLI reference
-- [Using Appstrate / Webapp](/docs/using-appstrate/webapp): the browser UI
+- [Quickstart](/docs/get-started/quickstart): run your first agent
+- [Concepts](/docs/get-started/concepts): the mental model
+- [Self-Hosting](/docs/self-hosting): production checklist, environment variables, upgrades
+- [Using Appstrate / CLI](/docs/using-appstrate/cli): the command reference

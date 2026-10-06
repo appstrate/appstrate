@@ -1,32 +1,70 @@
 ---
 title: Webapp
-description: "The Appstrate webapp: dashboard, agents view, runs, skills, end-users, API keys, and org settings."
+description: "A tour of the Appstrate dashboard: sidebar, agents, runs, integrations, spaces, and organization settings."
 ---
 
-The Appstrate webapp is the visual interface served by `apps/web/` on the same instance as the API. By default it lives at `http://localhost:3000` and uses the same [authentication](/docs/api/authentication) as the REST API (session cookies via Better Auth).
+The webapp is the dashboard served by the instance itself, at `http://localhost:3000` on a local install. It uses the same [authentication](/docs/api/authentication) as the REST API (cookie sessions), is available in French and English (change it under **Preferences → General**), and shows each person only the pages their role can reach.
 
 ## First login
 
-On a fresh instance, anyone who knows the URL can sign up. Each new account is pushed through an onboarding flow that creates its own organization, so the signup user always becomes owner of the org they just created. New accounts never auto-join an existing org.
+Who can sign up depends on how the instance was set up (see [Install](/docs/get-started/install#who-can-sign-up)):
 
-To add someone to an existing org, send them an [invitation](/docs/features/multi-tenancy#invitations) from **Settings → Members**, or enable the `oidc` module with org auto-join.
+- **Open instance.** Anyone with the URL can create an account. Each new account is guided through creating its own organization, and becomes its owner. A new account never joins an existing organization on its own.
+- **Invitation-only instance.** The first owner claims the instance at `/claim` with the installer's token. After that, people join through an invitation, sent from **Organization settings → Users**. A person with no organization and no invitation sees a "waiting for an invitation" page.
 
-## Main sections
+Sign-in methods depend on configuration: email and password, plus Google or GitHub when the operator enabled them, and magic links or email verification when SMTP is configured.
 
-| Section | What you do here |
-|---|---|
-| **Dashboard** | Overview of recent runs, active agents, and quota usage for the current organization |
-| **Agents** | Browse agents, edit their prompt, manage dependencies (skills, tools, providers), run them ad hoc |
-| **Runs** | Live and historical runs with filters by agent, status, and end-user. Logs, cost, duration, realtime stream |
-| **Skills / Tools / Packages** | Library of installed AFPS packages. Fork system packages, publish your own versions |
-| **End-users** | Manage the end-users on whose behalf agents run. Create, disable, inspect their connections and runs |
-| **API keys** | Create, revoke, and rotate API keys pinned to the current organization and application |
-| **Settings** | Organization-level config: branding, default policies, module toggles, member invitations |
+Onboarding for a new organization has three steps: create the organization (a default space and a `hello-world` demo agent come with it), add an AI model, and optionally invite users.
 
-## Organization switcher
+## The sidebar
 
-Every non-org-scoped action happens inside the **active organization**. The switcher at the top of the sidebar lets you move between orgs you belong to. The webapp persists your last active org per profile.
+| Group          | Page                      | What you do here                                                                                                                                                                            |
+| -------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Activity       | **Dashboard**             | Upcoming schedules, recently run agents, recent runs                                                                                                                                        |
+|                | **Chat**                  | Talk to the [assistant](/docs/using-appstrate/chat)                                                                                                                                         |
+|                | **Files**                 | Files you uploaded in chat and files agents produced, filterable by origin                                                                                                                  |
+|                | **Runs**                  | Every run of the current space, live and historical. Show everyone's or only yours, and filter by kind (agents or inline). Open one for its outcome, execution log, configuration and files |
+| Automation     | **Agents**                | The agents active in the space. Create, import, edit, run                                                                                                                                   |
+|                | **Schedules**             | Cron schedules that launch agents, with their next run and last result                                                                                                                      |
+| Extensions     | **Skills**                | Reusable `SKILL.md` instructions                                                                                                                                                            |
+|                | **MCP Servers**           | MCP server packages that integrations can run                                                                                                                                               |
+|                | **Integrations**          | Connect third-party services and configure them                                                                                                                                             |
+| Administration | **Webhooks**              | Signed callbacks for run events                                                                                                                                                             |
+|                | **End-Users**             | The customers of your own product, on whose behalf agents run                                                                                                                               |
+|                | **Organization settings** | Members, spaces, models and more (below)                                                                                                                                                    |
 
-## Configuration
+The Chat, Webhooks and Organization settings entries depend on the corresponding modules and permissions. The footer holds the **organization switcher**, which also lets you pick a space when the organization has several. The user menu opens **Preferences**, the **API documentation** (Swagger UI of your instance) and the theme, and the bell shows notifications about your runs.
 
-Per-org settings (defaults, policies, webhook receivers, SSO) live under **Settings**. Infrastructure-level configuration (database URL, Redis URL, rate limits, feature modules) is set through [environment variables](/docs/self-hosting/environment-variables) and is not exposed in the webapp.
+## Agents and runs
+
+Open an agent for its tabs: about, runs, schedules, connections, memory, default settings, API and content. Click **Run**, fill in the input form if the agent has one, and the run starts. The run page streams logs, tool calls and the result live. A run can come from an agent of the catalog, from an inline one-off agent launched by the chat, or from outside the dashboard (the CLI, a GitHub Action or a self-hosted runner) and reported back.
+
+Create an agent with **New agent**, or **Import** a `.afps` or `.afps-bundle` file or a GitHub URL. The editor has tabs for the general settings and prompt, the input and output schemas, skills, runtime tools and integrations, and the raw JSON. Packages have a draft you edit, and versions you publish from it. Version history, diffing and restoring are in the package's detail page.
+
+Agents that use integrations need a **connection** for each. Connect your accounts from the agent's Connections tab, from the integration's page, or from **Preferences → My connections**. A run is refused until each required integration has a working connection, and one whose sign-in expired is flagged for reconnection.
+
+## Spaces
+
+A **space** scopes everything under Activity, Automation and Extensions. Switch space from the footer switcher. Every member has a **personal space** that nobody else, not even an owner, can open, and teams create shared **team spaces** with their own members, roles and visibility. Inside a space, the library lists the packages placed there so you can switch them on or off, and a person who can write skills there can require some of them on the chat. See [Concepts](/docs/get-started/concepts#organizations-spaces-and-roles).
+
+## Organization settings
+
+| Tab          | Purpose                                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| General      | Name and slug, the [MCP connection](/docs/using-appstrate/mcp-clients) snippets, leaving or deleting the organization |
+| Users        | Members, their organization role and invitations                                                                      |
+| Roles        | Custom space roles, and a preview of what a role can see                                                              |
+| Spaces       | Create and manage spaces, their visibility and default role                                                           |
+| Models       | The LLM models agents and chat use, and the provider keys behind them. Test a model, set the default                  |
+| Proxies      | Outbound HTTP proxies, assignable per agent                                                                           |
+| Team SSO     | Single sign-on for the dashboard, when enabled                                                                        |
+| CLI sessions | The CLI sessions of members, which an admin can revoke                                                                |
+| Billing      | Plans and credits, when the billing module is enabled                                                                 |
+
+The **Space** section of the same page holds that space's settings: general, members, **API keys**, authentication and end-user SSO. API keys are bound to one space.
+
+Infrastructure configuration (database and Redis URLs, rate limits, enabled modules) is set through [environment variables](/docs/self-hosting/environment-variables) and is not exposed in the webapp.
+
+## Preferences
+
+**Preferences** is about your own account: general (language, display name), appearance (theme), security (password, email, linked Google or GitHub accounts), **My connections**, and **Devices**, which lists your signed-in CLI sessions and lets you revoke them.

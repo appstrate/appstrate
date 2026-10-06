@@ -5,39 +5,49 @@ description: Connect Brevo to your Appstrate agents.
 
 ## Overview
 
-Brevo (formerly Sendinblue) is a transactional email and marketing platform, allowing your agents to send emails and manage campaigns.
+Brevo is an email marketing and CRM platform. The integration lets agents call the Brevo API v3 with a key you provide.
 
-## Authentication Mode
+Integration: `@appstrate/brevo` (version 1.0.2), reached through the `api_call` tool. For how this works, see [How integrations work](/docs/integrations/how-integrations-work).
 
-| Property | Value |
-|----------|-------|
-| Type | `api_key` |
-| Header | `api-key: <token>` |
-| Scopes | N/A |
+## Authentication
+
+| Property           | Value                   |
+| ------------------ | ----------------------- |
+| Type               | `api_key`               |
+| Credential sent as | `api-key: <credential>` |
 
 ## Authorized URIs
 
-The agent can access the following endpoints through the sidecar proxy:
+The sidecar sends the credential only to URLs that match one of these patterns:
 
-- `https://api.brevo.com/*`
+- `https://api.brevo.com/**`
 
 ## Connect Brevo
 
-1. [Retrieve your API key](https://app.brevo.com/settings/keys/api) from the Brevo dashboard (Settings > API Keys)
-2. Create a new API v3 key if needed
-3. On Appstrate, go to the Brevo provider settings and enter the API key
+Create an API v3 key in your Brevo account and paste it into the hosted connect form. Brevo expects the key in an `api-key` header, which the integration sets for you.
 
-## Usage in an Agent
+## Use it in an agent
 
-Once connected, the agent can call Brevo APIs through the sidecar proxy. Example prompt:
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/brevo": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/brevo": {
+      "tools": ["api_call"]
+    }
+  }
+}
+```
+
+Example prompt:
 
 ```
-Whenever a new contact is added in HubSpot, send a personalized welcome email
-via Brevo with the contact's first name and a link to the getting started
-documentation.
+Add the contacts from the attached sheet to the "Newsletter" list, skipping the ones already subscribed.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

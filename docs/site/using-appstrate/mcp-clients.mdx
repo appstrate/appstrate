@@ -1,0 +1,75 @@
+---
+title: MCP clients
+description: Connect Claude Code, Claude Desktop, Cursor, Codex or any MCP client to an Appstrate organization.
+---
+
+Every organization on an instance has its own **Model Context Protocol** endpoint. A generic MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf) that connects to it can discover and call the Appstrate API, and launch agents and wait for their results, with the permissions of the person or key that connected and confined to that one organization. It is the same surface the dashboard [chat](/docs/using-appstrate/chat) uses.
+
+```
+https://<your-instance>/api/mcp/o/<orgId>
+```
+
+The endpoint is served by the `mcp` module, which is in the default `MODULES`. It uses the Streamable HTTP transport and accepts POST requests only. To use several organizations, add one server entry per organization. There is no switch inside a session, on purpose.
+
+## Get the connection details
+
+The dashboard builds them for you. Open **Organization settings → General** and find **MCP connection**. It shows the exact URL for the current organization and ready-made snippets:
+
+- the `claude mcp add` command for Claude Code
+- a generic `mcpServers` JSON block, for Claude Desktop, Windsurf, Cline and similar clients
+- an `mcp-remote` stdio bridge, for clients that do not speak remote HTTP or OAuth yet
+- **Add to Cursor** and **Add to VS Code** buttons
+
+## Connect with browser sign-in (OAuth)
+
+A spec-compliant client needs nothing but the URL. It discovers the authorization server, registers itself without any manual step, and opens a browser for you to sign in and consent.
+
+```bash
+claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/org_123abc
+# then, in Claude Code: /mcp, select the server, Authenticate
+```
+
+The token you get is bound to that one organization's endpoint. It is refused everywhere else on the platform, including on another organization's MCP endpoint, so it cannot be reused against the rest of the REST API.
+
+Self-hosting, this flow needs the instance to be reachable over **HTTPS** at its public `APP_URL` (an `http://localhost` instance is for development only), and the `oidc` module, which is in the default `MODULES`.
+
+## Connect with an API key
+
+Without a browser, create an API key and send it as a bearer token. In the dashboard, open **Organization settings**, go to the space section, and choose **API Keys**. Create a key in the space you want, with at least the `mcp:read` and `mcp:invoke` scopes plus whatever your task needs.
+
+```bash
+claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/org_123abc \
+  --header "Authorization: Bearer apst_xxx"
+```
+
+The key's own organization must match the one in the URL.
+
+## Codex
+
+```bash
+codex mcp add appstrate --url https://appstrate.example.com/api/mcp/o/org_123abc
+codex mcp login appstrate
+```
+
+## Which space it acts in
+
+The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/docs/using-appstrate/skill) sets this header to your pinned space for you.
+
+## The tools
+
+The server does not declare one tool per API operation. It exposes a small set that lets the client find and call any operation, and the list you see depends on your permissions:
+
+| Tool                                           | What it does                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `get_me`                                       | Who you are in this organization, your role, and the integrations you have connected. Call it first |
+| `search_operations`, `describe_operation`      | Find an API operation and read its input schema                                                     |
+| `invoke_operation`                             | Call an operation, validated and authorized like the equivalent REST call                           |
+| `run_and_wait`                                 | Launch an agent (or a one-off inline agent) and return when the run finishes                        |
+| `list_files`, `read_file`                      | List and read files, addressed by `appfile://` URIs                                                 |
+| `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                 |
+| `validate_package_file`, `import_package_file` | Check and import a package archive                                                                  |
+| `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                               |
+
+`mcp:read` lets a client connect and use the read-only tools. `mcp:invoke` adds `invoke_operation`, and `run_and_wait` further needs `agents:run` and a run-read permission. An operation your role cannot perform is not shown, and every call is checked again when it runs, so a client can never do more than the same credentials could over REST. If your role changes or the platform is upgraded, re-list the tools in your client.
+
+The full permission matrix, the security model (audience binding, SSRF protection of client registration) and the inline-run options are in the [connecting MCP clients guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/connecting-mcp-clients.md).

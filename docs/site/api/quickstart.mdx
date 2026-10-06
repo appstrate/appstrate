@@ -1,16 +1,18 @@
 ---
 title: Quickstart
-description: Make your first Appstrate API call in under 5 minutes.
+description: Create an API key, run an agent, and read its result with curl in a few minutes.
 ---
 
-This page walks through getting an API key and making your first request against a local Appstrate instance.
+This page takes you from nothing to a finished run using only HTTP. You will create an API key, launch an agent defined inline in the request, wait for its result, and then see how to run a saved agent on behalf of one of your end-users.
 
 ## Prerequisites
 
-- A running Appstrate instance. If you don't have one, follow the [Get Started Quickstart](/docs/get-started/quickstart) to spin up Tier 0 in under 10 minutes.
-- Your dashboard is reachable at `http://localhost:3000`.
+- A running Appstrate instance and an account in it. To start one, follow the [Get Started quickstart](/docs/get-started/quickstart) (Tier 0 needs only Bun). The examples use `http://localhost:3000`; on Appstrate Cloud the base URL is `https://app.appstrate.com`.
+- A model the organization can run agents with. Add one in **Organization settings** under models if the onboarding did not.
 
-## First API call
+```bash
+export APPSTRATE_URL=http://localhost:3000
+```
 
 <Steps>
 
@@ -18,102 +20,171 @@ This page walks through getting an API key and making your first request against
 
 ### Create an API key
 
-From the dashboard, go to **Settings → API Keys** and click **Create API Key**. Give it a name (e.g. `dev-local`) and copy the full key. It starts with `ask_` and is only shown once.
-
-You can also create a key with a curl call if you already have a cookie session:
+In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults, and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
-curl -X POST http://localhost:3000/api/api-keys \
-  -H "Cookie: $YOUR_SESSION_COOKIE" \
-  -H "X-Org-Id: $YOUR_ORG_ID" \
+export APPSTRATE_KEY=apst_your_key_here
+```
+
+A key is pinned to the space where you created it, so you never send `X-Org-Id` or `X-Space-Id` with it. See [Authentication](/docs/api/authentication) for scopes and how a key's authority is derived.
+
+</Step>
+
+<Step>
+
+### Check the key
+
+List the agents in the key's space:
+
+```bash
+curl "$APPSTRATE_URL/api/agents" \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
+```
+
+```json
+{ "object": "list", "data": [], "hasMore": false }
+```
+
+An empty list is normal on a fresh instance. A `401` means the key is wrong, expired, or revoked. A `403` means the key lacks the `agents:read` scope.
+
+</Step>
+
+<Step>
+
+### Run an inline agent
+
+An inline run needs no saved agent: you send the manifest and the prompt in the request. It requires the `agents:write` and `agents:run` scopes. This agent has one runtime tool, `output`, to return a structured result.
+
+```bash
+curl -X POST "$APPSTRATE_URL/api/runs/inline" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "dev-local",
-    "scopes": ["agents:read", "agents:run", "runs:read"]
+    "manifest": {
+      "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+      "name": "@inline/first-primes",
+      "display_name": "First primes",
+      "version": "0.0.0",
+      "type": "agent",
+      "schema_version": "0.3",
+      "dependencies": {},
+      "runtime_tools": ["output"],
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "primes": { "type": "array", "items": { "type": "integer" } } },
+          "required": ["primes"]
+        }
+      }
+    },
+    "prompt": "List the first five prime numbers and return them with the output tool."
   }'
 ```
 
-The response includes the full key under `key`. Save it; it cannot be retrieved later.
+The answer is `201 Created` with the run resource. The run executes in the background:
+
+```json
+{
+  "id": "run_...",
+  "status": "pending",
+  "packageId": "...",
+  "model_label": "...",
+  "result": null
+}
+```
+
+Save the `id`:
+
+```bash
+export RUN_ID=run_...
+```
+
+The `Idempotency-Key` header is optional and makes the call safe to retry: see [Idempotency](/docs/api/idempotency).
 
 </Step>
 
 <Step>
 
-### Verify the key
+### Wait for the result
 
-The simplest authenticated call is listing the keys you have access to:
+Long-poll the run. The request returns as soon as the run is `success`, `failed`, `timeout`, or `cancelled`, or after at most 55 seconds. If the status is still `running`, run the same command again.
 
 ```bash
-export APPSTRATE_KEY=ask_your_key_here
-
-curl http://localhost:3000/api/api-keys \
+curl "$APPSTRATE_URL/api/runs/$RUN_ID?wait=true" \
   -H "Authorization: Bearer $APPSTRATE_KEY"
 ```
 
-If the key is valid you get a JSON array of API key metadata (without the key material). A `401` means the key is wrong or revoked; a `403` means the key lacks the `api-keys:read` scope.
+```json
+{
+  "id": "run_...",
+  "status": "success",
+  "result": { "output": { "primes": [2, 3, 5, 7, 11] } },
+  "duration": 6120
+}
+```
 
-</Step>
-
-<Step>
-
-### List your agents
+For what the agent did along the way, read the logs:
 
 ```bash
-curl http://localhost:3000/api/agents \
+curl "$APPSTRATE_URL/api/runs/$RUN_ID/logs" \
   -H "Authorization: Bearer $APPSTRATE_KEY"
 ```
 
-If your application doesn't have any agents yet, the response is an empty array. Create one from the dashboard (**Agents → New agent**) or via [`POST /api/packages/agents`](/docs/api/introduction).
+</Step>
+
+<Step>
+
+### Stream a run instead
+
+Server-Sent Events push status changes, log entries, and cost updates as they happen. Browsers cannot set headers on `EventSource`, so the key goes in a query parameter on these routes only. Open the stream before you launch a run, or right after:
+
+```bash
+curl -N "$APPSTRATE_URL/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
+```
+
+You receive `run_update`, `run_log`, and `run_metric` events, plus a `ping` every 30 seconds. The stream starts with the run's current status but does not replay past log lines. See [Realtime streams](/docs/api#realtime-streams).
 
 </Step>
 
 <Step>
 
-### Run an agent
+### Run a saved agent
+
+Agents you create in the dashboard or publish through the API are identified by `@scope/name`. The scope and name are path segments, with the `@` kept:
 
 ```bash
-curl -X POST http://localhost:3000/api/agents/ag_xxx/run \
+curl -X POST "$APPSTRATE_URL/api/agents/@acme/summarizer/run" \
   -H "Authorization: Bearer $APPSTRATE_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "input": { "query": "hello" }
-  }'
+  -d '{ "input": { "text": "..." } }'
 ```
 
-The response is `202 Accepted` with a `runId`. The run executes asynchronously. To watch it in realtime:
-
-```bash
-curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
-```
-
-The SSE stream delivers `log`, `status`, and `result` events until the run ends.
+The body is validated against the agent's input schema, and unknown fields are rejected. You get `201` and the run resource, like an inline run. The agent must be active in the key's space and have a published version, and every integration it needs must be connected for the caller.
 
 </Step>
 
 <Step>
 
-### Impersonate an end-user
+### Act for one of your end-users
 
-If you are embedding Appstrate into a multi-tenant product, you execute runs on behalf of your end-users. Create one first:
+If you embed Appstrate in a product, you run agents for your own customers. Create an end-user, then add the `Appstrate-User` header to any request made with the key:
 
 ```bash
-curl -X POST http://localhost:3000/api/end-users \
+curl -X POST "$APPSTRATE_URL/api/end-users" \
   -H "Authorization: Bearer $APPSTRATE_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "externalId": "user_alice", "name": "Alice" }'
-```
+# → { "id": "eu_...", ... }
 
-Then run an agent as that user by adding the `Appstrate-User` header:
-
-```bash
-curl -X POST http://localhost:3000/api/agents/ag_xxx/run \
+curl -X POST "$APPSTRATE_URL/api/agents/@acme/summarizer/run" \
   -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -H "Appstrate-User: eu_xxx" \
+  -H "Appstrate-User: eu_..." \
   -H "Content-Type: application/json" \
-  -d '{ "input": { "query": "What meetings do I have?" } }'
+  -d '{ "input": { "text": "..." } }'
 ```
 
-Connections and memories used by the run are scoped to `eu_xxx`. Every impersonation is logged (request id, API key id, end-user id, IP, user agent).
+Runs, memory, and integration connections used by that request belong to `eu_...`, and that end-user sees only their own runs. See [End-user impersonation](/docs/api/authentication#end-user-impersonation).
 
 </Step>
 
@@ -121,13 +192,13 @@ Connections and memories used by the run are scoped to `eu_xxx`. Every impersona
 
 ## What you have now
 
-- An API key stored in `$APPSTRATE_KEY`
-- Verified authentication
-- At least one running agent
-- An end-user and a first impersonated run
+- An API key bound to one space.
+- A run launched, awaited, and read back, with a structured result.
+- The three ways to follow a run: long-poll, logs, and a stream.
 
 ## Next
 
-- [Authentication](/docs/api/authentication) — the three auth flows in detail.
-- [Multi-Tenancy](/docs/features/multi-tenancy) — organizations, applications, end-users, impersonation.
-- [API Reference](/docs/api/introduction) — the full endpoint catalog.
+- [Authentication](/docs/api/authentication): keys, sessions, OIDC tokens, scopes.
+- [Webhooks](/docs/api/webhooks-guide): get notified instead of polling.
+- [API Reference](/docs/api): versioning, rate limits, pagination.
+- [Tutorial: email digest agent](/docs/resources/tutorials/email-agent): build a saved agent that uses integrations and a schedule.

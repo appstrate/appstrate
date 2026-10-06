@@ -1,133 +1,87 @@
 ---
 title: API Keys
-description: Authenticate your headless integrations with Appstrate API keys.
+description: Authenticate backends, scripts and CI with space-bound API keys and limit them with scopes.
 ---
 
-## Overview
+An **API key** lets a server, script or CI job call the API without a user session. A key is bound to **one space** (and so to one organization) for its whole life, and its secret starts with `apst_`.
 
-API keys let you access the Appstrate API without a user session. They're designed for headless integrations — backends, scripts, CI/CD.
+## What a key can do
 
-Each API key is scoped to **both** an organization and an application (both columns are `NOT NULL` on the key) and carries the `ask_` prefix on the secret. Only owners and admins can create or revoke keys.
+A key does not carry permissions of its own. It **delegates its creator's standing in its space, checked live on every request**, narrowed by the key's `scopes`:
 
-## Via the UI
+```
+effective = what the creator can do now in the key's space  ∩  the key's scopes
+```
 
-Open the dashboard → settings icon in the sidebar → **API keys** (`/org-settings/app/api-keys`, admin-only). From there you can:
+- If the creator is demoted or removed from the space, the key loses the same rights immediately.
+- If the creator leaves or is removed from the organization, their keys in it are revoked.
+- A key cannot grant itself anything its creator lacks: requested scopes are checked against the creator's own permissions when you mint it.
+- Some permissions can never be put on a key, such as `share`, `integrations:configure`, member and role management. A key cannot create spaces or organizations either. See [Roles and permissions](/docs/features/roles-and-permissions).
 
-- Create a new key (name, scopes, expiration)
-- Copy the key plaintext **once** at creation time — only a SHA-256 hash is stored afterwards, and there is no "view key" button later
-- See each key's scopes, expiry, `keyPrefix` (first 8 chars), and `lastUsedAt` timestamp
-- Revoke a key (immediate effect)
+Only people holding `api-keys:create` in the space (the `admin` space role, so owners and admins) can mint keys. A personal space takes no keys (`409 personal_space_takes_no_keys`).
 
-The REST API below gives the programmatic equivalent.
+## Creating a key
 
-## Creating an API Key
+In the web app, open **Settings > Space > API keys** and create a key with a name, scopes and an optional expiry. The key is shown **once**.
+
+Through the API, in the space you are acting in:
 
 ```bash
-curl -X POST http://localhost:3000/api/api-keys \
-  -H "Authorization: Bearer ask_existing_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X POST https://your-instance/api/api-keys \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "Production Backend",
+    "name": "Production backend",
     "scopes": ["agents:read", "agents:run", "runs:read"],
     "expiresAt": "2027-01-01T00:00:00Z"
   }'
 ```
 
-Fields:
+| Field       | Notes                                                                                                                                                                         |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | Required, 1 to 100 characters.                                                                                                                                                |
+| `scopes`    | Optional list of `resource:action` strings. If omitted or empty, the key receives **every key-grantable permission its creator holds** in the space. Prefer an explicit list. |
+| `expiresAt` | Optional ISO 8601 time in the future. Omit or send `null` for a key that does not expire.                                                                                     |
 
-- `name` *(required)* — 1-100 chars
-- `scopes` *(optional)* — array of permission strings. Scopes are **clamped to the creator's own permissions** via `validateScopes()`: a member cannot grant scopes they themselves don't hold, and only scopes in `API_KEY_ALLOWED_SCOPES` can appear on a key.
-- `expiresAt` *(optional)* — ISO 8601 datetime, must be in the future. Omit for a non-expiring key.
+The response is `{ id, key, keyPrefix, scopes }` and the only time `key` is returned. Only a SHA-256 hash is stored, so a lost key cannot be recovered: create another and revoke the old one. Keys are never edited, only revoked.
 
-Permission: `api-keys:create` (owner + admin only; members and viewers cannot create keys).
+The key format is `apst_` followed by 30 random characters and a 6 character checksum, so a leaked key can be recognised by secret scanners. `keyPrefix` (`apst_` plus 8 characters) identifies a key in lists without exposing it.
 
-The full key is returned **only** in the creation response (`{ id, key, keyPrefix, scopes }` at 201). There is no `GET /api/api-keys/:id` to retrieve it later — the plaintext is never stored. Keys are **revoke-only**: to rotate, create a new key and revoke the old one.
+`GET /api/api-keys/available-scopes` returns the scopes you can grant in the current space, and `GET /api/api-keys` lists the keys of the space with `id`, `name`, `keyPrefix`, `scopes`, `created_by`, `expiresAt`, `lastUsedAt`, `revokedAt` and `createdAt`.
 
-## Usage
-
-### In HTTP Headers
-
-```bash
-curl http://localhost:3000/api/agents \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
-
-Sending `X-App-Id` is optional with an API key (the server infers the app from the key). If you do send it and it doesn't match the key's pinned app, the request is rejected with `403 forbidden`.
-
-### With SSE Endpoints
-
-`EventSource` doesn't support custom headers. Use the `token` query param:
+## Using a key
 
 ```bash
-curl -N "http://localhost:3000/api/realtime/runs?token=ask_your_key"
+curl https://your-instance/api/agents \
+  -H "Authorization: Bearer apst_your_key"
 ```
 
-## Session vs API Key
+- The organization and the space come from the key. You do not need `X-Org-Id` or `X-Space-Id`, and a header that disagrees with the key is a `403`.
+- Server-Sent Event streams take the key as `?token=apst_...`, since browsers cannot set headers on `EventSource`. See [Realtime](/docs/features/realtime).
+- A key can act for an [end-user](/docs/features/end-users) with the `Appstrate-User` header.
+- Rate limits are counted per key, not per user. Mutating `POST` routes accept `Idempotency-Key`.
 
-| Aspect | Session (cookie) | API Key |
-|--------|-----------------|---------|
-| Usage | Frontend / dashboard | Backend / integrations |
-| Authentication | Email/password + cookie | `Authorization: Bearer ask_...` |
-| Org context | `X-Org-Id` header | Pinned on the key (implicit) |
-| App context | `X-App-Id` header | Pinned on the key (optional header) |
-| End-user impersonation | Rejected (`400 header_not_allowed`) | Supported via `Appstrate-User` |
-| Rate limiting key | `userId` | `apikey:{apiKeyId}` |
+|                            | Browser session                          | API key                          |
+| -------------------------- | ---------------------------------------- | -------------------------------- |
+| Authentication             | Email and password, social login, cookie | `Authorization: Bearer apst_...` |
+| Organization               | `X-Org-Id` header                        | Pinned by the key                |
+| Space                      | `X-Space-Id` header                      | Pinned by the key                |
+| End-user impersonation     | Refused (`400 header_not_allowed`)       | `Appstrate-User`                 |
+| Role preview (`X-View-As`) | Owners and admins                        | Not supported                    |
 
-## End-User Impersonation
-
-API keys can execute actions on behalf of an end-user via the `Appstrate-User` header:
+## Revoking a key
 
 ```bash
-curl -X POST http://localhost:3000/api/agents/@scope/agent-name/run \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -H "Appstrate-User: eu_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"input": {"query": "My latest emails"}}'
+curl -X DELETE https://your-instance/api/api-keys/<id> \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..."
 ```
 
-Rules:
+`<id>` is the key's `id` from the creation response or the list, not the secret. It needs `api-keys:revoke` in the key's space, and takes effect immediately. A revoked or expired key answers `401`.
 
-- API key auth only. Cookie sessions return `400` with code `header_not_allowed`.
-- Unknown or foreign end-user returns `403` with code `invalid_end_user`.
-- Every impersonation is written to the log pipeline as a structured JSON line with 9 fields: `requestId`, `apiKeyId`, `authenticatedMember` (the member who owns the API key), `endUserId`, `applicationId`, `method`, `path`, `ip`, `userAgent`.
+## Good practice
 
-See [End-Users](/docs/features/end-users) for the full impersonation surface.
-
-## Revoking a Key
-
-```bash
-curl -X DELETE http://localhost:3000/api/api-keys/{uuid} \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
-
-The `:id` path param is the **database UUID** of the key record (returned as `id` in the creation response and listed by `GET /api/api-keys`), not the `ask_...` secret. Permission: `api-keys:revoke`. Revocation is immediate — all subsequent requests with that key are rejected.
-
-## Scopes
-
-List the scopes your role is allowed to grant:
-
-```bash
-curl http://localhost:3000/api/api-keys/available-scopes \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
-
-The endpoint returns `{ scopes: string[] }` — the intersection of `API_KEY_ALLOWED_SCOPES` and the caller's role permissions. Permission required: `api-keys:read`.
-
-## Permissions summary
-
-- `api-keys:read` — owner, admin (list + available-scopes)
-- `api-keys:create` — owner, admin
-- `api-keys:revoke` — owner, admin
-
-Members and viewers do not have any `api-keys:*` permission.
-
-## Storage notes
-
-- The secret is hashed with SHA-256 before storage. Only `keyHash` and `keyPrefix` (first 8 chars, for display) are persisted.
-- `lastUsedAt` is updated fire-and-forget on every successful request (no `await`, errors logged at warn level, no blocking impact on the hot path).
-- Key validation uses a plain SQL equality check on the hash, not a constant-time comparison — this is considered acceptable because the stored value is already a SHA-256 digest rather than the plaintext secret.
+- One key per integration or environment, with the narrowest scopes that work and an expiry.
+- Store keys in a secret manager. Never ship one to a browser or a mobile app. For an app used by your customers, keep the key on your backend and act for each customer with `Appstrate-User`.
+- Remember that a key follows its creator. If the person who minted a production key leaves the organization, the key is revoked, so mint production keys from an account that will stay.
+- Scopes such as `credential-proxy:call` (use the space's credentials from a remote runner) and `llm-proxy:call` (use the organization's models) are powerful. Add them deliberately.
+- Creating and revoking a key are written to the platform's audit trail, an append-only `audit_events` table. It is not exposed through the API today.

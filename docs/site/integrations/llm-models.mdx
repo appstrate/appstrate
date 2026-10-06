@@ -1,120 +1,111 @@
 ---
 title: LLM Models
-description: Configure the AI models used by your agents.
+description: Connect model providers with an API key or a subscription, choose the models your agents run on, and understand system models and aliases.
 ---
 
-## Overview
+Every agent needs a model. Models are not integrations: they are configured separately, through **model providers**. This page covers how a provider is connected, how a model is created from it, and which model an agent ends up using.
 
-Every agent needs an LLM model to function. Appstrate ships native adapters for: OpenAI, Anthropic, Google (Generative AI and Vertex), Mistral, Azure OpenAI, and AWS Bedrock. Any OpenAI-compatible endpoint also works (used by Groq, Cerebras, xAI, OpenRouter, and custom gateways).
+## The three layers
 
-Models are defined at the organization level and can be overridden per agent or per application.
+| Layer              | What it is                                                                                                    | API                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Model provider** | A vendor entry contributed by a module: wire format, default endpoint, how to authenticate. Read-only.        | `GET /api/model-provider-credentials/registry` |
+| **Credential**     | Your API key (or subscription login) for one provider, stored encrypted.                                      | `/api/model-provider-credentials`              |
+| **Model**          | A named model bound to one credential, with optional overrides (context window, max tokens, reasoning, cost). | `/api/models`                                  |
 
-## Adding a Model
+## Providers
 
-A model points at a stored **provider key** (its API key). You first create the provider key, then create models that reference it by id.
+The providers available on your instance depend on the `MODULES` setting (see [Environment Variables](/docs/self-hosting/environment-variables)). The registry endpoint always returns the exact list.
 
-```bash
-# Step 1: create the provider key (stores the API key encrypted)
-curl -X POST http://localhost:3000/api/provider-keys \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "label": "OpenAI prod",
-    "api": "openai-responses",
-    "baseUrl": "https://api.openai.com/v1",
-    "apiKey": "sk-..."
-  }'
-# → { "id": "<providerKeyId>" }
+### API key providers (`core-providers`, loaded by default)
 
-# Step 2: create the model referencing that key
-curl -X POST http://localhost:3000/api/models \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "label": "GPT-4o",
-    "api": "openai-responses",
-    "baseUrl": "https://api.openai.com/v1",
-    "modelId": "gpt-4o",
-    "providerKeyId": "<providerKeyId>"
-  }'
-```
+| Provider                                                                                        | Wire format             |
+| ----------------------------------------------------------------------------------------------- | ----------------------- |
+| Anthropic                                                                                       | `anthropic-messages`    |
+| OpenAI, xAI                                                                                     | `openai-responses`      |
+| Mistral                                                                                         | `mistral-conversations` |
+| Cerebras, DeepSeek, Fireworks AI, Groq, Moonshot AI, OpenRouter, Together AI, Z.ai, OpenCode Go | `openai-completions`    |
+| OpenAI-compatible (custom endpoint)                                                             | `openai-completions`    |
+| Anthropic-compatible (custom endpoint)                                                          | `anthropic-messages`    |
 
-The `api` field selects the wire protocol. Supported values: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `google-vertex`, `azure-openai-responses`, `bedrock-converse-stream`, `mistral-conversations`.
+The two **custom endpoint** providers are the escape hatch: give them a `base_url_override` to reach a self-hosted or third-party server (Ollama, vLLM, LiteLLM and similar). The API-key providers all use one of the four wire formats the platform's LLM proxy serves, so inference reaches the vendor through the same sidecar path whichever one you pick.
 
-## Provider Keys
+Earlier versions of this page listed Google, Vertex, Azure OpenAI and AWS Bedrock as native providers. They are not in the current catalogue. Reach such a model through a gateway that exposes an OpenAI or Anthropic compatible API, using a custom endpoint provider.
 
-**Provider keys** are API keys for LLM providers, managed at the organization level. They can be shared across multiple models.
+### Subscription providers (opt-in modules)
 
-System administrators can also configure **system provider keys** via the `SYSTEM_PROVIDER_KEYS` environment variable (JSON array).
+Two modules let an organization run agents on a personal subscription instead of an API key. Neither is in the `MODULES` default: an operator adds them deliberately.
 
-```bash
-# List provider keys
-curl http://localhost:3000/api/provider-keys \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>"
+| Provider      | Module                          | Subscription                  |
+| ------------- | ------------------------------- | ----------------------------- |
+| `claude-code` | `@appstrate/module-claude-code` | Claude Pro, Max or Team       |
+| `codex`       | `@appstrate/module-codex`       | ChatGPT Plus, Pro or Business |
 
-# Test a provider key (replace <providerKeyId> with the uuid returned at creation)
-curl -X POST http://localhost:3000/api/provider-keys/<providerKeyId>/test \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>"
-```
+These use OAuth, not a pasted key, and the login runs on the user's own machine: the dashboard mints a short-lived pairing token (valid for five minutes) and shows an `npx @appstrate/connect-helper <token>` command. The helper runs the browser login against the provider and sends the resulting credentials back to Appstrate. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`).
 
-## Default Model
+Using a personal subscription to power a product is a policy question that belongs to the operator. Vendor terms have changed several times, and Anthropic documents that third-party products offering claude.ai login need prior approval. For production and team automation, use an API key. The code-level guarantees and what is deliberately not claimed are in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
 
-A model can be set as the organization's default. The route takes no id in the URL; send the model id in the body (or `null` to clear):
+## Adding a provider and a model
+
+Create the credential first, then the model that points at it.
 
 ```bash
-curl -X PUT http://localhost:3000/api/models/default \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>" \
-  -H "Content-Type: application/json" \
-  -d '{"modelId": "<modelId>"}'
+# 1. Store the API key (encrypted at rest)
+appstrate api POST /api/model-provider-credentials -d '{
+  "providerId": "openai",
+  "api_key": "sk-..."
+}'
+# -> { "id": "<credentialId>", ... }
+
+# 2. Create a model bound to it
+appstrate api POST /api/models -d '{
+  "modelId": "<id from the provider offer>",
+  "credentialId": "<credentialId>"
+}'
 ```
 
-## Per-Agent Override
+- `label` is optional on both calls. The platform derives one and avoids duplicates.
+- For a custom endpoint provider, add `"base_url_override": "https://llm.internal.example.com/v1"` to the credential.
+- A named provider only accepts model ids from its own offer (`model_not_offered` otherwise). Gateways (OpenAI-compatible, Anthropic-compatible) and OpenRouter accept any id.
+- `POST /api/model-provider-credentials/test` and `POST /api/model-provider-credentials/{id}/test` check a key before or after saving. `POST /api/models/{id}/test` checks one model.
+- `POST /api/model-provider-credentials/discover` lists the models an endpoint serves.
+- `POST /api/models/seed` creates several models from the provider's offer for one credential in a single call.
+- For OpenRouter, `GET /api/models/openrouter?q=claude` searches its catalogue.
+- Per-model overrides (`contextWindow`, `maxTokens`, `reasoning`, `input`, `cost`) are optional. Left out, they come from the model catalogue and follow catalogue updates.
 
-Each agent can use a different model from the default:
+For a subscription provider, start from the dashboard so the pairing token and command are generated for you.
+
+The dashboard also seeds a provider's featured models the first time you connect it.
+
+## System models and organization models
+
+An operator can offer models to every organization with the `SYSTEM_PROVIDER_KEYS` environment variable: a JSON array of provider credentials, each with the models it exposes. System models appear in `GET /api/models` next to the organization's own. You cannot bind your own models to a system credential: to add models for your organization, create your own credential.
+
+### Model aliases
+
+An operator can expose a system model under a vanity name (for example `appstrate-medium`) while the real model and endpoint stay on the server. Set `"aliased": true` and an explicit `"label"` on the entry. API callers see the alias, not the backing. This hides what the platform hands out, not what the model reveals about itself when asked. Subscription providers cannot back an alias. The pattern and its limits are described in [`MODEL_ALIASES.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_ALIASES.md).
+
+## Which model does a run use
+
+The first match wins:
+
+1. The model named on the run request (`modelId`), or on a schedule.
+2. The model set on the agent.
+3. The organization default.
+4. The system default (the system model flagged as default).
+
+If none is configured, the run cannot start.
 
 ```bash
-curl -X PUT http://localhost:3000/api/agents/@scope/agent-name/model \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: <applicationId>" \
-  -H "Content-Type: application/json" \
-  -d '{"modelId": "<modelId>"}'
+# Organization default (send null to clear)
+appstrate api PUT /api/models/default -d '{"modelId": "<modelId>"}'
+
+# Per-agent model
+appstrate api PATCH /api/agents/@acme/triage/model -d '{"modelId": "<modelId>"}'
 ```
 
-## Per-Application Override
+`GET /api/agents/{scope}/{name}/model` returns the current setting. Changing an agent's model needs the `agents:configure` permission. The `modelId` in these calls is the Appstrate model id, not the vendor's.
 
-Applications can also override the model for an installed package via the `application_packages` configuration.
+## Cost tracking
 
-## OpenRouter
-
-Appstrate supports [OpenRouter](https://openrouter.ai/) as a provider. OpenRouter models automatically fetch cost information from the pricing API.
-
-```bash
-# Search OpenRouter models (note: no /search segment)
-curl "http://localhost:3000/api/models/openrouter?q=claude" \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>"
-```
-
-## Cost Tracking
-
-If a model has cost configuration, Appstrate calculates the dollar cost for each run from token usage. The cost chain:
-
-1. Cost config in the model (`ModelDefinition.cost`)
-2. Injected into the agent container via `MODEL_COST`
-3. Pi SDK calculates cost per message
-4. Accumulated and persisted in `runs.cost`
-
-## Testing a Model
-
-Verify a model works before using it:
-
-```bash
-curl -X POST http://localhost:3000/api/models/<modelId>/test \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-Org-Id: <orgId>"
-```
+Appstrate records token usage for every inference call in a ledger and prices it from the model's rate card: the model catalogue, OpenRouter's price list for OpenRouter models, or the `cost` you set on the model. A run's cost is the sum of its ledger rows. The mechanics are in [`RUN_COST.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md). Usage on a subscription provider goes through the same ledger.

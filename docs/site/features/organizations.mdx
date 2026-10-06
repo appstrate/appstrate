@@ -1,131 +1,114 @@
 ---
 title: Organizations
-description: Manage organizations, members, and roles in Appstrate.
+description: Create and manage organizations, invite members, assign roles and set organization-wide options.
 ---
 
-## Overview
+An **organization** is the top-level tenant: the membership, billing and administration boundary. It owns the infrastructure shared by everything inside it (models and provider credentials, proxies, the package catalog, custom roles) and contains one or more [spaces](/docs/features/spaces), where the work happens.
 
-Appstrate is **multi-tenant**. Each organization is an isolated space with its own members, packages, models, proxies, and applications.
+Organization ids are bare UUIDs, with no prefix. Each organization also has a unique slug, which becomes the default scope of the packages it authors (`@<slug>/<name>`).
 
-The first signup on an instance automatically creates an organization.
+## Creating an organization
 
-Organization IDs are **bare UUIDs** (no prefix). Examples below use `a1b2c3d4-...` as placeholder; replace with the real UUID returned by the API or visible in the dashboard URL.
+After signing up, the onboarding flow guides you through creating your first organization. Creating one needs your own user credential (not an API key or an OAuth client):
 
-## Via the UI
+```bash
+curl -X POST https://your-instance/api/orgs \
+  -H "Cookie: ..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Acme Corp" }'
+```
 
-Open the dashboard and click the settings icon in the sidebar → **Members** (`/org-settings/members`, admin-only). From there you can:
+`name` is required. `slug` is optional (kebab-case) and derived from the name when omitted. A slug that is taken answers `400 slug_taken`. You become the `owner`.
 
-- Invite new members by email (owner/admin only)
-- Change a member's role (owner only)
-- Remove a member (admin+)
-- Manage pending invitations (revoke, resend)
+A new organization gets a **default space** and a starter agent activated in it. It is also pinned to the current API version.
 
-The REST API below gives the programmatic equivalent.
+An operator can close organization creation on an instance, so that only platform admins can create organizations and everyone else waits for an invitation (`403 org_creation_disabled`). See [Environment Variables](/docs/self-hosting/environment-variables).
 
 ## Roles
 
-| Role | Permissions |
-|------|------------|
-| `owner` | Everything, including org deletion and promoting another member to `owner` (no dedicated transfer endpoint — do it by updating the target member's role) |
-| `admin` | Member management, applications, models, proxies, provider keys; cannot delete the org or change roles |
-| `member` | Day-to-day use: agents, runs, connections, end-users read/write |
-| `viewer` | Read-only across the org |
+| Role     | Can do                                                                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `owner`  | Everything, including renaming and deleting the organization and managing other owners.                                                          |
+| `admin`  | Everything except renaming and deleting the organization. Manages members, spaces, models, proxies, credentials and roles. Admin in every space. |
+| `member` | Day-to-day use. Sees the open spaces, and the spaces they were added to.                                                                         |
+| `guest`  | A restricted identity with no implicit access to any space. Sees only the spaces they were added to.                                             |
 
-## Creating an Organization
+An organization can have several owners and always keeps at least one. What each role can do in detail, and how space roles combine with it, is in [Roles and permissions](/docs/features/roles-and-permissions).
 
-Session auth only. API keys cannot create organizations.
+Who may change whose role:
 
-```bash
-curl -X POST http://localhost:3000/api/orgs \
-  -H "Cookie: session=..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Acme Corp"
-  }'
-```
+- Nobody changes their own role.
+- An owner manages every other member, owners included, and is the only one who can assign `owner`.
+- An admin manages members and guests and can assign `guest`, `member` or `admin`.
+- Granting `owner`, changing or removing an owner, and leaving the organization require the **dashboard session**. API keys, OAuth clients, MCP clients and CLI tokens are refused, even when their user is an owner.
 
-`name` is required. `slug` is optional and auto-derived from `name` if omitted (kebab-case).
+There is no ownership-transfer endpoint. To transfer, promote the new owner, then demote yourself or leave.
 
-## Inviting Members
+## Inviting members
+
+All invitations are explicit: the person receives a link, signs in or signs up, and accepts.
 
 ```bash
-curl -X POST http://localhost:3000/api/orgs/a1b2c3d4-.../members \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..." \
+curl -X POST https://your-instance/api/orgs/<org id>/members \
+  -H "Cookie: ..." \
   -H "Content-Type: application/json" \
   -d '{
     "email": "alice@acme.com",
-    "role": "member"
+    "role": "member",
+    "space_assignments": [{ "spaceId": "spc_...", "preset_role": "operator" }]
   }'
 ```
 
-If the user already has an Appstrate account, they are added directly. Otherwise an invitation email is sent (requires SMTP configuration). Assignable roles are `viewer`, `member`, `admin` — promoting someone to `owner` uses the change-role endpoint instead.
+- `role` is `guest`, `member` or `admin` (default `member`). `owner` is reached by changing the role of an existing member.
+- `space_assignments` (optional) lists the spaces the person joins, with a preset or custom role each. They are applied when the invitation is accepted.
+- When SMTP is configured, an email is sent. Otherwise the response carries a token to share yourself, and the invite page is `/invite/<token>`.
+- A second invitation for the same email answers `409` with the `invitation_id` to edit instead.
+- `PATCH /api/orgs/{orgId}/invitations/{invitationId}` changes the role or the assignments of a pending invitation, `DELETE` cancels it.
 
-## Managing Members
-
-```bash
-# Change role (owner only)
-curl -X PUT http://localhost:3000/api/orgs/a1b2c3d4-.../members/user_xxx \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..." \
-  -H "Content-Type: application/json" \
-  -d '{"role": "admin"}'
-
-# Remove a member (admin+)
-curl -X DELETE http://localhost:3000/api/orgs/a1b2c3d4-.../members/user_xxx \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..."
-```
-
-There is no dedicated `GET /api/orgs/:id/members` endpoint — the member list is returned inside the org detail response (`GET /api/orgs/:orgId`), alongside pending invitations.
-
-## Organization Settings
+## Managing members
 
 ```bash
-# View settings
-curl http://localhost:3000/api/orgs/a1b2c3d4-.../settings \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..."
+# Change a role (owner or admin, within the rules above)
+curl -X PUT https://your-instance/api/orgs/<org id>/members/<user id> \
+  -H "Cookie: ..." -H "Content-Type: application/json" \
+  -d '{ "role": "admin" }'
 
-# Update (any subset of supported keys)
-curl -X PUT http://localhost:3000/api/orgs/a1b2c3d4-.../settings \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..." \
-  -H "Content-Type: application/json" \
-  -d '{"apiVersion": "2026-03-21", "dashboardSsoEnabled": false}'
+# Remove a member
+curl -X DELETE https://your-instance/api/orgs/<org id>/members/<user id> -H "Cookie: ..."
+
+# Leave (dashboard session only)
+curl -X POST https://your-instance/api/orgs/<org id>/leave -H "Cookie: ..."
 ```
 
-Settings are stored in the `organizations.settings` JSONB column. Current supported keys: `apiVersion` (pins the org to a specific API version), `dashboardSsoEnabled` (toggles dashboard SSO when the `oidc` module is loaded).
+`GET /api/orgs/{orgId}` returns the organization with its members and pending invitations. There is no separate member list endpoint.
 
-## Deleting an Organization
+A member who leaves or is removed loses their explicit space roles and notifications in the organization, their schedules there are disabled, their API keys there are revoked, and their personal space enters a 30-day offboarding window. The last owner cannot leave (`409 last_owner`): promote someone else first or delete the organization. A JWT access token is not revocable and stays valid until it expires, but every request is checked against live membership.
 
-Owner-only. Cascades to every application, package, run, webhook, etc.
+In the web app, **Settings > Members** manages members and invitations, and **Settings > Roles** manages custom roles.
 
-```bash
-curl -X DELETE http://localhost:3000/api/orgs/a1b2c3d4-... \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..."
-```
+## Organization settings
 
-## X-Org-Id Header
+`GET /api/orgs/{orgId}/settings` is readable by any member. `PATCH /api/orgs/{orgId}/settings` needs `org:settings` (owner or admin) and merges the keys you send:
 
-With cookie authentication (dashboard), the `X-Org-Id` header indicates the active organization:
+| Key                     | Effect                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                     |
+| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the SSO tab. Default `false`. Requires the `oidc` module.                                                               |
+| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/docs/features/packages). Skills are exempt. |
 
-```bash
-curl http://localhost:3000/api/agents \
-  -H "Cookie: session=..." \
-  -H "X-Org-Id: a1b2c3d4-..." \
-  -H "X-App-Id: app_xxx"
-```
+## Deleting an organization
 
-With an API key, the organization is implicit (pinned on the key at creation).
+`DELETE /api/orgs/{orgId}` is owner-only and deletes the organization with its spaces, packages, runs, files, webhooks and keys. While a deletion is reserved, new runs and chat turns are refused with `409 org_deleting`.
 
-## Organization Resources
+## Selecting an organization
 
-The following resources are shared at the organization level (not application-scoped):
+A browser session names the active organization with the `X-Org-Id` header. An API key is bound to one organization and does not need it, and a mismatching header is a `403`. `GET /api/orgs` lists the organizations of the caller.
 
-- **LLM Models** — AI provider configuration (`org_models`)
-- **Proxies** — outbound HTTP proxies (`org_proxies`)
-- **Provider keys** — API keys for LLM providers (`org_system_provider_keys`)
-- **Packages catalog** — the agents, skills, tools, and providers available in this org (`packages`). Installed instances with per-app config live in `application_packages`.
-- **Organization-level connection profiles** — shared credentials reusable across applications
+Each organization is also reachable as its own [MCP server](/docs/using-appstrate/mcp-clients) endpoint.
+
+## What belongs to the organization
+
+- **Models and provider credentials**, **proxies** and the **default** of each. See [LLM Models](/docs/integrations/llm-models) and [Proxies](/docs/features/proxies).
+- The **package catalog**: agents, skills, integrations and MCP servers are owned by the organization and placed in spaces. See [Library and sharing](/docs/features/library).
+- **Custom roles** and the OAuth clients registered at the organization level.
+- **Organization-wide integration OAuth clients**, inherited by every space.

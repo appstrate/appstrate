@@ -5,39 +5,49 @@ description: Connect Firecrawl to your Appstrate agents.
 
 ## Overview
 
-Firecrawl is a web scraping and crawling service, allowing your agents to extract structured content from web pages.
+Firecrawl is a web scraping and crawling service. The integration lets agents extract content from web pages with a key you provide.
 
-## Authentication Mode
+Integration: `@appstrate/firecrawl` (version 1.0.3), reached through the `api_call` tool. For how this works, see [How integrations work](/docs/integrations/how-integrations-work).
 
-| Property | Value |
-|----------|-------|
-| Type | `api_key` |
-| Header | `Authorization: Bearer <token>` |
-| Scopes | N/A |
+## Authentication
+
+| Property           | Value                                |
+| ------------------ | ------------------------------------ |
+| Type               | `api_key`                            |
+| Credential sent as | `Authorization: Bearer <credential>` |
 
 ## Authorized URIs
 
-The agent can access the following endpoints through the sidecar proxy:
+The sidecar sends the credential only to URLs that match one of these patterns:
 
-- `https://api.firecrawl.dev/*`
+- `https://api.firecrawl.dev/**`
 
 ## Connect Firecrawl
 
-1. [Create a Firecrawl account](https://www.firecrawl.dev/signup)
-2. [Retrieve your API key](https://www.firecrawl.dev/app/api-keys) from the dashboard (the key starts with `fc-`)
-3. On Appstrate, go to the Firecrawl provider settings and enter the API key
+Create an API key in your Firecrawl account (keys start with `fc-`) and paste it into the hosted connect form.
 
-## Usage in an Agent
+## Use it in an agent
 
-Once connected, the agent can call Firecrawl APIs through the sidecar proxy. Example prompt:
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/firecrawl": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/firecrawl": {
+      "tools": ["api_call"]
+    }
+  }
+}
+```
+
+Example prompt:
 
 ```
-Every week, crawl the blog pages of the 5 competitors listed in the "Monitoring" Google Sheet.
-Extract the new articles published this week and write a comparative summary.
-Post the summary to the #competitive-intel Slack channel.
+Every week, crawl the blog of each competitor in the "Monitoring" sheet, extract the new articles and write a comparative summary.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

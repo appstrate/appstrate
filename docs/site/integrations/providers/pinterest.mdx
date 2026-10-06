@@ -5,54 +5,88 @@ description: Connect Pinterest to your Appstrate agents.
 
 ## Overview
 
-Pinterest is a visual social network, allowing your agents to manage pins, boards, and visual content.
+Pinterest is a visual discovery platform. The integration lets agents read account data and, with the matching scopes, manage boards and pins.
 
-## Authentication Mode
+Integration: `@appstrate/pinterest` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/docs/integrations/how-integrations-work).
 
-| Property | Value |
-|----------|-------|
-| Type | `oauth2` |
-| Header | `Authorization: Bearer <token>` |
-| Default scopes | `user_accounts:read` |
+## Authentication
 
-### Available Scopes
+| Property            | Value                                |
+| ------------------- | ------------------------------------ |
+| Type                | `oauth2`                             |
+| Credential sent as  | `Authorization: Bearer <credential>` |
+| Default scopes      | `user_accounts:read`                 |
+| Token endpoint auth | `client_secret_basic`                |
 
-| Scope | Description |
-|-------|-------------|
-| `boards:read` | Read boards |
-| `boards:write` | Create and edit boards |
-| `pins:read` | Read pins |
-| `pins:write` | Create and edit pins |
-| `user_accounts:read` | Read user profile |
-| `ads:read` | Read ads data |
-| `ads:write` | Manage ads campaigns |
-| `catalogs:read` | Read product catalogs |
-| `catalogs:write` | Manage product catalogs |
+### Scopes
+
+The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
+
+| Scope                | Description             | Default |
+| -------------------- | ----------------------- | ------- |
+| `boards:read`        | Read boards             |         |
+| `boards:write`       | Create & edit boards    |         |
+| `pins:read`          | Read pins               |         |
+| `pins:write`         | Create & edit pins      |         |
+| `user_accounts:read` | Read user profile       | yes     |
+| `ads:read`           | Read ads data           |         |
+| `ads:write`          | Manage ads campaigns    |         |
+| `catalogs:read`      | Read product catalogs   |         |
+| `catalogs:write`     | Manage product catalogs |         |
 
 ## Authorized URIs
 
-The agent can access the following endpoints through the sidecar proxy:
+The sidecar sends the credential only to URLs that match one of these patterns:
 
-- `https://api.pinterest.com/*`
+- `https://api.pinterest.com/**`
 
 ## Connect Pinterest
 
-1. [Create a Pinterest application](https://developers.pinterest.com/apps/) on the developer portal
-2. Configure the OAuth settings and add the Appstrate redirect URI
-3. Copy the App ID and App Secret
-4. Enter these credentials in the Pinterest provider settings on Appstrate
+An administrator registers an OAuth client once, then members connect their own accounts.
 
-## Usage in an Agent
+<Steps>
+<Step>
 
-Once connected, the agent can call Pinterest APIs through the sidecar proxy. Example prompt:
+Create an app in the Pinterest developer portal ([open](https://developers.pinterest.com/apps/)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the app's redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/pinterest": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/pinterest": {
+      "tools": ["api_call"],
+      "scopes": ["boards:write", "pins:write"]
+    }
+  }
+}
+```
+
+`api_call` has no per-tool scopes, so scopes beyond the defaults are listed explicitly (here `boards:write`, `pins:write`).
+
+Example prompt:
 
 ```
-For each new product added to the "Catalog" Google Sheet,
-create a Pinterest pin with the product image, title, and link
-to the product page. Add it to the "New Arrivals" board.
+Create a board named "Spring collection" and add the ten pins from the attached list.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

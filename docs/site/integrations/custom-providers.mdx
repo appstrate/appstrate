@@ -1,248 +1,203 @@
 ---
-title: Custom Providers
-description: Ship your own provider as an AFPS package or create it via the REST API when the service you need isn't in the 60 built-in providers.
+title: Custom Integrations
+description: Write your own integration as an AFPS package when the service you need is not one of the built-in integrations.
 ---
 
-When the service you need isn't in the [built-in providers](/docs/integrations/providers), author your own. Custom providers use the exact same format, sidecar protocol, and connection flow as built-in ones: manifest shape, `@scope/name` addressing, credential injection, authorized URIs, everything. Nothing is second-class.
+When the service you need is not in the [built-in catalogue](/docs/integrations/providers), write your own. A custom integration uses the same manifest format, the same runtime and the same connection flow as the built-in ones. The built-in manifests are the best reference: every `.afps` in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages) is a zip with a `manifest.json` at its root, and their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages).
 
-Two creation paths, pick based on how you want to ship it:
+This page is a summary. The complete guide, with every strategy and field, is [Writing an integration with connect](https://github.com/appstrate/appstrate/blob/main/docs/guides/writing-an-integration-with-connect.md), and the wire format is the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md). Read [How integrations work](/docs/integrations/how-integrations-work) first if sources, auths and connections are new to you.
 
-| Path | When to pick it | Version history | Portable file |
-|---|---|---|---|
-| [`POST /api/providers`](#path-1-rest-api-flat-payload) | One-off, internal service, scaffolded by a coding agent | Auto-snapshots to `1.0.0` (or the `version` you pass); subsequent `PUT` mutates the draft | No, lives only in this org's DB |
-| [AFPS package import](#path-2-afps-package-import) | Portable, semver, multi-env, publishable | Full semver + SHA256 integrity, bumps create new version rows | Yes, `.afps` ZIP you can ship between instances |
+## Pick a source
 
-## Path 1: REST API (flat payload)
+| You have                                                    | Use                                   | What you write                                                       |
+| ----------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| A REST API                                                  | `source.kind: "none"` plus `api_call` | One `manifest.json`                                                  |
+| A vendor-hosted MCP server                                  | `source.kind: "remote"`               | One `manifest.json` with the endpoint URL                            |
+| Code that must run next to the credential (git, SSH, a CLI) | `source.kind: "local"`                | The integration manifest, plus an `mcp-server` package it references |
 
-The fastest path when you want to declare a provider from code without packaging it. Send a flat JSON body; the server builds the nested `definition` internally and stores a draft manifest. Good shape for UI forms and one-off internal providers.
+Most integrations are the first kind. They are also the simplest: no server to host or maintain.
 
-```bash
-appstrate api POST /api/providers \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "id": "@acme/my-api",
-    "displayName": "Acme Internal API",
-    "authMode": "api_key",
-    "credentialHeaderName": "Authorization",
-    "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.acme.com/*"]
-  }'
-```
+## A REST API with an API key
 
-Rules:
-
-- Permission required: `providers:write` (admin or owner).
-- `id` must start with `@` and the scope must match your org's scope.
-- You cannot shadow a built-in: posting `@appstrate/gmail` returns `403 system_entity_forbidden`.
-
-Full list of accepted fields per `authMode` (more than 20 optional fields across OAuth2 / OAuth1 / api_key / basic / custom): **[API reference for createProvider](/docs/api/providers/createProvider)** and related endpoints ([update](/docs/api/providers/updateProvider), [configureCredentials](/docs/api/providers/configureProviderCredentials), [delete](/docs/api/providers/deleteProvider)).
-
-## Path 2: AFPS package import
-
-The path built-in providers use themselves. Write a `manifest.json` with the proper nested shape, ZIP it, import via `POST /api/packages/import`. You get semver versions, SHA256 integrity, dist-tags, forkability, and a portable `.afps` file you can publish to any Appstrate instance.
-
-### The nested manifest shape
-
-This is the shape **actually stored in the database** (whether you arrived via Path 1 or Path 2). Unlike Path 1's flat payload, the AFPS manifest nests the auth-specific fields under `definition.oauth2`, `definition.oauth1`, `definition.credentials`. These examples are copied from the real `.afps` files shipped in `system-packages/`.
-
-**OAuth 2.0** (from the Slack system provider):
+This is the shape of the shipped Stripe integration, with your own scope:
 
 ```json
 {
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
-  "name": "@acme/slack-fork",
+  "name": "@acme/internal-api",
   "version": "1.0.0",
-  "type": "provider",
-  "schemaVersion": "1.0",
-  "displayName": "Slack (Acme fork)",
-  "description": "Team messaging",
-  "iconUrl": "slack",
-  "categories": ["messaging", "productivity"],
-  "docsUrl": "https://api.slack.com/docs",
-  "definition": {
-    "authMode": "oauth2",
-    "oauth2": {
-      "authorizationUrl": "https://slack.com/oauth/v2/authorize",
-      "tokenUrl": "https://slack.com/api/oauth.v2.access",
-      "defaultScopes": ["channels:read", "chat:write"],
-      "scopeSeparator": ",",
-      "pkceEnabled": false,
-      "tokenAuthMethod": "client_secret_post"
-    },
-    "credentialHeaderName": "Authorization",
-    "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://slack.com/api/*"],
-    "availableScopes": [
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Acme Internal API",
+  "description": "Internal data API",
+  "source": { "kind": "none" },
+  "default_tools": ["api_call"],
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://api.acme.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["api_key"],
+          "properties": {
+            "api_key": { "type": "string", "description": "Acme API key" }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/api": { "auths": { "primary": {} } }
+  }
+}
+```
+
+- `credentials.schema` is a JSON Schema that drives the hosted form the user fills in.
+- `delivery.http` says where the sidecar puts the credential. `{$credential.<field>}` is the only template expression the platform evaluates.
+- `_meta["dev.appstrate/api"]` opts the auth into the `api_call` tool. Without it the integration exposes no `api_call`.
+- `default_tools` is what an agent gets when it does not select tools itself.
+
+## OAuth 2.0
+
+Add the endpoints and the scope catalogue. The Slack integration, trimmed:
+
+```json
+"auths": {
+  "primary": {
+    "type": "oauth2",
+    "authorization_endpoint": "https://slack.com/oauth/v2/authorize",
+    "token_endpoint": "https://slack.com/api/oauth.v2.access",
+    "token_endpoint_auth_method": "client_secret_post",
+    "default_scopes": ["channels:read", "users:read"],
+    "scope_catalog": [
       { "value": "channels:read", "label": "View channels" },
       { "value": "chat:write", "label": "Send messages" }
-    ]
-  },
-  "setupGuide": {
-    "callbackUrlHint": "Set the redirect URL to: {{callbackUrl}}",
-    "steps": [
-      { "label": "Create a Slack app", "url": "https://api.slack.com/apps" },
-      { "label": "Configure OAuth & Permissions" },
-      { "label": "Copy your credentials" }
-    ]
-  }
-}
-```
-
-Key point: `authorizationUrl`, `tokenUrl`, `pkceEnabled`, etc. live under `definition.oauth2.*`, NOT flat on `definition`. Getting this wrong is the single most common error when authoring custom OAuth providers by hand.
-
-**API key** (from the Firecrawl system provider):
-
-```json
-{
-  "$schema": "https://afps.appstrate.dev/packages/schema/v1/provider.schema.json",
-  "name": "@acme/my-api",
-  "version": "1.0.0",
-  "type": "provider",
-  "schemaVersion": "1.0",
-  "displayName": "Acme Internal API",
-  "description": "Internal data API",
-  "iconUrl": "https://acme.com/icon.png",
-  "categories": ["internal"],
-  "docsUrl": "https://docs.acme.com",
-  "definition": {
-    "authMode": "api_key",
-    "credentials": {
-      "schema": {
-        "type": "object",
-        "properties": {
-          "api_key": {
-            "type": "string",
-            "description": "Acme API key (starts with acme_)"
-          }
-        },
-        "required": ["api_key"]
-      },
-      "fieldName": "api_key"
-    },
-    "credentialHeaderName": "Authorization",
-    "credentialHeaderPrefix": "Bearer",
-    "authorizedUris": ["https://api.acme.com/*"]
-  }
-}
-```
-
-The `definition.credentials.schema` is a JSON Schema that drives the connection form in the webapp. `definition.credentials.fieldName` tells the sidecar which property to pull out when substituting `{{variable}}` placeholders in outgoing headers.
-
-**OAuth 1.0a** (rare, Trello is the only built-in that uses it):
-
-```json
-{
-  "definition": {
-    "authMode": "oauth1",
-    "oauth1": {
-      "requestTokenUrl": "https://trello.com/1/OAuthGetRequestToken",
-      "accessTokenUrl": "https://trello.com/1/OAuthGetAccessToken",
-      "authorizationUrl": "https://trello.com/1/OAuthAuthorizeToken",
-      "authorizationParams": {
-        "name": "Your App Name",
-        "scope": "read,write",
-        "expiration": "never"
+    ],
+    "authorized_uris": ["https://slack.com/api/**"],
+    "delivery": {
+      "http": {
+        "in": "header",
+        "name": "Authorization",
+        "prefix": "Bearer ",
+        "value": "{$credential.access_token}"
       }
     },
-    "authorizedUris": ["https://api.trello.com/*"]
+    "_meta": { "dev.appstrate/oauth": { "scope_separator": "," } }
   }
 }
 ```
 
-Appstrate handles the HMAC-SHA1 signing and the `Authorization: OAuth ...` header automatically (no `credentialHeaderName` needed). `clientId` / `clientSecret` on the connection map to consumer key / consumer secret.
+Points that matter:
 
-**Custom (multi-field credentials)** for services that need more than a single key (site URL + user + app password, API key + account ID, etc.). This example mirrors the real `@appstrate/wordpress` manifest:
+- Discovery is optional. Set `issuer` to let the platform discover endpoints, or give them explicitly as above.
+- `scope_catalog` lists the scopes the provider offers. Entries can declare `implies` (a broad scope that satisfies narrower ones). Default scopes and tool scopes must belong to it.
+- `scope_separator` defaults to a space. Slack and Pinterest use a comma.
+- `identity_claims` maps the provider's user payload to an `account_id` (for example `"account_id": "$.email"`), which labels the connection and tells two accounts of the same service apart. Keys must be snake_case, and the platform refuses a manifest that uses another spelling. Without `account_id`, connections fall back to `Connexion 1`, `Connexion 2`.
+- `callback_url_hint` and `setup_guide` give the admin the steps shown when they register the OAuth app. Use the `{{callback_url}}` placeholder for the redirect URI.
+- An admin still has to register an OAuth client for it, as described in [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration). The `@acme` scope has no system client.
+
+## Several fields (custom auth)
+
+When a service needs more than one value, use `type: "custom"` with a schema of your own. The shipped WordPress integration asks for a site URL, a user and an application password, and builds a Basic header from two of them:
 
 ```json
-{
-  "definition": {
-    "authMode": "custom",
+"auths": {
+  "primary": {
+    "type": "custom",
     "credentials": {
       "schema": {
         "type": "object",
+        "required": ["site_url", "username", "application_password"],
         "properties": {
-          "site_url": { "type": "string", "description": "Your site URL (e.g. https://mysite.com)" },
+          "site_url": { "type": "string" },
           "username": { "type": "string" },
-          "application_password": { "type": "string", "description": "Generated in the target service" }
-        },
-        "required": ["site_url", "username", "application_password"]
+          "application_password": { "type": "string" }
+        }
       }
     },
-    "allowAllUris": true,
-    "authorizedUris": []
-  }
-}
-```
-
-When the target URL is tenant-specific (different domain per end-user), use `allowAllUris: true` with an empty `authorizedUris` list. `authorizedUris` patterns are matched as static strings; credential placeholders like `{{site_url}}` are substituted into the target URL, headers, and body at call time (via `substituteVars`), but NOT into the `authorizedUris` patterns themselves.
-
-### Pack and import
-
-```bash
-# From a directory containing manifest.json (at root, not nested)
-bash scripts/afps-pack.sh /path/to/provider-dir /tmp/my-provider.afps
-appstrate api POST /api/packages/import -F file=@/tmp/my-provider.afps
-```
-
-Manual alternative without the helper:
-
-```bash
-cd /path/to/provider-dir && zip -r /tmp/my-provider.afps manifest.json
-appstrate api POST /api/packages/import -F file=@/tmp/my-provider.afps
-```
-
-On `409 DRAFT_OVERWRITE`, bump the `version` (preferred) or add `-q force=true` to overwrite the draft.
-
-## Use the custom provider in an agent
-
-Identical to a built-in provider: declare it in the agent's manifest by scoped name.
-
-```json
-{
-  "dependencies": {
-    "providers": { "@acme/my-api": "^1.0.0" }
-  },
-  "providersConfiguration": {
-    "@acme/my-api": {
-      "scopes": ["read:items"],
-      "connectionMode": "user"
+    "authorized_uris": ["{$credential.site_url}/**"],
+    "delivery": {
+      "http": {
+        "in": "header",
+        "name": "Authorization",
+        "prefix": "Basic ",
+        "value": "{$credential.username}:{$credential.application_password}",
+        "encoding": "base64"
+      }
     }
   }
 }
 ```
 
-End-users connect through the same UI flow (OAuth redirect or credential form, depending on `authMode`). The sidecar proxy injects credentials using the same protocol, so `$SIDECAR_URL/proxy` with `X-Provider: @acme/my-api` + `X-Target: https://api.acme.com/...` works out of the box.
+The host depends on the connection, so `authorized_uris` references `{$credential.site_url}`. It is rendered per connection. The platform refuses an auth that injects a credential over HTTP while leaving the host to the caller (no `authorized_uris`, `allow_all_uris: true`, or a pattern such as `https://**`).
 
-## OAuth client credentials (client_id + client_secret)
+Custom auths can also acquire the credential themselves: a declarative `connect.login` (one HTTP request that exchanges a password for a session) or a `connect.tool` (a tool that logs in, run once at connect time or at the start of every run). Those are covered in the repository guide.
 
-For OAuth providers (built-in or custom), an admin must configure the OAuth app credentials on the application before end-users can connect. Navigate to **Settings → Application → Providers → Configure** in the webapp, or call `PUT /api/providers/credentials/@scope/name` with `{ credentials: { clientId, clientSecret } }`.
+## A hosted MCP server
 
-Full endpoint spec: **[configureProviderCredentials](/docs/api/providers/configureProviderCredentials)**.
+```json
+"source": {
+  "kind": "remote",
+  "remote": { "url": "https://mcp.example.com/mcp", "transport": "streamable-http" }
+}
+```
 
-Key point: `clientId` / `clientSecret` live **per-application**, not per-provider-definition. This is what lets you ship one shared custom-provider package and have each tenant bring their own OAuth app.
+Declare the tools you want agents to be able to pick in `tools_policy`, with the scopes each needs:
 
-## Scope this provider automatically with the skill
+```json
+"tools_policy": {
+  "list_issues": { "required_scopes": { "oauth": ["repo"] } },
+  "create_issue": { "required_scopes": { "oauth": ["repo"] } }
+}
+```
 
-If you run a coding agent with the [Appstrate skill](/docs/using-appstrate/skill) loaded, ask it to scaffold the manifest:
+`hidden_tools` removes tools from what agents can see. A remote OAuth auth declared as a public client (`token_endpoint_auth_method: "none"`) gets its client registered automatically at connect time through discovery and dynamic client registration, so the admin has no client to create. This is how Notion, ClickUp and Canva work.
 
-> Using the **Appstrate** skill, create a custom OAuth2 provider for Acme API. Auth URL `https://acme.com/oauth/authorize`, token URL `https://acme.com/oauth/token`, scopes `read:items` and `write:items`, authorized URIs `https://api.acme.com/*`.
+## A local MCP server
 
-The agent knows the nested shape (it reads `references/manifest-schema.md`), fills the correct fields, packs, imports, and runs a quick test.
+Set `source: { "kind": "local", "server": { "name": "@acme/my-mcp", "version": "^1.0.0" } }` and publish an `mcp-server` package with that name. Its manifest names the runtime (`server.type`: `node`, `python`, `binary` or `uv`) and the entry point, and the platform starts it in a runner container with the credential delivered by `env` or `files`. The shipped `@appstrate/ssh` and `@appstrate/github-git` integrations, and their `-mcp` server packages, are working examples. Local integrations need the `docker` or `firecracker` run adapter.
 
-## Troubleshooting
+## Tools and scopes in agents
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `422` on import: `definition.oauth2.authorizationUrl is required` | OAuth2 fields flat on `definition` instead of nested under `definition.oauth2` | Move them under `definition.oauth2.*`. See the Slack example above. |
-| `401` at connection time on an OAuth provider | No OAuth `client_id` / `client_secret` configured on the application | Configure them via the webapp or `POST /api/providers/:id/credentials`. |
-| Sidecar returns `403 {"error": "URL not authorized for provider..."}` | Outgoing URL doesn't match any pattern in `authorizedUris` | Add the pattern (static string with `*` wildcard), or set `allowAllUris: true` + `authorizedUris: []` if the target URL is tenant-specific (the WordPress / WooCommerce pattern). |
-| `403 system_entity_forbidden` on `POST /api/providers` | Trying to create a provider under `@appstrate/*` | System scope is reserved. Use your own org scope (`@acme/*`, `@my-company/*`). |
-| Connection form shows blank / no fields | `authMode` is `api_key` / `basic` / `custom` but `credentials.schema` is missing or empty | Add a valid JSON Schema under `definition.credentials.schema`. |
-| Headers work in curl but not from the agent | Missing `{{variable}}` placeholder in the header template | The sidecar does NOT auto-inject: you must write `Authorization: Bearer {{api_key}}` explicitly in the provider's `credentialHeaderPrefix` + header name, OR use the `credentialSchema.fieldName` to tell the sidecar which field to pick. |
+Agents pick tools from `tools_policy` (remote and local sources) or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/docs/integrations/how-integrations-work#scopes).
 
-## Reference
+## Pack, import, publish
 
-- [Built-in Providers](/docs/integrations/providers): the 60 that ship with Appstrate.
-- [AFPS provider schema](https://afps.appstrate.dev/packages/schema/v1/provider.schema.json): the authoritative JSON Schema for validation.
-- [OpenAPI for providers](/docs/api/providers/createProvider): REST endpoints (create, update, configure credentials, delete).
-- Inspect a real `.afps` as reference: every system provider under `system-packages/provider-<name>-*.afps` in the Appstrate monorepo is a valid AFPS package with a correct manifest.
+Put `manifest.json` at the root of a zip (not inside a folder), then import it:
+
+```bash
+cd my-integration && zip -r ../my-integration.afps manifest.json
+appstrate api POST /api/packages/import -F file=@../my-integration.afps
+```
+
+The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` is evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
+
+You can also edit a package as a local folder with `appstrate packages pull`, `status`, `push` and `publish`, which writes to the package's draft and publishes a version as a separate step. Name your package under your organization's scope (`@appstrate` is the scope of the system packages). Forking a system integration (`POST /api/packages/@appstrate/{name}/fork`) gives you an editable copy under your scope.
+
+Activate the integration in a space, register an OAuth client if it needs one, then reference it from an agent as any other integration:
+
+```json
+{
+  "dependencies": { "integrations": { "@acme/internal-api": "^1.0.0" } },
+  "integrations_configuration": { "@acme/internal-api": { "tools": ["api_call"] } }
+}
+```
+
+## Common problems
+
+| Symptom                                                                                                 | Cause                                                                                                                     | Fix                                                                                    |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Import refused with a field error naming `identity_claims`, a `{$...}` expression, or `authorized_uris` | The manifest uses something the platform cannot evaluate or cannot bound                                                  | Fix the field the error names. Only `{$credential.<field>}` is a valid template.       |
+| Saving or publishing an agent fails with `no_tools_selected` on `integrations_configuration.{id}.tools` | The integration exposes no callable tool for that selection                                                               | Select a tool, give the integration `default_tools`, or remove the dependency          |
+| Connecting answers 403 "Administrator must register OAuth client credentials"                           | An OAuth integration with no client at any tier                                                                           | Register a client, or have the operator add a system client in `SYSTEM_INTEGRATIONS`   |
+| Connection form is empty                                                                                | `credentials.schema` is missing or has no properties                                                                      | Add a JSON Schema with the fields the user must enter                                  |
+| `api_call` returns `status: 0`                                                                          | The call was stopped before reaching the service: URL outside `authorized_uris`, credential unavailable or body too large | Check the target against the patterns, including those rendered from connection fields |
+| The run fails with `409 missing_integration_connection`                                                 | No usable connection is bound                                                                                             | Connect an account, or pin or pass a connection explicitly                             |

@@ -1,0 +1,97 @@
+---
+title: Files
+description: Give runs input files, collect the deliverables agents produce, and chain files from one run to the next.
+---
+
+Files move in two directions. **Inputs** are files you hand to a run. **Outputs** are the deliverables an agent produces for you: a report, a spreadsheet, an image. Both are stored durably and addressed by a stable URI, so the output of one run can be the input of another.
+
+## Two kinds of reference
+
+| Reference            | Meaning                              | Lifetime                                                                                             |
+| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `upload://upl_...`   | A staged upload, waiting to be used. | Expires with its signed URL. After first use it stays valid for 24 hours (`UPLOAD_RETENTION_HOURS`). |
+| `appfile://file_...` | A durable file the platform stores.  | Permanent by default. The id never changes.                                                          |
+
+A durable file has a `purpose`:
+
+- `user_upload`: an upload that a run or a chat conversation consumed. Only the person who uploaded it can download it again.
+- `agent_output`: a deliverable an agent published. Anyone who can read the run can download it.
+
+Access is inherited from the **container**, the run or chat session the file belongs to. There is no per-file sharing. A file you cannot read answers `404`, indistinguishable from a missing one.
+
+## Giving a run an input file
+
+The agent's input schema marks a field as a file (`format: "uri"` with a `contentMediaType`). Pass one of:
+
+1. An **upload** reference, for any size up to 100 MB. Three calls:
+
+   ```bash
+   # 1. Reserve a slot
+   curl -X POST https://your-instance/api/uploads \
+     -H "Authorization: Bearer apst_your_key" -H "Content-Type: application/json" \
+     -d '{ "name": "invoice.pdf", "size": 24576, "mime": "application/pdf" }'
+   # -> { "uri": "upload://upl_...", "url": "<signed url>", "method": "PUT", "headers": { ... } }
+
+   # 2. PUT the raw bytes, with exactly the returned headers (not multipart)
+   curl -X PUT "<signed url>" -H "Content-Type: application/pdf" --data-binary @invoice.pdf
+
+   # 3. Launch the run with the uri
+   curl -X POST https://your-instance/api/agents/@acme/extract-invoice/run \
+     -H "Authorization: Bearer apst_your_key" -H "Content-Type: application/json" \
+     -d '{ "input": { "document": "upload://upl_..." } }'
+   ```
+
+2. An existing **`appfile://`** reference you can read: the output of another run, for instance.
+3. An **inline data URI**, `data:<mime>;name=<filename>;base64,<payload>`, up to 4 MiB decoded. It is the single-call path for small files, but it cannot be replayed with `rerun_from`.
+
+The byte count must match the declared `size`, and binary types are checked by magic-byte sniffing. Add `sha256` to the reservation to have the checksum enforced end to end. Each caller can hold 50 unused uploads at once (`UPLOAD_MAX_ACTIVE_PER_ACTOR`), and an organization 2 GiB of staged uploads (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`).
+
+When the run starts, uploads are copied into durable files and the stored input is rewritten from `upload://` to `appfile://`. Files appear in the agent's workspace under `./files/` and are listed in its prompt. An [inline run](/docs/features/runs#inline-runs) can also mount existing files with `context_files`.
+
+## Getting deliverables out
+
+An agent produces output files in two ways:
+
+- It writes them under **`./outputs/`**. At the end of the run, everything there is published automatically. Files and folders whose name starts with a dot are skipped.
+- It calls the **`publish_file`** [runtime tool](/docs/features/tools), when selected, to publish a file immediately and get its `appfile://` URI back, for example to cite it in its output.
+
+The platform prompt asks agents to use a concise, descriptive file name, which is the name you see. The run reports what was stored: `file_counts` and an `artifacts` summary that lists any file that could not be saved.
+
+On the run page, **Outcome** features the deliverable when the run produced exactly one file, and **Files** lists all inputs and outputs.
+
+## Using the API
+
+| Method and route              | Purpose                                                                                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/files`              | List files you can see. Filters: `purpose`, `runId`, `packageId`, `chat_session_id`. Paginate with `startingAfter` and `limit`.                   |
+| `GET /api/files/{id}`         | Metadata: `uri`, `purpose`, `name`, `mime`, `size`, `sha256`, `downloadable`, `expiresAt`, and a short-lived `preview_url` for previewable files. |
+| `GET /api/files/{id}/content` | Download, as an attachment. Answers `307` to a presigned URL when the storage supports it, and streams otherwise.                                 |
+| `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                     |
+| `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                     |
+
+Listing and downloading need `files:read`. Deleting or keeping a file needs `files:delete`, or being the file's creator on a credential that carries `files:delete`. `read` is held by all five preset space roles, `delete` by `admin` and `builder`. See [Roles and permissions](/docs/features/roles-and-permissions).
+
+## Chaining runs
+
+An `appfile://` URI is stable for the file's life. Pass the output of run A as an input of run B and the platform records the dependency. Deleting run A, a chat session or an end-user **detaches** files that another run still needs instead of removing them, so a rerun of run B still resolves its inputs. Files nothing references are deleted with their container.
+
+## Limits and retention
+
+All of these are operator settings, see [Environment Variables](/docs/self-hosting/environment-variables).
+
+| Limit                                   | Default                                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------------------------- |
+| One file                                | 100 MiB (`FILE_MAX_BYTES`), `413` over the cap                                          |
+| Output per run                          | 256 MiB (`RUN_MAX_OUTPUT_BYTES`)                                                        |
+| Files per run, as inputs and as outputs | 200 (`RUN_MAX_FILES`), `413 file_count_exceeded`                                        |
+| Input bytes per run                     | 256 MiB (`WORKSPACE_MAX_FILES_BYTES`)                                                   |
+| Durable storage per organization        | Unlimited unless `ORG_STORAGE_QUOTA_BYTES` is set, `403 storage_limit_exceeded`         |
+| Retention                               | Permanent unless `FILE_RETENTION_DAYS` stamps an expiry. A sweep deletes expired files. |
+
+Deleting a file always removes its stored object too, through a queue that retries until it succeeds.
+
+## Previews
+
+Files that can be previewed (images, PDFs, HTML, Markdown, text) get a `preview_url` signed for the viewer. Untrusted HTML is served from a hardened, cookie-less preview route with a restrictive content security policy. For the strongest isolation, set `USERCONTENT_URL` to a separate domain. Markdown is shown as inert text by the server and rendered by the web app.
+
+See [FILES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FILES.md) for the full design.

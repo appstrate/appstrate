@@ -5,48 +5,100 @@ description: Connect Google Sheets to your Appstrate agents.
 
 ## Overview
 
-Google Sheets is Google's online spreadsheet tool, allowing your agents to read, write, and manipulate spreadsheets.
+Google Sheets is Google's online spreadsheet. The integration lets agents read and write spreadsheet data through the Sheets API.
 
-## Authentication Mode
+Integration: `@appstrate/google-sheets` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/docs/integrations/how-integrations-work).
 
-| Property | Value |
-|----------|-------|
-| Type | `oauth2` |
-| Header | `Authorization: Bearer <token>` |
-| Default scopes | `spreadsheets.readonly` |
+## Authentication
 
-### Available Scopes
+| Property            | Value                                                                      |
+| ------------------- | -------------------------------------------------------------------------- |
+| Type                | `oauth2`                                                                   |
+| Credential sent as  | `Authorization: Bearer <credential>`                                       |
+| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/spreadsheets.readonly` |
+| Token endpoint auth | `client_secret_post`                                                       |
 
-| Scope | Description |
-|-------|-------------|
-| `spreadsheets` | Full spreadsheet access |
-| `spreadsheets.readonly` | Read-only access |
-| `drive.file` | Per-file access (recommended) |
+### Scopes
+
+The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
+
+| Scope                                                   | Description                            | Default |
+| ------------------------------------------------------- | -------------------------------------- | ------- |
+| `openid`                                                | Identity (OpenID)                      | yes     |
+| `email`                                                 | Email address                          | yes     |
+| `https://www.googleapis.com/auth/userinfo.email`        | Email address (Google canonical scope) |         |
+| `https://www.googleapis.com/auth/spreadsheets.readonly` | Read-only access                       | yes     |
+| `https://www.googleapis.com/auth/spreadsheets`          | Full spreadsheet access                |         |
+| `https://www.googleapis.com/auth/drive.file`            | Per-file access (recommended)          |         |
 
 ## Authorized URIs
 
-The agent can access the following endpoints through the sidecar proxy:
+The sidecar sends the credential only to URLs that match one of these patterns:
 
-- `https://sheets.googleapis.com/*`
+- `https://sheets.googleapis.com/**`
 
 ## Connect Google Sheets
 
-1. [Create a Google Cloud project](https://console.cloud.google.com/apis/library/sheets.googleapis.com) and enable the Google Sheets API
-2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
-3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
-4. Add the Appstrate redirect URI as an authorized redirect URI
-5. Enter the Client ID and Client Secret in the Google Sheets provider settings on Appstrate
+An administrator registers an OAuth client once, then members connect their own accounts.
 
-## Usage in an Agent
+<Steps>
+<Step>
 
-Once connected, the agent can call Google Sheets APIs through the sidecar proxy. Example prompt:
+Create or select a Google Cloud project ([open](https://console.cloud.google.com/projectcreate)).
+
+</Step>
+<Step>
+
+Enable the API you need in that project.
+
+</Step>
+<Step>
+
+Configure the OAuth consent screen ([open](https://console.cloud.google.com/auth/overview)).
+
+</Step>
+<Step>
+
+Create an OAuth client ID of type "Web application" and register the Appstrate redirect URI ([open](https://console.cloud.google.com/apis/credentials)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the OAuth client's authorized redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/google-sheets": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/google-sheets": {
+      "tools": ["api_call"],
+      "scopes": ["https://www.googleapis.com/auth/spreadsheets"]
+    }
+  }
+}
+```
+
+`api_call` has no per-tool scopes, so scopes beyond the defaults are listed explicitly (here `https://www.googleapis.com/auth/spreadsheets`).
+
+Example prompt:
 
 ```
-Read the "Q1 Sales" spreadsheet and calculate the total per salesperson.
-Add a totals row at the bottom of the table and update the sheet.
+Read the "Monitoring" sheet, list the competitor URLs in column A, and add today's findings in column C.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

@@ -1,177 +1,115 @@
 ---
 title: AFPS Packages
-description: Import, export, and version agents, skills, tools, and providers in AFPS format.
+description: The four package types, drafts and versions, importing and exporting, and system packages.
 ---
 
-## Overview
+Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/docs/resources/afps-specification).
 
-**AFPS** (Agent Format Packaging Standard) is Appstrate's packaging format. It defines 4 package types:
+## Package types
 
-| Type | Description |
-|------|-------------|
-| `agent` | AI agent with prompt, config, skills, tools |
-| `skill` | Markdown document (`SKILL.md`) extending agent knowledge, optional extension code |
-| `tool` | Callable runtime function (Pi Coding Agent SDK extension) |
-| `provider` | External service definition (OAuth, API key, credentials) |
+| Type          | What it is                                                                                                                   | Content file                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/docs/features/agents).                               | `prompt.md`                                |
+| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/docs/features/skills).                                       | `SKILL.md`                                 |
+| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/docs/integrations/overview). | `manifest.json`, optional `INTEGRATION.md` |
+| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                                   | Server entry point                         |
 
-Package IDs are **scoped names** of the form `@scope/name`, not prefixed ids. The scope defaults to your organization's slug at package creation and cannot be changed afterwards. System packages shipped with Appstrate use the `@appstrate/` scope (e.g. `@appstrate/log`, `@appstrate/asana`, `@appstrate/gmail`).
+Earlier versions also had `tool` and `provider` types. They were replaced by [runtime tools](/docs/features/tools) and integrations.
 
-## Via the UI
+Package ids are scoped names, `@scope/name`. The scope defaults to your organization's slug. Packages shipped with the platform use `@appstrate/`.
 
-There is no single "Packages" page. Each package type has its own list + detail screens in the dashboard:
-
-- [**Agents**](/docs/features/agents) — `/agents`, `/agents/:scope/:name`
-- [**Skills**](/docs/features/skills) — `/skills`, `/skills/:scope/:name`
-- [**Tools**](/docs/features/tools) — `/tools`, `/tools/:scope/:name`
-- [**Providers**](/docs/integrations/providers) — `/providers`, `/providers/:scope/:name`
-
-Each of these pages exposes the common operations described below: create, import, fork, publish a new version, yank, download.
-
-## Package Structure
-
-An AFPS package is a ZIP file containing at minimum a `manifest.json`:
+## Anatomy
 
 ```
-my-agent.afps
-├── manifest.json    # Metadata, config schema, dependencies
-├── prompt.md        # For type "agent"
-├── SKILL.md         # For type "skill" (+ optional extension file)
-├── TOOL.md          # For type "tool"
-└── {entrypoint}.ts  # For type "tool" (and optionally "skill")
+my-agent.afps          (a ZIP)
+├── manifest.json      metadata, schemas, dependencies
+├── prompt.md          the agent prompt
+└── ...                any other files the package needs
 ```
 
-The tool / skill entrypoint file is **not named `extension.ts` by convention** — its name is declared in the manifest's `entrypoint` field (e.g. `"entrypoint": "log.ts"` for `@appstrate/log`, `"entrypoint": "set-state.ts"` for `@appstrate/set-state`).
+A package can be edited and imported as a folder or a ZIP (`.afps` or `.zip`). Several packages travel together as an `.afps-bundle`.
 
-## Importing a Package
+## Drafts and versions
 
-### From a ZIP File
+Every package has a mutable **draft** and immutable **versions**.
+
+- Editing writes the draft. Saving a draft requires the `ETag` of what you last read, sent as `If-Match`. A stale tag answers `412`, a missing one `428`, so two editors cannot overwrite each other silently.
+- **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills`, `integrations` or `mcp-servers`. The version comes from the manifest or from the `version` you send in the body.
+- Versions are **semver and forward-only**: a new version must be strictly higher than every existing one. A duplicate is `409 version_exists`.
+- An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing and restoring are refused while one of its runs is in progress (`agent_in_use`).
+- Each version stores an **integrity hash** (SHA-256 SRI). Downloads return it in `X-Integrity`.
+- `POST .../versions/{version}/restore` copies a version back into the draft. `DELETE .../versions/{version}` removes a version permanently and moves the dist-tag to the best remaining stable version.
 
 ```bash
-curl -X POST http://localhost:3000/api/packages/import \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+# List versions of an agent
+curl https://your-instance/api/packages/agents/@acme/support-triage/versions \
+  -H "Authorization: Bearer apst_your_key"
+
+# Latest published and draft
+curl https://your-instance/api/packages/agents/@acme/support-triage/versions/info \
+  -H "Authorization: Bearer apst_your_key"
+```
+
+### Dist-tags and resolution
+
+The platform maintains one dist-tag, `latest`, which points at the newest stable published version. You cannot create other tags. When something refers to a package by a range, it resolves in three steps:
+
+1. an **exact** version (`1.2.3`);
+2. a **dist-tag** (`latest`);
+3. a **semver range** (`^1.0.0`, `~2.1`).
+
+Two more selectors exist where a run or schedule picks a definition: `published` (the latest version) and `draft` (the working copy, for people who can write the package).
+
+Dependencies declared in an agent (`dependencies.skills`, `integrations`, `mcp_servers`) are ranges and are resolved when a run starts, so publishing a compatible dependency version changes what the next run uses.
+
+## Importing
+
+```bash
+# A ZIP, .afps, or .afps-bundle
+curl -X POST https://your-instance/api/packages/import \
+  -H "Authorization: Bearer apst_your_key" \
   -F "file=@my-agent.afps"
-```
 
-Rate-limited to 10 imports per minute per caller.
+# A bundle exported from another instance
+curl -X POST https://your-instance/api/packages/import-bundle \
+  -H "Authorization: Bearer apst_your_key" \
+  -F "file=@my-agent.afps-bundle"
 
-### From GitHub
-
-```bash
-curl -X POST http://localhost:3000/api/packages/import-github \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+# A public GitHub directory holding a manifest.json
+curl -X POST https://your-instance/api/packages/import-github \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://github.com/user/repo"
-  }'
+  -d '{ "url": "https://github.com/acme/my-agent", "ref": "main" }'
 ```
 
-Only `url` is required. An optional `ref` can pin a branch, tag, or commit; if omitted, the service auto-detects. The route is `/api/packages/import-github` (hyphen), not a sub-path of `/import`.
+- An import writes the draft **and** cuts a version from the archive. The package is owned by your organization and stays editable, whatever its scope name.
+- `POST /api/packages/import` answers `409` when the target has unpublished draft changes. Resend with `?force=true` to overwrite.
+- A bundle registers every embedded package, reusing byte-identical ones. A conflict (same identity, different bytes) is `409 bundle_conflict`. Integrations whose selection exposes no callable tool are refused.
+- A ZIP containing only a `SKILL.md` imports as a skill.
+- Imports are limited to 10 per minute. The signature policy of the instance (`AFPS_SIGNATURE_POLICY`) can require signed bundles.
 
-## Versioning
+## Exporting and downloading
 
-Packages follow **semver** (semantic versioning) with constraints:
+- `GET /api/agents/{scope}/{name}/bundle` streams the agent and all its dependencies as a deterministic `.afps-bundle` (`?source=published` by default, `?source=draft` for authors).
+- `GET /api/packages/{scope}/{name}/{version}/download` returns one package as a ZIP. `version` can be a version, a dist-tag, a range or `draft` (authors only).
+- `GET /api/packages/{scope}/{name}/files` lists the files of a package and returns small text files inline.
 
-- **Forward-only** — `validateForwardVersion()` rejects duplicates and any version not strictly higher than the current maximum. No downgrades.
-- **SHA-256 SRI integrity** — every uploaded version gets a `sha256-base64…` hash (`computeIntegrity()`), returned on download via the `X-Integrity` header.
-- **Dist-tags** — named pointers to versions. `latest` is auto-managed on non-prerelease publishes and is **protected** (`isProtectedTag()` refuses manual set/remove). Custom dist-tags are stored in the DB but there is no public API to create or remove them today.
+If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills are exempt. See [Organizations](/docs/features/organizations#organization-settings).
 
-### Publishing a New Version
+## Working from a folder
 
-```bash
-curl -X POST http://localhost:3000/api/packages/agents/@my-org/my-agent/versions \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -F "file=@my-agent-v2.afps"
-```
+The [CLI](/docs/using-appstrate/cli) edits packages as local folders: `appstrate packages pull` writes a package's draft (or a published version) to a folder, `status` shows what would change, `push` writes the folder back to the draft atomically, and `publish` cuts a version.
 
-### Listing Versions
+## Ownership, sharing and activation
 
-```bash
-curl http://localhost:3000/api/packages/agents/@my-org/my-agent/versions \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
+A package belongs to the organization and has a **home space**. Other spaces get it through **shares** and run it once they **activate** it. Moving a home, sharing, and the library views are in [Library and sharing](/docs/features/library).
 
-## Yanking
+Creating a package needs the type's `write` permission (`agents:write`, `skills:write`, `integrations:write`, `mcp-servers:write`) in the space you create it from, which becomes its home. `DELETE /api/packages/{type}/{scope}/{name}` removes a package, and is refused while it is in use.
 
-Yanking marks a version as withdrawn without deleting it. Affected dist-tags are reassigned to the highest non-yanked non-prerelease version (`findBestStableVersion()`). Yanked versions remain visible in listings with `yanked: true` and are served with `X-Yanked: true` on download.
+## Forking
 
-Yank is implemented as a `DELETE` on the version route (no separate `/yank` endpoint):
+`POST /api/packages/{scope}/{name}/fork` copies a package your organization does not own, for example a system package, under your scope. The copy is based on the latest published version, so the source needs one. Packages your organization already owns are edited in place and do not need forking.
 
-```bash
-curl -X DELETE http://localhost:3000/api/packages/agents/@my-org/my-agent/versions/1.0.0 \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
+## System packages
 
-## Dependencies
-
-Agents can declare dependencies on **skills, tools, and providers** (all three, per-version):
-
-```json
-{
-  "dependencies": {
-    "skills": { "@appstrate/web-research": "^1.0.0" },
-    "tools":  { "@my-org/word-count": "~1.2" },
-    "providers": { "@appstrate/gmail": "^1.0.0" }
-  }
-}
-```
-
-Dependencies are stored per version and extracted via `@appstrate/core/dependencies`.
-
-## Version Resolution
-
-When an agent declares a dependency, resolution follows 3 steps (`resolveVersionFromCatalog`):
-
-1. **Exact match** — `1.2.3` (includes yanked versions, so exact pinning still works after a yank)
-2. **Dist-tag** — `latest`, `beta`, … (yanked excluded)
-3. **Semver range** — `^1.0.0`, `~2.1` (yanked excluded)
-
-## System Packages
-
-System packages ship with Appstrate in the `system-packages/` directory. They are automatically loaded at boot and synced to the database with `orgId: null` (global, available to every organization without installation). System packages cannot be deleted or modified — fork them first.
-
-## Downloading a Package
-
-```bash
-curl http://localhost:3000/api/packages/@my-org/my-agent/1.0.0/download \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -o agent.afps
-```
-
-Response headers:
-
-- `X-Integrity: sha256-base64…` — the SRI hash of the ZIP
-- `X-Yanked: true` — present only when the version was yanked
-
-## Forking a Package
-
-Create an independent copy of an existing package. Scope is auto-assigned to the caller's org.
-
-```bash
-curl -X POST http://localhost:3000/api/packages/@appstrate/web-research/fork \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-custom-research"}'
-```
-
-`name` is optional and must be a slug. If omitted, the source name is reused. The returned package id is `@{your-org-slug}/{name}`.
-
-## Package lifecycle endpoints
-
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/api/packages/{scope}/{name}` | Full package detail (manifest, content, versions, dist-tags) |
-| `DELETE` | `/api/packages/{scope}/{name}` | Delete the whole package. System packages are rejected. |
-| `GET` | `/api/packages/{type}/{scope}/{name}/versions` | List versions of a specific package type (agents, skills, tools, providers) |
-| `POST` | `/api/packages/{type}/{scope}/{name}/versions` | Publish a new version (multipart) |
-| `DELETE` | `/api/packages/{type}/{scope}/{name}/versions/{version}` | Yank a version (soft delete) |
-| `GET` | `/api/packages/{scope}/{name}/{version}/download` | Download the `.afps` ZIP |
-| `POST` | `/api/packages/{scope}/{name}/fork` | Fork into the caller's org |
-| `POST` | `/api/packages/import` | Import an uploaded `.afps` ZIP |
-| `POST` | `/api/packages/import-github` | Import from a GitHub repo URL |
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and a few MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/docs/integrations/overview).

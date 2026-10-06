@@ -1,129 +1,89 @@
 ---
 title: End-Users
-description: Manage your product's users via the API and run agents on their behalf.
+description: Represent the users of your own product in Appstrate and run agents on their behalf.
 ---
 
-## Overview
+An **end-user** is a user of _your_ product, not of the Appstrate dashboard. It is an external identity that lives in a [space](/docs/features/spaces), has no password and cannot sign in to the dashboard. Its id starts with `eu_`. You create and manage end-users with the API, or in the web app on the **End-users** page.
 
-**End-users** are users of *your* product — not Appstrate platform users. They belong to an application and can be managed via the UI or the REST API.
+Use end-users when your backend calls Appstrate for many customers and each customer's connections, memory and runs must stay separate.
 
-An end-user has no password and cannot log into the Appstrate dashboard. Their identifier carries the `eu_` prefix.
-
-## Via the UI
-
-Open the dashboard → **End-users** in the sidebar (`/end-users`, admin-only). From there you can:
-
-- Create a new end-user (optional `externalId`, `name`, `email`, `metadata`)
-- Search and filter the list (by name, email, externalId, or id — client-side)
-- Open the detail view to inspect, edit, or delete
-- Delete an end-user (connection profiles cascade-delete; runs orphaned via `endUserId SET NULL`)
-
-The REST API below gives the programmatic equivalent — use it when you provision end-users from your own product's signup flow.
-
-## Creating an End-User
+## Creating an end-user
 
 ```bash
-curl -X POST http://localhost:3000/api/end-users \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X POST https://your-instance/api/end-users \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Idempotency-Key: create-user-123" \
   -H "Content-Type: application/json" \
   -d '{
     "externalId": "user_123",
     "name": "Alice Martin",
     "email": "alice@example.com",
-    "metadata": {
-      "plan": "premium",
-      "company": "Acme Inc"
-    }
+    "metadata": { "plan": "premium", "company": "Acme Inc" }
   }'
 ```
 
-### Fields
+All fields are optional, but give at least one so you can find the user again. The body is closed: an unknown field is a `400`.
 
-| Field | Required | Notes |
-|-------|----------|-------|
-| `externalId` | No | Your system's id. Nullable. If provided, must be unique per application — `409 conflict` otherwise |
-| `name` | No | Display name |
-| `email` | No | If provided, must be unique per application — `409 conflict` otherwise |
-| `metadata` | No | Free-form JSONB. Max 50 keys, 40 chars per key, 500 chars per value |
+| Field        | Constraint                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------- |
+| `externalId` | Your own id for the user. Unique in the space (`409 external_id_taken`). Up to 255 characters.                 |
+| `email`      | Unique in the space (`409`).                                                                                   |
+| `name`       | Up to 200 characters.                                                                                          |
+| `metadata`   | Up to 50 keys. Keys up to 40 characters. Values are strings (up to 500 characters), numbers, booleans or null. |
 
-Each end-user automatically gets a **default connection profile** on creation (row in `connection_profiles` with `isDefault: true`, scoped to the end-user).
+Creating is limited to 60 requests per minute and honours `Idempotency-Key`. The space must be a team space, because a personal space takes no end-users (`409 personal_space_takes_no_end_users`).
 
-Rate limit: 60 requests per minute on creation. Permission: `end-users:write`. `Idempotency-Key` is honored (Redis-backed, 24h TTL, SHA-256 body hash for conflict detection).
-
-## Listing and Viewing
+## Listing, reading, updating, deleting
 
 ```bash
-# List (cursor-based pagination)
-curl "http://localhost:3000/api/end-users?limit=50&externalId=user_123" \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
+# List, cursor-paginated (limit 1 to 100, default 20)
+curl "https://your-instance/api/end-users?limit=50&externalId=user_123" \
+  -H "Authorization: Bearer apst_your_key"
 
-# Get one
-curl http://localhost:3000/api/end-users/eu_xxx \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
+# Read one
+curl https://your-instance/api/end-users/eu_xxx -H "Authorization: Bearer apst_your_key"
+
+# Update any subset of name, email, externalId, metadata
+curl -X PATCH https://your-instance/api/end-users/eu_xxx \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "metadata": { "plan": "enterprise" } }'
+
+# Delete
+curl -X DELETE https://your-instance/api/end-users/eu_xxx -H "Authorization: Bearer apst_your_key"
 ```
 
-Query params on list:
+List filters: `externalId` and `email` (exact match), `search` (name, email or external id). Paginate with `startingAfter` or `endingBefore` (an `eu_` id, one at a time) and follow the `Link` header.
 
-- `limit` — 1–100, default 20
-- `startingAfter`, `endingBefore` — cursor-based pagination (pass an `eu_` id)
-- `externalId`, `email` — exact-match filter
+Deleting an end-user removes its connections, its stored uploads and its notifications. Files it produced that another run still depends on are kept and detached. **Runs are kept**, with `endUserId` set to `null`, so history survives.
 
-Rate limit on list + detail: 300 requests per minute.
+Permissions are `end-users:read`, `end-users:write` and `end-users:delete`. By default `operator` can read and write, `builder` and `admin` can also delete. All three can be put on an API key.
 
-## Impersonation
+## Acting on behalf of an end-user
 
-The `Appstrate-User` header lets you execute actions on behalf of an end-user. This scopes connections, memories, and runs to that user.
+Send `Appstrate-User: eu_xxx` with an **API key** to make a request as that end-user. This is the pattern for a backend that triggers agents for its own customers:
 
 ```bash
-curl -X POST http://localhost:3000/api/agents/@scope/agent-name/run \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X POST https://your-instance/api/agents/@acme/support-triage/run \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Appstrate-User: eu_xxx" \
   -H "Content-Type: application/json" \
-  -d '{"input": {"query": "My meetings for tomorrow"}}'
+  -d '{ "input": { "query": "My meetings for tomorrow" } }'
 ```
 
 Rules:
 
-- Requires **API key** authentication. Sent with a cookie session it returns `400` with code `header_not_allowed`.
-- The end-user must belong to the API key's application. An unknown or foreign end-user returns `403` with code `invalid_end_user`.
-- Generates a structured JSON log line with 9 fields: `requestId`, `apiKeyId`, `authenticatedMember` (the member who owns the API key), `endUserId`, `applicationId`, `method`, `path`, `ip`, `userAgent`.
+- API keys only. On a cookie session the header is refused with `400 header_not_allowed`.
+- The id must start with `eu_` (`400 invalid_end_user_id`) and the end-user must belong to the key's space (`403 invalid_end_user`).
+- Under impersonation the caller is treated as an outsider, not as the key's creator. The run is attributed to the end-user (`endUserId`), uses **the end-user's connections**, reads and writes the end-user's [memory](/docs/features/memory), and the end-user only sees its own runs.
+- Every impersonation is logged as a structured line with `requestId`, `apiKeyId`, `authenticatedMember`, `endUserId`, `spaceId`, `method`, `path`, `ip` and `userAgent`.
 
-## Updating an End-User
+An end-user can be the actor of a [schedule](/docs/features/scheduling) too.
 
-Update uses `PATCH` (partial update). Any subset of `name`, `email`, `externalId`, `metadata` can be sent.
+## Connections of an end-user
 
-```bash
-curl -X PATCH http://localhost:3000/api/end-users/eu_xxx \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Alice Martin-Dupont",
-    "metadata": {"plan": "enterprise"}
-  }'
-```
+An end-user connects its own accounts (Gmail, Slack, a PAT) to integrations. Your backend can mint a hosted **connect** link for it, or import credentials through the API, using the key and `Appstrate-User`. The connection then belongs to that end-user and is the one its runs use. See [Integrations](/docs/integrations/overview).
 
-`externalId` and `email` are updatable but remain unique per application (`409 conflict` if the new value collides with another end-user in the same app). Permission: `end-users:write`. Rate limit: 60 per minute.
+## Signing in end-users
 
-## Deleting an End-User
-
-```bash
-curl -X DELETE http://localhost:3000/api/end-users/eu_xxx \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
-
-Permission: `end-users:delete` (admin/owner only — members cannot delete). Cascades: connection profiles and agent-provider bindings are deleted; runs are preserved with `endUserId` set to `NULL` so historical data survives.
-
-## Permissions summary
-
-- `end-users:read` — owner, admin, member, viewer
-- `end-users:write` — owner, admin, member
-- `end-users:delete` — owner, admin
-
-All three are available as API key scopes.
+For end-users that must log in themselves, for example to use an embedded experience, the `oidc` module turns a space into an OpenID provider. Its sessions are tagged with the realm `end_user:<spaceId>` and cannot reach platform routes. This is configured in the space settings of the web app, outside this page.

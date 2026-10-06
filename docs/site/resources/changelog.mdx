@@ -1,26 +1,51 @@
 ---
 title: Changelog
-description: Appstrate version history and changes.
+description: Where to find Appstrate release notes, how versions are numbered, and the milestones that changed the product the most.
 ---
 
-## Releases
+The release notes are not copied into this site, so they cannot drift. Two places are authoritative:
 
-Appstrate releases are published on GitHub:
+- **[GitHub releases](https://github.com/appstrate/appstrate/releases)**: one entry per tag, with the notes of that version.
+- **[`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG.md)** in the repository: the full history in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, including an `Unreleased` section for what has landed on `main` since the last tag.
 
-**[github.com/appstrate/appstrate/releases](https://github.com/appstrate/appstrate/releases)**
+## Read this before upgrading
 
-Each release includes:
-- Changes and new features
-- Bug fixes
-- Breaking changes if any
-- Migration instructions when needed
+Appstrate is in beta (`1.0.0-beta.N`), and a release can change the wire contract, the database schema, or the operator's environment on purpose. Each version in `CHANGELOG.md` can carry these sections:
 
-## API Versioning
+| Section                                | What it tells you                                                                                                                                           |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Operators`                            | Steps to run before or after the deploy: maintenance windows, one-off migration scripts, environment variables that changed, images that must move together |
+| `Added`, `Changed`, `Removed`, `Fixed` | What changed for users and API clients                                                                                                                      |
+| `BREAKING` entries                     | A change that breaks existing integrations, with the migration                                                                                              |
 
-The API uses date-based versioning (Stripe pattern). The current version is `2026-03-21`.
+Read every version between yours and your target, not only the last one. The upgrade procedure is in [Upgrading](/docs/self-hosting/upgrading). Two rules worth knowing up front: the platform image, `appstrate-pi`, and `appstrate-sidecar` are one version contract and must be deployed at the same version, and migrations are applied at boot with no down migration, so take a database dump first.
 
-See the `Appstrate-Version` header in the [API reference](/en/docs/api) for more details.
+## Versioning
+
+| What                                          | Scheme                                                                 | Where it is published                 |
+| --------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
+| The platform (API, dashboard, runtime images) | `v1.0.0-beta.N` git tags                                               | GitHub releases, GHCR images          |
+| The `appstrate` CLI                           | `cli@1.0.0-beta.N` tags, released in step with the platform            | GitHub releases, npm (`appstrate`)    |
+| `@appstrate/core`                             | `core@MAJOR.MINOR.PATCH`                                               | npm                                   |
+| `@appstrate/afps-shared`                      | `afps-shared@0.MINOR.PATCH`                                            | npm                                   |
+| The HTTP API                                  | Date version in the `Appstrate-Version` header, currently `2026-03-21` | [API Reference](/docs/api#versioning) |
+
+The API date version is separate from the platform version and has not moved yet.
+
+## Milestones
+
+A selection of changes that altered how you use Appstrate. Each is a git tag you can find in `CHANGELOG.md`.
+
+| Version          | Date       | Change                                                                                                                    |
+| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `v1.0.0-beta.17` | 2026-06-04 | AFPS 2.0 and the move from providers to **integrations**: MCP-backed packages that declare their authentication and tools |
+| `v1.0.0-beta.26` | 2026-06-08 | The **MCP module**: the platform API exposed to MCP clients, one endpoint per organization                                |
+| `v1.0.0-beta.34` | 2026-07-03 | The hosted **Connect portal** for integrations, and the chat module                                                       |
+| `v1.0.0-beta.36` | 2026-07-06 | The **Firecracker** run backend: one microVM per run, behind a KVM boundary                                               |
+| `v1.0.0-beta.54` | 2026-08-28 | **Applications became spaces**: `spc_` ids, `X-Space-Id`, `/api/spaces`                                                   |
+| `v1.0.0-beta.62` | 2026-09-25 | API keys use the checksummed **`apst_`** format. Older `ask_` keys stop working                                           |
+| `v1.0.0-beta.64` | 2026-09-30 | An agent can use **several connections of one integration** in a single run                                               |
 
 ## Upgrading
 
-For self-hosted instances, see the [Upgrading](/en/docs/self-hosting/upgrading) guide.
+For self-hosted instances, follow [Upgrading](/docs/self-hosting/upgrading). For breaking API changes, check the `Operators` and `BREAKING` entries of each release between your version and the target.

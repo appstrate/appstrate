@@ -1,56 +1,111 @@
 ---
-title: GitHub
-description: Connect GitHub to your Appstrate agents.
+title: "GitHub"
+description: "Connect GitHub to your Appstrate agents: the REST API, GitHub's hosted MCP server, or a sandboxed git workflow."
 ---
 
 ## Overview
 
-GitHub is a collaborative development platform, allowing your agents to manage repositories, issues, and pull requests.
+GitHub hosts code and collaboration. Appstrate ships three GitHub integrations, each a separate package with separate connections.
 
-## Authentication Mode
+| Integration                             | Source       | Use it for                                                                                                                                                |
+| --------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/github` (version 1.0.5)     | `api_call`   | Calling the GitHub REST API directly                                                                                                                      |
+| `@appstrate/github-mcp` (version 1.1.3) | Remote MCP   | GitHub's hosted MCP server: 93 tools covering repositories, issues, pull requests, Actions, code security, notifications, projects, gists and discussions |
+| `@appstrate/github-git` (version 1.0.3) | Local runner | A clone, edit, commit, push and pull request loop on a real working tree                                                                                  |
 
-| Property | Value |
-|----------|-------|
-| Type | `oauth2` |
-| Header | `Authorization: Bearer <token>` |
-| Default scopes | `repo`, `read:user` |
+## GitHub (API): `@appstrate/github`
 
-### Available Scopes
+| Property            | Value                                |
+| ------------------- | ------------------------------------ |
+| Type                | `oauth2`                             |
+| Credential sent as  | `Authorization: Bearer <credential>` |
+| Default scopes      | `repo`, `read:user`                  |
+| Token endpoint auth | `client_secret_post`                 |
 
-| Scope | Description |
-|-------|-------------|
-| `repo` | Full repository access |
-| `read:user` | Read user profile |
-| `user:email` | Read user emails |
-| `read:org` | Read org membership |
-| `gist` | Create gists |
-| `notifications` | Access notifications |
-| `workflow` | Update GitHub Actions workflows |
+### Scopes
 
-## Authorized URIs
+| Scope           | Description                     | Default |
+| --------------- | ------------------------------- | ------- |
+| `repo`          | Full repository access          | yes     |
+| `read:user`     | Read user profile               | yes     |
+| `user:email`    | Read user emails                |         |
+| `read:org`      | Read org membership             |         |
+| `gist`          | Create gists                    |         |
+| `notifications` | Access notifications            |         |
+| `workflow`      | Update GitHub Actions workflows |         |
 
-The agent can access the following endpoints through the sidecar proxy:
+### Authorized URIs
 
-- `https://api.github.com/*`
+- `https://api.github.com/**`
+- `https://codeload.github.com/**`
+- `https://*.githubusercontent.com/**`
+
+## GitHub (MCP): `@appstrate/github-mcp`
+
+Two authentication methods, both accepted:
+
+| Auth key | Type      | Details                                                                                                                                                                                                                                                                                  |
+| -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `oauth`  | `oauth2`  | An OAuth App registered by an administrator. GitHub's MCP server does not support dynamic client registration. Default scopes: `read:user`, `repo`, `read:org`, `workflow`, `security_events`, `notifications`, `gist`, `read:discussion`, `write:discussion`, `read:project`, `project` |
+| `pat`    | `api_key` | A personal access token (classic or fine-grained), pasted into the connect form as `personal_access_token`, sent as `Authorization: Bearer <token>`                                                                                                                                      |
+
+Each tool declares the scopes it needs (`public_repo`, `repo`, `security_events`, `notifications`, `workflow`, `gist`, `read:discussion`, `write:discussion`, `read:user`, `read:org`, `read:project`, `project`), so OAuth consent asks only for what the selected tools use. A personal access token carries whatever permissions you gave it.
+
+This integration allows `tools: "*"`: an agent can select every tool the server advertises instead of listing them. Prefer an explicit list.
+
+Authorized URIs: `https://api.githubcopilot.com/**` and `https://api.github.com/**`.
+
+## GitHub Git: `@appstrate/github-git`
+
+Runs the `@appstrate/github-git-mcp` server in a sandboxed runner container. The platform gives the runner an OAuth token with the `repo` scope as a Basic credential for git over HTTPS, mounts a per-run workspace at `/workspace`, and the server shells out to `git`. The agent edits the files with its own file tools. Tools: `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push`, `open_pr`.
+
+Authorized URIs: `https://api.github.com/**`, `https://github.com/**` and `https://codeload.github.com/**`. Needs the `docker` or `firecracker` run adapter.
 
 ## Connect GitHub
 
-1. [Register a new OAuth application](https://github.com/settings/developers) in the GitHub developer settings
-2. Set the callback URL to the Appstrate redirect URI
-3. Copy the Client ID and Client Secret
-4. Enter these credentials in the GitHub provider settings on Appstrate
+An administrator registers an OAuth App once (not needed for a personal access token).
 
-## Usage in an Agent
+<Steps>
+<Step>
 
-Once connected, the agent can call GitHub APIs through the sidecar proxy. Example prompt:
+Create an OAuth App under Settings, Developer settings, OAuth Apps ([open](https://github.com/settings/developers)).
+
+</Step>
+<Step>
+
+Set the "Authorization callback URL" to `APP_URL` followed by `/api/integrations/callback`, as shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/github-mcp": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/github-mcp": {
+      "tools": ["list_issues", "issue_read", "issue_write"]
+    }
+  }
+}
+```
+
+Example prompt:
 
 ```
-Every morning, check for new issues and pull requests on the "my-project" repo.
-For each PR, read the diff and write a summary of the changes.
-Post a review comment on PRs that touch the "src/api/" directory.
+Every Monday, list the issues opened last week in acme/api without a label,
+propose a label for each one, and add it after my approval.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

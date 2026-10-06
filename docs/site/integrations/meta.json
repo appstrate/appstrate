@@ -5,6 +5,7 @@
   "defaultOpen": true,
   "pages": [
     "overview",
+    "how-integrations-work",
     "providers",
     "custom-providers",
     "llm-models",

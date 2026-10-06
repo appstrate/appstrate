@@ -1,93 +1,99 @@
 ---
 title: Progressive Infrastructure
-description: Appstrate's 4-tier infrastructure model, from zero-install to full production deployment.
+description: Appstrate's tier model, execution backends and modules, from a zero-install setup to a full production stack.
 ---
 
-## The Progressive Model
+Appstrate resolves its infrastructure at boot from the environment variables that are set. Each missing service is replaced by an in-process fallback, so you can start with nothing but Bun and add services one at a time. The adapters live in `apps/api/src/infra/` and are chosen from `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET` and `RUN_ADAPTER`.
 
-Appstrate resolves its infrastructure adapters at boot based on which environment variables are set. Each missing dependency is replaced by an in-process fallback, so you can start with zero external services and promote piece by piece.
+Three things are configured independently:
 
-Infrastructure adapters live in `apps/api/src/infra/` and are loaded via dynamic imports driven by `hasExternalDb()`, `hasRedis()`, `hasS3()`, and `getExecutionMode()` in `infra/mode.ts`.
+1. The **tier**: which data services you run (PostgreSQL, Redis, S3).
+2. The **execution backend**: where agent runs execute (`RUN_ADAPTER`).
+3. The **modules**: which optional features load (`MODULES`).
 
-## The 4 Tiers
+## Tiers
 
-### Tier 0 — Zero-install
+| Tier  | You run                               | You get                                                                                                                                                                                                                                  |
+| ----- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0** | Bun only                              | PGlite (embedded PostgreSQL) in `PGLITE_DATA_DIR` (default `./data/pglite`), filesystem storage in `FS_STORAGE_PATH` (default `./data/storage`), in-process queue, pub/sub, cache and rate limiter                                       |
+| **1** | + PostgreSQL (`DATABASE_URL`)         | Persistent data, multi-user. Queue, pub/sub, cache, rate limiter and storage stay in-process                                                                                                                                             |
+| **2** | + Redis (`REDIS_URL`)                 | BullMQ scheduler (exactly-once cron across instances), Redis pub/sub and cross-instance run cancellation, distributed rate limiting, shared cache and event buffer. Multiple Appstrate instances can share the same PostgreSQL and Redis |
+| **3** | + S3-compatible storage (`S3_BUCKET`) | Object storage for files and packages, instead of the filesystem. The installer's Tier 3 bundles MinIO; you can also point any tier at AWS S3 or R2                                                                                      |
 
-| Component | Implementation when tier condition met |
-|-----------|----------------------------------------|
-| Database | **PGlite** (embedded WASM PostgreSQL, `./data/pglite/`) |
-| Storage | Local filesystem at `FS_STORAGE_PATH` (default `./data/storage`) |
-| Queue / scheduler | `LocalQueue` — a custom in-process cron evaluator, not BullMQ |
-| PubSub | `LocalPubSub` — Node `EventEmitter` |
-| Rate limiter | `rate-limiter-flexible` in-memory (`RateLimiterMemory`) |
-| Run execution | Bun subprocess on the host (`RUN_ADAPTER=process`, the default) |
+The installer's recommended single-node stack is **Tier 2**. All file traffic, uploads included, goes through the platform on `APP_URL`, so a separate object store adds a container without adding capability on one node. Bundled MinIO stays private inside the Compose network. To let browsers upload straight to a public S3 endpoint (multi-node setups), set `S3_PUBLIC_ENDPOINT`. See the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md) for the proxy and bucket-policy notes.
 
-No external dependencies. Ideal for development and quick evaluation.
-
-```bash
-cp .env.example .env && bun run dev
-```
-
-### Tier 1 — PostgreSQL
-
-Set `DATABASE_URL` to switch to PostgreSQL. Data becomes persistent and multi-user works properly. Queue, PubSub, rate limiter, and storage stay in-process.
+### Tier 0
 
 ```bash
-bun run docker:dev:minimal
+curl -fsSL https://get.appstrate.dev | bash -s -- --yes --tier 0
 ```
 
-### Tier 2 — PostgreSQL + Redis
+Or run `appstrate install --tier 0` once the CLI is installed. The installer clones the release tag matching the CLI into the install directory and starts `bun run dev`. For development from a checkout, `cp .env.example .env && bun run dev` does the same. Everything is in one process, which is right for evaluation and local development. The queue is in memory and its cron evaluator polls every 30 seconds, so nothing is shared across instances.
 
-Set `REDIS_URL` on top of Tier 1 to unlock:
+### Tiers 1 to 3 with Docker
 
-- **BullMQ** (Redis-backed) for the scheduler queue
-- **Redis PubSub** for realtime and cross-instance run cancellation
-- **Redis-backed distributed rate limiting** via `rate-limiter-flexible`'s `RateLimiterRedis`
-- Horizontal scaling: multiple Appstrate instances can share the same Redis and distribute work
+The installer renders the matching Compose template from `examples/self-hosting/` (`docker-compose.tier1.yml`, `docker-compose.tier2.yml`, `docker-compose.tier3.yml`). All three default `RUN_ADAPTER` to `docker`. The root `docker-compose.yml` of the repository is the Tier 3 stack with its own service names. See [Docker Compose](/docs/self-hosting/docker-compose).
 
-```bash
-bun run docker:dev:standard
-```
+For development from a checkout, `bun run docker:dev:minimal` (Tier 1), `bun run docker:dev:standard` (Tier 2) and `bun run docker:dev` (Tier 3) start the services of `docker-compose.dev.yml`.
 
-### Tier 3 — Object storage and/or container isolation
+## Execution backends
 
-Tier 3 adds two **independent** capabilities on top of Tier 2:
+`RUN_ADAPTER` selects the backend that runs each agent. The id is resolved against a registry at boot, and an unknown id is a fatal error that lists the registered backends.
 
-- **`S3_BUCKET`** routes storage to S3 or MinIO. Without it, storage stays on the filesystem at `FS_STORAGE_PATH`.
-- **`RUN_ADAPTER=docker`** runs each agent inside an ephemeral Docker container on an internal-only network, with a per-run sidecar for credential injection. Without it, agents run as Bun subprocesses on the host (no isolation). See [Sandbox & Sidecar](/docs/features/sandbox-and-sidecar) for the isolation model.
+| Backend       | Isolation                                                                | Notes                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `process`     | None. The agent and its sidecar are host subprocesses                    | The code default, and what Tier 0 uses. Refuses to spawn `source.kind: "local"` integrations unless `INTEGRATION_RUNTIME_ADAPTER=docker`                                           |
+| `docker`      | One internal network, an agent container and a sidecar container per run | Needs the Docker socket (`DOCKER_SOCKET`, default `/var/run/docker.sock`). The installer's Compose files set it as the default                                                     |
+| `firecracker` | One microVM per run                                                      | Opt-in. Needs the `firecracker` module in `MODULES`, a KVM host running the `appstrate-runner` daemon, and `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` on the platform |
 
-`RUN_ADAPTER=docker` additionally requires the Docker daemon socket to be accessible (`DOCKER_SOCKET`, default `/var/run/docker.sock`).
+For Firecracker, pass `--run-adapter firecracker` to `appstrate install`. It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`) and the runner settings, and either installs the daemon on this host (`--host-ip`) or prints the one-liner for a remote KVM host (`--runner-url` and `--runner-token`). Topology, requirements, hardening status and known limits are in [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
 
-```bash
-bun run docker:dev
-```
+Use `docker` or `firecracker` for anything multi-tenant. See [Isolation and Security](/docs/self-hosting/isolation-and-security) for what each backend protects and what it does not.
 
-## Summary Table
+## Modules
 
-| Tier | Added services | In-process fallbacks still in use | Use case |
-|------|---------------|-----------------------------------|----------|
-| 0 | Bun only | PGlite, LocalQueue, LocalPubSub, RateLimiterMemory, filesystem storage, Bun subprocess | Development, evaluation |
-| 1 | + PostgreSQL | LocalQueue, LocalPubSub, RateLimiterMemory, filesystem storage, Bun subprocess | Persistent data, multi-user |
-| 2 | + Redis | Filesystem storage, Bun subprocess | Scheduling, distributed rate limiting, horizontal scaling |
-| 3 | + S3/MinIO and/or Docker | Depends on which axis you enable | Full prod with isolation and/or object storage |
+Modules are optional features loaded at boot from the comma-separated `MODULES` variable. A module you do not list is not imported: it adds no routes, middleware or permissions. Every listed module is required, and a failure to load one is fatal. Empty `MODULES` resolves to the default set, and `MODULES=none` boots with no module at all.
 
-## Migrating between tiers
+Enabled by default (`oidc,webhooks,mcp,core-providers,@appstrate/module-chat`):
 
-Promoting from Tier 0 to Tier 1+ means swapping the database backend from PGlite to PostgreSQL. There is **no PGlite dump REST endpoint** today — you have two practical paths:
+| Module                   | What it provides                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `oidc`                   | OAuth 2.1 and OIDC identity provider for embedding apps, including the device flow behind `appstrate login` |
+| `webhooks`               | Standard Webhooks event delivery for runs                                                                   |
+| `mcp`                    | The platform REST API exposed as an inbound MCP server, one endpoint per organization                       |
+| `core-providers`         | API-key model providers (OpenAI, Anthropic, OpenAI-compatible). Removing it removes those providers         |
+| `@appstrate/module-chat` | The dashboard's chat surface                                                                                |
 
-1. **Fresh start (recommended if you have no production data yet)**: stop the Tier 0 instance, set `DATABASE_URL`, restart. Drizzle migrations run automatically at boot and create an empty schema in the new PostgreSQL database.
-2. **Copy data manually**: stop the Tier 0 instance, export each table from PGlite with a script that reads the local PGlite data directory, then import into PostgreSQL. PGlite and PostgreSQL share a schema, so `pg_dump`-compatible output can be restored with `psql "$DATABASE_URL" -f backup.sql`. Plan for downtime during the swap.
+Opt-in, append them to `MODULES`:
 
-Promoting Tier 1 → Tier 2 (adding Redis) or Tier 2 → Tier 3 (adding S3/Docker) is non-destructive: the adapters swap at the next boot, no data migration needed.
+| Module                                                     | What it provides                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firecracker`                                              | The Firecracker execution backend (see above)                                                                                                                                                                                                                               |
+| `@appstrate/module-observability`                          | OpenTelemetry traces and metrics. See [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md)                                                                                                                               |
+| `@appstrate/module-codex`, `@appstrate/module-claude-code` | Model providers backed by a ChatGPT or Claude subscription. Using a personal subscription to power a product is a grey zone you own. Read [SUBSCRIPTION_COMPLIANCE.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md) first |
+| `@appstrate/module-ee`                                     | Stripe billing, credit quotas and usage metering. Source-available, not Apache-2.0, and running it needs a commercial agreement. Needs PostgreSQL (it refuses to start on PGlite)                                                                                           |
 
-Drizzle migrations run automatically at every boot for both PGlite and PostgreSQL. Schema evolution within a tier is handled; there is no built-in rollback path.
+Disable what you do not use to reduce the attack surface. Keep `oidc` if you use the CLI, since `appstrate login` goes through it. The authoritative default is the `MODULES` row in [Environment Variables](/docs/self-hosting/environment-variables), and module authoring is covered in the [modules README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
 
-## Other boot behaviors worth knowing
+The Compose files pass `MODULES` through from `.env` and leave the default to the platform. An older on-disk Compose file can still pin a stale default that masks a newer one. `appstrate doctor` reports this under **Compose drift**, and `appstrate install --upgrade-compose` strips the stale defaults (it backs the file up and never touches `.env`).
 
-- **Orphan run cleanup**: on startup, any run still in `running` or `pending` from a previous process is marked `failed`, and Docker containers labeled `appstrate.managed=true` are removed.
-- **System packages sync**: `system-packages/*.afps` ZIPs are loaded and synced to the database with `orgId: null` on every boot.
-- **Sidecar pool warm-up**: when `RUN_ADAPTER=docker`, `SIDECAR_POOL_SIZE` pre-warmed sidecar containers are created at boot (default 2, set 0 to disable).
+## Moving between tiers
+
+- **Adding Redis, or S3 for new installs**: set the variable and restart. The adapters swap at the next boot, and schedules are re-synced from the database.
+- **Tier 0 to PostgreSQL**: the repository ships no export tool for a PGlite directory. Set `DATABASE_URL` and restart for a fresh, empty schema. Migrations run at boot on both PGlite and PostgreSQL.
+- **Filesystem to S3 on an instance that already holds files**: objects are not copied for you. Plan the copy yourself before switching `S3_BUCKET`.
+
+Migrations are applied automatically at boot and there is no built-in rollback. See [Upgrading](/docs/self-hosting/upgrading).
+
+## What happens at boot
+
+- Pending database migrations are applied. The tier Compose templates also run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform binds a port.
+- Runs left in `running` or `pending` by a previous process are stopped and finalized as `failed` ("Server restarted while run was in progress"). On Docker, orphaned `appstrate-exec-*` networks are reclaimed too.
+- System packages shipped in the image are synced to the database.
+- On Docker, the agent and sidecar images are pre-pulled, and a warmer keeps them on the host so `docker image prune -a` cannot force a cold pull on the next run (`RUNTIME_IMAGE_WARM_INTERVAL_SECONDS`).
+- Until startup finishes, `/health` answers `503` with `status: "starting"`.
+- On shutdown the platform drains in-flight work for up to 30 seconds. The shipped root Compose file sets `stop_grace_period: 45s` to leave room for it.
 
 ## Recommendation
 
-For production, use **Tier 3** (PostgreSQL + Redis + S3/MinIO + Docker execution) behind a TLS reverse proxy. Tier 0 is the fastest way to evaluate Appstrate without installing anything. Tiers 1 and 2 are suitable for staging or shared development environments.
+For production on one node, use Tier 2 behind a TLS reverse proxy with `RUN_ADAPTER=docker`. Use Tier 3, or your own S3 endpoint, when you want object storage or run several platform instances. Tiers 0 and 1 are for evaluation, development and staging.

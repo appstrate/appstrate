@@ -1,163 +1,177 @@
 ---
 title: Runs
-description: "How an agent executes: lifecycle, triggers, inputs, results, and monitoring."
+description: "How an agent executes: lifecycle, ways to launch, inputs, results, logs and limits."
 ---
 
-A **run** is a single execution of an agent inside its own Docker container. Every run has a UUID v7 id prefixed with `run_` (e.g. `run_0194a3c2...`), a status, and an audit trail linking it back to whoever or whatever triggered it.
+A **run** is one execution of an agent in its own sandbox. A run has an id (`run_` followed by a UUID), a per-agent `runNumber`, a status, a result and an audit trail that records who or what launched it.
 
-## Run Lifecycle
-
-Every agent execution follows this lifecycle:
+## Lifecycle
 
 ```
 pending → running → success | failed | timeout | cancelled
 ```
 
-- **pending** — run created, container not yet started
-- **running** — Docker container is active, agent executing the prompt
-- **success** — agent completed with a result
-- **failed** — an error occurred
-- **timeout** — maximum execution time exceeded
-- **cancelled** — run was cancelled manually or via API
+| Status      | Meaning                                                                                                           |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `pending`   | The run exists, the sandbox is being provisioned.                                                                 |
+| `running`   | The agent loop is executing.                                                                                      |
+| `success`   | The run finished and its output (if a schema is declared) is valid.                                               |
+| `failed`    | An error, an invalid output, a model failure, or a stall detected by the [watchdog](/docs/features/run-liveness). |
+| `timeout`   | The run exceeded its timeout.                                                                                     |
+| `cancelled` | Someone cancelled it.                                                                                             |
 
-## Launching a Run Manually
+Terminal runs carry `completed_at`, `duration` (milliseconds), `cost` and `token_usage` (see [Run cost](/docs/features/run-cost)).
 
-### Via the UI
+## Launching a run
 
-Open an agent detail page and click **Run**. If the agent declares an input schema, a modal form appears; otherwise the run starts immediately. There is no launch button on the dashboard itself (the dashboard shows recent runs and upcoming schedules).
+### From the web app
 
-### Via the API
+Open an agent and click **Run**. If the agent declares an input schema, a form generated from it appears. The run page streams logs and status as the run progresses.
+
+### From the API
 
 ```bash
-curl -X POST http://localhost:3000/api/agents/@scope/agent-name/run \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X POST https://your-instance/api/agents/@acme/support-triage/run \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Idempotency-Key: 2f1c0b0e-launch-001" \
   -H "Content-Type: application/json" \
-  -d '{
-    "input": {"message": "Analyze this month sales"},
-    "modelId": "mod_xxx",
-    "proxyId": "px_xxx"
-  }'
+  -d '{ "input": { "max_tickets": 10 } }'
 ```
 
-Fields in the body:
+The call is fire-and-forget: it answers `201` with the created run resource (the same shape as `GET /api/runs/{id}`, `status: "pending"`) and execution continues in the background. The route is rate-limited to 20 requests per minute and honours `Idempotency-Key`.
 
-- `input` *(optional)* — payload validated against the agent's input schema
-- `modelId` *(optional)* — override the agent's LLM model for this run only
-- `proxyId` *(optional)* — override the outbound proxy (`"none"` to force direct egress)
+The body is closed (an unknown field is a `400`) and every field is optional:
 
-The endpoint also accepts `multipart/form-data` when `input` needs to carry file uploads.
+| Field                  | Meaning                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `input`                | Values for the agent's input schema. File fields take `upload://`, `appfile://` or inline data URIs (see [Files](/docs/features/files)).               |
+| `rerun_from`           | A previous run id whose stored input is replayed. Mutually exclusive with `input`. The run must belong to the same agent (`409 rerun_agent_mismatch`). |
+| `modelId`              | Model for this run only (system model key or organization model id).                                                                                   |
+| `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                           |
+| `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                     |
+| `connection_overrides` | Per-integration connection picks, as arrays of connection ids.                                                                                         |
+| `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                |
 
-Response:
+Query parameter `version` chooses the agent definition: `published` (default, the latest published version), a version, dist-tag or semver range, or `draft` for callers who can write the agent. The run records the definition it used in `version_ref`.
 
-```json
-{ "runId": "run_0194a3c2..." }
-```
+Headers worth knowing: `X-Space-Id` (browser sessions), `Appstrate-User` ([impersonation](/docs/features/end-users)), `Appstrate-Version` ([API versioning](/docs/api)), and `X-Appstrate-Connect-Offers: 1`, which asks a `409 missing_integration_connection` to carry a ready-to-open connect link for each missing integration.
 
-The run starts in the background. Use SSE or `GET /api/runs/:runId` to follow its status.
+Launch failures that create **no run**: `404 agent_not_active_in_space`, `404 no_published_version`, `422 dependency_unresolved`, `422 bundle_invalid`, `409 missing_integration_connection`, `402` when a billing module refuses usage, `413` when input files exceed their caps.
 
-### Pinning an agent version
+### Waiting for the result
 
-Append `?version=1.2.3` to execute a specific version of the agent instead of the latest:
+Poll `GET /api/runs/{id}`, or let the server hold the request:
 
 ```bash
-curl -X POST "http://localhost:3000/api/agents/@scope/agent-name/run?version=1.2.3" \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
-  -d '{"input": {...}}'
+curl "https://your-instance/api/runs/run_0194...?wait=55" \
+  -H "Authorization: Bearer apst_your_key"
 ```
+
+`wait` accepts `true` or a number of seconds, capped at 55. The call returns when the run reaches a terminal status or the wait elapses, so a non-terminal `status` means "ask again". Each identity can hold 10 concurrent waits. To watch live progress, use the [realtime](/docs/features/realtime) streams. The `run_and_wait` tool of the [MCP server](/docs/using-appstrate/mcp-clients) launches and waits in one call.
+
+### Rerunning
+
+Send `rerun_from` instead of `input`. Files attached through `upload://` are kept as durable `appfile://` references, so a rerun does not need them uploaded again. Inline `data:` files are not replayable (`409 rerun_inline_input_unavailable`): stage them with an upload when the input must be replayable.
 
 ### Inline runs
 
-For one-shot executions where you don't want to publish a package first, define the agent in the request body:
+An **inline run** executes an agent defined entirely in the request, without publishing a package first.
 
 ```bash
-curl -X POST http://localhost:3000/api/runs/inline \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X POST https://your-instance/api/runs/inline \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
   -d '{
-    "manifest": { "type": "agent", "name": "adhoc", "version": "0.0.0" },
+    "manifest": {
+      "name": "@inline/summarize-contract",
+      "version": "0.0.0",
+      "type": "agent",
+      "schema_version": "0.3",
+      "display_name": "Summarize contract"
+    },
     "prompt": "Summarize the attached document.",
-    "input": {...}
+    "context_files": ["appfile://file_..."]
   }'
 ```
 
-A shadow package is created under the hood, the run is executed, and the shadow package is cleaned up after the retention window (default 30 days).
+The body takes `manifest` and `prompt` (required), `input`, `context_files` (existing `appfile://` files mounted read-only), `connection_overrides`, `modelId`, `proxyId` and `generation`. The platform stores a temporary **shadow package** (`package_ephemeral: true` on the run), runs it through the normal pipeline, and keeps the manifest and prompt snapshot for the retention window (default 30 days) before compacting them.
 
-`POST /api/runs/inline/validate` runs the same manifest/prompt validation without starting a container, useful as a dry-run check from CI or a coding agent.
+Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
 
-## Monitoring a Run in Real Time (SSE)
+`POST /api/runs/inline/validate` runs the same preflight (manifest, input, integration readiness) without creating anything. It shares the rate-limit bucket of inline runs.
 
-Appstrate exposes Server-Sent Events for live log and status streams:
+### Remote runs
 
-```bash
-# Single run
-curl -N "http://localhost:3000/api/realtime/runs/run_xxx?token=ask_your_key"
+A **remote run** (`runOrigin: "remote"`) executes the agent on the caller's host, for example the `appstrate run` CLI or a CI job, and streams signed events back to the platform. `POST /api/runs/remote` creates the run and returns short-lived signing credentials. The platform still tracks status, logs, files, cost and liveness. See [CLI](/docs/using-appstrate/cli).
 
-# All runs for a specific agent
-curl -N "http://localhost:3000/api/realtime/agents/ag_xxx/runs?token=ask_your_key"
+## Results
 
-# All runs in the active application
-curl -N "http://localhost:3000/api/realtime/runs?token=ask_your_key"
-```
+A finished run exposes:
 
-SSE endpoints accept the API token via `?token=ask_...` query param because browser `EventSource` does not support custom headers. Under the hood, realtime is driven by Postgres `LISTEN/NOTIFY` on the `runs` table plus an in-memory fanout for log lines. See [Realtime](/docs/features/realtime) for event shapes.
+- `result.output`: the structured value passed to the `output` tool, validated against `output.schema` when one exists. It is `null` while the run is in flight or when no output was emitted.
+- `error`: a message when the run did not succeed.
+- **Files**: deliverables the agent wrote under `./outputs/` or published with `publish_file` (see [Files](/docs/features/files)). `file_counts` gives the number of input and output files. `artifacts` summarises the end-of-run sweep (`complete` or `partial`, with the names of any files that could not be stored).
+- `checkpoint`: the carry-over snapshot of the run (see [Memory](/docs/features/memory)).
+- `connections_used`: the connections bound to the run, for display.
 
-## Viewing a Completed Run
-
-```bash
-# Run details
-curl http://localhost:3000/api/runs/run_xxx \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-
-# Run logs
-curl http://localhost:3000/api/runs/run_xxx/logs \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
-```
-
-## Cancelling a Run
+## Logs
 
 ```bash
-curl -X POST http://localhost:3000/api/runs/run_xxx/cancel \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx"
+curl "https://your-instance/api/runs/run_0194.../logs?level=info&limit=500" \
+  -H "Authorization: Bearer apst_your_key"
 ```
 
-Cancellation is delivered through a pluggable PubSub adapter: in single-instance deployments (Tier 0/1) it is an in-memory `EventEmitter`, and in multi-instance deployments it uses Redis when available. On the target instance, the `run-tracker` holds an `AbortController` per in-flight run and aborts it immediately, which tears down the container.
+The response is a list envelope. `since=<id>` returns entries with a greater id and is the cursor for tailing. `level` is a minimum severity (`debug`, `info`, `warn`, `error`). `limit` defaults to 1000 and, when more follow, a `Link: rel="next"` header points at the next page. The route is limited to 120 requests per minute. Tool results inside log data are truncated at write time (2048 bytes by default).
 
-## Concurrent Runs and Limits
+## Cancelling
 
-Each run gets its own isolated Docker network (`appstrate-exec-{runId}`) so credentials and egress policy are scoped per run. The `run-tracker` keeps an `AbortController` per in-flight run for both cancellation and graceful shutdown.
+```bash
+curl -X POST https://your-instance/api/runs/run_0194.../cancel \
+  -H "Authorization: Bearer apst_your_key"
+```
 
-The runtime enforces a set of org-wide limits from `INLINE_RUN_LIMITS` (override via env):
+The call returns the updated run, already `cancelled`, once the sandbox has been stopped. It requires `runs:cancel` and applies only to runs you may read. A run that is already terminal answers `409 not_cancellable`.
 
-| Limit | Default | Env |
-|---|---|---|
-| Max concurrent runs per org | 50 | `max_concurrent_per_org` |
-| Global rate per org | 200 / min | `per_org_global_rate_per_min` |
-| Timeout ceiling per run | 1800 s | `timeout_ceiling_seconds` |
-| Shadow package retention (inline runs) | 30 days | `retention_days` |
+## Listing and deleting
 
-Agent-declared timeouts are clamped to the ceiling.
+`GET /api/runs` lists the runs of the current space. Filters: `user=me`, `kind` (`all`, `package`, `inline`), `status`, `start_date`, `end_date`, `chat_session_id`, with `limit` (max 100) and `offset`. `GET /api/agents/{scope}/{name}/runs` lists one agent's runs.
 
-## Trigger Attribution
+Visibility follows [roles and permissions](/docs/features/roles-and-permissions): `runs:read` shows the runs you launched, `runs:read-all` shows every run of the space. `DELETE /api/agents/{scope}/{name}/runs` deletes the completed runs of an agent and needs `runs:delete` plus `runs:read-all`. It is refused while a run of that agent is in progress.
 
-Every run records who or what launched it. Exactly one of the following fields is populated on the run record:
+## Who launched it
 
-- `userId` — a dashboard user launched the run
-- `endUserId` — the run was launched on behalf of an end-user (via the `Appstrate-User` header)
-- `apiKeyId` — the run was launched by a server-side API key
-- `scheduleId` — the run was triggered by a cron schedule
+Every run records its trigger. Exactly one of these is set:
 
-`runs.proxyLabel` and `runs.modelLabel` are also denormalized on the record at launch time so that audit queries can answer "which proxy / model did this run actually use" without resolving overrides after the fact.
+| Field        | Trigger                                                       |
+| ------------ | ------------------------------------------------------------- |
+| `userId`     | A member launched it (dashboard, CLI, MCP, chat).             |
+| `endUserId`  | It ran on behalf of an [end-user](/docs/features/end-users).  |
+| `apiKeyId`   | A server-side [API key](/docs/features/api-keys) launched it. |
+| `scheduleId` | A [schedule](/docs/features/scheduling) fired.                |
 
-## Cost Per Run
+The response adds readable names (`user_name`, `end_user_name`, `api_key_name`, `schedule_name`), plus `runner_name` and `runner_kind` for remote runs. `model_label`, `model_source` and `proxy_label` freeze which model and proxy the run used.
 
-If the LLM model has cost configuration, the dollar cost is computed from token usage and stored in `runs.cost` (nullable `double`). Only populated when greater than zero. Available via the run detail endpoint.
+## Limits
 
-## Execution via Scheduling
+These are operator settings. The values below are the defaults. The variables are described in [Environment Variables](/docs/self-hosting/environment-variables).
 
-Runs can also be triggered automatically via cron schedules. See [Scheduling](/docs/features/scheduling).
+| Limit                                                       | Default              | Setting                                                            |
+| ----------------------------------------------------------- | -------------------- | ------------------------------------------------------------------ |
+| Run timeout ceiling (a manifest `timeout` is clamped to it) | 1800 s               | `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`                      |
+| Timeout when the manifest declares none                     | 300 s                | fixed                                                              |
+| Concurrent runs per organization                            | 50                   | `PLATFORM_RUN_LIMITS.max_concurrent_per_org`                       |
+| Runs started per organization per minute                    | 200                  | `PLATFORM_RUN_LIMITS.per_org_global_rate_per_min`                  |
+| Agent memory and CPU ceiling                                | 1536 MiB, 2 vCPU     | `PLATFORM_RUN_LIMITS.agent_memory_ceiling_mb`, `agent_cpu_ceiling` |
+| Inline runs per minute                                      | 60                   | `INLINE_RUN_LIMITS.rate_per_min`                                   |
+| Inline manifest / prompt size                               | 65536 / 200000 bytes | `INLINE_RUN_LIMITS.manifest_bytes`, `prompt_bytes`                 |
+| Skills in an inline run                                     | 20                   | `INLINE_RUN_LIMITS.max_skills`                                     |
+| Inline shadow retention                                     | 30 days              | `INLINE_RUN_LIMITS.retention_days`                                 |
+| Files per run (input and output)                            | 200                  | `RUN_MAX_FILES`                                                    |
+
+Run boot and stall limits are covered in [Run liveness](/docs/features/run-liveness).
+
+## Related
+
+- [Scheduling](/docs/features/scheduling) fires runs on a cron.
+- [Webhooks](/docs/features/webhooks) and [Notifications](/docs/features/notifications) report the outcome.
+- [Realtime](/docs/features/realtime) streams status, logs and cost.

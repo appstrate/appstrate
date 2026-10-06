@@ -1,207 +1,150 @@
 ---
 title: API Reference
-description: Complete guide to the Appstrate API — authentication, versioning, error handling, rate limiting, idempotency, pagination, and SSE streaming.
+description: "Cross-cutting rules of the Appstrate API: context headers, versioning, rate limits, pagination, long polling, and realtime streams. Per-operation reference is generated from OpenAPI."
 ---
+
+This page covers the conventions shared by every endpoint. Each operation's parameters, bodies, and responses are in the generated reference pages and in the live OpenAPI document, which is the source of truth.
 
 ## Base URL
 
-All requests are relative to the `/api` root of your instance:
+All endpoints are under `/api` on your instance:
 
 ```
 http://localhost:3000/api
 ```
 
-The OpenAPI specification is publicly available (no authentication required):
+| Resource             | Path                    | Credentials                                                      |
+| -------------------- | ----------------------- | ---------------------------------------------------------------- |
+| OpenAPI 3.1 document | `GET /api/openapi.json` | None. Responds with an `ETag`; send `If-None-Match` to get `304` |
+| Swagger UI           | `GET /api/docs`         | None                                                             |
+| LLM-oriented index   | `GET /llms.txt`         | None                                                             |
 
-- **JSON**: `GET /api/openapi.json`
-- **Swagger UI**: `GET /api/docs`
-
----
+Browser clients on another origin must be listed in the instance's `TRUSTED_ORIGINS`. Cross-origin responses expose the headers described below (`Request-Id`, `Appstrate-Version`, `RateLimit`, `Link`, `ETag`, and others).
 
 ## Authentication
 
-The API supports two authentication methods.
+API keys (`apst_...`), session cookies, and OIDC tokens are accepted. Context headers (`X-Org-Id`, `X-Space-Id`, `Appstrate-User`) select the organization, the space, and the end-user. All of it is in [Authentication](/docs/api/authentication).
 
-### Cookie session
+## Versioning
 
-Used by the frontend. Authentication relies on [Better Auth](https://www.better-auth.com/) with email/password and optional social login (Google, GitHub). The session cookie is sent automatically by the browser.
-
-For organization-scoped routes, include the `X-Org-Id` header:
-
-```bash
-curl -b cookies.txt \
-  -H "X-Org-Id: org_abc123" \
-  http://localhost:3000/api/applications
-```
-
-### API key
-
-For headless integrations. API keys use the `ask_` prefix and are scoped to an application.
-
-```bash
-curl -H "Authorization: Bearer ask_your_key" \
-     -H "X-App-Id: app_abc123" \
-     http://localhost:3000/api/agents
-```
-
-The `X-App-Id` header is required for application-scoped routes: agents, runs, schedules, webhooks, end-users, api-keys, packages, providers, and connections.
-
-### SSE and API keys
-
-SSE (Server-Sent Events) endpoints do not support custom headers via `EventSource`. Pass the API key as a query parameter:
-
-```bash
-curl -N "http://localhost:3000/api/realtime/runs/run_abc?token=ask_your_key"
-```
-
----
-
-## End-User Impersonation
-
-The API allows executing requests on behalf of an end-user via the `Appstrate-User` header:
-
-```bash
-curl -H "Authorization: Bearer ask_your_key" \
-     -H "X-App-Id: app_abc123" \
-     -H "Appstrate-User: eu_xyz789" \
-     http://localhost:3000/api/runs
-```
-
-Constraints:
-
-- **API key auth only** — returns `400` if used with a cookie session
-- The end-user must belong to the application associated with the API key
-- All requests are recorded in the audit log (requestId, apiKeyId, endUserId, applicationId, IP, userAgent)
-
----
-
-## API Versioning
-
-The API uses date-based versioning, inspired by the Stripe model. Send the `Appstrate-Version` header to target a specific version:
+The API uses date-based versions, sent in the `Appstrate-Version` header and echoed on every authenticated response:
 
 ```
 Appstrate-Version: 2026-03-21
 ```
 
-- **No header**: uses the organization's pinned version, or the current version by default
-- **Pinning**: configure the default version in your organization settings
-- **Deprecation**: sunset versions return a `Sunset` header with the end-of-support date
+- The version is resolved from the request header, then from the version pinned on the organization, then the current version, `2026-03-21`. A header or a pin the server cannot serve is a `400 unsupported_api_version`; it never silently falls back.
+- `2026-03-21` is currently the only version, and a version does not yet change any response: the header is a contract marker you can send now to pin your integration. No `Deprecation` or `Sunset` header is emitted yet.
+- The platform is still in beta (`1.0.0-beta.x`) and some releases change the wire contract on purpose, for example the `ask_` to `apst_` key format and the `applications` to `spaces` rename. Breaking changes are called out in the [changelog](/docs/resources/changelog).
 
----
+## Errors
 
-## Error Format
+Errors are RFC 9457 `application/problem+json` with a stable `code` and a `request_id`. Every response, success or error, carries a `Request-Id` header (`req_...`). See [Errors](/docs/api/errors).
 
-All errors follow the [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) specification (`application/problem+json`). Every response includes a `Request-Id` header (`req_` prefix) for tracing.
+## Rate limiting
 
-```json
-{
-  "type": "https://appstrate.dev/errors/validation-error",
-  "title": "Validation Error",
-  "status": 422,
-  "detail": "The 'name' field is required and cannot be empty.",
-  "instance": "/api/agents"
-}
-```
+Rate limits are applied per route, per caller. The caller is the user, or the API key (`apikey:<id>`), and public routes are limited per IP. Limits are enforced with Redis when `REDIS_URL` is set and in memory otherwise.
 
-The `Request-Id` is present on **all** responses (success and error):
-
-```
-Request-Id: req_a1b2c3d4e5f6
-```
-
----
-
-## Rate Limiting
-
-Rate limiting is backed by Redis via `rate-limiter-flexible`. Keys are constructed from the method, path, and caller identity:
-
-- **Cookie session**: `method:path:userId`
-- **API key**: `method:path:apikey:apiKeyId`
-
-Every response includes standard IETF headers:
+Responses from a rate-limited route carry the IETF headers, on success as well as on `429`:
 
 ```
 RateLimit: limit=20, remaining=18, reset=45
 RateLimit-Policy: 20;w=60
 ```
 
-When the limit is exceeded (`429 Too Many Requests`), a `Retry-After` header indicates the delay in seconds.
+`reset` is the number of seconds until the window refills. A request over the limit is `429` with `code: "rate_limited"`, a `Retry-After` header, and `retry_after` in the body.
 
-**Key limits**:
+| Route                                                | Limit          |
+| ---------------------------------------------------- | -------------- |
+| Launch a run (`POST /api/agents/{scope}/{name}/run`) | 20 per minute  |
+| Create a schedule                                    | 10 per minute  |
+| Create a webhook                                     | 10 per minute  |
+| Import a package                                     | 10 per minute  |
+| Create an end-user                                   | 60 per minute  |
+| List or read end-users, webhooks                     | 300 per minute |
+| Run logs (`GET /api/runs/{id}/logs`)                 | 120 per minute |
+| File reads (`GET /api/files`)                        | 120 per minute |
 
-| Category | Limit |
-|----------|-------|
-| Run endpoints | 20 requests/min |
-| Package import | 10 requests/min |
-| Resource creation | 10 requests/min |
-
----
+Runs are also capped per organization across all callers and all launch paths, 200 per minute by default (`PLATFORM_RUN_LIMITS`), and by concurrency limits. Operators tune these in the [environment variables](/docs/self-hosting/environment-variables) and [rate limits](/docs/self-hosting/rate-limits) guides. The `RateLimit-Policy` header on each response is authoritative for that route.
 
 ## Idempotency
 
-Critical POST routes (end-users, webhooks, agent run) support the `Idempotency-Key` header to guarantee idempotency:
-
-```bash
-curl -X POST \
-     -H "Authorization: Bearer ask_your_key" \
-     -H "X-App-Id: app_abc123" \
-     -H "Idempotency-Key: my-unique-key-123" \
-     -H "Content-Type: application/json" \
-     -d '{"agentId": "agent_abc"}' \
-     http://localhost:3000/api/runs
-```
-
-Behavior:
-
-- Keys are stored in Redis with a **24-hour** TTL
-- A SHA-256 hash of the body is used for conflict detection
-- **`409 Conflict`**: concurrent request with the same key (processing in progress)
-- **`422 Unprocessable Entity`**: same key but different body
-- Replays return the `Idempotent-Replayed: true` header
-
----
+A handful of `POST` operations accept an `Idempotency-Key`. Others reject it. See [Idempotency](/docs/api/idempotency).
 
 ## Pagination
 
-List endpoints use offset-based pagination:
-
-```bash
-curl -H "Authorization: Bearer ask_your_key" \
-     -H "X-App-Id: app_abc123" \
-     "http://localhost:3000/api/agents?page=2&pageSize=20"
-```
-
-Response shape:
+List endpoints return an envelope:
 
 ```json
 {
-  "data": [{ "id": "agent_abc", "name": "My agent" }],
-  "pagination": {
-    "page": 2,
-    "pageSize": 20,
-    "total": 47,
-    "totalPages": 3
-  }
+  "object": "list",
+  "data": [{ "id": "…" }],
+  "hasMore": true
 }
 ```
 
----
+Some also return `total` or `limit`. The style depends on the resource, and the operation's parameters tell you which:
 
-## SSE Streaming (Realtime)
+| Style    | Parameters                                                  | Used by                                                                                                     |
+| -------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Offset   | `limit`, `offset`                                           | `/api/runs`, `/api/agents/{scope}/{name}/runs`, `/api/schedules/{id}/runs`, `/api/integrations`             |
+| Cursor   | `limit`, `startingAfter` (and `endingBefore` for end-users) | `/api/end-users`, `/api/files`, `/api/notifications`, `/api/webhooks/{id}/deliveries`, `/api/chat/sessions` |
+| Sequence | `since`, `limit`                                            | `/api/runs/{id}/logs`                                                                                       |
 
-The API exposes SSE endpoints for tracking runs in real time. Events include run status changes and log entries.
+`limit` defaults to 20 and is capped at 100 on most lists (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/realtime/runs/:id` | Single run (historical replay + live logs) |
-| `GET /api/realtime/agents/:id/runs` | All runs for an agent |
-| `GET /api/realtime/runs` | All runs across the application |
+When another page follows, the response carries an RFC 8288 `Link` header with `rel="next"`, and `rel="prev"`, `first`, `last` where they apply. A generic client can follow `next` until it disappears, whatever the body shape. Cursor values are resource ids: pass the `id` of the last item you received.
 
-Connection example with API key:
+## Waiting for a run
+
+`POST /api/agents/{scope}/{name}/run` answers `201` with the created run as soon as it is queued. It does not wait for the run to finish. To wait without polling, long-poll the run:
 
 ```bash
-curl -N -H "Accept: text/event-stream" \
-     "http://localhost:3000/api/realtime/runs/run_abc?token=ask_your_key"
+curl "http://localhost:3000/api/runs/$RUN_ID?wait=true" \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
 ```
 
-For cookie-based authentication, standard headers (`Cookie`, `X-Org-Id`) are used normally.
+`wait` takes a number of seconds or `true`, and is capped at 55 seconds, below the idle timeout of common proxies. The call returns as soon as the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or when the wait elapses, in which case the status is still non-terminal: call again. Each caller can hold at most 10 waits at once. Past that, the call returns immediately.
+
+## Realtime streams
+
+Server-Sent Events streams push run changes to a browser or a backend without polling.
+
+| Endpoint                                    | Streams                                                                     |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /api/realtime/runs/{id}`               | One run. The stream opens with a `run_update` snapshot of the current state |
+| `GET /api/realtime/agents/{packageId}/runs` | Every run of one agent                                                      |
+| `GET /api/realtime/runs`                    | Every run in the space                                                      |
+
+Authentication cannot use headers, because `EventSource` cannot send them:
+
+- **API key**: `?token=apst_...`. The organization and space come from the key.
+- **Session cookie**: send the cookie, plus `?orgId=...&spaceId=...`.
+
+```bash
+curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
+```
+
+Event names, as `event:` lines in the stream:
+
+| Event                 | Carries                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `run_update`          | A run's status and timing changed                                                              |
+| `run_log`             | One log entry. By default without its `data` payload                                           |
+| `run_metric`          | Running total of cost and token usage for a run                                                |
+| `connection_update`   | One of your own integration connections changed                                                |
+| `chat_session_update` | A change signal for one of your chat sessions, when the chat module is loaded. Needs a session |
+| `ping`                | Keep-alive, immediately on connect and every 30 seconds                                        |
+
+Parameters: `channels=run_update,run_log` limits the stream to those events (unknown names are ignored, and an empty result falls back to everything). `verbose=true` includes full payloads, such as log `data`. Leave it off for safer consumption.
+
+Delivery rules to build around:
+
+- A caller receives only the runs it may read: every run in the space with `runs:read-all`, otherwise the runs it launched. Debug-level log entries need `runs:delete`.
+- **There is no replay.** `Last-Event-ID` is not honored; a reconnect resumes at the live tail, and anything missed is gone. After a reconnect, read the run with `GET /api/runs/{id}` and the logs with `GET /api/runs/{id}/logs?since=...`.
+- A client that stops reading is dropped once about 2000 frames are queued for it. Reconnect and resynchronize the same way.
+- Frame ids look like `<subscriber>:<n>`. They are unique per connection and meant for deduplication, not for resuming.
+
+## Conditional requests
+
+A resource that supports optimistic concurrency returns a strong `ETag`. Send it back in `If-Match` on the next write. A stale tag is `412 precondition_failed`, and a missing mandatory one is `428 precondition_required`. The package draft save requires it. Other resources are last write wins.

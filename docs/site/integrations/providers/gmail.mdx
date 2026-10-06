@@ -1,60 +1,150 @@
 ---
 title: Gmail
-description: Connect Gmail to your Appstrate agents.
+description: Connect Gmail to your Appstrate agents, with the direct API integration or Google's hosted MCP server.
 ---
 
 ## Overview
 
-Gmail is Google's email service, allowing your agents to read, send, and manage emails.
+Gmail is Google's email service. Appstrate ships two Gmail integrations. They are separate packages with separate connections.
 
-## Authentication Mode
+| Integration                            | Source     | How the agent reaches Gmail                                                              |
+| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `@appstrate/gmail` (version 1.1.6)     | `api_call` | Calls the Gmail REST API directly                                                        |
+| `@appstrate/gmail-mcp` (version 2.3.5) | Remote MCP | Uses Google's hosted Gmail MCP server (`gmailmcp.googleapis.com`) and its tool catalogue |
 
-| Property | Value |
-|----------|-------|
-| Type | `oauth2` |
-| Header | `Authorization: Bearer <token>` |
-| Default scopes | `gmail.readonly`, `gmail.send` |
+Both use Google OAuth 2.0 and need an OAuth client registered by an administrator. For the model behind this page, see [How integrations work](/docs/integrations/how-integrations-work).
 
-### Available Scopes
+## Gmail (API): `@appstrate/gmail`
 
-| Scope | Description |
-|-------|-------------|
-| `gmail.readonly` | Read-only access |
-| `gmail.send` | Send messages |
-| `gmail.compose` | Compose and send drafts |
-| `gmail.modify` | Read and write (no delete) |
-| `gmail.labels` | Manage labels |
-| `gmail.metadata` | Read metadata only |
-| `gmail.insert` | Insert messages |
-| `gmail.settings.basic` | Manage basic settings |
-| `mail.google.com/` | Full mailbox access |
+| Property            | Value                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Type                | `oauth2`                                                                                                          |
+| Credential sent as  | `Authorization: Bearer <credential>`                                                                              |
+| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send` |
+| Token endpoint auth | `client_secret_post`                                                                                              |
 
-## Authorized URIs
+Extra parameters on the authorization request: `access_type=offline` and `prompt=consent`, so Google returns a refresh token.
 
-The agent can access the following endpoints through the sidecar proxy:
+### Scopes
 
-- `https://gmail.googleapis.com/*`
-- `https://www.googleapis.com/gmail/*`
+Scope values are Google URLs. The table shows the part after `https://www.googleapis.com/auth/` (the full-mailbox scope is `https://mail.google.com/`).
+
+| Scope                      | Description                            | Default |
+| -------------------------- | -------------------------------------- | ------- |
+| `openid`                   | Identity (OpenID)                      | yes     |
+| `email`                    | Email address                          | yes     |
+| `userinfo.email`           | Email address (Google canonical scope) |         |
+| `gmail.readonly`           | Read-only access                       | yes     |
+| `gmail.send`               | Send messages                          | yes     |
+| `gmail.compose`            | Compose & send drafts                  |         |
+| `gmail.modify`             | Read & write (no delete)               |         |
+| `gmail.labels`             | Manage labels                          |         |
+| `gmail.metadata`           | Read metadata only                     |         |
+| `gmail.insert`             | Insert messages                        |         |
+| `gmail.settings.basic`     | Manage basic settings                  |         |
+| `https://mail.google.com/` | Full mailbox access                    |         |
+
+### Authorized URIs
+
+- `https://gmail.googleapis.com/**`
+- `https://www.googleapis.com/gmail/**`
+
+## Gmail (MCP): `@appstrate/gmail-mcp`
+
+| Property            | Value                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Type                | `oauth2`                                                                                                             |
+| Credential sent as  | `Authorization: Bearer <credential>`                                                                                 |
+| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.compose` |
+| Token endpoint auth | `client_secret_post`                                                                                                 |
+
+The MCP integration exposes 23 tools. The platform grants the OAuth scopes the selected tools need, so an agent that only searches mail is never asked for write access. No tool in the catalogue sends a message: agents create drafts.
+
+| Required scope   | Tools                                                                                                                                                                                                                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gmail.readonly` | `search_threads`, `get_thread`, `get_message`, `get_draft`, `list_drafts`, `list_labels`                                                                                                                                                                                                                                   |
+| `gmail.compose`  | `create_draft`                                                                                                                                                                                                                                                                                                             |
+| `gmail.labels`   | `create_label`                                                                                                                                                                                                                                                                                                             |
+| `gmail.modify`   | `apply_sensitive_message_label`, `apply_sensitive_thread_label`, `label_message`, `unlabel_message`, `update_message_labels`, `label_thread`, `unlabel_thread`, `trash_message`, `untrash_message`, `mark_message_spam`, `unmark_message_spam`, `trash_thread`, `untrash_thread`, `mark_thread_spam`, `unmark_thread_spam` |
+
+Authorized URI: `https://gmailmcp.googleapis.com/**`.
 
 ## Connect Gmail
 
-1. [Create a Google Cloud project](https://console.cloud.google.com/apis/library/gmail.googleapis.com) and enable the Gmail API
-2. [Configure the OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
-3. [Create OAuth 2.0 credentials](https://console.cloud.google.com/apis/credentials) (Client ID and Client Secret)
-4. Add the Appstrate redirect URI as an authorized redirect URI
-5. Enter the Client ID and Client Secret in the Gmail provider settings on Appstrate
+<Steps>
+<Step>
 
-## Usage in an Agent
+Create or select a Google Cloud project ([open](https://console.cloud.google.com/projectcreate)).
 
-Once connected, the agent can call Gmail APIs through the sidecar proxy. Example prompt:
+</Step>
+<Step>
+
+Enable the API you need in that project.
+
+</Step>
+<Step>
+
+Configure the OAuth consent screen ([open](https://console.cloud.google.com/auth/overview)).
+
+</Step>
+<Step>
+
+Create an OAuth client ID of type "Web application" and register the Appstrate redirect URI ([open](https://console.cloud.google.com/apis/credentials)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the OAuth client's authorized redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Direct API, with a wider scope than the default:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/gmail": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/gmail": {
+      "tools": ["api_call"],
+      "scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    }
+  }
+}
+```
+
+Hosted MCP server, selecting tools:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/gmail-mcp": "^2.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/gmail-mcp": {
+      "tools": ["search_threads", "get_thread", "create_draft"]
+    }
+  }
+}
+```
+
+Example prompt:
 
 ```
 Every morning at 8am, read my unread emails received since last night.
-For each email, write a 2-line summary.
-Send me a recap email with the list of summaries.
+For each email, write a 2-line summary, then create a draft recap in my mailbox.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

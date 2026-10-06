@@ -1,114 +1,150 @@
 ---
 title: Architecture
-description: How the Appstrate monorepo is organized and how requests flow from the API to an isolated run.
+description: "How Appstrate is built: the API, the run sandbox with its sidecar, integrations, modules, and the execution backends."
 ---
 
-Appstrate is a TypeScript monorepo built on Bun and Hono. Self-hosters pick an infrastructure tier (0 to 3) and bring up the stack with the matching Docker Compose file, or with nothing at all for Tier 0.
+Appstrate is a TypeScript monorepo on Bun and Hono, with a React dashboard. The API validates a request, creates a run, and starts the agent in an isolated sandbox next to a **sidecar** that holds every secret. This page is an overview. Each subsystem has a design document in the repository, linked in [Go deeper](#go-deeper), and those documents are the reference when this page and the code disagree.
 
 ## Monorepo layout
 
 ```
-appstrate-oss/
+appstrate/
 ├── apps/
-│   ├── api/              # Hono backend (237 endpoints, auth pipeline, webhooks, realtime)
-│   ├── web/              # React 19 + Vite dashboard
-│   └── cli/              # appstrate binary (Bun self-contained)
+│   ├── api/            # Hono API: routes, services, auth pipeline, OpenAPI, built-in modules
+│   ├── web/            # React 19 + Vite dashboard (also served by the API)
+│   └── cli/            # the `appstrate` binary
 ├── packages/
-│   ├── connect/          # OAuth2/PKCE, OAuth1, API key, credential encryption
-│   ├── core/             # Shared validation, storage, semver, integrity, schemas
-│   ├── db/               # Drizzle ORM schema, PGlite + PostgreSQL drivers
-│   ├── emails/           # Email template registry + renderer
-│   ├── env/              # Zod-validated env configuration
-│   ├── shared-types/     # Drizzle InferSelectModel re-exports
-│   └── ui/               # React components (schema-form, widgets) published to npm
-├── runtime-pi/            # Per-run container spec: agent + sidecar + extension wrapper
-├── system-packages/       # 60 provider + 5 tool AFPS packages shipped by default
-└── examples/
-    └── self-hosting/      # docker-compose.yml + tier1/tier2/tier3 overlays
+│   ├── core/           # shared validation, naming, semver, permissions, module contract (npm)
+│   ├── afps-shared/    # bundle, SSRF and credential helpers shared with the runtime (npm)
+│   ├── afps-runtime/   # portable AFPS bundle runner, signing, conformance, `afps` CLI
+│   ├── runner-pi/      # drives the Pi agent run and builds the container environment
+│   ├── mcp-transport/  # MCP SDK adapter used by the sidecar and the agent runtime
+│   ├── connect/        # OAuth2/PKCE, API-key credentials, credential encryption
+│   ├── db/             # Drizzle schema and migrations (PostgreSQL and PGlite), Better Auth
+│   ├── env/            # Zod-validated environment: the source of truth for configuration
+│   ├── emails/         # email templates
+│   ├── ui/             # shared React design system
+│   └── module-*/       # workspace modules: chat, claude-code, codex, observability, ee
+├── runtime-pi/         # the run container images: agent runtime, sidecar, integration runners
+└── system-packages/    # AFPS packages shipped with the platform: integrations and MCP servers
 ```
 
-Tier 0 requires only Bun (zero-install, no Docker). Tiers 1 to 3 each add a dependency: Tier 1 adds PostgreSQL, Tier 2 adds Redis, Tier 3 adds S3/MinIO and Docker-based run execution.
+The stack is Bun, Hono, PostgreSQL 16 with Drizzle (or PGlite when no `DATABASE_URL` is set), Better Auth for sessions, and the Pi coding agent SDK (`@earendil-works/pi-coding-agent`) as the agent harness. All tenant data is isolated at the application level: every query filters by organization, and by space for space-scoped resources.
 
-## Request flow
+## What happens on a request
 
-The real middleware chain is defined in `apps/api/src/index.ts`:
+The API assembles one pipeline, in this order (`apps/api/src/index.ts`):
 
 ```
-HTTP request
-    │
-    ▼
-Hono app (apps/api/src/index.ts)
-    │
-    ├─ onError              → ApiError becomes RFC 9457 application/problem+json
-    ├─ requestId            → attaches req_xxx on the request + response
-    ├─ cors                 → TRUSTED_ORIGINS allowlist
-    ├─ healthRouter         → /, bypasses auth
-    ├─ OpenAPI docs         → /api/openapi.json + /api/docs, bypasses auth
-    ├─ shutdown gate        → rejects new POSTs while draining
-    ├─ auth-pipeline        → module auth strategies → Bearer ask_… → cookie session
-    │                         (first match wins; resolves Appstrate-User header on API key)
-    ├─ org-context          → validates X-Org-Id + membership
-    ├─ app-context          → validates X-App-Id for app-scoped routes
-    ├─ api-version          → reads Appstrate-Version, sets response header
-    └─ route handler
-          │
-          ├─ per-route rateLimit()   → e.g. 20/min on run, 10/min on import
-          ├─ per-route idempotency() → Idempotency-Key, 24h TTL, SHA-256 body hash
-          │
-          ▼
-    service layer (apps/api/src/services/*)
-          │
-          ▼
-    Drizzle ORM → PostgreSQL / PGlite
-          │
-          ▼
-    For run triggers:
-      run-pipeline → acquires sidecar from pool
-                  → spawns agent container on an isolated Docker network
-                  → tool calls proxied through sidecar (credential injection)
-                  → run ends, container torn down
-                  → webhooks fan out, SSE stream closes
+request
+  → error handler (RFC 9457)  → Request-Id  → client IP  → CORS  → body limit
+  → health, OpenAPI document, /llms.txt            (no auth)
+  → shutdown gate (new writes are refused while draining)
+  → Better Auth routes (/api/auth/*)
+  → authentication: OIDC module strategies → API key (apst_) → session cookie
+  → Appstrate-User impersonation, role-preview and realm guards
+  → organization context (X-Org-Id) → permissions → space context (X-Space-Id)
+  → API version (Appstrate-Version) → Idempotency-Key guard
+  → route handler (per-route rate limit, idempotency)  → module routers
 ```
 
-## Key subsystems
+Authorization is RBAC: fixed organization roles, plus a role per space (a preset or an organization-defined bundle). An API key is a ceiling on its creator's authority in one space. See [Authentication](/docs/api/authentication).
 
-### Auth pipeline
+## What happens when an agent runs
 
-`apps/api/src/lib/auth-pipeline.ts` evaluates strategies in order and picks the first match:
+```
+POST /api/agents/{scope}/{name}/run
+   │  validate input, resolve model, connections and version, create the run
+   ▼
+Platform (API process)
+   │  starts, in parallel, on a per-run isolated network
+   ▼
+┌─ per-run sandbox ───────────────────────────────────────────────┐
+│  Sidecar            holds the secrets; speaks MCP at /mcp        │
+│    ├─ credential-injecting api_call tool per integration         │
+│    ├─ run_history and recall_memory tools                        │
+│    ├─ /llm/* reverse proxy to the model provider                 │
+│    └─ integration runners (one MCP server per local integration) │
+│                                                                  │
+│  Agent              Pi agent, runs your prompt                   │
+│    └─ sees only the sidecar's tools, never a secret              │
+└──────────────────────────────────────────────────────────────────┘
+   │  signed run events (logs, status, metrics, result)
+   ▼
+Platform: persists the run → LISTEN/NOTIFY → SSE streams, webhooks, notifications
+```
 
-1. **Module auth strategies** (generic JWT, mTLS, SAML, OIDC…). Modules contribute strategies via `authStrategies()`; they must return `null` fast when the request does not match their signature. The bundled OIDC module is one such strategy, not the only one.
-2. **API keys**: `Authorization: Bearer ask_...` validated against the hashed `api_keys` table. When `Appstrate-User: eu_...` is also present, the end-user context is attached and a full audit row is written.
-3. **Session cookies** from Better Auth are decoded last.
+- **The sidecar is the security boundary.** The agent talks to the sidecar over MCP and never holds a credential. The platform hands the run its sidecar address and token over stdin, not through the environment, and the agent process cannot dump its own memory. The sidecar injects credentials into outbound calls, checks every target against the integration's allowed URIs and against SSRF rules, and proxies model calls so the provider key stays out of the sandbox. Details: [SIDECAR.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SIDECAR.md).
+- **Everything the agent can do comes from MCP tools.** The agent sees the integration tools it was given, a few first-party tools (`run_history`, `recall_memory`), and the runtime tools its manifest enables (`output`, `log`, `note`, `pin`, `publish_file`).
+- **Runs report back through signed events.** The runner posts HMAC-signed events to the platform, which persists them, finalizes the run once, and then emits the status change that drives realtime streams, webhooks, and notifications. Liveness is watched in two phases, boot and execution, so a stuck run is failed with a specific error.
+- The platform image, `appstrate-pi` (the agent), and `appstrate-sidecar` speak a versioned protocol and must be deployed at one version. Boot fails when they disagree.
 
-Scope resolution happens downstream of the pipeline: `middleware/org-context.ts` validates `X-Org-Id` and sets `orgId`, `middleware/app-context.ts` validates `X-App-Id` and sets `applicationId`. `lib/scope.ts` only defines the `OrgScope` / `AppScope` types that services consume.
+## Integrations
 
-### Run pipeline
+A connection to a third-party service is an **integration**: an AFPS package that declares its authentication methods (OAuth 2, API key, basic, custom fields, mTLS), the URLs it may call, and where its tools come from:
 
-Run execution (`apps/api/src/services/run-pipeline.ts`):
+| Source   | What runs                                                                                                  | Notes                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `none`   | Nothing: only the credential-injecting `api_call` tool                                                     | The agent calls the vendor's REST API through the sidecar                                 |
+| `local`  | A third-party MCP server, started by the sidecar in its own runner container (node, python, binary, or uv) | Needs a container or microVM backend. Egress is limited to the integration's allowed URIs |
+| `remote` | A vendor-hosted MCP server over Streamable HTTP or SSE                                                     | No runner. Tool calls leave the perimeter                                                 |
 
-1. Apply rate limits, concurrent-run caps, and timeout ceilings (per org, per user, per end-user).
-2. Validate input against the agent's schema (AJV, manifest-driven).
-3. Create the run record, call the `beforeRun` hook (may block).
-4. Acquire a warm sidecar from the pool (`sidecar-pool.ts`), falling back to a fresh container.
-5. Start the agent container on an isolated Docker network (`appstrate-exec-{runId}`).
-6. Proxy tool calls through the sidecar, injecting credentials at the last moment.
-7. Collect output, validate against the agent's result schema when defined.
-8. Persist the run, emit terminal events (SSE + webhooks), stream log lines, tear down containers.
+Credentials are injected on the sidecar side, either into the tool's environment or into HTTP calls by a per-run credential-injecting proxy, and the integration's server never reads the stored secret. An agent selects which tools it uses, and the OAuth scopes requested at consent are inferred from that selection. A run binds the connections of its actor, so an end-user's run uses the end-user's connections. Full detail: [INTEGRATIONS_RUNTIME.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/INTEGRATIONS_RUNTIME.md). The AFPS format itself is covered in [AFPS specification](/docs/resources/afps-specification).
 
-### Realtime fanout
+## Execution backends
 
-PostgreSQL `pg_notify` triggers on both `runs` and `run_logs`. SSE clients subscribe through `EventSource`, the server patches React Query cache directly, no polling. No Redis dependency: this works in Tier 0 (PGlite implements LISTEN/NOTIFY) as well as Tier 3.
+`RUN_ADAPTER` picks where a run executes. It is a registry: modules can add backends.
+
+| Backend     | `RUN_ADAPTER`       | Isolation                                                                                | Use                                                                       |
+| ----------- | ------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Process     | `process` (default) | None: the agent is a host subprocess                                                     | Development and Tier 0 to 2 installs. Refuses `local` integration runners |
+| Docker      | `docker`            | A container per agent and sidecar, on an isolated per-run network                        | Production, Tier 3                                                        |
+| Firecracker | `firecracker`       | One microVM per run, behind a KVM boundary, driven through the `appstrate-runner` daemon | Untrusted workloads. Opt-in `firecracker` module                          |
+
+See [Progressive infrastructure](/docs/self-hosting/progressive-infrastructure) for tiers, and [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md) for the microVM backend and its threat model.
+
+## Modules
+
+Optional features are modules loaded at boot from the `MODULES` environment variable. A module contributes routes, permissions, OpenAPI paths, auth strategies, hooks, or an execution backend, and owns no database tables: its tables live in the core schema. Removing a module from `MODULES` leaves no routes, workers, or permissions behind.
+
+| Module                                                     | In the default set | Provides                                                                            |
+| ---------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------- |
+| `oidc`                                                     | Yes                | OAuth 2.1 and OpenID Connect server for platform users, the CLI, and your end-users |
+| `webhooks`                                                 | Yes                | Signed run-event webhooks                                                           |
+| `mcp`                                                      | Yes                | The platform API exposed as an MCP server, one endpoint per organization            |
+| `core-providers`                                           | Yes                | Model providers (OpenAI, Anthropic, OpenAI-compatible)                              |
+| `@appstrate/module-chat`                                   | Yes                | The dashboard chat surface                                                          |
+| `firecracker`                                              | No                 | The Firecracker execution backend                                                   |
+| `@appstrate/module-codex`, `@appstrate/module-claude-code` | No                 | Run agents on a Codex or Claude Code subscription                                   |
+| `@appstrate/module-observability`                          | No                 | OpenTelemetry traces, metrics, and logs                                             |
+| `@appstrate/module-ee`                                     | No                 | Stripe billing and credit quotas. Source-available, not Apache-2.0                  |
+
+The contract is published in `@appstrate/core`, so an external module can be installed from npm and listed in `MODULES`. The authoring guide is [`apps/api/src/modules/README.md`](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md). The default `MODULES` value is defined in `packages/env`; check [environment variables](/docs/self-hosting/environment-variables) rather than this table for what your version ships.
 
 ## Data model
 
-- `organizations` → many `applications` → many `end_users` and `api_keys`
-- `packages` (with `type` = `agent | skill | tool | provider`) are org-scoped (or `orgId = null` for system packages)
-- `runs` reference an agent `package` and optionally an `end_user`, with denormalized audit columns (`apiKeyId`, `dashboardUserId`, `endUserId`, `scheduleId`)
-- `webhooks` are application-scoped and deliver to receivers with HMAC-SHA256 signed envelopes
-- `package_memories` are application + package scoped, keyed by `run_id` for traceability
+- An **organization** has members with a role (`owner`, `admin`, `member`, `guest`) and contains **spaces**. A space holds agents, runs, schedules, end-users, files, integration connections, and API keys. See [SPACES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md).
+- **Packages** are agents, skills, MCP servers, and integrations. They are versioned (semver, with dist-tags) and immutable once published. A package belongs to a home space and is made runnable elsewhere by placing it in other spaces. Platform-provided ones have no organization.
+- **Runs** reference an agent version and record who or what triggered them: a member, an end-user, a schedule, or an API key. Cost is a ledger of model usage, summed per run ([RUN_COST.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md)).
+- **Memory** is one table keyed by actor (member, end-user, or shared): an archive agents search, and pinned slots injected into the prompt.
+- Credentials are encrypted at rest with a keyed envelope that supports key rotation.
 
-Core tables live in `packages/db/src/schema/`. Module-owned tables (webhooks, OIDC) live next to their module at `apps/api/src/modules/{webhooks,oidc}/schema.ts`, each tracked in its own `__drizzle_migrations_<module_id>` table.
+Realtime uses PostgreSQL `LISTEN/NOTIFY` fanned out to Server-Sent Events, so it needs no Redis and works with PGlite. The scheduler and distributed rate limits use Redis when `REDIS_URL` is set, and in-memory equivalents otherwise.
 
-## Contributing back
+## Go deeper
 
-The code is Apache 2.0. See [Contributing](/docs/resources/contributing) for the workflow, conventions, and how to propose a change.
+The design documents live in [`docs/architecture/`](https://github.com/appstrate/appstrate/tree/main/docs/architecture) in the repository:
+
+| Document                                                                                                                | Topic                                                         |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [SIDECAR.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SIDECAR.md)                             | Sidecar protocol, MCP surface, egress and SSRF rules          |
+| [INTEGRATIONS_RUNTIME.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/INTEGRATIONS_RUNTIME.md)   | Integration runners, credential injection, scopes, remote MCP |
+| [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md)                     | The microVM backend                                           |
+| [SPACES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md)                               | Spaces, personal spaces, resolution                           |
+| [RBAC_PERMISSIONS_SPEC.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RBAC_PERMISSIONS_SPEC.md) | Roles and permissions                                         |
+| [FILES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FILES.md)                                 | Uploads, run outputs, storage quotas                          |
+| [RUN_COST.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md)                           | Run cost tracking                                             |
+| [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md)                 | OpenTelemetry                                                 |
+| [SUPPLY_CHAIN.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUPPLY_CHAIN.md)                   | Supply-chain posture                                          |
+
+The code is Apache 2.0, apart from `packages/module-ee`. See [Contributing](/docs/resources/contributing).

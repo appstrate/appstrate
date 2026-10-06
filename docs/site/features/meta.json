@@ -6,19 +6,25 @@
   "pages": [
     "agents",
     "runs",
+    "run-cost",
+    "run-liveness",
     "scheduling",
     "webhooks",
     "realtime",
+    "notifications",
     "skills",
     "tools",
     "memory",
+    "files",
+    "packages",
+    "library",
     "proxies",
     "multi-tenancy",
     "organizations",
-    "applications",
+    "spaces",
+    "roles-and-permissions",
     "end-users",
     "api-keys",
-    "sandbox-and-sidecar",
-    "packages"
+    "sandbox-and-sidecar"
   ]
 }

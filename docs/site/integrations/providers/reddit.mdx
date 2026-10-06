@@ -5,59 +5,90 @@ description: Connect Reddit to your Appstrate agents.
 
 ## Overview
 
-Reddit is a community discussion platform, allowing your agents to post, comment, and monitor subreddits.
+Reddit is a discussion platform. The integration lets agents read subreddits and the connected account's history and, with the matching scopes, submit posts and comments.
 
-## Authentication Mode
+Integration: `@appstrate/reddit` (version 1.0.6), reached through the `api_call` tool. For how this works, see [How integrations work](/docs/integrations/how-integrations-work).
 
-| Property | Value |
-|----------|-------|
-| Type | `oauth2` |
-| Header | `Authorization: Bearer <token>` |
-| Default scopes | `identity`, `read`, `history` |
+## Authentication
 
-### Available Scopes
+| Property            | Value                                |
+| ------------------- | ------------------------------------ |
+| Type                | `oauth2`                             |
+| Credential sent as  | `Authorization: Bearer <credential>` |
+| Default scopes      | `identity`, `read`, `history`        |
+| Token endpoint auth | `client_secret_basic`                |
 
-| Scope | Description |
-|-------|-------------|
-| `identity` | Read user identity |
-| `read` | Read posts and comments |
-| `submit` | Submit posts and comments |
-| `edit` | Edit posts and comments |
-| `history` | Read voting and post history |
-| `subscribe` | Manage subreddit subscriptions |
-| `mysubreddits` | List subscribed subreddits |
-| `vote` | Upvote and downvote |
-| `save` | Save and unsave content |
-| `privatemessages` | Read and send private messages |
-| `report` | Report content |
-| `flair` | Manage flairs |
-| `modposts` | Moderate posts (approve/remove) |
-| `modconfig` | Manage subreddit settings |
+### Scopes
+
+The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
+
+| Scope             | Description                     | Default |
+| ----------------- | ------------------------------- | ------- |
+| `identity`        | Read user identity              | yes     |
+| `read`            | Read posts & comments           | yes     |
+| `submit`          | Submit posts & comments         |         |
+| `edit`            | Edit posts & comments           |         |
+| `history`         | Read voting & post history      | yes     |
+| `subscribe`       | Manage subreddit subscriptions  |         |
+| `mysubreddits`    | List subscribed subreddits      |         |
+| `vote`            | Upvote & downvote               |         |
+| `save`            | Save & unsave content           |         |
+| `privatemessages` | Read & send private messages    |         |
+| `report`          | Report content                  |         |
+| `flair`           | Manage flairs                   |         |
+| `modposts`        | Moderate posts (approve/remove) |         |
+| `modconfig`       | Manage subreddit settings       |         |
 
 ## Authorized URIs
 
-The agent can access the following endpoints through the sidecar proxy:
+The sidecar sends the credential only to URLs that match one of these patterns:
 
-- `https://oauth.reddit.com/*`
+- `https://oauth.reddit.com/**`
 
 ## Connect Reddit
 
-1. [Create a Reddit application](https://www.reddit.com/prefs/apps) (select the "web app" type)
-2. Set the redirect URI to the Appstrate callback URL
-3. Copy the Client ID (shown under the app name) and Client Secret
-4. Enter these credentials in the Reddit provider settings on Appstrate
+An administrator registers an OAuth client once, then members connect their own accounts.
 
-## Usage in an Agent
+<Steps>
+<Step>
 
-Once connected, the agent can call Reddit APIs through the sidecar proxy. Example prompt:
+Create an app of type "web app" (Preferences, Apps) ([open](https://www.reddit.com/prefs/apps)).
+
+</Step>
+<Step>
+
+Register the redirect URI as the app's redirect uri: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/reddit": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/reddit": {
+      "tools": ["api_call"]
+    }
+  }
+}
+```
+
+Example prompt:
 
 ```
-Monitor the r/artificial and r/MachineLearning subreddits daily.
-Filter posts with more than 100 upvotes and summarize the trending topics.
-Send the summary to the #ai-watch Slack channel.
+Every day, read the top ten posts of r/selfhosted that mention Appstrate and summarize the questions people ask.
 ```
 
-## Related Endpoints
+## Related
 
-- [Connect a provider](/en/docs/guides/providers-and-connections)
-- [API Reference — Connections](/en/docs/api)
+- [How integrations work](/docs/integrations/how-integrations-work)
+- [Built-in Integrations](/docs/integrations/providers)

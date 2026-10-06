@@ -1,0 +1,83 @@
+---
+title: Library and Sharing
+description: Where a package lives, how it reaches other spaces, and who decides whether a space runs it.
+---
+
+Packages (agents, skills, integrations, MCP servers) belong to the **organization**, but they are authored in one space, offered to others, and switched on space by space. Three ideas separate those steps.
+
+| Idea                 | Question it answers                                                                     | Decided by                                                                                                           |
+| -------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Home**             | Which space owns the package and governs editing, publishing, renaming and deleting it? | `<type>:write` in the home space                                                                                     |
+| **Share** (an offer) | Which other spaces, or people, may use it?                                              | `<type>:share` in the home space                                                                                     |
+| **Activation**       | Does this space run it right now?                                                       | The recipient space, with `agents:configure` (agents), `skills:write`, `mcp-servers:write` or `integrations:install` |
+
+Sharing is the audience. It never turns the package on. Each space keeps that decision.
+
+## Home
+
+The space where you create a package becomes its **home**. Every organization package has one, and a package that belongs to no team lives in the default space.
+
+- Only people who can write in the home space edit its draft, publish or restore versions, or delete it. Being in another space that uses it grants nothing.
+- Outside its home, a package runs its **latest published version**. The draft runs only for people who can write it.
+- `GET /api/packages/{scope}/{name}/home` locates a package from its id alone: its type, whether you may edit, delete or share it, and the spaces you can read it from. The CLI uses it.
+- `PUT /api/packages/{scope}/{name}/home` moves the home. You must hold the type's `write` permission in **both** spaces. The destination can never be a personal space.
+
+```bash
+curl -X PUT https://your-instance/api/packages/@acme/support-triage/home \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "home_space_id": "spc_...", "keep_in_previous_home": true }'
+```
+
+By default (`keep_in_previous_home: true`) the space the package leaves keeps reading and running it through an automatic offer, so its schedules do not stop. Set it to `false` to withdraw the package from the old home entirely. The new home activates the package, unless that space had switched it off on purpose.
+
+## Sharing
+
+An offer targets a **space** or a **person**. A person target is resolved to that member's personal space, and the sharer never learns that space's id.
+
+```bash
+curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "target": { "kind": "space", "spaceId": "spc_..." } }'
+```
+
+- `target` is `{ "kind": "space", "spaceId": "spc_..." }` or `{ "kind": "user", "userId": "..." }`.
+- The package must have a **published version**. An offer of an unpublished package is `409 package_has_no_version`.
+- You can only target a space you can reach, and not the package's own home (`409 share_target_is_home`).
+- Sharing the same pair twice is idempotent.
+- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws an offer **and** the placement behind it, so a space cannot keep running something it may no longer see. `target` is a space id or a user id.
+- The `share` permission belongs to the `admin` and `builder` presets, and API keys never carry it.
+- A person who receives a share gets a `package_shared` [notification](/docs/features/notifications).
+
+## Placement and activation
+
+A package is **placed** in a space when it is homed there, shared with it, or shipped with the platform (system packages are placed everywhere). A placed package is **active** when the space has switched it on. Only active packages can be launched there.
+
+```bash
+# Activate (idempotent: 201 when this call switched it on, 200 if it already was)
+curl -X POST https://your-instance/api/spaces/spc_.../packages \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "Content-Type: application/json" \
+  -d '{ "packageId": "@acme/support-triage" }'
+
+# Deactivate (204). The space's settings for it are kept.
+curl -X DELETE https://your-instance/api/spaces/spc_.../packages/@acme/support-triage \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>"
+```
+
+- Activation is the one door for every package type, integrations included. It needs the type's activation permission in the target space. That requirement is waived in your own personal space: ownership is the authorization, which is how a guest takes up a package offered to them.
+- If the package is not placed in the space yet, activation can create the offer in the same step, when you also hold `<type>:share` in the home space. An API key activates only what is already placed.
+- **Deactivation never deletes anything.** The space keeps its model, proxy, generation settings and stored input values, so activating the package again restores them. Only withdrawing the share removes them.
+- `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId`, `generation_config`, and `chat_enforced` for a skill). It has no `enabled` field: activation is its own act.
+- A deactivated agent answers `404 agent_not_active_in_space` on launch and schedule creation, while its detail and runs stay readable. A [schedule](/docs/features/scheduling) of a deactivated agent produces visible failed runs and stays armed, so reactivating resumes it.
+
+Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`, `inactive`, `none`). A `none` placement is an offer nobody has taken up yet.
+
+## The library views
+
+| View                                                                       | Who                            | What it shows                                                                                                              |
+| -------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/library` and the **Library** page (`/library`)                   | Organization owners and admins | Every package of the organization, grouped by type, with the map of spaces it is placed in and whether each space runs it. |
+| `GET /api/spaces/{spaceId}/library` and the **Packages** page of the space | Readers of that space          | The packages placed in this space with their state and the switch, plus the ones you could still place here.               |
+
+The agents, skills, integrations and MCP server lists of a space show only what the space can **launch**, meaning active packages. The library shows what is **placed**, active or not. Each view only lists the spaces and types you may read.

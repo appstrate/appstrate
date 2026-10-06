@@ -1,0 +1,128 @@
+---
+title: Spaces
+description: The workspace inside an organization that owns agents, runs, schedules, end-users, API keys and connections, and decides who can reach them.
+---
+
+A **space** is the working area of an organization. Agents run in a space, and runs, schedules, files, end-users, API keys, notifications and integration connections belong to one. The organization is the membership and billing boundary, the space is the **scoping and access** boundary inside it.
+
+Spaces were called _applications_ in earlier versions. The concept widened (a space also decides who can see what) and the resource, header and id prefix were renamed: `spaces`, `X-Space-Id`, `spc_`. Anything you wrote against `/api/applications`, `X-App-Id` or `app_` ids must be updated. The CLI verb is `appstrate space`.
+
+## What is in a space
+
+```
+Organization
+├── Roles (custom bundles of space permissions)
+├── Space (default, always open)
+├── Space (team) ─ visibility, default role, members
+│   ├── Agents, skills, integrations placed here (and which are active)
+│   ├── Runs, files, notifications
+│   ├── Schedules
+│   ├── Integration connections, OAuth clients, pins
+│   ├── End-users
+│   ├── API keys
+│   └── Webhooks (space level)
+└── Personal space of each member
+```
+
+Packages (agents, skills, integrations, MCP servers) are owned at the organization level. A package reaches a space by being **homed** there or **shared** with it, and runs there once **activated**. See [Library and sharing](/docs/features/library).
+
+## Space ids and the header
+
+A space id is `spc_` followed by a UUID. Requests that act inside a space name it:
+
+| Caller             | How the space is chosen                                               |
+| ------------------ | --------------------------------------------------------------------- |
+| Browser session    | `X-Space-Id` header, together with `X-Org-Id`.                        |
+| API key            | The key's own space. A conflicting `X-Space-Id` is a `403`.           |
+| Server-Sent Events | `?spaceId=` query parameter. See [Realtime](/docs/features/realtime). |
+| CLI                | The space saved in the profile, or `APPSTRATE_SPACE_ID`.              |
+
+A browser session without a space header gets a `400`. A retired `app_` id is rejected with an explicit message. Being in the organization is not enough to enter a space: you also need a role in it.
+
+## Visibility and who gets in
+
+Each team space has a **visibility**:
+
+| Visibility | Behaviour                                                                           |
+| ---------- | ----------------------------------------------------------------------------------- |
+| `open`     | Every organization `member` is an implicit member, with the space's `default_role`. |
+| `closed`   | Listed to members, but only people with an explicit membership can enter.           |
+| `private`  | Invisible to anyone without a membership. A non-member gets `404`, never `403`.     |
+
+Organization owners and admins reach every team space as `admin` and are never stored as members. A `guest` has no implicit access anywhere: they only see spaces they were added to.
+
+The **default space** is created with the organization. It is always `open` and cannot be deleted or made closed or private. It is where a new member lands, and it is the space the [MCP server](/docs/using-appstrate/mcp-clients) uses when a client names none.
+
+A member's rights inside a space come from their **space role**: one of five presets (`admin`, `builder`, `operator`, `runner`, `viewer`) or a custom role your organization defined. See [Roles and permissions](/docs/features/roles-and-permissions).
+
+## Personal spaces
+
+Every member gets a **personal space** that belongs to them alone.
+
+- It is private. An organization owner or admin can neither read nor write it. It is not even listed to them.
+- Its owner is its `admin`. A guest, who may only use what others built, is `operator` in theirs.
+- It takes no API keys and no end-users (`409 personal_space_takes_no_keys`, `409 personal_space_takes_no_end_users`).
+- It cannot be deleted or converted while its owner is a member.
+- When the owner leaves the organization, the space enters a **30-day offboarding window**: it is listed to owners and admins as orphaned, and can be turned into a team space with `POST /api/spaces/{id}/convert-to-team` (it keeps its contents and stays private) or emptied immediately with `POST /api/spaces/{id}/sweep-now`. After 30 days an hourly sweeper deletes it. A package homed in it is re-homed to the default space when another space still holds it, and deleted otherwise. Re-inviting the owner inside the window gives the space back.
+
+Use a personal space to build and test before sharing something with a team.
+
+## Creating and configuring spaces
+
+```bash
+# Create (organization owner or admin, on a user credential)
+curl -X POST https://your-instance/api/spaces \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Customer support", "settings": { "allowedRedirectDomains": ["app.example.com"] } }'
+
+# Change visibility and the default role (space admin)
+curl -X PATCH https://your-instance/api/spaces/spc_... \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" \
+  -H "Content-Type: application/json" \
+  -d '{ "visibility": "closed", "default_role": "operator" }'
+```
+
+- `name`: 1 to 100 characters.
+- `settings.allowedRedirectDomains`: up to 20 domains allowed as OAuth redirect targets.
+- `visibility` and `default_role` are changed with `PATCH`. Setting a default role or opening a space requires that you hold every permission of that role.
+- API keys cannot create spaces, and a key only lists its own space.
+- `GET /api/spaces` lists the spaces you reach, each with your `role`, your effective `permissions` and `access` (`member` or `none`).
+
+Editing a space needs `space-settings:write` in that space. Creating and deleting spaces are organization-level (`spaces:write`, `spaces:delete`).
+
+## Members
+
+```bash
+# Add an existing organization member to a space with a role
+curl -X POST https://your-instance/api/spaces/spc_.../members \
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "alice@acme.com", "preset_role": "builder" }'
+```
+
+- Identify the person with exactly one of `userId` or `email`, and give exactly one role: a preset (`preset_role`) or a custom role (`custom_role_id`). See `GET /api/spaces/{id}/roles` for the roles you may grant.
+- The person must already belong to the organization. To add someone new, invite them with `space_assignments` (see [Organizations](/docs/features/organizations)).
+- `PATCH /api/spaces/{id}/members/{userId}` changes a role, `DELETE` removes the explicit membership and answers whether the member keeps implicit access (`access_after`).
+- Owners and admins are refused (`409 redundant_space_role`): they already run every space.
+- You can only grant permissions you hold yourself.
+
+Members are listed with `GET /api/spaces/{id}/members`. Permissions: `space-members:read`, `invite`, `change-role`, `remove`.
+
+## Deleting a space
+
+`DELETE /api/spaces/{id}` removes the space and, in the same transaction, everything it owns: runs, schedules, memory, files and uploads (with their stored objects), end-users, API keys, notifications, connections and space-level webhooks. It is refused for the default space, while a run is in progress, and while the space is the home of a package (move it first with `PUT /api/packages/{scope}/{name}/home`). Organization packages themselves stay. Audit events keep their space id.
+
+## Per-space configuration of a package
+
+For each package placed in a space, the space keeps its own settings: whether it is active, the model, proxy and generation settings, and for agents the stored [input values](/docs/features/agents#input-and-output) and locks. Deactivating a package keeps these settings, so activating it again restores them. Endpoints live under `/api/spaces/{spaceId}/packages`.
+
+## Choosing a model for tenants
+
+Pick the granularity that fits your product:
+
+- **One organization, one space, many end-users.** The common case for a SaaS: your backend holds one API key and acts for each customer with `Appstrate-User`.
+- **One space per customer or per environment.** Hard separation of agents, schedules, connections and keys, inside one organization.
+- **One organization per customer.** The strongest isolation, with more to manage.
+
+See [Multi-Tenancy](/docs/features/multi-tenancy) for how the pieces fit together.

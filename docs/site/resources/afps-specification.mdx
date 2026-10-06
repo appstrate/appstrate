@@ -1,50 +1,56 @@
 ---
 title: AFPS Specification
-description: The open format Appstrate uses to package agents, skills, tools, and providers.
+description: The open package format Appstrate uses for agents, skills, MCP servers, and integrations, and what Appstrate adds on top of it.
 ---
 
-**AFPS** (Agent Format Packaging Standard) is the portable format Appstrate uses to distribute agents, skills, tools, and providers. It is an open specification published under a permissive license, maintained in a separate repository from the Appstrate runtime, and intended to be implementable by other runtimes.
+**AFPS** (Agent Format Packaging Standard) is the portable format Appstrate uses to package, version, and distribute agents and the things they depend on. The specification is open, maintained in its own repository, and meant to be implemented by other runtimes. Appstrate's runtime is one implementation.
 
 ## Why a separate format
 
-Models, toolkits, and runtimes are fragmenting fast. MCP covers tool transport. A2A covers agent-to-agent messaging. Anthropic's Agent Skills cover portable instructions. None of them covers what happens **between** the source and the runtime: versioning, integrity, dependency resolution, multi-tenant distribution, credential isolation at install time.
-
-AFPS fills that gap. It wraps a skill, tool, agent, or provider into a ZIP with a `manifest.json` that declares the type, version, integrity hash, and optional dependencies. Anything that can parse the manifest and verify the hash can install and run an AFPS package.
+MCP defines how tools are called. Anthropic's Agent Skills define portable instructions. Neither says how to **package, version, and install** an agent together with its skills, tool servers, and service connections, or what an agent is allowed to reach once installed. AFPS fills that gap: a package is a ZIP with a `manifest.json` that declares its type, its version, and its dependencies, so a runtime can resolve, verify, and run it.
 
 ## Where the spec lives
 
-The canonical specification, JSON Schema, and governance process are in a dedicated public repository:
+The normative text, JSON Schemas, examples, and the proposal process are in a public repository:
 
 **[github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec)**
 
-The npm package with the TypeScript types and validators is `@afps-spec/schema`. Appstrate's runtime consumes it directly.
+It is published under CC-BY-4.0, and the schemas and TypeScript types are on npm as `@afps-spec/schema` and `@afps-spec/types`. Appstrate validates every manifest it reads or writes with `@afps-spec/schema`. At the time of writing the specification is a **2.0 draft**; the manifests Appstrate writes declare `schema_version: "0.3"`, the revision of the manifest schema they conform to.
 
-## Scope at a glance
+## Package types
 
-The spec defines:
+AFPS defines four types. Appstrate stores, versions, and runs all four.
 
-- **Package types**: `agent`, `skill`, `tool`, `provider`.
-- **Manifest schema**: required fields (`type`, `name`, `version`), optional fields (`description`, `dependencies`, `definition`, `fileConstraints`, `uiHints`).
-- **Integrity**: SHA-256 SRI hashes computed over the ZIP contents.
-- **Versioning rules**: semver with forward-only constraints and dist-tag conventions.
-- **Dependency resolution**: semver range matching inside a package catalog.
-- **Compatibility with Anthropic Agent Skills**: a pure `SKILL.md` skill folder ZIPped with an AFPS manifest is a valid AFPS package.
+| Type          | What it is                                                                                                                                               | Main file                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `agent`       | A goal for an agent to pursue, with the resources it depends on, and optional input, output, and configuration schemas                                   | `prompt.md`                                                     |
+| `skill`       | Reusable instructions, compatible with Anthropic's Agent Skills                                                                                          | `SKILL.md` (with optional `scripts/`, `references/`, `assets/`) |
+| `mcp-server`  | A runnable MCP tool server, described with the MCPB vocabulary (`node`, `python`, `binary`, `uv`)                                                        | the entry point named in the manifest                           |
+| `integration` | A connection to a service: its authentication methods, the URLs it may call, and the MCP tools it exposes, backed by an `mcp-server` or a remote MCP URL | `manifest.json`                                                 |
 
-## License and governance
+An integration replaces what earlier versions of Appstrate called a **provider**. Packages are identified by a scoped name, `@scope/name`, and versioned with semver.
 
-AFPS is published under **CC-BY 4.0**. You can implement it, fork it, vendor it, or build a registry around it without asking permission. The governance process accepts proposals from any contributor via issues and pull requests on the spec repo.
+A package is a ZIP archive, conventionally `.afps`, with `manifest.json` at its root. Every manifest requires `name`, `version`, and `type`. A pure `SKILL.md` folder with a manifest is a valid skill, so skills written for other tools carry over.
 
-## Integration with Appstrate
+## What Appstrate adds around the format
 
-Appstrate's routes under `/api/packages/*` accept, store, and serve AFPS packages. See:
+The spec describes packages. These are Appstrate behaviors built on it:
 
-- [Build / Packages](/docs/features/packages) for the consumer API (importing, pinning, forking).
-- [Extend / Skills](/docs/features/skills) for authoring and publishing.
+- **Versioning and catalog.** Published versions are immutable and forward-only, resolved by exact version, dist-tag, or semver range, and recorded with a SHA-256 integrity hash. Packages are installed per space.
+- **Least-privilege tools and scopes.** An agent selects the tools it uses from each integration, and the OAuth scopes requested at consent are inferred from that selection.
+- **Bundles.** An agent and its dependencies export as one `.afps-bundle`, with integrity hashes computed per file, per package, and over the whole bundle. `GET /api/agents/{scope}/{name}/bundle` exports one and `POST /api/packages/import-bundle` imports it. Import also accepts single `.afps` files.
+- **Signatures.** Bundles can be signed with Ed25519. The `AFPS_SIGNATURE_POLICY` setting (`off`, `warn`, or `required`) and the `AFPS_TRUST_ROOT` allowlist decide what an instance accepts.
+- **Portable execution.** `@appstrate/afps-runtime` loads and runs a bundle outside Appstrate, and ships an `afps` command for bundle tooling: `keygen`, `sign`, `verify`, `inspect`, `render`, `bundle`, and `conformance`. It lives in the [Appstrate repository](https://github.com/appstrate/appstrate/tree/main/packages/afps-runtime) and is not published to npm. To execute an agent against a model, use `appstrate run`.
+
+Integrity, signing, and bundles are runtime features: the specification itself does not define them.
+
+## In the product
+
+- [Packages](/docs/features/packages): importing, publishing, versions, and placing a package in a space.
+- [Skills](/docs/features/skills): writing and publishing a skill.
+- [Agents](/docs/features/agents): the agent manifest in practice.
+- [Integrations overview](/docs/integrations/overview): what integrations are and which ship with the platform.
 
 ## Contributing to the spec
 
-Issues, proposals, and pull requests are welcomed on the spec repo:
-
-[github.com/appstrate/afps-spec/issues](https://github.com/appstrate/afps-spec/issues)
-
-The process is designed to absorb real-world feedback, especially from teams running multi-tenant agents in production today.
+Open an issue or a pull request on [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec/issues). The specification is governed separately from the Appstrate runtime.

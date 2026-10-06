@@ -1,95 +1,101 @@
 ---
 title: Rate Limits
-description: Default rate limits, per-endpoint behavior, and how to configure them.
+description: Default rate limits, per-endpoint behavior, run limits and how to tune them.
 ---
 
-Appstrate uses [`rate-limiter-flexible`](https://github.com/animir/node-rate-limiter-flexible) for rate limiting. With `REDIS_URL` set, buckets are shared across instances (`RateLimiterRedis`). Without Redis, buckets are process-local (`RateLimiterMemory`) and reset on restart.
+Appstrate uses [`rate-limiter-flexible`](https://github.com/animir/node-rate-limiter-flexible). With `REDIS_URL` set (Tier 2 and up), buckets are shared across instances. Without Redis, buckets are process-local and reset on restart.
 
 ## How buckets are keyed
 
-Rate limits are **per-endpoint**, not just per-identity. The key format is:
+Limits are per endpoint and per identity, so one caller hitting two endpoints has two counters. The key combines the HTTP method, the **matched route pattern** (not the literal URL, so `/api/files/{id}/content` is one bucket for all ids) and the identity:
 
-- **Session auth**: `{method}:{path}:{userId}`
-- **API key auth**: `{method}:{path}:apikey:{apiKeyId}`
-- **Unauthenticated / public routes**: `ip:{method}:{path}:{ipAddr}`
-- **Internal bearer tokens**: `internal:{path}:{tokenPrefix}`
+| Caller                    | Identity in the key                                             |
+| ------------------------- | --------------------------------------------------------------- |
+| Dashboard session         | The user id                                                     |
+| API key (`apst_...`)      | `apikey:<key id>`                                               |
+| Unauthenticated route     | `ip:` and the client IP                                         |
+| Run-bound internal routes | The run id carried by the verified run token                    |
+| Inbound MCP server        | The API key, end-user or user id, falling back to the client IP |
 
-Two identical identities hitting different paths have separate counters, so a single API key can simultaneously hit its `POST /run` limit without affecting its `POST /end-users` limit.
+The client IP comes from `X-Forwarded-For` only as far as `TRUST_PROXY` allows. Behind a reverse proxy, set `TRUST_PROXY` to the number of proxies that append to the header, or every caller is counted as the proxy. See [Docker Compose](/docs/self-hosting/docker-compose#reverse-proxy).
 
-On top of per-endpoint limits, two **org-wide** rate limits run in parallel:
+On top of per-endpoint limits, two organization-wide limits run when a run is launched:
 
-- The org-wide **run** rate limit (keyed by `orgId`, configured via `PLATFORM_RUN_LIMITS.per_org_global_rate_per_min`) governs any run launch.
-- The org-wide **inline** rate limit (keyed by `orgId`, `INLINE_RUN_LIMITS.rate_per_min`) is layered on top for `POST /api/runs/inline`.
+- **Runs per minute** per organization (`per_org_global_rate_per_min`), covering agent runs, inline runs and scheduled runs.
+- **Concurrent runs** per organization (`max_concurrent_per_org`).
 
-## Platform-wide limits (`PLATFORM_RUN_LIMITS`)
+## Run limits (`PLATFORM_RUN_LIMITS`)
 
-JSON object env var. Validated strictly at boot by `apps/api/src/services/run-limits.ts`. Defaults are conservative but production-ready — **the system is never "unlimited" out of the box**.
+A JSON object, validated strictly at boot. Unknown keys fail the boot. The defaults apply when the variable is unset or `{}`, so the system is never unlimited out of the box.
 
-```json
-{
-  "timeout_ceiling_seconds": 1800,
-  "per_org_global_rate_per_min": 200,
-  "max_concurrent_per_org": 50
-}
+```bash
+PLATFORM_RUN_LIMITS='{"timeout_ceiling_seconds":1800,"per_org_global_rate_per_min":200,"max_concurrent_per_org":50}'
 ```
 
-| Key | Default | Meaning |
-|---|---|---|
-| `timeout_ceiling_seconds` | `1800` (30 min) | Max runtime per run. Clamps any agent-declared timeout. Hitting the ceiling emits a `run.timeout` webhook event. |
-| `per_org_global_rate_per_min` | `200` | Runs per minute per organization (agent run + inline run + scheduled run). |
-| `max_concurrent_per_org` | `50` | Concurrent runs per organization. Extra runs are rejected with 429 until a slot frees. |
+| Key                           | Default | Meaning                                                                                                                                |
+| ----------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout_ceiling_seconds`     | `1800`  | Maximum runtime of any run. A longer timeout declared by an agent is clamped to it                                                     |
+| `per_org_global_rate_per_min` | `200`   | Run launches per minute per organization. Over the limit: `429` with code `org_run_rate_limited`                                       |
+| `max_concurrent_per_org`      | `50`    | Concurrent runs per organization. Over the limit: `429` with code `org_run_concurrency_exceeded`. The check is atomic per organization |
+| `agent_memory_ceiling_mb`     | `1536`  | Memory ceiling per run, in MiB                                                                                                         |
+| `agent_cpu_ceiling`           | `2`     | vCPU ceiling per run                                                                                                                   |
+
+The last two bound what an agent manifest may request. See the [resource guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md).
 
 ## Inline run limits (`INLINE_RUN_LIMITS`)
 
-Applies only to `POST /api/runs/inline`.
+These cap `POST /api/runs/inline` and `POST /api/runs/inline/validate`.
 
-```json
-{
-  "rate_per_min": 60,
-  "manifest_bytes": 65536,
-  "prompt_bytes": 200000,
-  "max_skills": 20,
-  "max_tools": 20,
-  "max_authorized_uris": 50,
-  "wildcard_uri_allowed": false,
-  "retention_days": 30
-}
-```
+| Key              | Default  | Meaning                                                                     |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| `rate_per_min`   | `60`     | Inline runs per minute, per identity on that endpoint                       |
+| `manifest_bytes` | `65536`  | Maximum size of the inline manifest                                         |
+| `prompt_bytes`   | `200000` | Maximum size of the agent prompt                                            |
+| `max_skills`     | `20`     | Maximum number of skills in an inline manifest (`0` allowed)                |
+| `retention_days` | `30`     | Days before the temporary package behind an inline run is garbage-collected |
 
-| Key | Default | Meaning |
-|---|---|---|
-| `rate_per_min` | `60` | Inline runs per minute per org |
-| `manifest_bytes` | `65536` | Max size of the inline manifest |
-| `prompt_bytes` | `200000` | Max size of the agent prompt |
-| `max_skills` | `20` | Max number of skills declared in the inline manifest |
-| `max_tools` | `20` | Max number of tools declared in the inline manifest |
-| `max_authorized_uris` | `50` | Max entries in each `authorizedUris` allowlist |
-| `wildcard_uri_allowed` | `false` | Allow `*` in `authorizedUris` entries |
-| `retention_days` | `30` | Days before the shadow package backing an inline run is garbage-collected |
+## Proxy limits
+
+Two JSON variables, validated the same strict way, cap the platform's model and credential proxies:
+
+- `LLM_PROXY_LIMITS` for `/api/llm-proxy/*`: `rate_per_min` (default 60) and `max_request_bytes` (10 MiB).
+- `CREDENTIAL_PROXY_LIMITS` for `/api/credential-proxy/proxy`: `rate_per_min` (100), `max_request_bytes` (10 MiB), `max_response_bytes` (50 MiB) and `session_ttl_seconds` (3600).
+
+`API_BODY_LIMIT_BYTES` (default 10 MiB) caps request bodies globally. Durable files are capped separately by `FILE_MAX_BYTES` (default 100 MiB), and `ORG_STORAGE_QUOTA_BYTES` sets an optional per-organization storage quota. See [Environment Variables](/docs/self-hosting/environment-variables).
 
 ## Per-endpoint limits
 
-These are set via the `rateLimit(N)` middleware and recorded as `method:path:identity` buckets.
+These are the fixed per-minute limits set in code. The list is representative. The route files under `apps/api/src/routes/` are authoritative.
 
-| Endpoint | Limit / min |
-|---|---|
-| `POST /api/agents/@scope/name/run` | 20 |
-| `POST /api/runs/inline`, `/api/runs/inline/validate` | `INLINE_RUN_LIMITS.rate_per_min` (default 60) |
-| `POST /api/packages/import`, `/api/packages/import-github` | 10 |
-| `GET /api/packages/@scope/name/{version}/download` | 50 |
-| `POST /api/end-users` | 60 |
-| `GET /api/end-users`, `/api/end-users/:id` | 300 |
-| `PATCH /api/end-users/:id`, `DELETE /api/end-users/:id` | 60 |
-| `POST /api/proxies/:id/test` | 5 |
-| `POST /api/provider-keys/test`, `/api/provider-keys/:id/test` | 5 |
-| `POST /api/models/test`, `/api/models/:id/test` | 5 |
-| `GET /api/models/openrouter` | 10 |
-| `POST /api/connection-profiles` | 10 |
-| `POST /api/app-profiles`, `/api/app-profiles/:id/bind` | 10 |
-| `POST /api/schedules` | 10 |
-| `POST /api/uploads` | 20 |
+| Endpoint                                                                                                                                           | Limit per minute                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `POST /api/agents/{scope}/{name}/run`                                                                                                              | 20                               |
+| `POST /api/runs/remote`                                                                                                                            | `per_org_global_rate_per_min`    |
+| `PATCH /api/runs/{id}/sink/extend`                                                                                                                 | 30                               |
+| `GET /api/runs/{id}/logs`                                                                                                                          | 120                              |
+| `POST /api/runs/inline`, `/api/runs/inline/validate`                                                                                               | `INLINE_RUN_LIMITS.rate_per_min` |
+| `POST /api/agents/{scope}/{name}/schedules`                                                                                                        | 10                               |
+| `GET /api/agents/{scope}/{name}/bundle`                                                                                                            | 30                               |
+| `POST /api/packages/import`, `/import-bundle`, `/import-github`                                                                                    | 10                               |
+| `GET /api/packages/{scope}/{name}/files`, `.../files/content`, `.../{version}/download`                                                            | 50                               |
+| `POST /api/uploads`                                                                                                                                | 20                               |
+| `PUT /api/uploads/_content` (by IP)                                                                                                                | 60                               |
+| `GET /api/files`, `GET /api/files/{id}` and its content                                                                                            | 120                              |
+| `DELETE /api/files/{id}`, `POST /api/files/{id}/keep`                                                                                              | 60                               |
+| `GET /preview/files/{id}` (by IP)                                                                                                                  | 120                              |
+| `POST /api/end-users`, `PATCH` and `DELETE /api/end-users/{id}`                                                                                    | 60                               |
+| `GET /api/end-users`, `GET /api/end-users/{id}`                                                                                                    | 300                              |
+| `POST /api/webhooks`, `PATCH` and `DELETE /api/webhooks/{id}`                                                                                      | 10                               |
+| `POST /api/webhooks/{id}/rotate`                                                                                                                   | 5                                |
+| `GET /api/webhooks`, `/{id}`, `/{id}/deliveries`                                                                                                   | 300                              |
+| `POST /api/proxies/{id}/test`, `POST /api/models/test`, `POST /api/models/{id}/test`, `POST /api/model-provider-credentials/test` and `/{id}/test` | 5                                |
+| `POST /api/model-provider-credentials/discover`                                                                                                    | 6                                |
+| `GET /api/models/openrouter`                                                                                                                       | 10                               |
+| `POST /api/auth/bootstrap/redeem` (by IP)                                                                                                          | 5                                |
+| Inbound MCP endpoint, per envelope                                                                                                                 | 120                              |
+| Run-bound `/internal/*` routes                                                                                                                     | 200 per run                      |
 
-Unauthenticated routes (signup, login, public health checks) are keyed by IP with equivalent per-route limits; the single global "60/min per IP" bucket described in earlier versions of this doc was never a real thing.
+The OAuth, OIDC and sign-in pages of the `oidc` module carry their own limits, set in the module. Authentication endpoints under `/api/auth/*` use Better Auth's own limiter, which these variables do not configure.
 
 ## Response on limit
 
@@ -101,38 +107,28 @@ RateLimit: limit=20, remaining=0, reset=15
 RateLimit-Policy: 20;w=60
 
 {
-  "type": "https://appstrate.dev/errors/rate-limited",
-  "title": "Rate limit exceeded",
+  "type": "https://docs.appstrate.dev/errors/rate-limited",
+  "title": "Rate Limited",
   "status": 429,
+  "detail": "Too many requests. Please try again shortly.",
   "code": "rate_limited",
-  "retryAfter": 15,
-  "requestId": "req_..."
+  "retry_after": 15,
+  "request_id": "req_..."
 }
 ```
 
-The three IETF structured headers (`RateLimit`, `RateLimit-Policy`, `Retry-After`) are emitted on every 429 and on non-429 responses from rate-limited routes (so clients can pre-emptively back off). Respect `Retry-After` (seconds). Implement exponential backoff for repeated 429s.
+`RateLimit` and `RateLimit-Policy` are also sent on successful responses from rate-limited routes, so clients can back off before they hit the limit. Respect `Retry-After` (seconds), and use exponential backoff for repeated `429` responses. The organization-wide run limits answer with the codes `org_run_rate_limited` and `org_run_concurrency_exceeded` shown above.
 
-## Per-endpoint specifics
+## Specifics
 
-### Realtime (SSE)
-
-SSE endpoints (`/api/realtime/*`) have no per-message rate limit — once the stream is open, the server fans events out as they arrive. Connection establishment goes through the normal auth pipeline but not a dedicated rate limiter.
-
-### Webhook deliveries (outbound from Appstrate)
-
-Outbound webhook deliveries run in a BullMQ worker outside the HTTP request pipeline, so they are not subject to these limits. Plan your receiver's rate limits to accommodate burst retries (the retry backoff is `30s → 5min → 30min → 1h → 2h → 3h → 4h`, see [Webhooks](/docs/features/webhooks#retry-policy)).
-
-### Write endpoints with `Idempotency-Key`
-
-A replayed request (same key, same body) returns the cached response without consuming a new rate-limit point. Note that the **original** request that populated the cache did consume a point when it was first executed.
+- **Realtime (SSE).** `/api/realtime/*` has no per-message limit. The stream fans events out as they arrive.
+- **Outbound webhook deliveries** run in a background worker, outside the HTTP pipeline, so these limits do not apply to them. Size your receiver for burst retries. See [Webhooks](/docs/features/webhooks#retry-policy).
+- **`Idempotency-Key`.** The rate limiter runs before the idempotency check, so a replayed request still consumes a point.
 
 ## Monitoring
 
-Rate-limit hit counts are emitted as structured log lines at `DEBUG` level. Forward Appstrate logs to your observability stack and alert on sustained `rate_limited` codes to detect either abusive clients or misconfigured per-endpoint caps.
+At `LOG_LEVEL=debug` the platform writes an access line per request. Alert on sustained `429` responses to catch abusive clients or limits set too low.
 
 ## Bypasses
 
-There is no built-in bypass. Admin role, dev mode, and IP allowlists are all unimplemented. If you need differentiated limits for a specific tenant, either:
-
-- Adjust `PLATFORM_RUN_LIMITS` globally and scale other endpoint caps as needed, or
-- Run your API key behind a reverse proxy that applies its own rate policy before reaching Appstrate.
+There is no built-in bypass: no admin exemption and no IP allowlist. For a tenant that needs different limits, raise `PLATFORM_RUN_LIMITS` for the instance, or apply a policy in the reverse proxy in front of Appstrate.

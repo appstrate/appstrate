@@ -1,127 +1,163 @@
 ---
 title: Troubleshooting
-description: Resolve common issues when self-hosting Appstrate.
+description: Resolve common boot, run, network and configuration problems when self-hosting Appstrate.
 ---
 
-## Container won't start
+Start with `docker compose logs appstrate --tail 200` (or `appstrate logs` for an installer install) and `curl http://localhost:3000/health`. Boot errors name the variable at fault.
 
-Three environment variables are validated at boot and will refuse to start the server if missing or invalid:
+## The container will not start
 
-- `BETTER_AUTH_SECRET` — session signing secret, any non-empty string
-- `UPLOAD_SIGNING_SECRET` — at least 16 characters (separate from the session secret so it can rotate independently)
-- `CONNECTION_ENCRYPTION_KEY` — exactly 32 bytes, base64-encoded (AES-256 for stored credentials)
+Five secrets are required and validated at boot:
 
-Generate each with:
+| Variable                    | Rule                     |
+| --------------------------- | ------------------------ |
+| `BETTER_AUTH_SECRET`        | Required                 |
+| `CONNECTION_ENCRYPTION_KEY` | 32 bytes, base64-encoded |
+| `UPLOAD_SIGNING_SECRET`     | At least 16 characters   |
+| `RUN_TOKEN_SECRET`          | At least 16 characters   |
+| `CONNECT_SESSION_SECRET`    | At least 16 characters   |
 
-```bash
-openssl rand -base64 32
-```
+The shipped Compose files also fail fast on `POSTGRES_PASSWORD` (and `POSTGRES_USER`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` in the root file). See [Docker Compose](/docs/self-hosting/docker-compose#set-up) for a generator.
 
-The Tier 3 `docker-compose.yml` enforces four more via bash `${VAR:?…}` expansion: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`. See [Docker Compose § Configure required variables](/docs/self-hosting/docker-compose#configure-required-variables) for the full generator script.
+Other cross-field checks that stop the boot:
+
+- **`TRUST_PROXY=false` behind an HTTPS `APP_URL` in production.** Set `TRUST_PROXY` to your proxy depth, usually `1`.
+- **`APP_URL` is not an absolute origin.** It must be `http://` or `https://` with no path, query or fragment, and HTTPS in production (loopback excepted).
+- **`USERCONTENT_URL` on the same host as `APP_URL`**, or not HTTPS in production.
+- **Image versions disagree.** The platform, `PI_IMAGE` and `SIDECAR_IMAGE` must carry the same version. Pin them with `APPSTRATE_VERSION`. See [Upgrading](/docs/self-hosting/upgrading).
+- **`PLATFORM_RUN_LIMITS`, `INLINE_RUN_LIMITS`, `LLM_PROXY_LIMITS` or `CREDENTIAL_PROXY_LIMITS` contains an unknown key** or a bad value. The error names the key.
+- **`RUN_ADAPTER` names a backend nobody registered.** The error lists the registered ones. `firecracker` needs the `firecracker` module in `MODULES`.
+- **A model in `SYSTEM_PROVIDER_KEYS`** is outside its provider's offer, or a provider needs an API shape the platform does not serve. The error names the entry.
+
+## A variable in `.env` has no effect
+
+Two common causes:
+
+- **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. See [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
+- **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped without a warning. Compare the spelling with [Environment Variables](/docs/self-hosting/environment-variables) and the operator notes of the release.
 
 ## Database connection refused
 
-- Verify that `DATABASE_URL` points to an accessible PostgreSQL instance.
-- Make sure PostgreSQL is running: `docker compose ps`.
-- Test the connection manually: `psql "$DATABASE_URL"`.
-- If `DATABASE_URL` is unset, Appstrate uses PGlite (`./data/pglite/` by default) — no external database required.
+- Check that `DATABASE_URL` points to a reachable PostgreSQL, and that the database container is healthy: `docker compose ps`.
+- On the Docker tiers the database sits on an internal network and publishes no port. Test from inside: `docker compose exec postgres pg_isready` (service `appstrate-postgres` in the root file).
+- If `DATABASE_URL` is unset, Appstrate uses PGlite in `PGLITE_DATA_DIR`. A single PGlite directory must be opened by one process only.
+- A password with `@`, `/` or `:` breaks the connection string Compose builds. Use hex or URL-safe passwords.
 
 ## Agents fail to run
 
-- For container-isolated execution set `RUN_ADAPTER=docker` (the default is `process`, which spawns Bun subprocesses with no network or filesystem isolation — fine for dev, not for prod).
-- Check Docker socket permissions: the Appstrate container must reach `/var/run/docker.sock`. On rootless Docker, you may need to map the socket explicitly and add your user to the `docker` group. See [Production Checklist § Restrict Docker socket access](/docs/self-hosting/production-checklist#15-restrict-docker-socket-access).
-- Verify the images exist locally: `docker images | grep appstrate`.
-- If missing, pull from GHCR: `docker pull ghcr.io/appstrate/appstrate-pi:latest && docker pull ghcr.io/appstrate/appstrate-sidecar:latest`.
+- **Wrong backend.** `RUN_ADAPTER` defaults to `process` (host subprocesses, no isolation). The shipped Compose files set `docker`.
+- **Docker socket.** The platform container must reach `/var/run/docker.sock`. Check the group mapping (`DOCKER_GID`) and the socket's permissions. See [Isolation and Security](/docs/self-hosting/isolation-and-security#the-docker-socket).
+- **Runtime images missing.** Check `docker images | grep appstrate`. Pull the same version of `appstrate-pi`, `appstrate-sidecar` and the five `appstrate-mcp-runner-*` images from `ghcr.io/appstrate`. A missing MCP runner image fails the integration that needs it, because the sidecar never pulls images.
+- **Local integration refused under `process`.** A `source.kind: "local"` integration (for example `@appstrate/github-git`) does not start with `RUN_ADAPTER=process`. Set `INTEGRATION_RUNTIME_ADAPTER=docker` or use `RUN_ADAPTER=docker`.
+- **"Run never started executing".** The runner posted no event within `RUN_BOOT_DEADLINE_SECONDS` (default 300). Look for a slow image pull, a missing image or a container that exits at boot.
+- **Run failed as stalled.** No heartbeat for `RUN_STALL_THRESHOLD_SECONDS` (default 60). Check the run's container logs and the host's resources.
+- **"Server restarted while run was in progress".** A restart finalizes in-flight runs as failed. Retry them.
+- **Model on a private endpoint fails.** Add its host to `EGRESS_ALLOW_INTERNAL_HOSTS`. The host must resolve from the API process, where `localhost` is the API's own loopback.
 
-## `X-App-Id` header missing
+## Outbound calls refused
 
-On app-scoped routes (`/api/agents`, `/api/runs`, `/api/schedules`, `/api/webhooks`, `/api/end-users`, `/api/api-keys`, `/api/packages`, …), a request without `X-App-Id` returns `400`. Either:
+| Symptom                                                                                              | Meaning                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `403 URL targets a blocked network range`, and `Target refused (SSRF)` in the sidecar log            | The target is private, loopback or link-local. To allow it, name the host literally in the integration's `authorized_uris` and list it in `EGRESS_ALLOW_INTERNAL_HOSTS` |
+| `403` with `unauthorized_target` (platform credential proxy), or a sidecar refusal as `unauthorized` | The integration declares no `authorized_uris`, or the URL is outside them. An empty list authorizes nothing                                                             |
+| `502 Target host could not be resolved`                                                              | The sidecar could not resolve the host. It needs working DNS, even when it sends through `PROXY_URL`                                                                    |
 
-- Use an API key — its pinned application is auto-injected, no header required.
-- Send `X-App-Id: app_xxx` alongside the session cookie.
+See [Isolation and Security](/docs/self-hosting/isolation-and-security#egress-rules).
 
-Cross-tenant mismatch (API key's pinned app ≠ `X-App-Id` header) returns `403 forbidden`.
+## Docker network pool exhausted
+
+```
+Docker create network appstrate-exec-... failed: 400
+{"message":"all predefined address pools have been fully subnetted"}
+```
+
+Each run uses one network, and Docker's default address pool holds about 31 on a stock host. Reclaim unused networks with `docker network prune`. For a lasting fix, carve smaller subnets in `/etc/docker/daemon.json` (Docker Desktop: Settings, Docker Engine) and restart the daemon:
+
+```json
+{
+  "default-address-pools": [
+    { "base": "172.20.0.0/16", "size": 24 },
+    { "base": "10.200.0.0/16", "size": 24 }
+  ]
+}
+```
+
+Each `/16` base then yields about 256 networks. Appstrate also reclaims orphaned `appstrate-exec-*` networks after a failure and retries once.
+
+## 400 on API calls: missing organization or space
+
+Requests that belong to an organization need an `X-Org-Id` header, and space-scoped routes (agents, runs, schedules, end-users, API keys, packages, integrations, files and uploads) also need `X-Space-Id`. Without it you get `400`. An API key carries its own organization and space, so it needs neither header. A header that contradicts the key's pinned value returns `403`.
+
+## Sign-in and first-owner problems
+
+- **Sign-up is closed (`signup_disabled`).** The instance runs in closed mode. Ask for an invitation, or see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
+- **`/claim` answers 410.** The bootstrap token is only redeemable while the instance has no organization. If you set `AUTH_BOOTSTRAP_TOKEN` and it does nothing, check that your Compose file forwards the variable to the container.
+- **The owner address cannot register.** An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` is not created by the plain sign-up form. Claim it at `/claim`, or use a magic link or a verified Google or GitHub sign-in. The server log states the reason.
+- **Redeem rate-limited.** `/api/auth/bootstrap/redeem` allows 5 attempts per minute per IP. Behind a proxy, set `TRUST_PROXY`.
 
 ## OAuth callback fails
 
-Make sure `APP_URL` matches the public URL **exactly**, including protocol:
+`APP_URL` must match the public URL exactly, including the scheme and no stray port:
 
 ```bash
-# ✅
+# correct
 APP_URL=https://appstrate.example.com
 
-# ❌ missing protocol
+# wrong: missing scheme
 APP_URL=appstrate.example.com
 
-# ❌ wrong port when terminated by a reverse proxy on :443
+# wrong: internal port when a proxy terminates TLS on 443
 APP_URL=http://appstrate.example.com:3000
 ```
 
-In production (`NODE_ENV=production`), `APP_URL` must use `https://` (the `localhost` / `127.0.0.1` carve-out is allowed). The OAuth provider (Google, GitHub, OIDC) must have the same redirect URI registered.
+Register the same redirect URI at the provider (Google, GitHub or an OIDC client).
 
-## Redis connection issues
+## Uploads and live streams misbehave behind a proxy
 
-Without Redis (default Tier 0/1), Appstrate falls back to in-process adapters:
+- **`413` that Appstrate never logs.** The proxy's body limit is lower than your upload. Raise it to at least 100 MB (nginx: `client_max_body_size 100m`).
+- **Chat or run logs arrive in one batch at the end.** The proxy buffers or compresses `text/event-stream`. Disable that for the Appstrate location.
+- **Everyone is rate-limited together.** `TRUST_PROXY` is not set to your proxy depth, so every caller shares the proxy's IP. See [Rate Limits](/docs/self-hosting/rate-limits).
 
-- **`LocalQueue`** — custom in-process cron evaluator that polls every 30 seconds. Scheduling still works, but jobs are **not persisted across restarts** and there is no cross-instance distribution.
-- **`LocalPubSub`** — Node `EventEmitter` for run status / log fanout.
-- **`RateLimiterMemory`** — per-process rate limit counters (reset on restart).
+## Redis fallbacks
 
-In a multi-instance deployment, these fallbacks produce divergent state across replicas. Set `REDIS_URL` to share state. Redis also stores persistent BullMQ jobs (scheduled runs, webhook deliveries) — enable Redis persistence or replication if those matter.
+Without `REDIS_URL` (Tier 0 and 1), the queue, pub/sub, cache and rate limiter are in-process:
 
-## Rate limit hits (`429 Too Many Requests`)
+- The scheduler's cron evaluator polls every 30 seconds, and queued jobs are lost on restart.
+- Rate-limit counters reset on restart.
+- Several instances do not share state. Set `REDIS_URL` for more than one instance.
 
-Appstrate enforces per-endpoint limits keyed by `method:path:identity`. A 429 includes three IETF headers so you can back off intelligently:
+With Redis, keep its volume if you care about scheduled runs and queued webhook deliveries.
 
-```
-Retry-After: 15
-RateLimit: limit=20, remaining=0, reset=15
-RateLimit-Policy: 20;w=60
-```
+## MinIO crash-loops
 
-See [Rate Limits](/docs/self-hosting/rate-limits) for the full table and for tuning `PLATFORM_RUN_LIMITS` / `INLINE_RUN_LIMITS`.
+`FATAL Unable to initialize backend: Unable to write to the backend` means the `miniodata` volume is not owned by uid 65532. Re-own it once with the stack stopped. The exact commands, with a snapshot step first, are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#data-persistence).
 
-## Sidecar pool errors
+## Rate limit hits (`429`)
 
-If the pre-warmed pool is unstable, disable it and fall back to per-run creation:
+Check `Retry-After` and the `RateLimit` headers. Per-endpoint limits and the organization-wide run limits are in [Rate Limits](/docs/self-hosting/rate-limits). An organization at its concurrent run cap gets `org_run_concurrency_exceeded`.
 
-```bash
-SIDECAR_POOL_SIZE=0
-```
+## Port 3000 is already in use
 
-Every run then creates a fresh sidecar on the hot path (adds ~500–1500 ms to run startup) but avoids any pool bookkeeping.
-
-## Port 3000 already in use
-
-```bash
-# Pick a different port on boot
-PORT=3100 bun run dev
-# or in docker-compose.yml, change the first half of the mapping:
-#   ports: ["3100:3000"]
-```
-
-The `appstrate` CLI installer defaults to `3000` but auto-picks the next free port when `--yes` is passed.
+Change the host side of the port mapping, or set `PORT` in `.env` (the Compose files read `${PORT:-3000}`). `appstrate install --port 3100` sets it for you, and with `--yes` the installer picks the next free port by itself.
 
 ## `minisign: command not found` during install
 
-The `get.appstrate.dev` one-liner verifies the CLI binary with minisign. Install minisign first (`brew install minisign`, `apt install minisign`, or `apk add minisign`), or use `bunx appstrate install` which skips the binary download entirely. Full detail: [Setup § minisign](https://github.com/appstrate/skills/blob/main/skills/appstrate/references/setup.md).
+`curl -fsSL https://get.appstrate.dev | bash` verifies the CLI binary with minisign. On a TTY it offers to install minisign through your package manager, and with `--yes`, in CI or without a TTY it installs it automatically when it can. If that fails, install it yourself (`brew install minisign`, `apt install minisign`, `apk add minisign`) and re-run. Setting `APPSTRATE_NO_INSTALL_MINISIGN=1` disables the automatic install.
 
-## Enable verbose logging
-
-Raise the log level and restart:
+## Verbose logging
 
 ```bash
 LOG_LEVEL=debug
 ```
 
-Debug logs include infrastructure adapter selection (Redis vs LocalQueue, S3 vs filesystem), Docker container creation details, and sidecar pool events. Drop back to `info` once the incident is understood.
+Debug logs include one access line per request (method, route pattern, status, duration and `Request-Id`) and details about adapter selection and container creation. Return to `info` once the incident is understood.
 
 ## Orphaned containers
 
-Appstrate marks every managed container with `appstrate.managed=true` and runs `cleanupOrphanedContainers()` at startup (via `apps/api/src/lib/boot.ts`). If stray containers remain after a crash, clean them up manually:
+Containers created for runs carry the label `appstrate.managed=true`, and the platform reconciles them at startup. If strays remain after a crash:
 
 ```bash
 docker ps -a --filter "label=appstrate.managed=true" -q | xargs docker rm -f
 ```
 
-The same label also covers the `appstrate-exec-*` networks, which are removed on graceful shutdown and again on the next boot.
+Per-run networks (`appstrate-exec-*`) are cleaned up at boot. The shared `appstrate-egress` network is never removed, by design.

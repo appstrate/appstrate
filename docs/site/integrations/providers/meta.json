@@ -1,5 +1,5 @@
 {
-  "title": "Built-in Providers",
+  "title": "Integration setup guides",
   "pages": [
     "gmail",
     "google-drive",
@@ -12,7 +12,6 @@
     "discord",
     "linkedin",
     "stripe",
-    "trello",
     "brevo",
     "firecrawl",
     "pinterest",

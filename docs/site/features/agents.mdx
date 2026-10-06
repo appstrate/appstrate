@@ -1,112 +1,218 @@
 ---
 title: Agents
-description: Create, configure, and customize your AI agents on Appstrate.
+description: What an agent is, how it is defined, versioned, configured per space and given capabilities.
 ---
 
-## What Is an Agent?
+## What is an agent?
 
-An agent is an **LLM in a loop with tools**, running inside an isolated sandbox. You give it a goal, and it decides on its own which tools to call, in what order, to reach the goal. Unlike workflows (predefined step graphs), an agent plans and reacts as it goes.
+An agent is an **LLM in a loop with tools**, running inside an isolated sandbox. You give it a goal, and it decides which tools to call, in what order, to reach it. Unlike a workflow (a predefined graph of steps), an agent plans and reacts as it goes.
 
-Every Appstrate agent is the combination of:
+An agent is an [AFPS package](/docs/features/packages) of type `agent`. It is made of:
 
-- A **prompt** that states the goal, context, and constraints
-- An **LLM** (any model you bring via BYOK: Anthropic, OpenAI, Azure, Ollama, custom)
-- **Tools** (executable functions) and **skills** (portable instructions) declared as dependencies in its manifest
-- **Providers** (Gmail, Slack, Notion, …) that give it authenticated access to external services via the credential-hiding sidecar
-- Schemas for `config`, `input`, and `output` (JSON Schema 2020-12) that validate the parameters the user supplies and the result the agent emits
+- `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
+- `prompt.md`: the instructions the model receives.
 
-At run time, Appstrate assembles these into a container, hands the LLM its tools, and lets it loop until it produces an output matching the schema (or hits the timeout).
+At run time Appstrate assembles the agent, its [skills](/docs/features/skills), its [integrations](/docs/integrations/overview) and the [runtime tools](/docs/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
 
-## Creating an Agent
+Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/docs/features/files)).
 
-### Via the UI
+## Drafts, versions and where an agent lives
 
-1. Open the **Agents** page from the sidebar, click **New agent**
-2. Give it a name and write your prompt
-3. (Optional) Connect providers to give access to external services
-4. Click **Run**
+Every agent package has:
 
-### Via the API
+- a **draft**: the working copy, edited in place;
+- immutable **published versions** (semver, forward-only), cut from the draft.
+
+An agent also has a **home space**, the space whose `agents:write` permission governs editing, publishing, renaming and deleting it. Other spaces reach it by **sharing** and run it by **activating** it. Both concepts are covered in [Library and sharing](/docs/features/library) and [Spaces](/docs/features/spaces).
+
+A launch with no selector runs the **latest published version**. The draft runs only when the caller asks for it (`?version=draft`) and can write the agent.
+
+## Creating an agent
+
+### In the web app
+
+Open **Agents** in the sidebar and create a new agent. The editor lets you write the prompt, define the input and output schemas, attach skills and integrations, and pick the runtime tools. Saving edits the draft. **Publish** cuts a version.
+
+### Through the API
+
+Create the draft, then publish a version. Writes to a draft are guarded by optimistic concurrency: `PATCH` requires the `ETag` of the draft in `If-Match`.
 
 ```bash
-curl -X POST http://localhost:3000/api/packages/agents \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+# 1. Create the agent (draft + initial version)
+curl -X POST https://your-instance/api/packages/agents \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "email-summarizer",
-    "description": "Summarizes recent emails"
+    "manifest": {
+      "name": "@acme/email-summarizer",
+      "version": "1.0.0",
+      "type": "agent",
+      "schema_version": "0.3",
+      "display_name": "Email summarizer",
+      "description": "Summarizes recent emails",
+      "author": "Acme"
+    },
+    "content": "Summarize the most recent emails and return the result."
   }'
+
+# 2. Later edits: update the draft under If-Match, then cut a version
+curl -X PATCH https://your-instance/api/packages/agents/@acme/email-summarizer \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "If-Match: <ETag from the GET>" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "Summarize the most recent emails in three bullets." }'
+
+curl -X POST https://your-instance/api/packages/agents/@acme/email-summarizer/versions \
+  -H "Authorization: Bearer apst_your_key"
 ```
 
-## Writing an Effective Prompt
+`content` is the prompt and must not be blank. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/docs/features/multi-tenancy)).
 
-The prompt is injected into the agent container via the `AGENT_PROMPT` environment variable. It's automatically enriched with contextual sections:
+You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See [Packages](/docs/features/packages).
 
-- **User Input** — input data provided at run launch
-- **Configuration** — the agent's current config values
-- **Previous State** — persisted state from the previous run
-- **Run History API** — URL to query past run history
+## The manifest
 
-Tips:
-- Be specific about the task to accomplish
-- Describe the expected output format
-- Mention available providers and how to use them
-- Use the "Previous State" section for agents that maintain tracking
-
-## Configuration
-
-The config schema is a JSON Schema that defines the agent's adjustable parameters. Users fill in these fields via an auto-generated form in the UI.
+A manifest follows the [AFPS specification](/docs/resources/afps-specification), plus Appstrate's `runtime_tools` field.
 
 ```json
 {
-  "schema": {
-    "type": "object",
-    "properties": {
-      "maxEmails": {
-        "type": "number",
-        "description": "Maximum number of emails to process"
-      },
-      "language": {
-        "type": "string",
-        "enum": ["fr", "en"]
+  "name": "@acme/support-triage",
+  "version": "1.2.0",
+  "type": "agent",
+  "schema_version": "0.3",
+  "display_name": "Support triage",
+  "description": "Labels and answers new support tickets",
+  "author": "Acme",
+  "timeout": 600,
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "max_tickets": { "type": "integer", "default": 20 }
       }
-    },
-    "required": ["maxEmails"]
-  }
+    }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": { "handled": { "type": "integer" } },
+      "required": ["handled"]
+    }
+  },
+  "dependencies": {
+    "skills": { "@acme/tone-of-voice": "^1.0.0" },
+    "integrations": { "@appstrate/zendesk": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/zendesk": { "tools": ["api_call"] }
+  },
+  "runtime_tools": ["output", "log", "note"]
 }
 ```
 
-Validation uses AJV with `coerceTypes: true` (e.g., `"50"` accepted as a number). Additional properties are always allowed.
+The fields the platform reads:
 
-## Input and Output
+| Field                                                  | Meaning                                                                                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`                                              | Run timeout in seconds. Default `300`. Clamped to the platform ceiling (`timeout_ceiling_seconds`, default `1800`). The agent detail returns `effective_timeout_seconds`. |
+| `input.schema`                                         | JSON Schema 2020-12 for the run input. Drives the launch form.                                                                                                            |
+| `output.schema`                                        | JSON Schema 2020-12 for the result. If set, `runtime_tools` must include `output`.                                                                                        |
+| `dependencies.skills` / `mcp_servers` / `integrations` | Flat maps of package id to semver range.                                                                                                                                  |
+| `integrations_configuration.<id>`                      | Per-integration selection: `tools`, `scopes`, `auth_key`. Every key must match a declared integration dependency.                                                         |
+| `runtime_tools`                                        | Opt-in first-party tools: `output`, `log`, `note`, `pin`, `publish_file`. None is injected by default.                                                                    |
+| `_meta["dev.appstrate/resources"]`                     | Optional memory and CPU hints. See [Configuring agent resources](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md).            |
 
-The **input** schema defines the data expected at each run. The **output** schema enables result validation.
+The platform validates manifests on every write path. An unknown `runtime_tools` id is rejected on author input and dropped (with a report) when read back from a stored manifest.
 
-If an output schema is defined:
-1. It's injected into the container via `OUTPUT_SCHEMA` for LLM constrained decoding
-2. After the run, AJV validates the result
-3. On mismatch, a warning is logged but the run still succeeds
+## The prompt
 
-## Attaching capabilities
+`prompt.md` is your text. The platform prepends a preamble built from the run context, so the model sees, when they apply:
 
-An agent's capabilities — skills, tools, memory, and providers — each have their own Feature page. This section only covers **how to bind existing capabilities to an agent**.
+- the environment (ephemeral container, network access, timeout, workspace layout);
+- the available skills (files under `.pi/skills/`);
+- one section per connected integration, including its API documentation when the integration ships an `INTEGRATION.md`;
+- the **User Input** and **Files** of this run;
+- the **Checkpoint** and **Pinned Slots** left by earlier runs (see [Memory](/docs/features/memory));
+- a **Deliverables** section telling it to write user-facing files under `./outputs/`;
+- the **Output Format**, with the full schema, when `output.schema` is declared.
 
-- **[Skills](/docs/features/skills)** — declarative markdown instructions. Attachment is **manifest-only**: declare them in `dependencies.skills` (semver ranges) and publish a new agent version. No dedicated REST endpoint.
-- **[Tools](/docs/features/tools)** — executable functions. Attach via `dependencies.tools` in the manifest **or** via `PUT /api/agents/@scope/name/tools` with a `{ "toolIds": ["@scope/name", …] }` body.
-- **[Memory](/docs/features/memory)** — persistent store scoped to this agent in this application. Agents write via the built-in `@appstrate/add-memory` tool; list and delete via `/api/agents/@scope/name/memories`.
-- **[Providers](/docs/integrations/providers)** — external services like Gmail or Slack. Declared as dependencies in the manifest; at run time the sidecar injects credentials.
+Tools are not listed in the prompt. The model discovers them through MCP, each tool carrying its own description. Write the prompt as the task and constraints, not as a tool manual.
 
-Example: update an agent's tool list.
+## Input and output
+
+### Input
+
+`input.schema` describes what a run takes. A field can be a file (`format: "uri"` with a `contentMediaType`), in which case the caller passes an `upload://` or `appfile://` reference or an inline data URI (see [Files](/docs/features/files)).
+
+Values resolve in this order, last one wins:
+
+1. the author `default` in the schema;
+2. the **stored value** saved for the agent in this space;
+3. the value frozen on a [schedule](/docs/features/scheduling);
+4. the caller's input at launch.
+
+A space admin can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
 
 ```bash
-curl -X PUT http://localhost:3000/api/agents/@my-org/agent-name/tools \
-  -H "Authorization: Bearer ask_your_key" \
-  -H "X-App-Id: app_xxx" \
+curl -X PUT https://your-instance/api/agents/@acme/support-triage/input-settings \
+  -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
-  -d '{"toolIds": ["@my-org/word-count", "@appstrate/log"]}'
+  -d '{ "values": { "max_tickets": 50 }, "locked_fields": ["max_tickets"] }'
 ```
 
-## Model and proxy overrides
+`PUT` replaces the whole input settings of the agent in that space: both members are required. Stored values are validated against the schema with `required` ignored, so a required field can stay empty and be asked at launch. Locking a required field that has no value is refused (`locked_required_field_empty`).
 
-Each agent can pin its own LLM model (overriding the org default) and its own outbound proxy. See [Proxies](/docs/features/proxies) for the full cascade and the REST surface. Model overrides use `PUT /api/agents/@scope/name/model` with a `modelId`.
+Without `agents:read`, run responses return `input: null` for registered agents, so editor-imposed values stay private.
+
+### Output
+
+When `output.schema` is declared, the `output` tool takes the schema as its argument schema, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
+
+A run with no output schema can finish without calling `output`.
+
+## Capabilities
+
+| Capability                                                          | Where it is declared                                         | Page                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------- |
+| Skills                                                              | `dependencies.skills`                                        | [Skills](/docs/features/skills)             |
+| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/docs/integrations/overview) |
+| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/docs/features/packages)         |
+| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/docs/features/tools)               |
+| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/docs/features/memory)             |
+
+Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
+
+### Integrations need connections
+
+An integration only works for an actor that holds a usable **connection** to it. Before launching, `GET /api/agents/{scope}/{name}/connection-readiness` returns one verdict covering every declared integration and whether the agent is active in the space. A launch with a missing connection answers `409 missing_integration_connection`, with one error item per integration to fix. The connection model (pins, org defaults, launch overrides) belongs to the integrations pages.
+
+## Model, proxy and generation settings
+
+Each space can pin a model, a proxy and generation settings (temperature, reasoning level) for an agent. The effective model is resolved at launch with this precedence:
+
+1. `modelId` in the run request;
+2. the model override of a schedule, when a schedule fires the run;
+3. the model pinned for the agent in this space;
+4. the organization default model;
+5. the system default.
+
+```bash
+curl -X PATCH https://your-instance/api/agents/@acme/support-triage/model \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "modelId": "mod_xxx", "generation": { "temperature": 0.2, "reasoning_level": "medium" } }'
+```
+
+Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/docs/integrations/llm-models). The proxy cascade is in [Proxies](/docs/features/proxies).
+
+The same per-space settings are also available through `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (`modelId`, `proxyId`, `generation_config`) and read back, resolved, by `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+
+## Running an agent
+
+An agent can be launched from the web app, the API, the CLI, a [schedule](/docs/features/scheduling), the [chat](/docs/using-appstrate/chat) assistant or an [MCP client](/docs/using-appstrate/mcp-clients). See [Runs](/docs/features/runs).
+
+An agent must be **active** in the space to be launched there. A space that has it switched off answers `404 agent_not_active_in_space`, while reads keep working.
+
+## Exporting
+
+`GET /api/agents/{scope}/{name}/bundle` streams the agent and all its transitive dependencies as a deterministic `.afps-bundle`, which another instance imports with `POST /api/packages/import-bundle`. If the organization sets `restrict_package_copy`, the export requires `agents:share` in the agent's home space.

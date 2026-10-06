@@ -1,130 +1,171 @@
 ---
 title: Errors
-description: Every Appstrate API error follows RFC 9457 with Stripe-style extensions.
+description: Every Appstrate API error is an RFC 9457 problem document with a stable machine-readable code and a request id.
 ---
 
-Errors are returned as `application/problem+json` per [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457), with a set of extensions inspired by Stripe.
+Errors are returned as `application/problem+json` per [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457), with a few Stripe-style extension members. Branch on the HTTP status and on `code`. Never branch on `title` or `detail`, which are written for humans and can change.
 
 ## Format
 
-```json
-{
-  "type": "https://appstrate.dev/errors/validation-failed",
-  "title": "Validation failed",
-  "status": 400,
-  "detail": "Request body contains invalid fields.",
-  "instance": "/api/end-users",
-  "code": "validation_failed",
-  "requestId": "req_01HZABC...",
-  "errors": [
-    { "field": "externalId", "code": "required" },
-    { "field": "email", "code": "invalid_format" }
-  ]
-}
-```
-
-### Fields
-
-| Field | Always | Description |
-|---|---|---|
-| `type` | Yes | URI identifying the error class |
-| `title` | Yes | Human-readable summary |
-| `status` | Yes | HTTP status code (mirrors the response status) |
-| `detail` | No | Human-readable explanation for this occurrence |
-| `instance` | No | URI of the request that produced the error |
-| `code` | Yes | Stable machine-readable code (see below) |
-| `requestId` | Yes | Correlation id; also in the `X-Request-Id` response header |
-| `param` | No | Single path of the offending field (Stripe-style) |
-| `errors` | No | Array of field-level errors for `validation_failed` |
-| `retryAfter` | No | Seconds to wait before retrying (on `429`) |
-
-## Stable codes
-
-| Code | Typical status | Meaning |
-|---|---|---|
-| `invalid_request` | 400 | Malformed request that does not fit validation |
-| `validation_failed` | 400 | Zod validation failed. Details in `errors[]` |
-| `unauthorized` | 401 | No credentials or credentials are invalid |
-| `forbidden` | 403 | Credentials lack the required scope or role |
-| `not_found` | 404 | Resource does not exist or is out of the caller's scope |
-| `conflict` | 409 | Resource state conflict (e.g. duplicate, idempotency key mismatch) |
-| `gone` | 410 | Resource was permanently deleted |
-| `operation_not_allowed` | 409 / 422 | Valid input, invalid state for this operation |
-
-See [Reference / Error Codes](/docs/api/errors) for the full catalog.
-
-## Field error codes
-
-When `code = validation_failed`, each entry in `errors[]` uses one of these stable field codes:
-
-| Field code | Meaning |
-|---|---|
-| `required` | Missing required field |
-| `invalid_type` | Wrong type (e.g. expected string, got number) |
-| `invalid_format` | Wrong format (e.g. not an email, not an ISO date) |
-| `out_of_range` | Value outside allowed min/max |
-| `unknown_field` | Field is not accepted by the schema |
-
-Mapped automatically from Zod issue types.
-
-## Retry guidance
-
-For `429 Too Many Requests`, the `retryAfter` field (and the `Retry-After` response header) tells you how long to wait. For `5xx` server errors, retry with exponential backoff; start at 1 second, cap at 60.
-
-`409 conflict` with `code = "conflict"` from `Idempotency-Key` mismatch (same key, different body) should not be retried; the original response is the authoritative one.
-
-## Request correlation
-
-Every response carries `X-Request-Id: req_...`. Include it in support tickets or reproduce it in your logs to correlate with Appstrate's logs. All auth decisions, permission denials, and impersonation events are emitted with the same `requestId`.
-
-## Example: authentication failure
-
-```
-HTTP/1.1 401 Unauthorized
-Content-Type: application/problem+json
-X-Request-Id: req_01HZ...
-
-{
-  "type": "https://appstrate.dev/errors/unauthorized",
-  "title": "Authentication required",
-  "status": 401,
-  "detail": "Invalid or revoked API key.",
-  "code": "unauthorized",
-  "requestId": "req_01HZ..."
-}
-```
-
-## Example: scope denial
-
-```
-HTTP/1.1 403 Forbidden
-Content-Type: application/problem+json
-
-{
-  "type": "https://appstrate.dev/errors/forbidden",
-  "title": "Forbidden",
-  "status": 403,
-  "detail": "Scope 'agents:run' is required.",
-  "code": "forbidden",
-  "requestId": "req_01HZ..."
-}
-```
-
-## Example: validation failure
-
-```
+```http
 HTTP/1.1 400 Bad Request
 Content-Type: application/problem+json
+Request-Id: req_6f1c9a52-7b0e-4b7d-9c2e-0d3a8a1f5e44
+```
 
+```json
 {
-  "type": "https://appstrate.dev/errors/validation-failed",
-  "title": "Validation failed",
+  "type": "https://docs.appstrate.dev/errors/validation-failed",
+  "title": "Validation Failed",
   "status": 400,
+  "detail": "name: Too small: expected string to have >=1 characters (+1 more)",
+  "instance": "urn:appstrate:request:req_6f1c9a52-7b0e-4b7d-9c2e-0d3a8a1f5e44",
   "code": "validation_failed",
-  "requestId": "req_01HZ...",
+  "request_id": "req_6f1c9a52-7b0e-4b7d-9c2e-0d3a8a1f5e44",
   "errors": [
-    { "field": "scopes", "code": "invalid_type" },
-    { "field": "name", "code": "required" }
+    {
+      "field": "name",
+      "code": "out_of_range",
+      "message": "Too small: expected string to have >=1 characters"
+    },
+    {
+      "field": "scopes",
+      "code": "invalid_type",
+      "message": "Invalid input: expected array, received string"
+    }
   ]
+}
+```
+
+| Field         | Always | Description                                                                                                                                                                                          |
+| ------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`        | Yes    | An identifier URI for the error class: `https://docs.appstrate.dev/errors/` plus the `code` with underscores turned into hyphens. Treat it as an identifier, not as a link you can rely on resolving |
+| `title`       | Yes    | Short human-readable summary                                                                                                                                                                         |
+| `status`      | Yes    | The HTTP status, repeated in the body                                                                                                                                                                |
+| `detail`      | Yes    | Human-readable explanation of this occurrence                                                                                                                                                        |
+| `instance`    | Yes    | `urn:appstrate:request:` followed by the request id                                                                                                                                                  |
+| `code`        | Yes    | Stable machine-readable code in `snake_case`                                                                                                                                                         |
+| `request_id`  | Yes    | The request id, also sent in the `Request-Id` response header                                                                                                                                        |
+| `param`       | No     | The single request parameter at fault, such as a header name or a query field                                                                                                                        |
+| `retry_after` | No     | Seconds to wait before retrying. Mirrored in the `Retry-After` header                                                                                                                                |
+| `errors`      | No     | Field-level errors, one entry per offending field, on `validation_failed` and on some readiness checks                                                                                               |
+
+Some errors carry additional members the client is expected to act on. For example, a run launch blocked by a missing connection returns the connections to choose from or to reconnect (`candidate_connections`, `required_scopes`, and similar) so a UI can resolve it without a second round trip. These members are documented on the operation that emits them.
+
+Property names in problem documents are `snake_case`, like the rest of the wire format. A few identifiers keep their `camelCase` spelling (`id`, `userId`, `createdAt`, and similar); see the OpenAPI schemas.
+
+## Request ids
+
+Every response, success or error, carries a `Request-Id` header of the form `req_<uuid>`. Quote it in support requests and log it on your side: the platform's logs and audit records carry the same id. If you send a valid W3C `traceparent` header, it is echoed back and the trace id is attached to the server logs for that request.
+
+## Validation errors
+
+A request body that fails validation returns `400` with `code: "validation_failed"` and one `errors[]` entry per offending field, all in the same response. Bodies are strict: an unknown field is an error, not silently dropped, and a malformed JSON body is a `400` rather than a `500`.
+
+| Field `code`                                      | Meaning                                                 |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| `required`                                        | A required field is missing                             |
+| `invalid_type`                                    | Wrong type, such as a string where an array is expected |
+| `invalid_format`                                  | Wrong format: not an email, not a URL, not an ISO date  |
+| `out_of_range`                                    | Too short, too long, too small, or too large            |
+| `unknown_field`                                   | The body contains a field the schema does not accept    |
+| `invalid_value`                                   | Not one of the allowed values, or a custom rule failed  |
+| `invalid_union`, `invalid_key`, `invalid_element` | A nested union, map key, or array element failed        |
+| `invalid_request`                                 | Any other validation failure                            |
+
+`field` is a path: `scopes`, `metadata.plan`, or `items[0].name` for array elements.
+
+A single bad query parameter or header is reported with `code: "invalid_request"` and a `param` instead of an `errors[]` array.
+
+## Common codes
+
+The set of `code` values is open: the platform adds specific codes (`no_published_version`, `must_choose_connection`, `dependency_unresolved`, and many more) and each operation in the OpenAPI document lists the responses it can return. These are the generic ones you will meet everywhere:
+
+| Status | `code`                                                            | Meaning                                                                                                   |
+| ------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_request`                                                 | Malformed request that does not fit field validation                                                      |
+| 400    | `validation_failed`                                               | Body validation failed. Details in `errors[]`                                                             |
+| 400    | `unsupported_api_version`                                         | `Appstrate-Version` names a version the server cannot serve                                               |
+| 400    | `idempotency_not_supported`                                       | `Idempotency-Key` was sent to an operation that does not honor it                                         |
+| 401    | `unauthorized`                                                    | No credential, or an invalid, revoked, or expired one                                                     |
+| 402    | `quota_exceeded`, `subscription_blocked`                          | Only when a billing module is enabled                                                                     |
+| 403    | `forbidden`                                                       | The credential lacks the permission                                                                       |
+| 403    | `not_a_space_member`                                              | The caller holds no role in the requested space                                                           |
+| 404    | `not_found`                                                       | The resource does not exist, or is outside the caller's reach. The two are deliberately indistinguishable |
+| 405    | `method_not_allowed`                                              | An `Allow` header lists the permitted methods                                                             |
+| 409    | `conflict` and specific codes                                     | A state conflict. Examples: `idempotency_in_progress`, `must_choose_connection`                           |
+| 410    | specific codes                                                    | The resource is gone                                                                                      |
+| 412    | `precondition_failed`                                             | `If-Match` did not match the current `ETag`. The response carries the current `ETag`                      |
+| 413    | `payload_too_large`, `file_count_exceeded`                        | A body or an upload is over a limit                                                                       |
+| 422    | `idempotency_conflict`, `dependency_unresolved`, `bundle_invalid` | The request is well-formed but cannot be processed in this state                                          |
+| 428    | `precondition_required`                                           | The operation requires an `If-Match` header                                                               |
+| 429    | `rate_limited`                                                    | See [Rate limiting](/docs/api#rate-limiting)                                                              |
+| 500    | `internal_error`                                                  | Unexpected server failure. The body never leaks internals                                                 |
+| 502    | `bad_gateway`                                                     | An upstream dependency failed                                                                             |
+| 503    | `shutting_down`                                                   | The instance is draining. Retry shortly; `retry_after` is set                                             |
+
+## Retrying
+
+- `429` and `503`: wait `retry_after` seconds (the `Retry-After` header carries the same value), then retry.
+- `5xx` without a hint: retry with exponential backoff and jitter, starting around one second and capped at one minute. For a `POST`, send an [`Idempotency-Key`](/docs/api/idempotency) so a retry cannot create a duplicate. Only the operations that declare the header accept it.
+- `4xx` other than `408`, `429`: do not retry unchanged. The request needs to change.
+
+## Examples
+
+### Authentication failure
+
+```http
+HTTP/1.1 401 Unauthorized
+Content-Type: application/problem+json
+WWW-Authenticate: Bearer error="invalid_token"
+```
+
+```json
+{
+  "type": "https://docs.appstrate.dev/errors/unauthorized",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "Invalid or expired API key",
+  "instance": "urn:appstrate:request:req_…",
+  "code": "unauthorized",
+  "request_id": "req_…"
+}
+```
+
+### Rate limited
+
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/problem+json
+Retry-After: 42
+RateLimit: limit=20, remaining=0, reset=42
+RateLimit-Policy: 20;w=60
+```
+
+```json
+{
+  "type": "https://docs.appstrate.dev/errors/rate-limited",
+  "title": "Rate Limited",
+  "status": 429,
+  "detail": "Too many requests. Please try again shortly.",
+  "instance": "urn:appstrate:request:req_…",
+  "code": "rate_limited",
+  "request_id": "req_…",
+  "retry_after": 42
+}
+```
+
+### A header the credential cannot honor
+
+```json
+{
+  "type": "https://docs.appstrate.dev/errors/header-not-allowed",
+  "title": "Header Not Allowed",
+  "status": 400,
+  "detail": "Appstrate-User is only supported with api_key auth, not session authentication.",
+  "instance": "urn:appstrate:request:req_…",
+  "code": "header_not_allowed",
+  "request_id": "req_…",
+  "param": "Appstrate-User"
 }
 ```
