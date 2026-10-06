@@ -1,0 +1,45 @@
+name: Publish docs
+
+# The public documentation lives in docs/site/ (and docs/ENV.md, which becomes
+# the "Environment Variables" page). The website (appstrate/website) copies both
+# at BUILD time, so a docs change only reaches appstrate.com when the website is
+# rebuilt. This job asks Coolify to do that.
+#
+# `force=true` is required: the website image build is cached on the website
+# repository's own files, and a plain redeploy would reuse the previous docs.
+#
+# Setup (repository settings):
+#   secret   COOLIFY_API_TOKEN       API token with the `deploy` ability
+#   variable COOLIFY_URL             e.g. https://coolify.example.com (no trailing slash)
+#   variable WEBSITE_COOLIFY_UUID    UUID of the website application in Coolify
+# Without them the job is skipped, so forks stay green.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/**"
+      - "docs/ENV.md"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-website:
+    if: ${{ vars.COOLIFY_URL != '' && vars.WEBSITE_COOLIFY_UUID != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Rebuild the website from the new docs
+        env:
+          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+          WEBSITE_COOLIFY_UUID: ${{ vars.WEBSITE_COOLIFY_UUID }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
+            "${COOLIFY_URL}/api/v1/deploy?uuid=${WEBSITE_COOLIFY_UUID}&force=true"
