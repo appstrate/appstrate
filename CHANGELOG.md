@@ -98,6 +98,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   branded version of the three new ones: they go out in the plain template.
   On a hosted (OIDC) password reset the notice leaves through the space's own
   SMTP transport, as does the verification e-mail re-sent at hosted sign-in.
+- **`POST /api/webhooks/{id}/test` sends a real request** (#1683): one signed
+  `test.ping` to the webhook URL, single attempt, listed in its deliveries and
+  recorded as a `webhook.test_sent` audit event. A delivery whose hostname does
+  not resolve is retried up to its third attempt (`Delivery target hostname
+could not be resolved`) instead of failing for good on the first. Without
+  Redis, cron schedules now fire on the minute rather than up to 30 s late.
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are

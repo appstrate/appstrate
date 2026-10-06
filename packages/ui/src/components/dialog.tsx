@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { captureDialogOpener, restoreDialogOpener } from "../dialog-focus.ts";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -29,6 +30,33 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * Returns focus to the control that opened a state-opened dialog (Radix only
+ * knows its own `DialogTrigger`). Mounted only while open, so the initializer
+ * captures the opener before any `autoFocus` inside moves focus.
+ *
+ * Limits: a tooltip-wrapped opener shows its tooltip on refocus; a dialog that
+ * replaces another captures a control inside the first one, gone at close.
+ */
+const DialogSurface = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ onCloseAutoFocus, ...props }, ref) => {
+  const [opener] = React.useState(() => captureDialogOpener(document));
+  return (
+    <DialogPrimitive.Content
+      ref={ref}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event);
+        if (event.defaultPrevented) return;
+        if (restoreDialogOpener(opener, document)) event.preventDefault();
+      }}
+      {...props}
+    />
+  );
+});
+DialogSurface.displayName = "DialogSurface";
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
@@ -36,7 +64,7 @@ const DialogContent = React.forwardRef<
   <DialogPortal>
     <DialogOverlay>
       <div className="flex min-h-full items-center justify-center p-4">
-        <DialogPrimitive.Content
+        <DialogSurface
           ref={ref}
           className={cn(
             "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg duration-200",
@@ -49,7 +77,7 @@ const DialogContent = React.forwardRef<
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
-        </DialogPrimitive.Content>
+        </DialogSurface>
       </div>
     </DialogOverlay>
   </DialogPortal>

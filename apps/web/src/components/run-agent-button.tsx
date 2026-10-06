@@ -7,6 +7,7 @@ import { Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
@@ -132,41 +133,35 @@ export function RunAgentButton({
     </span>
   ) : null;
 
-  const button = showLabel ? (
-    <Button
-      variant={variant}
-      onClick={handleClick}
-      disabled={isDisabled}
-      title={t("detail.run")}
-      className="relative"
-    >
-      {isPending ? <Spinner /> : t("detail.run")}
-      {warningDot}
-    </Button>
-  ) : (
-    <Button
-      variant={variant}
-      size={size}
-      className={`relative ${className ?? ""}`}
-      onClick={handleClick}
-      disabled={isDisabled}
-      title={t("detail.run")}
-    >
-      {isPending ? <Spinner /> : <Play size={14} />}
-      {warningDot}
-    </Button>
-  );
-
   return (
     <>
-      {/* A disabled button takes no pointer events: its reason needs a wrapper. */}
-      {blockedTitle ? (
-        <span className="inline-flex" title={blockedTitle} data-testid="run-blocked-reason">
-          {button}
-        </span>
-      ) : (
-        button
-      )}
+      <DisabledReasonTooltip reason={blockedTitle}>
+        {showLabel ? (
+          <Button
+            variant={variant}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            className="relative"
+          >
+            {isPending ? <Spinner /> : t("detail.run")}
+            {warningDot}
+          </Button>
+        ) : (
+          <Button
+            variant={variant}
+            size={size}
+            className={`relative ${className ?? ""}`}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            aria-label={t("detail.run")}
+          >
+            {isPending ? <Spinner /> : <Play size={14} />}
+            {warningDot}
+          </Button>
+        )}
+      </DisabledReasonTooltip>
 
       {detail && (
         <RunModal

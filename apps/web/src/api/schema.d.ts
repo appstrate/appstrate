@@ -4901,7 +4901,7 @@ export interface paths {
         put?: never;
         /**
          * Send a test ping
-         * @description Send a synthetic test.ping event to verify webhook connectivity.
+         * @description Deliver a synthetic `test.ping` event to the webhook URL, signed like a real event. The call returns once the delivery is queued; its outcome is a single attempt (never retried) listed by `GET /api/webhooks/{id}/deliveries`. Sent whether or not the webhook is enabled or subscribed to any event.
          */
         post: operations["testWebhook"];
         delete?: never;
@@ -24748,7 +24748,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Test event generated */
+            /** @description Test event queued for delivery */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { Modal } from "./modal";
@@ -9,6 +10,8 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateEndUser } from "../hooks/use-end-users";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { EndUserMetadataEditor } from "./end-user-metadata-editor";
+import { entriesToMetadata, type MetadataEntry } from "../lib/end-user-metadata";
 
 interface Props {
   open: boolean;
@@ -24,6 +27,7 @@ type FormData = {
 export function EndUserCreateModal({ open, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateEndUser();
+  const [metadata, setMetadata] = useState<MetadataEntry[]>([]);
 
   const {
     register,
@@ -37,15 +41,18 @@ export function EndUserCreateModal({ open, onClose }: Props) {
 
   const handleClose = () => {
     reset({ name: "", email: "", externalId: "" });
+    setMetadata([]);
     createMutation.reset();
     onClose();
   };
 
   const onFormSubmit = (data: FormData) => {
-    const payload: { name?: string; email?: string; externalId?: string } = {};
+    const payload: NonNullable<Parameters<typeof createMutation.mutate>[0]["body"]> = {};
     if (data.name.trim()) payload.name = data.name.trim();
     if (data.email.trim()) payload.email = data.email.trim();
     if (data.externalId.trim()) payload.externalId = data.externalId.trim();
+    const meta = entriesToMetadata(metadata);
+    if (Object.keys(meta).length > 0) payload.metadata = meta;
 
     createMutation.mutate(
       { body: payload },
@@ -105,6 +112,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
             {...register("externalId")}
           />
         </div>
+        <EndUserMetadataEditor entries={metadata} onChange={setMetadata} />
         {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>

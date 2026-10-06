@@ -371,7 +371,8 @@ export const webhooksPaths = {
       operationId: "testWebhook",
       tags: ["Webhooks"],
       summary: "Send a test ping",
-      description: "Send a synthetic test.ping event to verify webhook connectivity.",
+      description:
+        "Deliver a synthetic `test.ping` event to the webhook URL, signed like a real event. The call returns once the delivery is queued; its outcome is a single attempt (never retried) listed by `GET /api/webhooks/{id}/deliveries`. Sent whether or not the webhook is enabled or subscribed to any event.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -379,7 +380,7 @@ export const webhooksPaths = {
       ],
       responses: {
         "200": {
-          description: "Test event generated",
+          description: "Test event queued for delivery",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

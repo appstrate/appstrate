@@ -26,7 +26,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 type WebhookRow = InferSelectModel<typeof webhooks>;
 type WebhookDeliveryRow = InferSelectModel<typeof webhookDeliveries>;
-import { isBlockedUrl, guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
+import {
+  isBlockedUrl,
+  guardedFetch,
+  SsrfBlockedError,
+  type HostResolver,
+} from "@appstrate/core/ssrf";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
@@ -56,6 +61,11 @@ type WebhookEventType = z.infer<typeof webhookEventSchema>;
 /** Delays per attempt (attempt 1 = immediate, attempt 2 = 30s, etc.) */
 const RETRY_DELAYS_MS = [30_000, 300_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000, 14_400_000];
 const MAX_ATTEMPTS = 8;
+/**
+ * A DNS miss is retryable only on a delivery's first attempts (now, +30 s,
+ * +5 min). Bounds the TOTAL attempt number: a first miss on attempt 3+ is final.
+ */
+const MAX_UNRESOLVED_ATTEMPTS = 3;
 const DELIVERY_TIMEOUT_MS = 15_000;
 const MAX_WEBHOOKS_PER_SCOPE = 20;
 const MAX_PAYLOAD_SIZE = 256 * 1024; // 256KB
@@ -637,12 +647,41 @@ export async function dispatchWebhookEvents(
   }
 }
 
+/** Queue a signed `test.ping` on the real delivery path — one attempt, never retried. */
+export async function sendTestPing(
+  webhook: Pick<WebhookInfo, "id" | "payloadMode">,
+): Promise<{ eventId: string; payload: Record<string, unknown> }> {
+  const eventType = "test.ping";
+  const envelope = buildEventEnvelope({
+    eventType,
+    run: { id: "run_test", packageId: "test", status: "success" },
+    payloadMode: webhook.payloadMode,
+  });
+  const queue = await getDeliveryQueue();
+  await queue.add(
+    "deliver",
+    {
+      webhookId: webhook.id,
+      eventId: envelope.eventId,
+      eventType,
+      payload: JSON.stringify(envelope.payload),
+    },
+    { attempts: 1 },
+  );
+  return envelope;
+}
+
 /**
  * Process a single webhook delivery attempt.
  * Throws on failure — queue handles retry scheduling via backoffStrategy.
- * Throws PermanentJobError for permanent failures (4xx except 408/429).
+ * Throws PermanentJobError for permanent failures (4xx except 408/429, a
+ * blocked target, a DNS miss from attempt MAX_UNRESOLVED_ATTEMPTS).
+ * Exported for tests; `resolve` is their DNS seam.
  */
-async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
+export async function processDelivery(
+  job: QueueJob<DeliveryJobData>,
+  resolve?: HostResolver,
+): Promise<void> {
   const { webhookId, eventId, eventType, payload } = job.data;
   const attempt = job.attemptsMade + 1; // attemptsMade is 0-based before this attempt
 
@@ -695,6 +734,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
   const start = Date.now();
   let statusCode: number | undefined;
   let errorMessage: string | undefined;
+  let unresolved = false;
 
   try {
     const controller = new AbortController();
@@ -719,7 +759,7 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
           body: payload,
           signal: controller.signal,
         },
-        { maxRedirects: 0, logger },
+        { maxRedirects: 0, logger, resolve },
       );
       statusCode = res.status;
 
@@ -733,9 +773,12 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
       // The endpoint answered with a redirect. Transient-failure semantics —
       // same retry behaviour as the former `redirect: "manual"` 3xx response.
       errorMessage = "Delivery endpoint responded with a redirect (redirects are not followed)";
+    } else if (err instanceof SsrfBlockedError && err.reason === "resolution-failed") {
+      // Nothing was reached, so nothing was blocked: transient, capped below.
+      errorMessage = "Delivery target hostname could not be resolved";
+      unresolved = true;
     } else if (err instanceof SsrfBlockedError) {
-      // blocked-literal / blocked-resolved / resolution-failed — permanent,
-      // same as the former pre-delivery host check.
+      // blocked-literal / blocked-resolved — permanent.
       logger.warn("Webhook delivery blocked by SSRF guard", {
         webhookId,
         eventId,
@@ -791,6 +834,11 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
 
   const failContext = { webhookId, eventId, attempt, statusCode, error: errorMessage, latency };
 
+  if (unresolved && attempt >= MAX_UNRESOLVED_ATTEMPTS) {
+    logger.warn("Webhook delivery abandoned, hostname still unresolved", failContext);
+    throw new PermanentJobError(errorMessage!);
+  }
+
   // Permanent failure (4xx except 408/429) — do not retry
   if (isPermanentFailure) {
     logger.warn("Webhook delivery permanently failed", failContext);
@@ -804,11 +852,12 @@ async function processDelivery(job: QueueJob<DeliveryJobData>): Promise<void> {
 
 /**
  * Initialize the webhook delivery worker. Called at boot.
+ * `resolve` is the tests' DNS seam.
  */
-export async function initWebhookWorker(): Promise<void> {
+export async function initWebhookWorker(resolve?: HostResolver): Promise<void> {
   const queue = await getDeliveryQueue();
 
-  queue.process(processDelivery, {
+  queue.process((job) => processDelivery(job, resolve), {
     concurrency: 10,
     limiter: { max: 100, duration: 1000 },
     backoffStrategy: (attemptsMade: number) => {
