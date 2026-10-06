@@ -20,7 +20,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-ai": "1.0.4",
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^9.0.0",
     "@redocly/openapi-core": "^2.54.3",

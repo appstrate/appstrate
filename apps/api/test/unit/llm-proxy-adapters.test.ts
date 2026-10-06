@@ -42,7 +42,7 @@ describe("upstream headers — shared forwarding policy", () => {
     "x-api-key": "ask_caller",
     cookie: "session=abc",
     "x-forwarded-for": "10.0.0.1",
-    "x-appstrate-pi-sdk": "0.87.1",
+    "x-appstrate-pi-sdk": "1.0.4",
     "x-org-id": "org_1",
     "x-run-id": "run_1",
   });
