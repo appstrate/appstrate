@@ -1,6 +1,6 @@
 ---
 title: LLM Models
-description: Connect model providers with an API key or a subscription, choose the models your agents run on, and understand system models and aliases.
+description: Connect model providers with an API key or a subscription, choose the models your agents run on, tune temperature and reasoning, and understand system models and aliases.
 ---
 
 Every agent needs a model. Models are not integrations: they are configured separately, through **model providers**. This page covers how a provider is connected, how a model is created from it, and which model an agent ends up using.
@@ -36,14 +36,45 @@ Google, Vertex, Azure OpenAI and AWS Bedrock are not native providers. To use a 
 
 Two modules let an organization run agents on a personal subscription instead of an API key. Neither is in the `MODULES` default: an operator adds them deliberately.
 
-| Provider      | Module                          | Subscription                  |
-| ------------- | ------------------------------- | ----------------------------- |
-| `claude-code` | `@appstrate/module-claude-code` | Claude Pro, Max or Team       |
-| `codex`       | `@appstrate/module-codex`       | ChatGPT Plus, Pro or Business |
+| Provider      | Display name            | Module                          | Subscription                  |
+| ------------- | ----------------------- | ------------------------------- | ----------------------------- |
+| `claude-code` | Claude Code (Anthropic) | `@appstrate/module-claude-code` | Claude Pro, Max or Team       |
+| `codex`       | Codex (ChatGPT)         | `@appstrate/module-codex`       | ChatGPT Plus, Pro or Business |
 
-These use OAuth, not a pasted key, and the login runs on the user's own machine: the dashboard mints a short-lived pairing token (valid for five minutes) and shows an `npx @appstrate/connect-helper@<version> <token>` command. The helper runs the browser login against the provider and sends the resulting credentials back to Appstrate. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`).
+These use OAuth, not a pasted key. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`), because the plain `process` adapter does not deliver subscription credentials.
 
-Using a personal subscription to power a product is a policy question that belongs to the operator, and vendor terms can change. For production and team automation, use an API key. The code-level guarantees and what is deliberately not claimed are in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
+#### Connect a subscription
+
+1. **Add the module to `MODULES`** and restart the platform. Keep the rest of your list:
+
+   ```bash
+   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-claude-code,@appstrate/module-codex
+   ```
+
+   Load one or both. Without the module the provider id is unknown to the platform: no credential can be created for it, and no subscription traffic is possible.
+
+2. **Start the connection from the dashboard.** In the organization settings, open the **Models** page, then the **Model Provider Keys** tab, click **Add key** and pick the provider. The dashboard mints a pairing token, valid for five minutes, and shows a **Connect via CLI** command: `npx @appstrate/connect-helper@<version> <token>`, pinned to the helper version your platform speaks. Copy it and run it in a terminal on **your own machine**, where a browser can open. The login runs there because the Claude Code authorize endpoint only accepts loopback redirect addresses.
+
+3. **Sign in when the helper asks.** The helper runs the browser login against the provider and sends the credentials back to Appstrate. The dashboard shows "Waiting for the connection" until it arrives. Closing the dialog does not cancel a connection already in progress, and an expired command can be replaced with **Generate a new command**.
+
+4. **Pick models.** Connecting from the **Model Provider Keys** tab only creates the credential. Only the first-run onboarding flow seeds the provider's featured models. Open the **Models** tab, choose **Add model** and pick the new key under **My keys**.
+
+When the stored subscription token can no longer be used, the credential shows **Reconnection required** with a **Reconnect** action, and the models bound to it are flagged until you reconnect.
+
+#### Models are the provider's offer, not discovered per credential
+
+Appstrate never calls the vendor to list the models of a subscription credential. The models you can choose are the provider's offer: the records of Pi's pinned model catalogue for that provider (`anthropic` for `claude-code`, `openai-codex` for `codex`). They are the same for every credential, and nothing is stored per credential. `POST /api/model-provider-credentials/discover` refuses these providers with a `400`. A model that your plan does not serve is therefore still listed, and fails at the first run (Pro, Max and Team differ for Claude).
+
+The same rule covers testing. `POST /api/models/{id}/test` runs an offline check on the stored token: whether it is well-formed and unexpired. It is not a signature check and not a live call, so a passing test does not prove the token still works upstream. A subscription credential is proven live only when the first agent run presents it to the vendor.
+
+#### Compliance
+
+Using a personal subscription to power a product is a policy question that belongs to the operator, and vendor terms can change. For production and team automation, use an API key: both vendors' clean contract is API-key billing. The reasoning is in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md), which says plainly that Appstrate does not certify compliance with any vendor's terms, and records the following:
+
+- **What the code guarantees.** Pi, the agent engine, builds every subscription request. The platform forges no client identity, the sidecar swaps the bearer and forwards every other header Pi signed unchanged, and the real token stays server-side. The token is the user's or organization's own and is never pooled across tenants. The platform sends no request that a subscription token authenticates for testing or model discovery. The one honest narrowing: the upstream request is made by the sidecar, not by a vendor binary, so Appstrate does not claim transport-level client identity.
+- **Claude Code.** The file records a timeline of policy changes through 2026, and quotes Anthropic's Agent SDK documentation as not allowing third-party developers to offer claude.ai login or rate limits for their products without prior approval. It concludes that pointing Appstrate at a personal Claude subscription is an operator-owned grey-zone choice, not a sanctioned integration.
+- **Codex.** OpenAI had not banned subscription OAuth in third-party tools when the file was reviewed, but has not endorsed it either. The path relies on the Codex OAuth client and could be closed at any time.
+- **Re-verify before relying on it.** The file was last reviewed on 2026-07-08, calls the policy half volatile, and ends with a checklist of vendor terms to re-check. A burst of `401` or `410` answers on a subscription credential is its operational sign that a vendor has closed the path.
 
 ## Adding a provider and a model
 
@@ -105,6 +136,46 @@ appstrate api PATCH /api/agents/@acme/triage/model -d '{"modelId": "<modelId>"}'
 ```
 
 `GET /api/agents/{scope}/{name}/model` returns the current setting. Changing an agent's model needs the `agents:configure` permission. The `modelId` in these calls is the Appstrate model id, not the vendor's.
+
+## Generation settings: temperature and reasoning
+
+Two request settings can be tuned per agent or per run, without changing the model itself:
+
+- **Temperature**, from `0` (deterministic) to `1` (more varied).
+- **Reasoning level**, one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
+
+Both are optional. Left unset they inherit, and an unset reasoning level resolves to `medium` (or, when the model does not take `medium`, the nearest level it supports, looking upward first).
+
+### Where to set them
+
+- **On an agent.** Open the agent, then the **Default settings** tab (it needs the `agents:configure` permission). The **Models** card has the model select, a **Temperature** slider, a **Reasoning level** selector and a **Save model settings** button. The values apply to every run of the agent in that space.
+- **For one run or one schedule.** The **Run with options** dialog and the schedule form carry the same two controls. Empty fields inherit the agent's defaults.
+- **In the chat.** The chat's model picker ("Model and generation") has the same controls.
+- **Through the API.** `generation` on `PATCH /api/agents/{scope}/{name}/model` and on the run request, and `generation_config_override` on schedules, each with `temperature` and `reasoning_level`. See [Agents](/docs/features/agents#model-proxy-and-generation-settings) and [Runs](/docs/features/runs).
+
+The model form on the Models page of the organization settings only declares whether a model reasons, with a **Reasoning** checkbox among its capabilities. It has no temperature or reasoning level control.
+
+### What each model accepts
+
+Each model declares which of these settings it supports. `GET /api/models` returns that as a `generation` object on every model, and the controls follow it:
+
+- The slider's first stop is **Auto** ("Provider default"), then `0` to `1` in steps of `0.1`.
+- When a model declares a setting **unsupported**, its control is disabled, greyed out and badged **Unsupported**, with the note "The selected model declares this setting unsupported."
+- Reasoning levels the model does not confirm are disabled one by one, so you only see selectable levels. A model with no selectable level shows the whole reasoning control as unsupported.
+- Some models cannot combine a custom temperature with reasoning. For those, a temperature is not kept alongside a reasoning level other than `off`.
+- When you switch the model in the form, any value the new model refuses is cleared instead of being kept.
+
+The capabilities come from the model catalogue, so they follow catalogue updates. A model the catalogue does not describe has unknown support: its temperature stays available, but a reasoning level cannot be chosen.
+
+### When a setting is refused
+
+What happens depends on where the value comes from:
+
+- **Saving it.** Storing a setting the model refuses, on an agent, a space or a schedule, answers `400 invalid_request`, with `param` naming the field.
+- **Sending it with a run request.** A `generation` value in the request itself that the model refuses answers `400`, with one of the codes `temperature_unsupported`, `reasoning_unsupported`, `reasoning_level_unsupported` or `temperature_with_reasoning_unsupported`. A value you set for one run is never silently changed.
+- **A stored value the model now refuses.** If the agent's defaults or a schedule's override were valid when saved but the model that runs now refuses them (you changed the default model, or the catalogue changed), the run **proceeds without that setting**. A scheduled fire has nobody to refuse it, so the run is not blocked.
+
+In the last case the run's log says so. For each dropped setting the run gets one `warn` entry named `generation_setting_dropped`, with the `setting`, its `value`, the `model` and `reason: "refused_by_model"`. Its message names the setting, its value and the model, and says the setting is ignored for this run. The platform's own log also records `Stored generation settings refused by the model, dropped for this run`. A request value that sets the same field takes precedence over the stored one, so that field is not reported as dropped.
 
 ## Cost tracking
 

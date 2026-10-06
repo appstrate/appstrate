@@ -24,6 +24,7 @@
     "spaces",
     "roles-and-permissions",
     "end-users",
+    "embedded-sign-in",
     "api-keys",
     "sandbox-and-sidecar"
   ]

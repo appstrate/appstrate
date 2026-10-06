@@ -26,7 +26,7 @@ Terminal runs carry `completed_at`, `duration` (milliseconds), `cost` and `token
 
 ### From the web app
 
-Open an agent and click **Run**. If the agent declares an input schema, a form generated from it appears. The run page streams logs and status as the run progresses.
+Open an agent and click **Run**. If the agent declares an input schema, a form generated from it appears. The run page streams logs and status as the run progresses (see [The run page](#the-run-page)).
 
 ### From the API
 
@@ -102,7 +102,74 @@ Referenced skills and integrations must already exist in the organization or sys
 
 ### Remote runs
 
-A **remote run** (`runOrigin: "remote"`) executes the agent on the caller's host, for example the `appstrate run` CLI or a CI job, and streams signed events back to the platform. `POST /api/runs/remote` creates the run and returns short-lived signing credentials. The platform still tracks status, logs, files, cost and liveness. See [CLI](/docs/using-appstrate/cli).
+A **remote run** (`runOrigin: "remote"`) executes the agent on the caller's host, for example the `appstrate run` CLI or a CI job, and streams signed events back to the platform. The platform still tracks status, logs, files, cost and liveness. The CLI side, and when to prefer a remote run over a platform run, is in [CLI](/docs/using-appstrate/cli#headless-and-ci-runs).
+
+`POST /api/runs/remote` creates the run. The caller needs `agents:run` (a body that ships its own manifest also needs `agents:write`), and the route honours `Idempotency-Key`. The body is closed:
+
+| Field                  | Meaning                                                                                                                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`               | Required. Either `{ "kind": "registry", "packageId": "@scope/name" }` with optional `stage` (`draft` or `published`, default `published`), `spec` and `integrity`, or `{ "kind": "inline", "manifest": {...}, "prompt": "..." }`. |
+| `spaceId`              | Required. It must match the space of the request (the key's space, or `X-Space-Id`).                                                                                                                                              |
+| `input`                | Values for the agent's input schema. A file field cannot point at a platform-stored file (`upload://` or `appfile://`): the platform has no workspace on the caller's host. Use an inline `data:` URI.                            |
+| `dependency_overrides` | Same meaning as on a platform launch.                                                                                                                                                                                             |
+| `contextSnapshot`      | Free-form object describing the runner, at most 16 KiB once serialised. The CLI sends its OS, its version and the bundle's name and version.                                                                                      |
+| `sink.ttl_seconds`     | How long the signing credentials stay valid, up to 86400. The default and the ceiling are operator settings (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`, `REMOTE_RUN_SINK_MAX_TTL_SECONDS`).                                           |
+
+There is no `modelId` or `proxyId`: a remote run resolves no platform model, and a body that carries them is refused with `400`. The response holds the run `id` and the one-time sink credentials (`url`, `finalize_url`, `secret`, `expiresAt`). The runner posts its events to `url`, signed with `secret`, and closes the run through `finalize_url`. `PATCH /api/runs/{id}/sink/extend` with `ttl_seconds` extends the lifetime of a sink for a run that lasts longer than planned, and events posted after it expires are refused. In the web app a remote run carries a **Remote** badge, and its **Cancel** button is hidden, because the platform cannot signal the caller's host. See [Run liveness](/docs/features/run-liveness) for how a silent runner is finished.
+
+#### LLM proxy and credential proxy
+
+A remote run has no sandbox on the platform, so it reaches the organization's models and the space's integration credentials through two authenticated HTTP surfaces of the instance. A script, a CI job or another service can call them directly. Their request and response schemas are in the generated API reference: [LLM proxy](/docs/api/llm-proxy) and [Credential proxy](/docs/api/credential-proxy).
+
+| Surface          | Route                                                      | Credential required                                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LLM proxy        | `POST /api/llm-proxy/<api shape>/...`, four routes (below) | An API key carrying `llm-proxy:call`, or the access token of a user whose organization role holds it. The owner, admin, member and guest roles do.                                        |
+| Credential proxy | Any method on `/api/credential-proxy/proxy`                | An API key carrying `credential-proxy:call`, or the access token of a user who holds it in the space. The `admin` and `builder` space roles do, `operator`, `runner` and `viewer` do not. |
+
+Both accept bearer authentication only. A cookie session is refused with `403`. The "access token of a user" is the device-flow token of the CLI, or a dashboard access token. A key follows its creator and its scopes, as described in [API keys](/docs/features/api-keys), and neither scope should be given out lightly: the first spends the organization's model budget, the second reaches every provider the space has connected.
+
+**LLM proxy.** One route per protocol, each shaped like the vendor's own endpoint, so a vendor SDK works when its base URL points at the proxy:
+
+| API shape               | Route                                                      | SDK base URL                                                |
+| ----------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
+| `openai-completions`    | `/api/llm-proxy/openai-completions/v1/chat/completions`    | `https://your-instance/api/llm-proxy/openai-completions/v1` |
+| `openai-responses`      | `/api/llm-proxy/openai-responses/v1/responses`             | `https://your-instance/api/llm-proxy/openai-responses/v1`   |
+| `anthropic-messages`    | `/api/llm-proxy/anthropic-messages/v1/messages`            | `https://your-instance/api/llm-proxy/anthropic-messages`    |
+| `mistral-conversations` | `/api/llm-proxy/mistral-conversations/v1/chat/completions` | `https://your-instance/api/llm-proxy/mistral-conversations` |
+
+The request body is the vendor's, with one change: `model` is the id of a **model preset** of the organization (the `id` that `GET /api/models` and `appstrate models list` print), not a vendor model name. The platform resolves the preset, puts the real model id and the provider key in, forwards the call and relays the answer, streamed or not. Each call is metered in the usage ledger. A preset whose protocol does not match the route you called is a `400`, and so is a preset that comes from an OAuth subscription, which the proxy never serves. Send the key as `Authorization: Bearer`: the proxy does not read `x-api-key`, so a vendor SDK that sends that header by default (the Anthropic SDK does) needs the bearer header added. With a user access token instead of an API key, also send `X-Org-Id`. The optional `X-Run-Id` header attributes the call to a run so its cost rolls up into that run; for a user token it must be a run that user launched. `appstrate models list --proxy-only` lists the presets these four routes can serve.
+
+```bash
+curl https://your-instance/api/llm-proxy/anthropic-messages/v1/messages \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "model": "<preset id>", "max_tokens": 256, "messages": [{ "role": "user", "content": "Hello" }] }'
+```
+
+**Credential proxy.** It sends one HTTP request to a third-party API with the credentials of a connection injected on the platform, so the caller never holds them. The method is the one you use, and the proxy forwards it. Control headers say what to call:
+
+| Header             | Meaning                                                                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `X-Space-Id`       | The space to act in. Optional with an API key, which already names its space (a different value is refused with `403`). Required with a user access token. |
+| `X-Org-Id`         | The organization id. Required with a user access token, ignored with an API key.                                                                           |
+| `X-Integration-Id` | The integration package, for example `@scope/name`.                                                                                                        |
+| `X-Target`         | The upstream URL. It must match the `authorized_uris` of the integration's auth.                                                                           |
+| `X-Session-Id`     | A UUID v4 that you choose. It scopes the server-side cookie jar and is bound to the first principal that used it.                                          |
+| `X-Run-Id`         | Optional. The in-flight run of the calling actor this call acts for. It confines the call to the connections that run was bound to.                        |
+| `X-Connection-Id`  | Optional. A connection uuid, when several could serve the call.                                                                                            |
+
+```bash
+curl -X GET https://your-instance/api/credential-proxy/proxy \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "X-Space-Id: spc_..." \
+  -H "X-Integration-Id: @scope/name" \
+  -H "X-Target: https://api.example.com/v1/items" \
+  -H "X-Session-Id: 3b241101-e2bb-4255-8caf-4136c566a962"
+```
+
+The answer is the upstream's status, headers and body, with a `Proxy-Status` header that tells a relayed upstream answer from one the proxy produced itself. The credential-proxy route limits request and response size and the call rate, and the LLM proxy limits the request size and the call rate. The values are operator settings (`LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`) in [Environment Variables](/docs/self-hosting/environment-variables).
+
+**How `appstrate run` uses them.** A remote run started by the CLI sends every `{ns}__api_call` tool call of an integration to the credential proxy, with the integration as `X-Integration-Id`, one random `X-Session-Id` for the whole run and, when the run is reported, its id as `X-Run-Id`. With `--model-source preset` it lists the presets, picks one (`--model`, or the instance default) and points the model's base URL at the matching LLM-proxy route, sending the preset id as `model`. The CLI itself never sees a provider key or an integration credential. With `--model-source env` it calls your provider directly and the LLM proxy is not involved. The flags are in [CLI](/docs/using-appstrate/cli#headless-and-ci-runs).
 
 ## Results
 
@@ -122,6 +189,84 @@ curl "https://your-instance/api/runs/run_0194.../logs?level=info&limit=500" \
 ```
 
 The response is a list envelope. `since=<id>` returns entries with a greater id and is the cursor for tailing. `level` is a minimum severity (`debug`, `info`, `warn`, `error`). `limit` defaults to 1000 and, when more follow, a `Link: rel="next"` header points at the next page. The route is limited to 120 requests per minute. Tool results inside log data are truncated at write time (2048 bytes by default).
+
+## The run page
+
+Open a run from **Runs**, from an agent's runs tab or from a notification. The page is the same for a running and a finished run, and it updates live while the run is active.
+
+**Banners.** Above the tabs, up to three notices can appear:
+
+- The run's error message, when it ended in anything but `success` and carries one (grey for a cancelled run, red otherwise).
+- **Connection lost during this run**, when an integration returned an authentication error that survived a refresh. The run did not fail, the agent just lost that tool. Each integration listed has a **Reconnect** link (shown when your role can open the integration page). The platform records these ids in the run's `metadata.degraded_integrations`.
+- **Some files were not saved**, when the end-of-run sweep could not store some of the files the agent produced. Each file is listed with a reason: file too large, storage quota exceeded, run no longer active, upload failed after retries, or not saved. Those files are lost, and re-running the agent regenerates them.
+
+**Tabs.** There are always four, in the same order, so a link such as `#execution` always lands somewhere.
+
+| Tab               | What it holds                                                                                                                                                                                                                                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Outcome**       | What the run produced: the featured file, the list of produced files, the `output` value and the memory it wrote. A run that produced none of them shows "This run produced nothing", and the Execution tab says why.                                                                                                        |
+| **Files**         | Every file attached to the run, with a filter: **All**, **Imported** (consumed by the run) or **Produced**. Only the first 100 are listed, and the tab says so when there are more. Its badge counts both directions.                                                                                                        |
+| **Execution**     | How it ran: the logs, run details, usage and per-turn table, the input payload and the run's metadata.                                                                                                                                                                                                                       |
+| **Configuration** | How it was set up: the agent, the version (`v1.2.0`, or `draft`, with `+ modifications` when a draft differs from the published base), who or what triggered it and the connections it used, each tagged with how it was chosen. An inline run shows its prompt and manifest here, until the retention window compacts them. |
+
+The page opens on **Outcome** when the run produced a file, an `output` value or a memory write, and on **Execution** otherwise. That choice is made once when the page settles, so a file published while you read does not move you to another tab. The URL hash (`#outcome`, `#files`, `#execution`, `#configuration`) selects a tab, and an unknown hash falls back to the default.
+
+**Featured file.** When the run produced exactly one file, the Outcome tab opens it in a viewer above the list, with its name and a download button. With none or several, nothing is featured and the files are only listed. A file the run merely read as input never counts, even one an earlier run produced.
+
+**Readouts.** At the right of the tab strip:
+
+- **Cost.** The run's cost in dollars with four decimals. While the run is active a dot pulses and the figure follows the run live. Two caveats show as a tooltip: a bare dash in place of the amount means the model has no price, so the cost could not be computed (a zero would read as "free"), and a figure followed by an asterisk is a floor, because part of the consumption (an unpriced call or cached input) had no rate.
+- **Context gauge.** A bar and `128k / 200k` counts for how full the model's context window is. While the run is active it shows the current context of the last turn, with a percentage. Once the run ends it shows the peak instead, because a run that compacted its context ends far below the point it reached. The gauge is absent when the runner reported no turns or no context window for the model, rather than showing an empty bar.
+- **Re-run** (not on a running or an inline run, and it needs `agents:run`) and **Cancel** (on an active run, needs `runs:cancel`, hidden for a remote run).
+
+The total token count is not in the header. Open the **Run details** panel (the chevron at the end of the run row above the tabs) and read **Total tokens**, whose tooltip splits it into input, output, cache read and cache creation tokens. It adds up every turn of the run and is not the size of the current context.
+
+**Execution tab.** Its sections, top to bottom:
+
+1. **Logs**, with a count badge, described below.
+2. **Run details**: run id, runner (**Platform** or **Remote**, followed by the runner's name), duration, start and completion times, and the proxy when one was used.
+3. **Usage**, with a **Live** badge while the run is active: cost, model, and input, output, cache creation and cache read tokens. A run with no usage data says so.
+4. **Per-turn breakdown**, present only when the run reported turns. Per turn it lists the context sent to the model (input plus cache reads and writes, output excluded), the share of the model's window when it is known, the output tokens and the latency. When the window is unknown the bars are relative to the highest turn instead.
+5. The **input payload** and the run's **metadata**, when they are not empty.
+
+**Tool-call trace.** The log viewer shows the agent's own messages, `log` tool lines and runtime breadcrumbs, with an icon for the level (debug, info, warn, error). A tool call is a single row: the call and its result are joined on the tool call id, so parallel calls of the same tool that settle out of order stay on their own rows. The row shows a status, the tool name, a short form of the arguments and the duration when the runner measured one:
+
+| Status              | Meaning                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| Tool running        | The call started and has no result yet, and the run is still active.                       |
+| Tool completed      | The result arrived and was not an error.                                                   |
+| Tool failed         | The result was flagged as an error.                                                        |
+| Tool interrupted    | The call started, the run ended, and no result ever arrived.                               |
+| Tool status unknown | An older call row without a tool call id, in a run that has ended, so it cannot be paired. |
+
+Click a tool row to open **Tool details** with the status, the duration, the full **Arguments** and the **Result**. A result is truncated when it is written to the log (see [Logs](#logs)). The toolbar above the viewer toggles **Timestamps**, shows or hides tool rows, turns **Auto-scroll** back on (scrolling up turns it off) and copies the logs with **Copy logs**: the copy covers the rows currently visible, with their arguments and results.
+
+### Degraded runs
+
+Some things the platform cannot give a run are not errors, so the run starts anyway and records the gap as a `warn` entry in the run's logs. The entries have `type` `system`, and their `data` carries `platform: true`. They are written once, right after the run is created and before the sandbox's own logs, for runs the platform launches, and a failure to write one never fails the run. The run's status is not changed by them. Without them, a run that started with fewer tools would look the same as an agent that chose not to use them. In the web app they appear as warning lines in **Execution**, **Logs**. Over the API, read `GET /api/runs/{id}/logs` (`level=warn` narrows it) and look for these `event` values.
+
+| `event`                      | What it means                                                                                                                                                                                             |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `integration_dropped`        | The agent declares an integration that could not be started, so its tools are unavailable to this run. One entry per drop.                                                                                |
+| `generation_setting_dropped` | A stored generation setting (`temperature` or `reasoning_level`, from the space's defaults or a schedule's override) is refused by the run's model, so the run goes on without it. One entry per setting. |
+| `model_fallback`             | The model chosen for the run is no longer usable, so the run uses the default model instead.                                                                                                              |
+
+`integration_dropped` carries `integrationId`, a `reason`, and optionally a `detail` and a `connectionLabel`. The connection label is set when the drop concerns one bound connection. Several connections bound to one integration form a set that starts whole or not at all: when one of them has no usable credential, the integration is dropped, the lost connection with `no_delivery` and each of the others with `bound_set_incomplete`.
+
+| `reason`                                           | Cause                                                                                                                   |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `not_found`                                        | No package with that id.                                                                                                |
+| `not_integration`                                  | The package is of another type (the `detail` names it).                                                                 |
+| `invalid_manifest`                                 | The integration's manifest fails validation.                                                                            |
+| `not_active`                                       | The integration is not active in the space.                                                                             |
+| `remote_source_invalid`                            | A remote integration has no usable `url` and `transport`.                                                               |
+| `local_server_ref_missing`                         | A local integration names no server package.                                                                            |
+| `mcp_server_unresolved`, `mcp_server_not_runnable` | The MCP server package it references could not be resolved, or has no runnable configuration.                           |
+| `no_delivery`                                      | The bound connection is no longer reachable, or it has no usable credential (for example one that cannot be decrypted). |
+| `bound_set_incomplete`                             | Another connection of the same bound set had no usable credential.                                                      |
+| `resolve_error`                                    | An unexpected error while resolving it, with its message in `detail`.                                                   |
+
+`generation_setting_dropped` carries `setting`, `value`, `model` and `reason: "refused_by_model"`. `model_fallback` carries `pinnedModelId`, `model` and `reason: "pinned_model_unavailable"`. Read these entries when an agent seems to be missing a tool or ignoring a setting. An integration whose tool selection is empty is skipped without an entry, because there is nothing to expose. An integration whose `source.server.version` pin cannot be satisfied is a different case: the launch fails with `422 dependency_unresolved` and no run starts.
 
 ## Cancelling
 

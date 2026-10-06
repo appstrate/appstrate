@@ -78,7 +78,7 @@ Agents can only reach hosts that an integration's `authorized_uris` allows, and 
 
 Email verification and magic-link sign-in need SMTP. Set `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` together (`SMTP_PORT` defaults to `587`): mail is enabled only when all four are set, and no error is raised when they are not. Test with a magic link or a password reset before go-live.
 
-With the tier Compose templates, SMTP and the Google and GitHub sign-in variables are not forwarded to the container by default. Add them under `appstrate.environment`.
+The tier Compose templates of older releases do not forward SMTP and the Google and GitHub sign-in variables (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). Check that they are listed under `appstrate.environment`.
 
 ## Choose your modules
 

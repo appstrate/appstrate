@@ -145,7 +145,7 @@ Endpoints:
 | Device flow (RFC 8628)                | `POST /api/auth/device/code`                                                                |
 | Register and manage clients           | `POST /api/oauth/clients`, `GET /api/oauth/clients`, and siblings (needs `oauth-clients:*`) |
 
-A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). The module's behavior and per-space SMTP and social sign-in settings are documented in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
+A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). To register clients, embed the flow and set up per-space SMTP and social sign-in, see [Embedded sign-in](/docs/features/embedded-sign-in). The module's internals are in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
 
 OIDC tokens are not accepted by the `?token=` query parameter of the SSE routes, which takes API keys only. Use a cookie session or an API key for realtime streams.
 

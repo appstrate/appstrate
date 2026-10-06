@@ -1,0 +1,144 @@
+---
+title: Monitoring and Observability
+description: "Check platform health, read the logs, follow one request by its Request-Id and export OpenTelemetry traces and metrics to your own collector."
+---
+
+Appstrate gives an operator three signals. Two are always on: the `/health` endpoint and structured JSON logs. The third, OpenTelemetry traces and metrics, is opt-in and does nothing until you load a module and point it at a collector.
+
+| Signal                    | On by default | Where it goes                           |
+| ------------------------- | ------------- | --------------------------------------- |
+| Health check              | Yes           | `GET /health`                           |
+| Logs                      | Yes           | One JSON object per line on stdout      |
+| OpenTelemetry (OTLP/HTTP) | No            | Your collector or observability backend |
+
+## Health check
+
+```bash
+curl http://localhost:3000/health
+```
+
+The endpoint needs no authentication. The response has `status`, `version`, `uptime_ms` and a `checks` object:
+
+| Check      | Healthy when                                          | Counts toward `status`                        |
+| ---------- | ----------------------------------------------------- | --------------------------------------------- |
+| `database` | A `SELECT 1` succeeds (`latency_ms` reports the time) | Yes: a failure makes `status` `unhealthy`     |
+| `agents`   | The run orchestrator has initialized                  | Yes: until then `status` is `degraded`        |
+| `realtime` | The live-stream fan-out behind SSE is installed       | No, it is advisory and never changes `status` |
+
+The HTTP status is `503` when `status` is `unhealthy` and `200` otherwise, so a `degraded` platform still answers `200`. While the server is still starting, `/health` answers `503` with `status: "starting"` and a `Retry-After: 1` header, and every other path answers a `503` problem document with the code `starting`.
+
+The platform image has a built-in container health check. It polls `/health` every 30 seconds and counts the container as healthy only when `status` is exactly `healthy`, so a `degraded` platform shows as unhealthy to Docker. The root `docker-compose.yml` keeps that check, but the self-hosting templates in `examples/self-hosting` (the ones `appstrate install` writes) replace it with a request to `GET /`, which only shows that the server answers. Whichever you run, point an external uptime monitor at `/health`. Alert on a non-`200` answer, and also on any `status` other than `healthy` if you want to catch `degraded`. See [Docker Compose](/docs/self-hosting/docker-compose#verify) for a first check after install.
+
+## Logs and request ids
+
+The platform writes one JSON object per line to stdout. Fields passed with a message are merged into the object. Inside a trace context, `trace_id`, `span_id` and `trace_flags` are added to every line. See [Docker Compose](/docs/self-hosting/docker-compose#logs) for how to read the stream of a Compose install.
+
+`LOG_LEVEL` accepts `debug`, `info` (default), `warn` and `error`. At `debug` the platform also writes one `request` line per request, with these fields:
+
+| Field        | Meaning                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| `requestId`  | The request id, the same value as the `Request-Id` response header                                           |
+| `method`     | The HTTP method                                                                                              |
+| `route`      | The matched route pattern, never the raw path or query string, because those can carry bearer tokens         |
+| `status`     | The response status                                                                                          |
+| `durationMs` | Handler time in milliseconds. For a streamed response it is the time to the headers, not the stream lifetime |
+
+Every response carries a `Request-Id` header of the form `req_<uuid>`, and error bodies repeat it as `request_id` (see [Errors](/docs/api/errors)). The error lines written by the error handler (`Request failed` and `Unhandled error`) carry the same `requestId`, so a request id from a customer leads to the server-side cause. When a request arrives with a valid W3C `traceparent` header, the platform echoes it back and attaches its trace id to the logs of that request.
+
+Log levels and messages change between releases. Before you build an alert on a log line, read the operator notes of the release in the [changelog](/docs/resources/changelog).
+
+## OpenTelemetry traces and metrics
+
+Telemetry is disabled by default, twice over. The OpenTelemetry code lives in the opt-in module `@appstrate/module-observability`, and even with the module loaded nothing is exported until a collector is configured. Turning it on takes two steps, and both are required.
+
+<Steps>
+
+<Step>
+
+### Load the module
+
+Append `@appstrate/module-observability` to `MODULES`. Keep the rest of your list, for example:
+
+```bash
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-observability
+```
+
+</Step>
+
+<Step>
+
+### Point it at a collector
+
+Telemetry turns on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, or when `OTEL_ENABLED=true` (the exporters then use the OTLP default endpoint, `http://localhost:4318`, which is the container itself in a Compose install, so you almost always want the endpoint variable):
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+OTEL_SERVICE_NAME=appstrate-api
+```
+
+</Step>
+
+</Steps>
+
+With the module loaded and no endpoint, everything stays a no-op. Without the module, the variables are inert. The four variables the module reads are `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` (the `service.name` of every span and metric, `appstrate-api` by default) and `OTEL_TRUST_INCOMING_TRACE`. They are listed in [Environment Variables](/docs/self-hosting/environment-variables). The exporters also honor the standard OTLP variables such as `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so any OTLP/HTTP backend works: an OpenTelemetry Collector, Grafana Alloy, or a hosted service.
+
+On Docker Compose, remember that the container only receives the variables its `environment:` list names (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). The shipped Compose files already pass through the four `OTEL_*` variables above plus `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so setting them in `.env` is enough. `MODULES` is passed through too.
+
+To check that it worked, look for the boot log line `OpenTelemetry observability enabled`, which names the service and the endpoint. A misconfiguration never stops the platform: the boot logs `OpenTelemetry init failed` at `error` level and continues without telemetry.
+
+### Spans
+
+| Span                        | What it covers                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `<METHOD> <route>`          | One server span per HTTP request, named with the matched route template                                 |
+| `appstrate.run.gates`       | The preflight gates of a launch: rate and concurrency limits, the timeout cap, the usage admission hook |
+| `appstrate.run.freeze`      | Freezing the manifest version of each integration the agent declares                                    |
+| `appstrate.run.connections` | Resolving the integration connections of the run                                                        |
+| `appstrate.run.context`     | Building the run context                                                                                |
+| `appstrate.run.create`      | Creating the run record                                                                                 |
+| `appstrate.run.execute`     | The background execution of the run                                                                     |
+| `appstrate.run.container`   | The sandbox lifecycle. The container's outbound events nest under this span                             |
+| `appstrate.run.finalize`    | Moving the run to its terminal status                                                                   |
+
+Server spans carry the standard HTTP attributes: method, `url.path`, `url.scheme`, `server.address`, `client.address` (the client IP, honoring `TRUST_PROXY`), `http.route` and `http.response.status_code`. A `5xx` marks the span as an error and sets `error.type`. A request that matches no route is named with the method alone, so a scanner cannot create unbounded span names, and the raw path stays in `url.path`. Streaming responses (SSE) carry `appstrate.response.streaming=true`, and their span ends when the headers are sent, so its duration is time to first byte, not the stream lifetime. Run spans carry the run id as `appstrate.run.id`, and the launch spans also carry the organization id as `appstrate.org.id`.
+
+Logs and spans share one trace context, so a log line written during a span has that span's `trace_id`.
+
+### Metrics
+
+Durations are in seconds. Counter names carry no `_total` suffix (a Prometheus exporter adds it). The module exports metrics every 60 seconds and has no setting for that interval.
+
+| Metric                                                  | Type             | What it tells you                                                                                                                    |
+| ------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `appstrate.run.duration`                                | histogram        | Run duration from launch to terminal status, by `status`                                                                             |
+| `appstrate.run.terminal`                                | counter          | Runs reaching a terminal status, by `status` and `error_code`. The failure-rate source                                               |
+| `appstrate.run.container_spawn`                         | histogram        | Time to provision the sandbox. Failures carry `error.type` (`boundary`, `workload`, `other`)                                         |
+| `appstrate.llm.latency`                                 | histogram        | Upstream model call latency at the platform's LLM proxy, by `api_shape` and `http.response.status_code`. Failures carry `error.type` |
+| `appstrate.scheduler.queue_depth`                       | observable gauge | Pending jobs in the run scheduler queue                                                                                              |
+| `appstrate.process.anomaly`                             | counter          | Async errors that escaped every request handler, by `kind`                                                                           |
+| `appstrate.storage_deletion.result`                     | counter          | Storage deletion attempts, by `result` (`completed` or `failed`)                                                                     |
+| `appstrate.storage_deletion.backlog`                    | observable gauge | Storage deletion jobs still pending                                                                                                  |
+| `appstrate.storage_deletion.oldest_pending_age_seconds` | observable gauge | Age of the oldest pending deletion job                                                                                               |
+| `appstrate.storage_deletion.dead_letters`               | observable gauge | Pending deletion jobs past the dead-letter attempt threshold                                                                         |
+| `appstrate.files.created`                               | counter          | Durable files committed, by `purpose` (`agent_output` or `user_upload`)                                                              |
+| `appstrate.files.deleted`                               | counter          | File rows removed                                                                                                                    |
+| `appstrate.files.storage_limit_rejections`              | counter          | Writes refused because an organization hit its storage limit                                                                         |
+| `appstrate.files.partial_publications`                  | counter          | Runs that finished with a deliverable lost                                                                                           |
+
+The `error_code` label of `appstrate.run.terminal` is limited to `timeout`, `manifest_invalid` and `provider_unauthorized`. Any other code is reported as `other`, and no code as `none`, so a runner cannot inflate the label set. A non-zero rate of `appstrate.process.anomaly` under normal load means a new unhandled error escaped, not a healthy steady state.
+
+Useful starting points: run latency percentiles from `appstrate.run.duration`, the failure rate from `appstrate.run.terminal` filtered on `status`, cold start from `appstrate.run.container_spawn`, and scheduler backlog from `appstrate.scheduler.queue_depth`. Database latency is already in `/health` as `checks.database.latency_ms`.
+
+### Trace propagation and trust
+
+The spans form one trace from the API request, through the run, to the sandbox: the platform forwards `appstrate.run.container` as the parent of the container's outbound events, so they nest under it.
+
+An inbound `traceparent` header is **not trusted by default**. On a public API, an unauthenticated caller could otherwise splice your spans into a trace of their choosing. With `OTEL_TRUST_INCOMING_TRACE` off, each request starts a fresh root span, and run traces stay inside the platform's own trace. Set `OTEL_TRUST_INCOMING_TRACE=true` only when the platform sits behind a trusted gateway that sets or strips `traceparent` for external callers.
+
+### Limits
+
+- The LLM latency histogram measures calls that go through the platform's LLM proxy. Runs on a subscription provider send inference through the run's sidecar and are not in that histogram. See [LLM Models](/docs/integrations/llm-models).
+- There is no automatic instrumentation of libraries (database driver, HTTP client). Spans exist at the places listed above.
+- Spans and metrics are flushed during a graceful shutdown, so a clean restart does not drop the last interval.
+
+The design notes behind these choices are in [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md). Production recommendations, including what to alert on, are in the [Production Checklist](/docs/self-hosting/production-checklist#set-up-monitoring).

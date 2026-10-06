@@ -5,6 +5,7 @@
     "google-drive",
     "google-sheets",
     "slack",
+    "ssh",
     "notion",
     "github",
     "clickup",

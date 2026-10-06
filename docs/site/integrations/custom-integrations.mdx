@@ -164,7 +164,137 @@ Declare the tools you want agents to be able to pick in `tools_policy`, with the
 
 ## A local MCP server
 
-Set `source: { "kind": "local", "server": { "name": "@acme/my-mcp", "version": "^1.0.0" } }` and publish an `mcp-server` package with that name. Its manifest names the runtime (`server.type`: `node`, `python`, `binary` or `uv`) and the entry point, and the platform starts it in a runner container with the credential delivered by `env` or `files`. The shipped `@appstrate/ssh` and `@appstrate/github-git` integrations, and their `-mcp` server packages, are working examples. Local integrations need the `docker` or `firecracker` run adapter.
+Use a local source when code has to run next to the credential: a CLI, git, SSH, a client library. Two packages work together:
+
+- an **`mcp-server` package** holds the code and declares how to start it (an MCP Bundle, MCPB, manifest);
+- an **integration** with `source.kind: "local"` references it and declares how the credential reaches it.
+
+The platform starts the server in its own runner container, one per bound connection. The server speaks MCP over its standard input and output (line-delimited JSON-RPC), and its tools appear to agents under the integration's namespace like any other integration tool. Local integrations need the `docker` or `firecracker` run adapter, because the default `process` adapter refuses to start them. The shipped `@appstrate/ssh` and `@appstrate/github-git` integrations, and their `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp` server packages, are working examples: their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages), and the SSH server is a small dependency-free implementation of the protocol loop.
+
+### The `mcp-server` manifest
+
+The manifest uses the MCPB field names for the server and keeps the AFPS identity fields at the root:
+
+| Field                               | Meaning                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`                              | Always `"mcp-server"`.                                                                                                                                                                      |
+| `name`, `version`                   | The scoped identity (`@acme/tickets-mcp`) and the semver version the integration pins.                                                                                                      |
+| `manifest_version`                  | MCPB `MAJOR.MINOR` format. The shipped servers use `"0.3"`. A `uv` server needs `"0.4"` or later and is refused with `"0.3"`.                                                               |
+| `server.type`                       | The runtime: `node`, `python`, `binary` or `uv`. It selects the runner image.                                                                                                               |
+| `server.entry_point`                | The file to start, as a path inside the archive. It must exist in the archive.                                                                                                              |
+| `server.mcp_config`                 | Required by the schema, with a `command` and optional `args`. The templates the platform hands out use `node` and the entry point for `node`, and `uv`, `run` and the entry point for `uv`. |
+| `tools`                             | The tools the server offers, each with a `name` and a `description`. This list is the catalog an agent author picks from, so declare every tool the server exposes.                         |
+| `_meta["dev.appstrate/mcp-server"]` | Optional runtime hint. `{ "runtime": "bun" }` runs a TypeScript or JavaScript server under Bun. Keep `server.type: "node"`: the schema refuses a `bun` runtime with any other type.         |
+| `_meta["dev.appstrate/workspace"]`  | Optional. `{ "mount": "/workspace", "access": "rw" }` mounts the run's shared workspace into the runner. Without it the server cannot see the agent's files. `access` defaults to `ro`.     |
+
+The archive is a zip with `manifest.json` at its root and the entry point beside it, at most 10 MB compressed. Put whatever the server needs inside the archive. The runner images are minimal: the bun image has no `node_modules`, which is why the shipped SSH server is dependency-free.
+
+If you author through an agent connected to the instance's MCP server, its `get_runtime_capabilities` tool returns the runtimes this build accepts and a minimal manifest template for each.
+
+### Delivering the credential
+
+The integration's auth says where the credential lands inside the runner. A local server never gets it over HTTP: use `delivery.env`, `delivery.files`, or both.
+
+- `delivery.env` maps an environment variable name to an object: `{ "value": "{$credential.api_key}", "sensitive": true }`. A bare string is refused.
+- `delivery.files` maps an absolute path to `{ "value": "{$credential.client_cert}", "mode": "0400" }`. `mode` is an octal string and defaults to `"0400"`. Paths under system directories are refused, so keep to places such as `/run/secrets/`.
+- `delivery.http` cannot be combined with `env` or `files` on the same auth.
+
+The credential reaches only the runner, never the agent's container. The runner's network access is limited to the auth's `authorized_uris`, rendered for the connection, so declare every host the server must call. Its HTTP traffic is routed through the sidecar, and a server that starts child processes must pass its own `process.env` on to them, or their requests cannot get out.
+
+One rule for the server code: a tool must not have a parameter named `connection`. When an agent binds several connections of the integration in one run, the platform adds that parameter itself, and the run fails to boot if a tool already declares it.
+
+### A worked example
+
+An internal ticket tracker whose server is a Node program. Layout of the two packages, each zipped with its `manifest.json` at the root:
+
+```text
+tickets-mcp/
+  manifest.json
+  server/index.js
+tickets/
+  manifest.json
+```
+
+The server package, `tickets-mcp/manifest.json`:
+
+```json
+{
+  "name": "@acme/tickets-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.3",
+  "manifest_version": "0.3",
+  "display_name": "Acme tickets (MCP server)",
+  "description": "Lists and closes tickets in the Acme tracker.",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": { "command": "node", "args": ["server/index.js"] }
+  },
+  "tools": [
+    { "name": "list_tickets", "description": "List open tickets." },
+    { "name": "close_ticket", "description": "Close a ticket by id." }
+  ]
+}
+```
+
+The integration, `tickets/manifest.json`. The server reads `ACME_API_KEY` from its environment:
+
+```json
+{
+  "name": "@acme/tickets",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Acme tickets",
+  "description": "Acme ticket tracker, through a local MCP server.",
+  "source": {
+    "kind": "local",
+    "server": { "name": "@acme/tickets-mcp", "version": "^1.0.0" }
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://tickets.acme.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["api_key"],
+          "properties": {
+            "api_key": { "type": "string", "description": "Acme API key" }
+          }
+        }
+      },
+      "delivery": {
+        "env": {
+          "ACME_API_KEY": { "value": "{$credential.api_key}", "sensitive": true }
+        }
+      }
+    }
+  }
+}
+```
+
+`source.server.version` is a semver range matched against the published versions of the server package. The agent then selects tools by the names in the server's `tools` list:
+
+```json
+{
+  "dependencies": { "integrations": { "@acme/tickets": "^1.0.0" } },
+  "integrations_configuration": {
+    "@acme/tickets": { "tools": ["list_tickets"] }
+  }
+}
+```
+
+To also hand a certificate to the server as a file, add a `client_cert` field to the credential schema (and to `required`), and add this beside `env` in `delivery`:
+
+```json
+"files": {
+  "/run/secrets/acme_cert.pem": { "value": "{$credential.client_cert}", "mode": "0400" }
+}
+```
+
+Import both archives as described under "Pack, import, publish" below, then activate the integration and connect an account.
 
 ## Tools and scopes in agents
 

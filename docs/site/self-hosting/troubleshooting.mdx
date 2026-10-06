@@ -134,6 +134,46 @@ With Redis, keep its volume if you care about scheduled runs and queued webhook 
 
 `FATAL Unable to initialize backend: Unable to write to the backend` means the `miniodata` volume is not owned by uid 65532. Re-own it once with the stack stopped. The exact commands, with a snapshot step first, are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#data-persistence).
 
+## Stored objects that will not delete
+
+Deleting a file, a run workspace, a space or an organization removes its database rows at once and queues the stored objects in a deletion outbox. A background worker purges them. Every `STORAGE_DELETION_WORKER_INTERVAL_MS` (default `60000`, see [Environment Variables](/docs/self-hosting/environment-variables)) it claims a batch of due jobs and deletes the objects. A failed job is retried later, with a delay that doubles after each attempt (about one minute at first, capped at 6 hours, with up to 10% jitter). A job is never abandoned: deletion is retried for as long as it takes.
+
+After 8 attempts a job that is still pending is called a **dead letter**. The threshold only makes the job visible, it does not stop the retries. Dead letters are what to look at when disk or bucket usage does not go down after deletions. With the `@appstrate/module-observability` module, the gauges `appstrate.storage_deletion.backlog`, `appstrate.storage_deletion.oldest_pending_age_seconds` and `appstrate.storage_deletion.dead_letters` report the same state.
+
+List the jobs with the platform-admin API:
+
+```bash
+curl "https://your-instance/api/admin/storage-deletion-jobs?status=dead" \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID"
+```
+
+| Query parameter | Values                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `status`        | `pending` (default, every job not yet completed), `dead` (pending with 8 or more attempts) or `completed`                |
+| `limit`         | 1 to 200, default 50                                                                                                     |
+| `startingAfter` | The `id` of the last job of the previous page. Follow the `Link` header with `rel="next"` instead of building it by hand |
+
+The answer is `{ "object": "list", "data": [...], "hasMore": false }`, newest first. Each job has `id`, `bucket`, `storage_key` (the key inside the bucket), `reason` (why the object is purged, for example `file_deleted`, `space_deleted` or `run_workspace_deleted`), `attempts`, `next_attempt_at`, `completed_at`, `last_error` (the message of the last failed attempt) and `createdAt`. The list covers every organization of the instance, and a storage key contains a space id and a file name.
+
+To retry a job without waiting for its next scheduled attempt:
+
+```bash
+curl -X POST "https://your-instance/api/admin/storage-deletion-jobs/$JOB_ID/retry" \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID"
+```
+
+It answers `{ "id": "...", "retried": true }` and makes the job due immediately, so the next worker pass picks it up. A job that is already completed, or an unknown id, answers `404`. Retrying does not reset the attempt count, so a dead letter stays one until it succeeds. The two calls are limited to 60 and 30 per minute. Fix the cause shown in `last_error` first (the storage backend, its credentials or its permissions), or the retry fails the same way.
+
+Both calls answer `403 Platform admin access required` unless all of these hold:
+
+- You are signed in with a **dashboard session cookie**. An API key is refused, and so is an OIDC token, whatever its scopes.
+- The session belongs to the `platform` audience. A person who signed in as an end-user of a space is refused.
+- Your email address is in `AUTH_PLATFORM_ADMIN_EMAILS`, a comma-separated list compared without regard to case. With the variable empty, nobody qualifies. The account for a listed address is only created with proof that you own it, see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
+
+A session also needs `X-Org-Id`, set to an organization you belong to, like any other request made with a cookie (`400` without it, `403` if you are not a member).
+
 ## Rate limit hits (`429`)
 
 Check `Retry-After` and the `RateLimit` headers. Per-endpoint limits and the organization-wide run limits are in [Rate Limits](/docs/self-hosting/rate-limits). An organization at its concurrent run cap gets `org_run_concurrency_exceeded`.

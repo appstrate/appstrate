@@ -105,7 +105,7 @@ services:
       - EGRESS_ALLOW_INTERNAL_HOSTS
 ```
 
-At the time of writing, none of the shipped files forwards `AUTH_BOOTSTRAP_TOKEN` or `EGRESS_ALLOW_INTERNAL_HOSTS`, and the tier templates do not forward the SMTP or Google and GitHub sign-in variables.
+Older releases of the shipped files do not forward `AUTH_BOOTSTRAP_TOKEN` or `EGRESS_ALLOW_INTERNAL_HOSTS`, and their tier templates do not forward the SMTP or Google and GitHub sign-in variables ([issue #1722](https://github.com/appstrate/appstrate/issues/1722)). If you run one of those, add the lines yourself. The same applies to any variable you add later that is not in the file.
 
 ## Pin a version
 

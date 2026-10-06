@@ -43,7 +43,7 @@ The model's plain text is never delivered. To reach the user, an agent must call
 
 ## Integration tools
 
-Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request. The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools.
+Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request (described in detail further down this page). The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools.
 
 The agent author picks which tools an agent can use:
 
@@ -64,6 +64,70 @@ The agent author picks which tools an agent can use:
 Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/docs/self-hosting/environment-variables).
 
 For connections, scopes and the catalog, see [Integrations](/docs/integrations/overview).
+
+## The `api_call` and `api_upload` tools
+
+`api_call` is the tool most integrations give an agent. It sends one authenticated HTTP request: the sidecar checks the target against the integration's `authorized_uris`, injects the credential and returns the response. `api_upload` is its companion for large files. Neither tool ever shows the credential to the model.
+
+### Names
+
+Like every integration tool, they are advertised as `{namespace}__{tool}`. The namespace is the integration id with the leading `@` dropped, every run of characters other than letters and digits replaced by `_`, lowercased and cut to 20 characters. Two integrations that land on the same namespace get `_2`, `_3` and so on. So `@appstrate/gmail` gives `appstrate_gmail__api_call`, and `@appstrate/google-drive` gives `appstrate_google_dri__api_call`.
+
+When an integration opts several auths into `api_call`, each auth gets its own tool, `api_call__<authToken>`. An auth key of up to 17 characters appears verbatim. In `integrations_configuration` you select the unprefixed name (`api_call`, or `api_call__<authToken>`), and selecting either tool of the pair, `api_call` or `api_upload`, grants both.
+
+### Arguments of `api_call`
+
+| Argument         | Meaning                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | Required. The absolute URL, or a `{{field}}` holding the connection's base URL followed by a path. It must match the integration's `authorized_uris`.          |
+| `method`         | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`. Defaults to `GET`.                                                                                          |
+| `headers`        | Extra headers to forward. `Host`, hop-by-hop and framing headers are dropped.                                                                                  |
+| `body`           | A string, a JSON object (sent as `application/json` unless you set the header), `{ fromFile }`, `{ fromBytes, encoding: "base64" }` or `{ multipart: [...] }`. |
+| `substituteBody` | When true, `{{credential}}` placeholders in a text body are substituted. Off by default so a token cannot leak into a payload by accident.                     |
+| `responseMode`   | `{ toFile }`, described below.                                                                                                                                 |
+| `connection`     | Present only when several connections are bound to the integration, described below.                                                                           |
+
+### Sending a file: `body.fromFile`
+
+Pass `{ "fromFile": "outputs/report.pdf" }` as the body to send a workspace file without putting its bytes in the model's context. The agent runtime, not the sidecar, reads the file, because the sidecar has no access to the workspace. The path is workspace-relative, and a path that escapes the workspace or goes through a symlink is refused.
+
+The file is sent in one request, so it is capped at 10 MB by default (`SIDECAR_MAX_REQUEST_BODY_BYTES`, with a hard ceiling of 100 MB). Because the bytes cross to the sidecar as base64 inside one MCP message, raising the cap also means raising `SIDECAR_MAX_MCP_ENVELOPE_BYTES`. A file over the cap, a missing file or a refused path comes back as a tool error the model can act on, not as a failed run. For anything larger use `api_upload`.
+
+### Receiving a file: `responseMode.toFile`
+
+Pass `{ "responseMode": { "toFile": "outputs/export.csv" } }` to write the response body to a workspace file. The tool then returns a small descriptor instead of the body:
+
+```json
+{ "kind": "file", "path": "outputs/export.csv", "size": 48213, "status": 200 }
+```
+
+Missing parent folders are created. A target that resolves outside the workspace or through a symlink is refused with a tool error. Use it for binary downloads and for any response you want to process with a script rather than read.
+
+Without `toFile`, large responses still stay out of the model's context. A text body above the inline cap described earlier, any text body once the run-wide budget is used up, and every binary body are stored by the sidecar and then written by the agent runtime into a file under `resources/` in the workspace, which the model reads with its file tools. In that case the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. A status of `0` means the call was stopped before it reached the service.
+
+### Resumable uploads: `api_upload`
+
+`api_upload` uploads a workspace file in chunks through a protocol the service supports. It exists only for an integration that declares `upload_protocols` on an auth in its `_meta["dev.appstrate/api"]` block. Of the built-in integrations, only [Google Drive](/docs/integrations/catalog/google-drive) does, with `google-resumable`.
+
+| Argument         | Meaning                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | Required. The URL that starts the upload (for Drive, the endpoint with `uploadType=resumable`). It must match `authorized_uris`. |
+| `fromFile`       | Required. Workspace-relative path of the file.                                                                                   |
+| `uploadProtocol` | Required. One of the protocols the integration declared.                                                                         |
+| `metadata`       | Protocol-specific metadata, for example the file name and parents for Drive.                                                     |
+| `sourceMimeType` | MIME type of the bytes being uploaded. Distinct from the target type in `metadata`, which lets Drive convert a file on upload.   |
+| `partSizeBytes`  | Chunk size. Defaults are 8 MiB for `google-resumable`, 5 MiB for `s3-multipart` and `ms-resumable`, 4 MiB for `tus`.             |
+| `connection`     | As for `api_call`, when several connections are bound.                                                                           |
+
+The four protocols the runtime can drive are `google-resumable` (Drive, Cloud Storage, YouTube), `s3-multipart` (S3 and compatible stores: R2, MinIO, Backblaze B2), `tus` and `ms-resumable` (OneDrive, SharePoint, Microsoft Graph). Each has its own part-size rules: Google needs a multiple of 256 KiB, S3 needs at least 5 MiB for every part except the last, Microsoft Graph needs a multiple of 320 KiB up to 60 MiB. A bad `partSizeBytes` comes back as an error before anything is sent.
+
+The agent runtime reads the file as a stream, cuts it into chunks and sends each chunk through the sibling `api_call` tool, so every chunk gets the same credential injection and `authorized_uris` check as any other call. The file is limited to 100 MB, a ceiling compiled into the runtime that no setting raises, and an empty file is refused. If an upload fails or is cancelled, the runtime tries to have the service discard the partial upload.
+
+The result is a single JSON object. On success it carries `ok: true`, the final upstream `status`, `headers` and `body`, the number of `chunks`, the `size` and the `sha256` of the bytes sent, so the agent can verify the upload. On failure it carries `ok: false`, an `error`, the last `status` and `bytesSent`.
+
+### Several connections: the `connection` parameter
+
+A run can bind up to 10 connections of one integration, for example two mailboxes or two SSH hosts. When a namespace has more than one, every tool of that namespace, `api_call` and `api_upload` included, gets a required `connection` parameter. It is a string restricted to the connection labels, and its description pairs each label with the account it stands for, so the model states which account a call acts on. The sidecar removes the parameter before forwarding the call. A missing or unknown value returns a tool error that lists the valid labels. With a single connection the tools carry no `connection` parameter at all.
 
 ## Adding your own tools
 

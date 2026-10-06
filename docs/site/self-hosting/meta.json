@@ -10,7 +10,9 @@
     "environment-variables",
     "rate-limits",
     "isolation-and-security",
+    "firecracker",
     "production-checklist",
+    "monitoring",
     "upgrading",
     "troubleshooting"
   ]
