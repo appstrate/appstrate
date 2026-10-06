@@ -17,7 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   installer. An account can no longer change its e-mail to that address or
   to an `AUTH_PLATFORM_ADMIN_EMAILS` one (403 `email_change_refused`). A
   Google sign-in now takes `emailVerified` from Google's `email_verified`
-  claim. Details and known limits: `examples/self-hosting/AUTH_MODES.md`.
+  claim. **The same rule covers every address in
+  `AUTH_PLATFORM_ADMIN_EMAILS`**: the sign-up form refuses a listed address
+  that has no account yet. An instance in that state creates the account
+  at `/claim` with the token while it has no organization (when no owner
+  is named, or the owner is that address), otherwise by a magic link or a
+  verified Google/GitHub sign-in, otherwise by unlisting the address,
+  creating the account as an ordinary one and listing it again. An account
+  that already holds a listed address is not re-examined: check that you
+  can sign in to the account of every listed address. Details and known
+  limits: `examples/self-hosting/AUTH_MODES.md`.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at

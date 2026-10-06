@@ -24,7 +24,8 @@ export function emailDomain(email: string): string | null {
 /**
  * True when `email` is listed in `AUTH_PLATFORM_ADMIN_EMAILS`. Platform
  * admins bypass the signup gate and may create orgs even when
- * `AUTH_DISABLE_ORG_CREATION=true`. Returns false when the env var is empty.
+ * `AUTH_DISABLE_ORG_CREATION=true`; the create hook requires proof of
+ * ownership for their account (`auth.ts`). Returns false when the env var is empty.
  */
 export function isPlatformAdmin(email: string): boolean {
   const env = getEnv();
@@ -62,6 +63,15 @@ export function isBootstrapOwner(email: string): boolean {
   const env = getEnv();
   if (!env.AUTH_BOOTSTRAP_OWNER_EMAIL) return false;
   return env.AUTH_BOOTSTRAP_OWNER_EMAIL === normalizeEmail(email);
+}
+
+/**
+ * True when the environment names `email`, as bootstrap owner or as platform
+ * admin: its account is created only with proof of ownership, and no existing
+ * account moves onto it (`auth.ts`).
+ */
+export function isOperatorNamedEmail(email: string): boolean {
+  return isBootstrapOwner(email) || isPlatformAdmin(email);
 }
 
 /**

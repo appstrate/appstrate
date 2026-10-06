@@ -155,13 +155,15 @@ describe("Platform signup gate — issue #228", () => {
       expect(res.status).toBe(403);
     });
 
-    it("allows signup for a platform admin email", async () => {
+    it("does not let a platform admin address through on its name alone", async () => {
+      // Same rule as the bootstrap owner below, same suite for the rows.
       setAuthEnv({
         AUTH_DISABLE_SIGNUP: "true",
         AUTH_PLATFORM_ADMIN_EMAILS: "Admin@Acme.com",
       });
       const res = await attemptSignup("admin@acme.com");
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe("signup_disabled");
     });
 
     it("does not let the bootstrap owner address through on its name alone", async () => {

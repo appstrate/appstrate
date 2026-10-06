@@ -18,6 +18,10 @@
 // "no proof" holds whatever else would let an address through: open or closed
 // sign-up, the platform-admin allowlist, a pending invitation, SMTP, realm.
 // A refusal reads like the one any other address gets in the same mode.
+//
+// An address listed in AUTH_PLATFORM_ADMIN_EMAILS is created under the same
+// proof rule (it gets no organization): the "no proof" rows run over both
+// kinds of named address.
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -34,7 +38,7 @@ import { createTestContext } from "../helpers/auth.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { flushRedis } from "../helpers/redis.ts";
 import { seedInvitation } from "../helpers/seed.ts";
-import { enableSmtpForSuite } from "../helpers/smtp.ts";
+import { captureMails, enableSmtpForSuite } from "../helpers/smtp.ts";
 import {
   account,
   verification,
@@ -63,6 +67,7 @@ const SNAPSHOT = {
   AUTH_BOOTSTRAP_ORG_NAME: process.env.AUTH_BOOTSTRAP_ORG_NAME,
   AUTH_BOOTSTRAP_TOKEN: process.env.AUTH_BOOTSTRAP_TOKEN,
   AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP,
+  AUTH_DISABLE_ORG_CREATION: process.env.AUTH_DISABLE_ORG_CREATION,
   AUTH_PLATFORM_ADMIN_EMAILS: process.env.AUTH_PLATFORM_ADMIN_EMAILS,
   AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
 };
@@ -101,6 +106,24 @@ async function redeem(email: string, token = VALID_TOKEN) {
     body: JSON.stringify({ token, email, name: "Owner", password: "TestPassword123!" }),
   });
 }
+
+const UNNAMED = { AUTH_BOOTSTRAP_OWNER_EMAIL: undefined, AUTH_PLATFORM_ADMIN_EMAILS: undefined };
+
+/** The two ways the environment names an address; both take proof to create. */
+const NAMED_ADDRESSES = [
+  {
+    kind: "the bootstrap owner",
+    address: "owner@acme.com",
+    cased: "Owner@Acme.com",
+    naming: { ...UNNAMED, AUTH_BOOTSTRAP_OWNER_EMAIL: "owner@acme.com" },
+  },
+  {
+    kind: "a platform admin",
+    address: "ops@acme.com",
+    cased: "Ops@Acme.com",
+    naming: { ...UNNAMED, AUTH_PLATFORM_ADMIN_EMAILS: "ops@acme.com" },
+  },
+];
 
 type Refusal = { status: number; code: string };
 const TAKEN: Refusal = { status: 422, code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" };
@@ -161,6 +184,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       AUTH_BOOTSTRAP_ORG_NAME: "Acme HQ",
       AUTH_BOOTSTRAP_TOKEN: undefined,
       AUTH_DISABLE_SIGNUP: undefined,
+      AUTH_DISABLE_ORG_CREATION: undefined,
       AUTH_PLATFORM_ADMIN_EMAILS: undefined,
       AUTH_ALLOWED_SIGNUP_DOMAINS: undefined,
     });
@@ -170,104 +194,214 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     restore();
   });
 
-  describe("without proof of ownership", () => {
-    it("refuses the address when sign-up is open, as it refuses a taken address", async () => {
-      const res = await signUp("owner@acme.com");
-      const body = await res.clone().text();
-      await expectRefusedWithNothingCreated(res, TAKEN);
+  for (const { kind, address, cased, naming } of NAMED_ADDRESSES) {
+    describe(`without proof of ownership, ${kind}`, () => {
+      beforeEach(() => {
+        setEnv(naming);
+      });
 
-      // Byte for byte what Better Auth answers for an address that IS taken,
-      // so a Better Auth upgrade that rewords one cannot leave them apart.
-      expect((await signUp("someone@acme.com")).status).toBe(200);
-      const taken = await signUp("someone@acme.com");
-      expect(taken.status).toBe(422);
-      expect(await taken.text()).toBe(body);
+      it("refuses the address when sign-up is open, as it refuses a taken address", async () => {
+        const res = await signUp(address);
+        const body = await res.clone().text();
+        await expectRefusedWithNothingCreated(res, TAKEN);
+
+        // Byte for byte what Better Auth answers for an address that IS taken,
+        // so a Better Auth upgrade that rewords one cannot leave them apart.
+        expect((await signUp("someone@acme.com")).status).toBe(200);
+        const taken = await signUp("someone@acme.com");
+        expect(taken.status).toBe(422);
+        expect(await taken.text()).toBe(body);
+      });
+
+      it("refuses the address when sign-up is closed, as it refuses a stranger", async () => {
+        setEnv({ AUTH_DISABLE_SIGNUP: "true" });
+        const res = await signUp(address);
+        const body = await res.clone().text();
+        await expectRefusedWithNothingCreated(res, CLOSED);
+        expect(await (await signUp("stranger@acme.com")).text()).toBe(body);
+      });
+
+      it("refuses the address as a disallowed domain when the allowlist excludes it", async () => {
+        setEnv({ AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test" });
+        await expectRefusedWithNothingCreated(await signUp(address), {
+          status: 403,
+          code: "signup_domain_not_allowed",
+        });
+      });
+
+      it("refuses the address whatever its casing", async () => {
+        await expectRefusedWithNothingCreated(await signUp(cased), TAKEN);
+      });
+
+      it("refuses the address when it holds a pending invitation", async () => {
+        // An invitation is matched on the address alone: it lets a sign-up
+        // through the closed gate, it does not show who is signing up.
+        setEnv(UNNAMED);
+        const inviter = await createTestContext({ orgSlug: "inviter" });
+        await seedInvitation({ orgId: inviter.orgId, email: address, invitedBy: inviter.user.id });
+        setEnv({ ...naming, AUTH_DISABLE_SIGNUP: "true" });
+
+        const res = await signUp(address);
+        expect(res.status).toBe(403);
+        expect(await db.select().from(user).where(eq(user.email, address))).toHaveLength(0);
+        expect(await db.select().from(organizations)).toHaveLength(1);
+      });
+
+      it("refuses the address in an end-user realm too", async () => {
+        setRealmResolver(async () => "end_user:spc_test_space_id");
+        await expectRefusedWithNothingCreated(await signUp(address), TAKEN);
+      });
+
+      it("refuses a wrong bootstrap token", async () => {
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+        const res = await redeem(address, "x".repeat(VALID_TOKEN.length));
+        expect(res.status).toBe(401);
+        expect(await db.select().from(user)).toHaveLength(0);
+        expect(await db.select().from(organizations)).toHaveLength(0);
+      });
+
+      it("refuses the address on the sign-up form even while a token is redeemable", async () => {
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_DISABLE_SIGNUP: "true" });
+        await expectRefusedWithNothingCreated(await signUp(address), CLOSED);
+      });
+
+      it("refuses a row Better Auth is about to create unverified", async () => {
+        const ctx = await getAuth().$context;
+        await expect(
+          ctx.internalAdapter.createUser(
+            { email: address, name: "Owner" },
+            { method: "email-password" },
+          ),
+        ).rejects.toMatchObject({ body: { code: TAKEN.code } });
+        expect(await db.select().from(user)).toHaveLength(0);
+      });
+
+      it("refuses a social sign-in whose provider does not assert the address", async () => {
+        const ctx = await getAuth().$context;
+        await expect(
+          ctx.internalAdapter.createUser(
+            { email: address, name: "Owner", emailVerified: false },
+            { method: "oauth" },
+          ),
+        ).rejects.toMatchObject({ body: { code: TAKEN.code } });
+        expect(await db.select().from(user)).toHaveLength(0);
+      });
+
+      describe("with outbound mail configured", () => {
+        enableSmtpForSuite();
+
+        it("creates nothing and mails nothing: a verification mail shows who reads the inbox, not who chose the password", async () => {
+          // Better Auth answers a refused sign-up like a successful one once
+          // verification is required, so the status carries no signal here.
+          const mails = await captureMails(async () => {
+            const res = await signUp(address);
+            expect(res.status).toBe(200);
+            expect(((await res.json()) as { token: unknown }).token).toBeNull();
+          });
+          expect(mails).toHaveLength(0);
+          expect(await db.select().from(user)).toHaveLength(0);
+          expect(await db.select().from(organizations)).toHaveLength(0);
+        });
+      });
+    });
+  }
+
+  it("refuses the owner's address when it is also a platform admin (the installer's default)", async () => {
+    setEnv({ AUTH_DISABLE_SIGNUP: "true", AUTH_PLATFORM_ADMIN_EMAILS: "owner@acme.com" });
+    await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), CLOSED);
+  });
+
+  describe("a platform admin's address, with proof of ownership", () => {
+    beforeEach(() => {
+      setEnv({
+        ...UNNAMED,
+        AUTH_PLATFORM_ADMIN_EMAILS: "ops@acme.com",
+        AUTH_DISABLE_SIGNUP: "true",
+      });
     });
 
-    it("refuses the address when sign-up is closed, as it refuses a stranger", async () => {
-      setEnv({ AUTH_DISABLE_SIGNUP: "true" });
-      const res = await signUp("owner@acme.com");
-      const body = await res.clone().text();
-      await expectRefusedWithNothingCreated(res, CLOSED);
-      expect(await (await signUp("stranger@acme.com")).text()).toBe(body);
+    it("the bootstrap token claims it when no owner is named", async () => {
+      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+      expect((await redeem("ops@acme.com")).status).toBe(200);
+      await expectRootOrgOwnedBy("ops@acme.com", "acme-hq");
     });
 
-    it("refuses the address as a disallowed domain when the allowlist excludes it", async () => {
-      setEnv({ AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), {
+    it("the bootstrap token claims it when it is also the named owner", async () => {
+      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_BOOTSTRAP_OWNER_EMAIL: "ops@acme.com" });
+      expect((await redeem("ops@acme.com")).status).toBe(200);
+      await expectRootOrgOwnedBy("ops@acme.com", "acme-hq");
+    });
+
+    it("the token does not claim it outside AUTH_ALLOWED_SIGNUP_DOMAINS", async () => {
+      // The allowlist exemption under the token is the named owner's alone.
+      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_ALLOWED_SIGNUP_DOMAINS: "elsewhere.test" });
+      await expectRefusedWithNothingCreated(await redeem("ops@acme.com"), {
         status: 403,
         code: "signup_domain_not_allowed",
       });
     });
 
-    it("refuses the address whatever its casing", async () => {
-      await expectRefusedWithNothingCreated(await signUp("Owner@Acme.com"), TAKEN);
-    });
-
-    it("refuses the address when it is also a platform admin (the installer's default)", async () => {
-      setEnv({ AUTH_DISABLE_SIGNUP: "true", AUTH_PLATFORM_ADMIN_EMAILS: "owner@acme.com" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), CLOSED);
-    });
-
-    it("refuses the address when it holds a pending invitation", async () => {
-      // An invitation is matched on the address alone: it lets a sign-up
-      // through the closed gate, it does not show who is signing up.
-      setEnv({ AUTH_BOOTSTRAP_OWNER_EMAIL: undefined });
-      const inviter = await createTestContext({ orgSlug: "inviter" });
-      await seedInvitation({
-        orgId: inviter.orgId,
-        email: "owner@acme.com",
-        invitedBy: inviter.user.id,
-      });
-      setEnv({ AUTH_BOOTSTRAP_OWNER_EMAIL: "owner@acme.com", AUTH_DISABLE_SIGNUP: "true" });
-
-      const res = await signUp("owner@acme.com");
-      expect(res.status).toBe(403);
-      expect(await db.select().from(user).where(eq(user.email, "owner@acme.com"))).toHaveLength(0);
-      expect(await db.select().from(organizations)).toHaveLength(1);
-    });
-
-    it("refuses the address in an end-user realm too", async () => {
-      setRealmResolver(async () => "end_user:spc_test_space_id");
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), TAKEN);
-    });
-
-    it("refuses a wrong bootstrap token", async () => {
-      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
-      const res = await redeem("owner@acme.com", "x".repeat(VALID_TOKEN.length));
-      expect(res.status).toBe(401);
-      expect(await db.select().from(user)).toHaveLength(0);
+    it("a provider-asserted social sign-in creates it in closed mode", async () => {
+      await (
+        await getAuth().$context
+      ).internalAdapter.createUser(
+        { email: "ops@acme.com", name: "Ops", emailVerified: true },
+        { method: "oauth" },
+      );
+      expect((await db.select().from(user)).map((u) => u.email)).toEqual(["ops@acme.com"]);
       expect(await db.select().from(organizations)).toHaveLength(0);
     });
 
-    it("refuses the address on the sign-up form even while a token is redeemable", async () => {
-      setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN, AUTH_DISABLE_SIGNUP: "true" });
-      await expectRefusedWithNothingCreated(await signUp("owner@acme.com"), CLOSED);
-    });
-
-    it("refuses a row Better Auth is about to create unverified", async () => {
-      const ctx = await getAuth().$context;
-      await expect(
-        ctx.internalAdapter.createUser(
-          { email: "owner@acme.com", name: "Owner" },
-          { method: "email-password" },
-        ),
-      ).rejects.toMatchObject({ body: { code: TAKEN.code } });
-      expect(await db.select().from(user)).toHaveLength(0);
-    });
-
-    describe("with outbound mail configured", () => {
+    describe("a magic link sent to the address", () => {
       enableSmtpForSuite();
 
-      it("creates nothing: a verification mail shows who reads the inbox, not who chose the password", async () => {
-        // Better Auth answers a refused sign-up like a successful one once
-        // verification is required, so the status carries no signal here.
-        const res = await signUp("owner@acme.com");
-        expect(res.status).toBe(200);
-        expect(((await res.json()) as { token: unknown }).token).toBeNull();
-        expect(await db.select().from(user)).toHaveLength(0);
-        expect(await db.select().from(organizations)).toHaveLength(0);
+      it("creates it verified in closed mode", async () => {
+        const sent = await app.request("/api/auth/sign-in/magic-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "ops@acme.com" }),
+        });
+        expect(sent.status).toBe(200);
+        const [link] = await db.select().from(verification);
+        const verified = await app.request(
+          `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}`,
+        );
+        expect(verified.status).toBeLessThan(400);
+
+        const [u] = await db.select().from(user);
+        expect(u).toMatchObject({ email: "ops@acme.com", emailVerified: true });
       });
+    });
+
+    it("an account that already holds it still signs in and creates an organization", async () => {
+      // Existing accounts are not re-examined: the privilege is read off the
+      // address on every request.
+      setEnv(UNNAMED);
+      setEnv({ AUTH_DISABLE_SIGNUP: undefined });
+      await signedUpSession("ops@acme.com");
+      setEnv({
+        AUTH_PLATFORM_ADMIN_EMAILS: "ops@acme.com",
+        AUTH_DISABLE_SIGNUP: "true",
+        AUTH_DISABLE_ORG_CREATION: "true",
+      });
+
+      const signIn = await app.request("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "ops@acme.com", password: "TestPassword123!" }),
+      });
+      expect(signIn.status).toBe(200);
+      const cookie = signIn.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; ");
+
+      const created = await app.request("/api/orgs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({ name: "Ops Org", slug: "ops-org" }),
+      });
+      expect(created.status).toBe(201);
     });
   });
 

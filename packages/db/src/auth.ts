@@ -21,7 +21,7 @@ import {
   evaluateUnprivilegedSignup,
   isAllowedSignupDomain,
   isBootstrapOwner,
-  isPlatformAdmin,
+  isOperatorNamedEmail,
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
@@ -471,7 +471,7 @@ export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): UR
  * admins) that no account holds yet: no existing account may move onto it.
  */
 async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
-  if (!isBootstrapOwner(email) && !isPlatformAdmin(email)) return false;
+  if (!isOperatorNamedEmail(email)) return false;
   const [holder] = await db
     .select({ id: user.id })
     .from(user)
@@ -1005,14 +1005,16 @@ function buildAuth(options: CreateAuthOptions) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
-            // Proof for the bootstrap owner's account: the bootstrap token, or a
-            // row born verified (provider assertion, consumed magic link). The
-            // refusal mirrors what an unprivileged or taken address gets.
+            // Proof for an account the environment names (owner, platform
+            // admins): the bootstrap token, or a row born verified (provider
+            // assertion, consumed magic link). The refusal mirrors what an
+            // unprivileged or taken address gets.
             const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
-            if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
+            if (isOperatorNamedEmail(user.email) && !bootstrapTokenBypass && !bornVerified) {
               logger.warn(
-                "auth: refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of " +
-                  "ownership — see examples/self-hosting/AUTH_MODES.md",
+                "auth: refused to create an account named in AUTH_BOOTSTRAP_OWNER_EMAIL / " +
+                  "AUTH_PLATFORM_ADMIN_EMAILS without proof of ownership — see " +
+                  "examples/self-hosting/AUTH_MODES.md",
               );
               const unprivileged = evaluateUnprivilegedSignup(user.email);
               if (!unprivileged.allowed) {

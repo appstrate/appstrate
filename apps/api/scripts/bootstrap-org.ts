@@ -8,9 +8,11 @@
  *   bun apps/api/scripts/bootstrap-org.ts \
  *     --owner=admin@acme.com [--name="Acme"] [--slug=acme]
  *
- * Idempotent. The owner user MUST already exist (sign up via the dashboard
- * first — `AUTH_PLATFORM_ADMIN_EMAILS` lets them through the closed-mode
- * signup gate). The script:
+ * Idempotent. The owner user MUST already exist: the script creates no
+ * account. An address the environment names (`AUTH_BOOTSTRAP_OWNER_EMAIL`,
+ * `AUTH_PLATFORM_ADMIN_EMAILS`) gets its account by a magic link or a
+ * verified social sign-in, any other by the sign-up form or an invitation.
+ * The script:
  *
  *   1. Looks up the user by email — exits 2 if absent.
  *   2. If they already own an org → exits 0 (idempotent no-op, prints orgId).
@@ -84,7 +86,7 @@ async function main(): Promise<void> {
   if (!ownerRow) {
     exit(2, {
       error: "owner_not_found",
-      detail: `No user with email ${args.owner}. Create the account first: AUTH_PLATFORM_ADMIN_EMAILS lets an address sign up in closed mode; the address named in AUTH_BOOTSTRAP_OWNER_EMAIL is claimed at /claim with AUTH_BOOTSTRAP_TOKEN instead, which creates the organization too.`,
+      detail: `No user with email ${args.owner}. Create the account first. An address named in AUTH_BOOTSTRAP_OWNER_EMAIL or AUTH_PLATFORM_ADMIN_EMAILS is created by a magic link or a verified social sign-in, or at /claim with AUTH_BOOTSTRAP_TOKEN, which creates the organization too; any other address by the sign-up form or an invitation.`,
     });
   }
 

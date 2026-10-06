@@ -9,9 +9,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { eq } from "drizzle-orm";
+import { user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite, captureMails, firstLink } from "../../helpers/smtp.ts";
 
 // Core only: no OIDC routes, as on an instance whose `MODULES` omits `oidc`.
@@ -267,28 +269,48 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(await sessionEmail(account.cookie)).toBe(account.email);
     });
 
-    it("still verifies a named address that signs up for itself", async () => {
-      const admin = `admin-${crypto.randomUUID()}@example.test`;
+    describe("a platform admin's address", () => {
+      const admin = "admin-named@example.test";
       const savedAdmins = process.env.AUTH_PLATFORM_ADMIN_EMAILS;
-      process.env.AUTH_PLATFORM_ADMIN_EMAILS = admin;
-      _resetCacheForTesting();
-      try {
+
+      beforeEach(() => {
+        process.env.AUTH_PLATFORM_ADMIN_EMAILS = admin;
+        _resetCacheForTesting();
+      });
+
+      afterEach(() => {
+        if (savedAdmins === undefined) delete process.env.AUTH_PLATFORM_ADMIN_EMAILS;
+        else process.env.AUTH_PLATFORM_ADMIN_EMAILS = savedAdmins;
+        _resetCacheForTesting();
+      });
+
+      it("signing up for it creates nothing and sends no mail", async () => {
         const mails = await captureMails(async () => {
           const res = await postAuth("/sign-up/email", {
             email: admin,
             password: PASSWORD,
             name: "Admin",
           });
+          // Better Auth's answer for any sign-up once verification is required.
           expect(res.status).toBe(200);
+          expect(((await res.json()) as { token: unknown }).token).toBeNull();
+        });
+
+        expect(mails).toHaveLength(0);
+        expect(await db.select().from(userTable).where(eq(userTable.email, admin))).toHaveLength(0);
+      });
+
+      it("the account that already holds it is still sent its verification link", async () => {
+        await createTestUser({ email: admin, password: PASSWORD, emailVerified: false });
+
+        const mails = await captureMails(async () => {
+          const res = await postAuth("/sign-in/email", { email: admin, password: PASSWORD });
+          expect(res.status).toBe(403);
         });
 
         expect(mails).toHaveLength(1);
         expect(mails[0]!.to).toBe(admin);
-      } finally {
-        if (savedAdmins === undefined) delete process.env.AUTH_PLATFORM_ADMIN_EMAILS;
-        else process.env.AUTH_PLATFORM_ADMIN_EMAILS = savedAdmins;
-        _resetCacheForTesting();
-      }
+      });
     });
 
     it("a link issued before the address was named returns to the settings page with the refusal", async () => {

@@ -823,7 +823,7 @@ export const envSchema = z
     // AUTH_DISABLE_SIGNUP — when true, blocks brand-new account creation
     // (email/password, magic-link, social OIDC). Three exceptions always pass:
     //   1. Email matches a pending+non-expired invitation in `org_invitations`.
-    //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
+    //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS, on proof of ownership.
     //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL, on proof of ownership.
     AUTH_DISABLE_SIGNUP: z
       .string()
@@ -872,7 +872,9 @@ export const envSchema = z
       ),
     // AUTH_PLATFORM_ADMIN_EMAILS — comma-separated email allowlist of
     // platform-level admins. Bypass AUTH_DISABLE_SIGNUP and may call
-    // POST /api/orgs even when AUTH_DISABLE_ORG_CREATION=true.
+    // POST /api/orgs even when AUTH_DISABLE_ORG_CREATION=true. The account
+    // of a listed address is created only on proof of ownership (bootstrap
+    // token, provider-verified social sign-in, magic link).
     // Declarative on purpose: no UI, no migration, IaC-friendly. Comparison
     // is case-insensitive against the user's normalized email.
     AUTH_PLATFORM_ADMIN_EMAILS: z
