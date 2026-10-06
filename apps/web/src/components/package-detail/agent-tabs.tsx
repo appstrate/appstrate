@@ -8,7 +8,6 @@ import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
-import { useAgentReadiness } from "../../hooks/use-agent-readiness";
 import {
   isFileField,
   schemaHasFileFields,
@@ -19,7 +18,7 @@ import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
-import { RunAgentButton } from "../run-agent-button";
+import { AgentRunButton } from "./agent-run-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
@@ -32,13 +31,6 @@ export function AgentRunsTab({
   versionLabel: string | undefined;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: detail } = usePackageDetail("agent", packageId);
-  const readiness = useAgentReadiness(detail);
-
-  if (!detail) return null;
-
-  const { hasPrompt, hasRequiredSkills } = readiness;
-  const runDisabled = !hasPrompt || !hasRequiredSkills;
 
   return (
     <RunList
@@ -47,13 +39,7 @@ export function AgentRunsTab({
       hideAgentName
       emptyState={
         <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-          <RunAgentButton
-            packageId={packageId}
-            detail={detail}
-            version={versionLabel}
-            disabled={runDisabled}
-            showLabel
-          />
+          <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
         </EmptyState>
       }
     />
@@ -175,6 +161,13 @@ function buildCurlMultipartExample(params: CurlParams): string {
 
   return lines.join("\n");
 }
+
+/** The launch answers `201` with the run resource; abridged here. */
+const RUN_RESPONSE_EXAMPLE = `{
+  "id": "run_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "status": "pending",
+  …
+}`;
 
 // ─── Agent API Tab ─────────────────────────────────────────────────────
 
@@ -335,7 +328,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
           {t("api.responseTitle")}
         </h4>
         <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-          {JSON.stringify({ runId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }, null, 2)}
+          {RUN_RESPONSE_EXAMPLE}
         </pre>
         <p className="text-muted-foreground mt-2 text-xs">{t("api.responseHint")}</p>
       </div>

@@ -11,7 +11,86 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { launchFromOptions, retryLaunch } from "../run-launch.ts";
+import { launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
+
+describe("launchFlight", () => {
+  /** A launch whose request the test settles by hand. */
+  function pendingLaunch() {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    let started = 0;
+    const start = () => {
+      started += 1;
+      return promise;
+    };
+    return { start, resolve, reject, started: () => started };
+  }
+  const settled = () => new Promise((r) => setTimeout(r, 0));
+  /** A flight and the pending flag it reports, as the launcher shows it. */
+  function flightWithBusy() {
+    const busy: boolean[] = [];
+    return { flight: launchFlight((b) => busy.push(b)), busy };
+  }
+
+  it("sends one request for a double click", async () => {
+    const { flight } = flightWithBusy();
+    const first = pendingLaunch();
+    const second = pendingLaunch();
+    // Both clicks land before React re-renders with `isPending`.
+    flight.run(first.start, {});
+    flight.run(second.start, {});
+    expect([first.started(), second.started()]).toEqual([1, 0]);
+    first.resolve();
+    await settled();
+  });
+
+  it("frees the slot when the launch succeeds, and when it fails", async () => {
+    const { flight, busy } = flightWithBusy();
+    const ok = pendingLaunch();
+    const seen: string[] = [];
+    flight.run(ok.start, { onSuccess: () => seen.push("ok") });
+    ok.resolve();
+    await settled();
+
+    const refused = pendingLaunch();
+    flight.run(refused.start, { onError: (e) => seen.push(e.message) });
+    expect(refused.started()).toBe(1);
+    refused.reject(new Error("409"));
+    await settled();
+
+    expect(seen).toEqual(["ok", "409"]);
+    expect(busy).toEqual([true, false, true, false]);
+    const next = pendingLaunch();
+    flight.run(next.start, {});
+    expect(next.started()).toBe(1);
+  });
+
+  it("a launch dismissed while in flight keeps the slot, reports nothing, then frees it", async () => {
+    const { flight, busy } = flightWithBusy();
+    const retry = pendingLaunch();
+    const seen: string[] = [];
+    flight.run(retry.start, { onError: (e) => seen.push(e.message) });
+    flight.forget();
+
+    // Still being created server-side: a click now would be a second run.
+    const tooEarly = pendingLaunch();
+    flight.run(tooEarly.start, {});
+    expect(tooEarly.started()).toBe(0);
+    expect(busy).toEqual([true]);
+
+    retry.reject(new Error("409"));
+    await settled();
+    expect(seen).toEqual([]);
+    expect(busy).toEqual([true, false]);
+    const next = pendingLaunch();
+    flight.run(next.start, {});
+    expect(next.started()).toBe(1);
+  });
+});
 
 describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {

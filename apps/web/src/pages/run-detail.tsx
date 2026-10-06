@@ -5,8 +5,10 @@ import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
+import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
@@ -233,6 +235,7 @@ export function RunDetailPage() {
   if (isLoading) return <LoadingState />;
 
   if (error || !run) return <ErrorState message={error?.message} />;
+  const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
@@ -301,8 +304,16 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      {run.status === "failed" && run.error && (
-        <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
+      {isTerminal && run.status !== "success" && run.error && (
+        <div
+          className={cn(
+            "mb-4 rounded-md px-4 py-3 text-sm",
+            run.status === "cancelled"
+              ? "bg-muted text-muted-foreground"
+              : "bg-destructive/10 text-destructive",
+          )}
+          data-testid="run-error-banner"
+        >
           {run.error}
         </div>
       )}
@@ -376,25 +387,8 @@ export function RunDetailPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    // Two refusals the launcher would otherwise discover by
-                    // round trip, in the order the detail page names them:
-                    // switched off HERE (the cure is one page away), then
-                    // nothing published and the working copy is not this
-                    // reader's — a re-run resolves the latest published
-                    // version and there is none.
-                    disabled={
-                      !permissionsReady ||
-                      launcher.isPending ||
-                      !agent.active ||
-                      (agent.definition === "draft" && !agent.home_writable)
-                    }
-                    title={
-                      !agent.active
-                        ? t("detail.titleNotActive")
-                        : agent.definition === "draft" && !agent.home_writable
-                          ? t("detail.titleNeverPublished")
-                          : undefined
-                    }
+                    disabled={!permissionsReady || launcher.isPending || rerunRefusal !== null}
+                    title={rerunRefusal ? t(rerunRefusal) : undefined}
                     onClick={() => {
                       if (canReadAgent) {
                         setInputOpen(true);

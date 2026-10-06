@@ -867,15 +867,16 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
   };
 }
 
-export async function resolveModel(
+/** The model a run gets, and whether the explicit id supplied it or a default did. */
+export async function resolveModelCascade(
   orgId: string,
   packageId: string,
   modelId: string | null,
-): Promise<ResolvedModel | null> {
+): Promise<{ model: ResolvedModel; fromExplicit: boolean } | null> {
   // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
-    if (result) return result;
+    if (result) return { model: result, fromExplicit: true };
     logger.warn("Agent model override not found, falling through to org default", {
       packageId,
       modelId,
@@ -888,19 +889,27 @@ export async function resolveModel(
   const pointer = await defaultModel.getDefaultId(orgId);
   if (pointer) {
     const resolved = await loadModel(orgId, pointer);
-    if (resolved) return resolved;
+    if (resolved) return { model: resolved, fromExplicit: false };
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return buildSystemResolvedModel(def);
+      return { model: buildSystemResolvedModel(def), fromExplicit: false };
     }
   }
 
   // 4. No model configured
   return null;
+}
+
+export async function resolveModel(
+  orgId: string,
+  packageId: string,
+  modelId: string | null,
+): Promise<ResolvedModel | null> {
+  return (await resolveModelCascade(orgId, packageId, modelId))?.model ?? null;
 }
 
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {

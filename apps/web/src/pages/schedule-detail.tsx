@@ -70,12 +70,12 @@ export function ScheduleDetailPage() {
     <div className="p-6">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
-          title={schedule.name || schedule.id}
+          title={schedule.name || t("schedule.unnamed")}
           emoji="📅"
           breadcrumbs={[
             { label: t("nav.orgSection", { ns: "common" }), href: "/" },
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || schedule.id },
+            { label: schedule.name || t("schedule.unnamed") },
           ]}
           actions={
             <>
@@ -301,7 +301,7 @@ function ScheduleHistory({
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
-        schedule_name={schedule.name || schedule.id}
+        schedule_name={schedule.name || t("schedule.unnamed")}
         next_run_at={schedule.next_run_at}
       />
     ) : null;

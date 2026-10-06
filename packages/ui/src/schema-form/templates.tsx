@@ -19,7 +19,7 @@ import type {
   ObjectFieldTemplateProps,
   MultiSchemaFieldTemplateProps,
 } from "@rjsf/utils";
-import { getSubmitButtonOptions } from "@rjsf/utils";
+import { getInputProps, getSubmitButtonOptions } from "@rjsf/utils";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../cn.ts";
 import { Button, INPUT_CLASS, LABEL_CLASS } from "./primitives.tsx";
@@ -55,7 +55,14 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
             : schema.format === "time"
               ? "time"
               : "text";
-  const inputType = type ?? formatType;
+  // Only the type is taken from RJSF: native `min` / `max` / `step` would raise
+  // the browser's own bubble where the validator's message belongs.
+  const inputType = getInputProps<T>(
+    schema,
+    type ?? (formatType === "text" ? undefined : formatType),
+    options,
+  ).type;
+  const isNumeric = schema.type === "number" || schema.type === "integer";
 
   const isConst = schema && "const" in schema;
   const isReadOnly = readonly || isConst;
@@ -64,6 +71,9 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
     <input
       id={id}
       type={inputType}
+      step={inputType === "number" ? "any" : undefined}
+      // RJSF keeps a `number` as text under a comma-decimal locale.
+      inputMode={isNumeric && inputType === "text" ? "decimal" : undefined}
       value={(value as string | number | undefined) ?? ""}
       required={required}
       readOnly={isReadOnly}

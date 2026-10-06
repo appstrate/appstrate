@@ -120,6 +120,8 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
       widgets={widgets}
       templates={templates}
       formContext={ctx}
+      // Each error already sits under its field; the summary outlived corrections.
+      showErrorList={false}
       {...rest}
     />
   );

@@ -9,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { EmptyState } from "../page-states";
+import { ConfirmModal } from "../confirm-modal";
 import { ScopeFilter, type PersistenceScopeFilter } from "./scope-filter";
 import { MemoryRow } from "./memory-row";
 import { PinnedSlotCard } from "./pinned-slot-card";
@@ -20,6 +21,7 @@ import {
   useRunPinned,
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
+import { usePermissions } from "../../hooks/use-permissions";
 
 interface MemoryPanelProps {
   packageId: string;
@@ -50,6 +52,10 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
 
   const deleteMemory = useDeleteMemory(packageId);
   const deletePinned = useDeletePinnedSlot(packageId);
+  const { can } = usePermissions();
+  const canDelete = !isRunView && can("persistence:delete");
+  const [toDelete, setToDelete] = useState<{ kind: "pinned" | "memory"; id: number } | null>(null);
+  const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
   const pinnedCount = pinned?.length ?? 0;
   const memoriesCount = memories?.length ?? 0;
@@ -93,7 +99,7 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
             <PinnedSlotCard
               key={slot.id}
               slot={slot}
-              onDelete={isRunView ? undefined : (id) => deletePinned.mutate(id)}
+              onDelete={canDelete ? (id) => setToDelete({ kind: "pinned", id }) : undefined}
               isDeleting={deletePinned.isPending}
             />
           ))}
@@ -115,12 +121,24 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
             <MemoryRow
               key={mem.id}
               memory={mem}
-              onDelete={isRunView ? undefined : (id) => deleteMemory.mutate(id)}
+              onDelete={canDelete ? (id) => setToDelete({ kind: "memory", id }) : undefined}
               isDeleting={deleteMemory.isPending}
             />
           ))}
         </div>
       </Section>
+
+      <ConfirmModal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (toDelete) deletion.mutate(toDelete.id, { onSettled: () => setToDelete(null) });
+        }}
+        title={t("detail.memoryDeleteTitle")}
+        description={t("detail.memoryDeleteConfirm")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deletion.isPending}
+      />
     </div>
   );
 }

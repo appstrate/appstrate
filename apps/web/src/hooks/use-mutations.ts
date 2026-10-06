@@ -19,7 +19,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
@@ -118,33 +118,41 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  const [isPending, setIsPending] = useState(false);
+  const [flight] = useState(() => launchFlight(setIsPending));
 
-  const onError = (err: Error) => {
-    const errors = missingConnectionErrors(err);
-    if (errors) setMissingErrors(errors);
-  };
-
-  return {
-    isPending: runAgent.isPending,
-    missingErrors,
-    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
-    launch: (launch: RunLaunch, onSuccess?: () => void) => {
-      lastLaunch.current = { launch, onSuccess };
-      runAgent.mutate(launch, { onSuccess, onError });
-    },
-    retry: (picks: Record<string, string[]>) => {
-      const { launch, onSuccess } = lastLaunch.current;
-      const next = retryLaunch(launch, picks, missingErrors ?? []);
-      lastLaunch.current = { launch: next, onSuccess };
-      runAgent.mutate(next, {
+  const send = (launch: RunLaunch, onSuccess?: () => void) => {
+    flight.run(
+      () => {
+        lastLaunch.current = { launch, onSuccess };
+        return runAgent.mutateAsync(launch);
+      },
+      {
         onSuccess: () => {
           setMissingErrors(null);
           onSuccess?.();
         },
-        onError,
-      });
+        // The mutation's own `onError` reports every failure; this picks up the 409.
+        onError: (err) => {
+          const errors = missingConnectionErrors(err);
+          if (errors) setMissingErrors(errors);
+        },
+      },
+    );
+  };
+
+  return {
+    isPending,
+    missingErrors,
+    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
+    launch: send,
+    retry: (picks: Record<string, string[]>) => {
+      const { launch, onSuccess } = lastLaunch.current;
+      send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
     },
     dismiss: () => {
+      // A retry still in flight must not reopen the modal.
+      flight.forget();
       setMissingErrors(null);
       runAgent.reset();
     },

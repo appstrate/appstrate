@@ -723,8 +723,8 @@ export class PiRunner {
       ...(this.opts.toolResultByteLimit !== undefined
         ? { toolResultByteLimit: this.opts.toolResultByteLimit }
         : {}),
-      // Early-stop: abort the SDK loop as soon as a terminal tool has
-      // executed successfully. `session.abort()` resolves once the agent
+      // Abort the SDK loop as soon as a terminal tool has settled the run
+      // (delivered, or refused too often). `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
       onTerminalTool: () => {
         void session.abort().catch(() => {});
@@ -1370,9 +1370,9 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 
 /**
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
- * runner's OWN early-stop rather than a failure: the run already produced a
- * successful terminal tool, and `onTerminalTool` aborted the SDK loop to stop
- * paying for turns nobody will read. Extracted so all three readers — the live
+ * runner's OWN stop rather than a provider failure: a terminal tool succeeded
+ * or ran out of attempts, and the runner aborted the SDK loop to stop paying
+ * for turns nobody will read. Extracted so all three readers — the live
  * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
  * — apply one definition instead of copies that can drift apart: they must
  * agree on what is NOT a failure.
@@ -1380,12 +1380,17 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
 function isRunnerEarlyStopAbort(
   stopReason: string | undefined,
   errorMessage: string | undefined,
-  terminalToolCompleted: boolean,
+  runnerStoppedLoop: boolean,
 ): boolean {
-  return (
-    terminalToolCompleted && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage))
-  );
+  return runnerStoppedLoop && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage));
 }
+
+/**
+ * How many calls a terminal tool may refuse before the run is failed. A refusal
+ * invites a retry, which never ends for a payload the model cannot fix (an
+ * output schema no value satisfies).
+ */
+export const MAX_TERMINAL_TOOL_REJECTIONS = 5;
 
 interface SessionBridgeOptions {
   /**
@@ -1394,8 +1399,9 @@ interface SessionBridgeOptions {
    */
   terminalTools?: string[];
   /**
-   * Invoked once, synchronously, when a terminal tool completes without
-   * error. The runner uses this to abort the SDK loop early.
+   * Invoked once, synchronously, when a terminal tool settles the run: its
+   * first success, or {@link MAX_TERMINAL_TOOL_REJECTIONS} refusals (the run
+   * then fails). The runner uses this to abort the SDK loop.
    */
   onTerminalTool?: () => void;
   /**
@@ -1426,6 +1432,10 @@ export function installSessionBridge(
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
+  let terminalToolRejections = 0;
+  let terminalToolExhausted: RunError | undefined;
+  const runnerStoppedLoop = (): boolean =>
+    terminalToolCompleted || terminalToolExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
@@ -1552,7 +1562,7 @@ export function installSessionBridge(
         // 503 latched earlier in the run — which a read-time guard would do.
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
         ) {
           lastUpstreamStopReason = last.stopReason;
           lastUpstreamErrorMessage = last.errorMessage;
@@ -1617,7 +1627,7 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, runnerStoppedLoop())
         ) {
           // The classification rides the event's `data`, which the platform
           // writes to `run_logs.data` (jsonb) — the same route the watchdog's
@@ -1736,11 +1746,23 @@ export function installSessionBridge(
             },
           ),
         );
-        // Early-stop on the first SUCCESSFUL terminal tool. A failed call
-        // (e.g. output-schema validation error) does not qualify — the
-        // model gets its retry turn as before.
-        if (!terminalToolCompleted && e.isError !== true && terminalTools.includes(tool)) {
+        // The first verdict stands: calls of the same batch still settle
+        // after the abort.
+        if (runnerStoppedLoop() || !terminalTools.includes(tool)) break;
+        if (e.isError !== true) {
           terminalToolCompleted = true;
+          options.onTerminalTool?.();
+          break;
+        }
+        terminalToolRejections += 1;
+        if (terminalToolRejections >= MAX_TERMINAL_TOOL_REJECTIONS) {
+          terminalToolExhausted = {
+            code: "terminal_tool_rejected",
+            message:
+              `The \`${tool}\` tool refused ${terminalToolRejections} calls from the agent, so the ` +
+              "run was stopped instead of retrying until its timeout. Each refusal is in the run log.",
+          };
+          fire(buildError({ runId, timestamp: Date.now() }, terminalToolExhausted.message));
           options.onTerminalTool?.();
         }
         break;
@@ -1767,6 +1789,7 @@ export function installSessionBridge(
       return reportedCost();
     },
     getTerminalError(): RunError | undefined {
+      if (terminalToolExhausted) return terminalToolExhausted;
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
       // `terminalErrorMessage` are shared with the live `appstrate.error`
       // emit above, so the stamped status and the `run_logs` trail can

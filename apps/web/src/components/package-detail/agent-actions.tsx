@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
+import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
@@ -71,17 +72,9 @@ export function AgentActions({
   // about (a `runner` holds `agents:run` and no `agents:read`, so the space
   // library lists no agents at all) still gets a verdict here.
   const activeHere = detail.active;
-  // Two refusals the launcher would otherwise discover by round trip. Being
-  // switched off HERE comes first, because the cure is one item away in this
-  // very menu ("Activer dans cet espace") while publishing is somebody else's
-  // act. The second is a package with nothing published whose working copy is
-  // not this caller's: a launch that names no version gets `404
-  // no_published_version`.
-  const runBlockedReason = !activeHere
-    ? t("detail.titleNotActive")
-    : detail.definition === "draft" && !detail.home_writable
-      ? t("detail.titleNeverPublished")
-      : undefined;
+  // Not the full run verdict: the options modal picks the model and the version.
+  const refusal = agentLaunchRefusal(detail);
+  const runBlockedReason = refusal ? t(refusal) : undefined;
 
   const handleConfirm = () => {
     if (!confirmState) return;
