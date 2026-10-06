@@ -92,8 +92,8 @@ export function ModelSelect({
         <Tabs
           value={tab}
           onValueChange={(value) => setTab(value as "models" | "configuration")}
-          // Tall enough for the reasoning levels wrapped on two rows (a popover
-          // narrowed by a small viewport) without an inner scroll.
+          // Tall enough for the reasoning levels on their two rows (the popover
+          // is narrower than their one-row width) without an inner scroll.
           className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
         >
           <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
