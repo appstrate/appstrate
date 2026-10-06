@@ -311,40 +311,29 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
  * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
  */
 /**
- * Whether a magic link bound to `policy`'s client may be verified: the account
- * it would sign in is of the realm that client serves, or it would create one
- * and the client allows sign-up. A token this cannot read is left to Better Auth.
+ * Whether verifying `token` would create an account. A token this cannot read
+ * is left to Better Auth, and so is an existing account: the realm of the
+ * account a link signs in is asserted where Better Auth writes
+ * (`assertMagicLinkAudience`, `@appstrate/db/auth`), after its own read.
  */
-async function linkServesClient(
-  policy: NonNullable<Awaited<ReturnType<typeof loadClientSignupPolicy>>>,
-  internalAdapter: unknown,
-  token: string,
-): Promise<boolean> {
+async function wouldCreateAccount(internalAdapter: unknown, token: string): Promise<boolean> {
   const adapter = internalAdapter as
     | {
         findVerificationValue: (key: string) => Promise<{ value: string } | null>;
-        findUserByEmail: (email: string) => Promise<{ user: { realm?: string } } | null>;
+        findUserByEmail: (email: string) => Promise<{ user: unknown } | null>;
       }
     | undefined;
-  if (!adapter) return true;
+  if (!adapter) return false;
   const row = await adapter.findVerificationValue(token);
-  if (!row) return true;
+  if (!row) return false;
   let email: unknown;
   try {
     email = (JSON.parse(row.value) as { email?: unknown }).email;
   } catch {
-    return true;
+    return false;
   }
-  if (typeof email !== "string" || !email) return true;
-
-  const existing = await adapter.findUserByEmail(email);
-  if (!existing?.user) return policy.allowSignup;
-  // The account may have been created, in another realm, after the link was
-  // issued for a then-free address.
-  return (
-    existing.user.realm ===
-    expectedRealmForClient({ level: policy.level, referencedSpaceId: policy.spaceId ?? undefined })
-  );
+  if (typeof email !== "string" || !email) return false;
+  return !(await adapter.findUserByEmail(email))?.user;
 }
 
 /**
@@ -393,10 +382,13 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   const pendingClientId = binding.clientId;
 
   // Once a link is bound to a client, that client decides: one that no longer
-  // resolves (deleted, disabled) serves nobody. Every refusal carries the
-  // same code, so the link's holder cannot tell an account exists.
+  // resolves (deleted, disabled) serves nobody.
   const policy = await loadClientSignupPolicy(pendingClientId);
-  if (policy && (await linkServesClient(policy, ctx.context.internalAdapter, token))) return;
+  if (
+    policy &&
+    (policy.allowSignup || !(await wouldCreateAccount(ctx.context.internalAdapter, token)))
+  )
+    return;
 
   const baseURL = new URL(ctx.context.baseURL);
 

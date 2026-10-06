@@ -46,8 +46,9 @@
  *      re-mints an authoritative `oidc_pending_client` cookie header from
  *      the validated authorize query (`headersWithAuthoritativePendingClient`)
  *      before calling BA in-process — the browser never gets a chance to
- *      strip it. The cookie read here is therefore server-authored on that
- *      path; for everything else it is a legacy/UX fallback only.
+ *      strip it — and marks those headers as its own
+ *      (`hasAuthoritativePendingClient`). The cookie is read only under
+ *      that mark: one the browser carries on any other request binds nothing.
  *
  * Consumers (`oidcRealmResolver`, `oidcBeforeSignupGuard`,
  * `oidcAfterSignupHandler`) treat the result as:
@@ -103,6 +104,13 @@ type PendingClientBinding =
   | { kind: "invalid" }
   | { kind: "none" };
 
+/** The pending client of headers the server minted itself, never of a cookie a browser carries. */
+function authoritativePendingClient(headers: Headers | null): string | null {
+  return hasAuthoritativePendingClient(headers)
+    ? readPendingClientCookieFromHeaders(headers)
+    : null;
+}
+
 /**
  * Resolve the OAuth client bound to the in-flight Better Auth user
  * creation. Precedence: OAuth callback state → magic-link token binding →
@@ -142,9 +150,9 @@ export async function resolvePendingClientBinding(
     return { kind: "none" };
   }
 
-  // ── 3. Cookie: authoritative on the server-driven register path (re-minted
-  //      from the validated authorize query), legacy/UX fallback elsewhere. ──
-  const cookieClientId = readPendingClientCookieFromHeaders(ctx.headers);
+  // ── 3. Cookie, when the server-driven register path re-minted it from the
+  //      validated authorize query. One a browser merely carries binds nothing.
+  const cookieClientId = authoritativePendingClient(ctx.headers);
   if (cookieClientId) return { kind: "bound", clientId: cookieClientId, source: "cookie" };
   return { kind: "none" };
 }
@@ -264,8 +272,7 @@ async function findMagicLinkClientBinding(token: string): Promise<string | null>
  * OIDC link whose verify leg would fall back to forgeable browser state.
  */
 export async function bindIssuedMagicLink(info: MagicLinkIssuedInfo): Promise<void> {
-  if (!hasAuthoritativePendingClient(info.headers)) return;
-  const clientId = readPendingClientCookieFromHeaders(info.headers);
+  const clientId = authoritativePendingClient(info.headers);
   if (!clientId) return;
   try {
     await persistMagicLinkClientBinding(info.token, clientId);

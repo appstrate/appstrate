@@ -489,18 +489,21 @@ could not be resolved`) instead of failing for good on the first. Without
   do not name. Anything else is withheld, the page answers as before, and
   the server logs it. A per-space transport cannot be built without its
   realm.
-- **A magic link signs in an account of the audience its client serves.**
-  A link issued through an OAuth client for an address that had no account
-  signed in whichever account held the address when it was opened. The
-  verify guard that already bound a link to its client for sign-up
-  (`enforceMagicLinkSignupPolicy`) now covers an existing account too: one
-  of another realm is refused, and so is any link whose client no longer
-  resolves (deleted or disabled). Every refusal is the redirect a closed
-  sign-up already gets (`error=signup_disabled`), with no session. A link
-  is bound to a client only when a hosted sign-in page issued it: one asked
-  from the dashboard is a platform link whatever pending-client cookie the
-  browser still holds, so an account it creates is a platform account under
-  the platform sign-up rules (it used to land in that space's realm).
+- **A magic link signs in an account of the audience its transaction
+  serves.** A link issued through an OAuth client for an address that had
+  no account signed in whichever account held the address when it was
+  opened. The realm of the account a link signs in is now asserted where
+  Better Auth writes (`assertMagicLinkAudience`: before it touches an
+  unproven account, and at the session), against the realm the link
+  resolves to: the bound client's, else the platform's. A link whose client
+  no longer resolves (deleted or disabled) is refused by the verify guard.
+  Every refusal is the redirect a closed sign-up already gets
+  (`error=signup_disabled`), with no session and the account untouched.
+  The pending-client cookie binds a client only on a request a hosted
+  sign-in page made itself: a magic link or a password sign-up asked from
+  the dashboard is a platform one whatever cookie the browser still holds,
+  so the account it creates is a platform account under the platform
+  sign-up rules (it used to land in that space's realm).
 - **`/claim` answers the account-creation refusal with SMTP configured
   too.** Under mail verification Better Auth answers a refused account
   creation as a created one, so claiming an address outside

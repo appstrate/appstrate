@@ -11,7 +11,13 @@ import { prefixedId } from "@appstrate/db/ids";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { user as userTable, session as sessionTable, spaces } from "@appstrate/db/schema";
+import {
+  user as userTable,
+  verification as verificationTable,
+  account as accountTable,
+  session as sessionTable,
+  spaces,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -125,7 +131,23 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
     expect(mails).toHaveLength(0);
   });
 
-  it("sends no magic link for an address the environment names, account or not", async () => {
+  it("sends no magic link to an account of another space", async () => {
+    const { qs } = await spaceWithOwnSmtp();
+    const other = `other-${crypto.randomUUID()}@tenant.test`;
+    await db.insert(userTable).values({
+      id: crypto.randomUUID(),
+      email: other,
+      name: "Other",
+      emailVerified: true,
+      realm: `end_user:${prefixedId("spc")}`,
+    });
+
+    await submitEmail("/api/oauth/magic-link", qs, other);
+
+    expect(mails).toHaveLength(0);
+  });
+
+  it("sends no magic link for an address the environment names that has no account", async () => {
     const { qs } = await spaceWithOwnSmtp();
     process.env.AUTH_PLATFORM_ADMIN_EMAILS = "ops@acme.test";
     _resetCacheForTesting();
@@ -140,12 +162,15 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
   });
 
   describe("a link issued for a free address, opened once a platform account holds it", () => {
-    async function openLinkAfter(change: (clientId: string) => Promise<unknown>) {
+    async function openLinkAfter(
+      change: (clientId: string) => Promise<unknown>,
+      { emailVerified = true } = {},
+    ): Promise<string> {
       const { clientId, qs } = await spaceWithOwnSmtp();
       const email = `later-${crypto.randomUUID()}@acme.test`;
       await submitEmail("/api/oauth/magic-link", qs, email);
       const link = new URL(/href="([^"]+)"/.exec(mails[0]!.html)![1]!.replaceAll("&amp;", "&"));
-      const account = await createTestUser({ email, emailVerified: true });
+      const account = await createTestUser({ email, emailVerified });
       await change(clientId);
 
       const res = await app.request(`/api/auth/magic-link/verify${link.search}`);
@@ -159,10 +184,23 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
       expect(
         await db.select().from(sessionTable).where(eq(sessionTable.userId, account.id)),
       ).toHaveLength(1);
+      return email;
     }
 
     it("does not sign that account in", async () => {
       await openLinkAfter(async () => {});
+    });
+
+    it("leaves an unverified account as its creator made it: unverified, password kept", async () => {
+      // What Better Auth does to an unproven account before it creates the
+      // session; the refusal has to come before those writes.
+      const email = await openLinkAfter(async () => {}, { emailVerified: false });
+
+      const [row] = await db.select().from(userTable).where(eq(userTable.email, email));
+      expect(row!.emailVerified).toBe(false);
+      expect(
+        await db.select().from(accountTable).where(eq(accountTable.userId, row!.id)),
+      ).toHaveLength(1);
     });
 
     it("nor after the client was deleted", async () => {
@@ -223,14 +261,35 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
       expect(await realmOf(email)).toBe("platform");
     });
 
-    it("creates nothing when platform sign-up is closed", async () => {
+    it("is refused by the platform's closed sign-up, not by the space's open one", async () => {
       process.env.AUTH_DISABLE_SIGNUP = "true";
       _resetCacheForTesting();
       const email = `new-${crypto.randomUUID()}@acme.test`;
 
-      await openDashboardLink(email);
+      const res = await openDashboardLink(email);
 
       expect(await realmOf(email)).toBeUndefined();
+      // No client was bound to the link: nothing but the link's own row was stored.
+      expect(await db.select().from(verificationTable)).toHaveLength(0);
+      expect(res.headers.get("location")).toContain("error=signup_disabled");
+    });
+
+    it("a password sign-up on the dashboard is a platform account too", async () => {
+      const { qs } = await spaceWithOwnSmtp();
+      const visit = await app.request(`/api/oauth/login${qs}`);
+      const cookie = visit.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; ");
+      const email = `new-${crypto.randomUUID()}@acme.test`;
+
+      await app.request("/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({ email, password: "TestPassword123!", name: "New" }),
+      });
+
+      expect(await realmOf(email)).toBe("platform");
     });
 
     it("is not bound to the space by a marker the caller sends itself", async () => {

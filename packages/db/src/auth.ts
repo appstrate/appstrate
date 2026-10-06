@@ -3,6 +3,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BASE_ERROR_CODES, betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
@@ -214,6 +215,41 @@ export function setRealmResolver(resolver: RealmResolver): void {
   _realmResolver = resolver;
 }
 
+/**
+ * A magic link signs in an account of the realm its transaction resolves to:
+ * the bound client's, else the platform's. Asserted at Better Auth's writes
+ * (the first one it makes to an unproven account, and the session), which come
+ * after its own read of the account, so nothing can change in between.
+ */
+async function assertMagicLinkAudience(
+  userId: string,
+  context: GenericEndpointContext | null,
+): Promise<void> {
+  if (context?.path !== "/magic-link/verify" || !_realmResolver) return;
+  const [account] = await db
+    .select({ realm: user.realm })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!account) return;
+  const query = (context.query ?? {}) as Record<string, unknown>;
+  const expected = await _realmResolver({
+    headers: context.headers ?? null,
+    path: context.path,
+    query,
+  });
+  if (account.realm === expected) return;
+  logger.warn("auth: refused a magic link for an account outside its audience", { expected });
+  // The redirect a closed sign-up gets: the link's holder learns nothing more.
+  const raw = query.errorCallbackURL ?? query.callbackURL;
+  const target = new URL(
+    typeof raw === "string" ? decodeURIComponent(raw) : "/",
+    context.context.baseURL,
+  );
+  target.searchParams.set("error", "signup_disabled");
+  throw context.redirect(target.toString());
+}
+
 // ─── Magic-link issued hook (injected at boot by the OIDC module) ───
 //
 // Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
@@ -320,7 +356,9 @@ function recordingRedemptionRefusal<A extends unknown[], R>(
       return await hook(...args);
     } catch (err) {
       const redemption = bootstrapTokenRedemptionStore.getStore();
-      if (redemption && err instanceof APIError) redemption.refusal = err.body?.code;
+      if (redemption && err instanceof APIError) {
+        redemption.refusal = err.body?.code ?? "signup_refused";
+      }
       throw err;
     }
   };
@@ -1224,6 +1262,13 @@ function buildAuth(options: CreateAuthOptions) {
           },
         },
       },
+      account: {
+        delete: {
+          before: async (account, context) => {
+            await assertMagicLinkAudience(account.userId, context);
+          },
+        },
+      },
       session: {
         create: {
           // Denormalize `user.realm` onto the session row so the request-time
@@ -1231,7 +1276,8 @@ function buildAuth(options: CreateAuthOptions) {
           // reject mismatched audiences without an extra user-table lookup
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
-          before: async (sess) => {
+          before: async (sess, context) => {
+            await assertMagicLinkAudience(sess.userId, context);
             const [row] = await db
               .select({ realm: user.realm })
               .from(user)

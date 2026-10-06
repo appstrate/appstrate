@@ -359,6 +359,21 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
         expect(isBootstrapTokenPending()).toBe(true);
       });
 
+      it("a refusal of the create hook that carries no code is still a 403", async () => {
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+        setBeforeSignupHook(() => {
+          throw new APIError("FORBIDDEN", { message: "no" });
+        });
+        try {
+          await expectRefusedWithNothingCreated(await redeem("ops@acme.com"), {
+            status: 403,
+            code: "signup_refused",
+          });
+        } finally {
+          setBeforeSignupHook(() => {});
+        }
+      });
+
       it("any other refusal of the create hook is answered with its own code", async () => {
         setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
         setBeforeSignupHook(() => {
