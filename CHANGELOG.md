@@ -496,7 +496,11 @@ could not be resolved`) instead of failing for good on the first. Without
   (`enforceMagicLinkSignupPolicy`) now covers an existing account too: one
   of another realm is refused, and so is any link whose client no longer
   resolves (deleted or disabled). Every refusal is the redirect a closed
-  sign-up already gets (`error=signup_disabled`), with no session.
+  sign-up already gets (`error=signup_disabled`), with no session. A link
+  is bound to a client only when a hosted sign-in page issued it: one asked
+  from the dashboard is a platform link whatever pending-client cookie the
+  browser still holds, so an account it creates is a platform account under
+  the platform sign-up rules (it used to land in that space's realm).
 - **`/claim` answers the account-creation refusal with SMTP configured
   too.** Under mail verification Better Auth answers a refused account
   creation as a created one, so claiming an address outside

@@ -66,7 +66,10 @@ import { verification } from "@appstrate/db/schema";
 import type { MagicLinkIssuedInfo } from "@appstrate/db/auth";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../../lib/logger.ts";
-import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
+import {
+  hasAuthoritativePendingClient,
+  readPendingClientCookieFromHeaders,
+} from "./pending-client-cookie.ts";
 
 /**
  * Path of the Better Auth OAuth authorize endpoint (oauth-provider plugin
@@ -250,15 +253,18 @@ async function findMagicLinkClientBinding(token: string): Promise<string | null>
  * route re-mints an AUTHORITATIVE pending-client cookie header from the
  * validated authorize query (`headersWithAuthoritativePendingClient`), so
  * the binding is pinned to the client the server authorized, not to
- * browser-supplied state. A direct (non-OIDC) call to BA's public
- * magic-link endpoint carries no such marker and writes no binding —
- * its eventual signup is a plain platform signup under platform gates.
+ * browser-supplied state, and marks the headers as its own
+ * (`hasAuthoritativePendingClient`). A direct (non-OIDC) call to BA's public
+ * magic-link endpoint carries no such marker, whatever cookie the browser
+ * still holds, and writes no binding — its eventual signup is a plain
+ * platform signup under platform gates.
  *
  * FAIL CLOSED: a persistence failure rethrows, which aborts the email send
  * in `sendMagicLink`'s surrounding try/catch — better no email than an
  * OIDC link whose verify leg would fall back to forgeable browser state.
  */
 export async function bindIssuedMagicLink(info: MagicLinkIssuedInfo): Promise<void> {
+  if (!hasAuthoritativePendingClient(info.headers)) return;
   const clientId = readPendingClientCookieFromHeaders(info.headers);
   if (!clientId) return;
   try {

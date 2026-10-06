@@ -15,7 +15,12 @@ import { user as userTable, session as sessionTable, spaces } from "@appstrate/d
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
+import {
+  captureMails,
+  enableSmtpForSuite,
+  firstLink,
+} from "../../../../../../test/helpers/smtp.ts";
+import { AUTHORITATIVE_PENDING_CLIENT_HEADER } from "../../../services/pending-client-cookie.ts";
 import {
   createClient,
   deleteClient,
@@ -166,6 +171,74 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
 
     it("nor after the client was disabled", async () => {
       await openLinkAfter((clientId) => updateClient(clientId, { disabled: true }));
+    });
+  });
+
+  describe("a dashboard magic link asked with a space's pending-client cookie still in the browser", () => {
+    const savedClosed = process.env.AUTH_DISABLE_SIGNUP;
+
+    afterEach(() => {
+      if (savedClosed === undefined) delete process.env.AUTH_DISABLE_SIGNUP;
+      else process.env.AUTH_DISABLE_SIGNUP = savedClosed;
+      _resetCacheForTesting();
+    });
+
+    /** Visit the space's hosted sign-in, then ask the dashboard for a link and open it. */
+    async function openDashboardLink(email: string, extraHeaders: Record<string, string> = {}) {
+      const { qs } = await spaceWithOwnSmtp();
+      const visit = await app.request(`/api/oauth/login${qs}`);
+      const cookie = visit.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; ");
+      expect(cookie).toContain("oidc_pending_client");
+      const sent = await captureMails(async () => {
+        await app.request("/api/auth/sign-in/magic-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Cookie: cookie, ...extraHeaders },
+          body: JSON.stringify({ email, callbackURL: "/" }),
+        });
+      });
+      return app.request(`/api/auth/magic-link/verify${firstLink(sent[0]!).search}`);
+    }
+
+    const realmOf = async (email: string) =>
+      (await db.select().from(userTable).where(eq(userTable.email, email)))[0]?.realm;
+
+    it("signs a platform user in", async () => {
+      const account = await createTestUser({ emailVerified: true });
+
+      const res = await openDashboardLink(account.email);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).not.toContain("error=");
+      expect(res.headers.getSetCookie().join(";")).toContain("session_token");
+    });
+
+    it("creates a new address as a platform account", async () => {
+      const email = `new-${crypto.randomUUID()}@acme.test`;
+
+      await openDashboardLink(email);
+
+      expect(await realmOf(email)).toBe("platform");
+    });
+
+    it("creates nothing when platform sign-up is closed", async () => {
+      process.env.AUTH_DISABLE_SIGNUP = "true";
+      _resetCacheForTesting();
+      const email = `new-${crypto.randomUUID()}@acme.test`;
+
+      await openDashboardLink(email);
+
+      expect(await realmOf(email)).toBeUndefined();
+    });
+
+    it("is not bound to the space by a marker the caller sends itself", async () => {
+      const email = `new-${crypto.randomUUID()}@acme.test`;
+
+      await openDashboardLink(email, { [AUTHORITATIVE_PENDING_CLIENT_HEADER]: "1" });
+
+      expect(await realmOf(email)).toBe("platform");
     });
   });
 

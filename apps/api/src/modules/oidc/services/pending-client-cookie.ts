@@ -100,6 +100,18 @@ export function clearPendingClientCookie(c: Context<AppEnv>): void {
 }
 
 /**
+ * Marks headers whose pending-client cookie was minted by
+ * `headersWithAuthoritativePendingClient`, as opposed to carried by a browser.
+ * Its value is a secret of this process, so a caller cannot send it.
+ */
+export const AUTHORITATIVE_PENDING_CLIENT_HEADER = "x-appstrate-pending-client-authority";
+const AUTHORITY_PROOF = crypto.randomUUID();
+
+export function hasAuthoritativePendingClient(headers: Headers | null): boolean {
+  return headers?.get(AUTHORITATIVE_PENDING_CLIENT_HEADER) === AUTHORITY_PROOF;
+}
+
+/**
  * Build the signed cookie value (`<clientId>.<exp>.<sig>`) — the exact string
  * `issuePendingClientCookie` writes to `Set-Cookie`. Exposed so the
  * server-driven OIDC handlers can mint an AUTHORITATIVE binding to feed into a
@@ -140,6 +152,7 @@ function buildSignedPendingClientValue(clientId: string): string {
  */
 export function headersWithAuthoritativePendingClient(source: Headers, clientId: string): Headers {
   const headers = new Headers(source);
+  headers.set(AUTHORITATIVE_PENDING_CLIENT_HEADER, AUTHORITY_PROOF);
   const encoded = encodeURIComponent(buildSignedPendingClientValue(clientId));
   const existing = headers.get("cookie");
   const others = existing
