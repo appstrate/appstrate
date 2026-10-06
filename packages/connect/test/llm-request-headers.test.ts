@@ -35,7 +35,7 @@ const DROPPED: Record<string, string> = {
   Cookie: "session=abc",
   // platform-internal
   "X-Appstrate-Sidecar-Auth": "run-secret",
-  "x-appstrate-pi-sdk": "0.87.1",
+  "x-appstrate-pi-sdk": "1.0.4",
   "Appstrate-Version": "2026-01-01",
   "Appstrate-User": "eu_1",
   "X-Org-Id": "org_1",

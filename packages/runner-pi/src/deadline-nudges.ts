@@ -83,7 +83,7 @@ interface DeadlineNudgeDeps {
   /** The run's wall-clock budget. `<= 0` (or non-finite) disables nudging entirely. */
   timeoutSeconds: number;
   /** Queues a steering message on the live session (`AgentSession.steer`). */
-  steer: (text: string) => Promise<void>;
+  steer: (text: string) => Promise<unknown>;
   /** Best-effort breadcrumb channel. Sync or async; failures are swallowed. */
   emit?: (event: RunEvent) => void | Promise<void>;
   runId: string;
