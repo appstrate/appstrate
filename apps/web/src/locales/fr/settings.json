@@ -902,6 +902,8 @@
   "integrations.badge.inactive": "Non activée",
   "integrations.btn.activate": "Activer",
   "integrations.activate.hint": "Activez cette intégration pour configurer ses connexions et ses accès.",
+  "integration.notInSpace.hint": "Elle n'y est ni hébergée ni partagée, ou elle n'existe plus. Changez d'espace, ou demandez à un administrateur de la partager ici.",
+  "integration.notInSpace.back": "Voir les intégrations de cet espace",
   "integrations.deactivate.confirm": "Désactiver cette intégration ? Les connexions et réglages sont conservés et réutilisés si vous la réactivez.",
   "integration.tabs.connections": "Connexions",
   "integration.tabs.configuration": "Configuration",

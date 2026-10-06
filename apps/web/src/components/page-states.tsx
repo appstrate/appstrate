@@ -27,16 +27,30 @@ export function ErrorState({ message, error }: { message?: string; error?: unkno
   );
 }
 
-/** A detail page's unreadable resource: missing and forbidden get the same panel, as the API answers them alike. */
-export function ResourceErrorState({ error }: { error: unknown }) {
+/**
+ * A detail page's unreadable resource: missing and forbidden get the same panel, as the API
+ * answers them alike. `hint` and `children` are the page's own way forward for that panel
+ * (what to ask for, where to go); any other failure shows neither.
+ */
+export function ResourceErrorState({
+  error,
+  hint,
+  children,
+}: {
+  error: unknown;
+  hint?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   const { t } = useTranslation();
   if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
     return (
       <EmptyState
         icon={SearchX}
         message={t("error.resourceUnavailable")}
-        hint={t("error.resourceUnavailableHint")}
-      />
+        hint={hint ?? t("error.resourceUnavailableHint")}
+      >
+        {children}
+      </EmptyState>
     );
   }
   return <ErrorState error={error} />;

@@ -71,7 +71,7 @@ export function MemoryRow({ memory, onDelete, isDeleting }: MemoryRowProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
+              className="text-muted-foreground hover:text-destructive h-7 w-7 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
               onClick={() => onDelete(memory.id)}
               disabled={isDeleting}
               title={t("btn.delete")}
