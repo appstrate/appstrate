@@ -4,8 +4,12 @@
 
 import { hasVerificationLinkError } from "./auth-errors";
 
-/** Where a signed-out visitor lands outside the auth routes; a failed verification link says so. */
+/**
+ * Where a signed-out visitor lands outside the auth routes; a failed sign-up verification link
+ * says so. An email-change link is not one: its landing belongs to a signed-in account.
+ */
 export function signedOutDestination(search: string): string {
+  if (new URLSearchParams(search).has("email_change")) return "/login";
   return hasVerificationLinkError(search) ? `/verify-email${search}` : "/login";
 }
 

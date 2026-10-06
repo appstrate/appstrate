@@ -18,6 +18,11 @@ describe("signedOutDestination", () => {
     expect(signedOutDestination("?error=INVALID_TOKEN")).toBe("/verify-email?error=INVALID_TOKEN");
     expect(signedOutDestination("?error=TOKEN_EXPIRED")).toBe("/verify-email?error=TOKEN_EXPIRED");
   });
+
+  it("is the login page after signing out from an email-change landing", () => {
+    expect(signedOutDestination("?email_change=1&error=TOKEN_EXPIRED")).toBe("/login");
+    expect(signedOutDestination("?email_change=1&error=email_change_refused")).toBe("/login");
+  });
 });
 
 describe("emailWasChanged", () => {
