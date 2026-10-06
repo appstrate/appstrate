@@ -58,7 +58,7 @@ describe("route declarations", () => {
     const unguarded = SHELL.flatMap(({ file, text }) =>
       links(text)
         .filter((t) => declared.has(t))
-        .filter((t) => routeVerdict(t as RoutePath, () => false, allOn) !== "granted")
+        .filter((t) => routeVerdict(t as RoutePath, () => false, allOn, false) !== "granted")
         .filter((t) => !reached(text).includes(t))
         .map((t) => `${file} → ${t}`),
     );
@@ -77,20 +77,38 @@ describe("routeVerdict", () => {
   const none = () => false;
 
   it("opens a gated route on any one of its permissions", () => {
-    expect(routeVerdict("/runs", (p) => p === "runs:read-all", {})).toBe("granted");
-    expect(routeVerdict("/runs", none, {})).toBe("denied");
+    expect(routeVerdict("/runs", (p) => p === "runs:read-all", {}, false)).toBe("granted");
+    expect(routeVerdict("/runs", none, {}, false)).toBe("denied");
   });
 
   it("treats a route whose module is off as absent, whatever the grants", () => {
     const all = () => true;
-    expect(routeVerdict("/chat", all, {})).toBe("absent");
-    expect(routeVerdict("/chat", all, { chat: true })).toBe("granted");
-    expect(routeVerdict("/chat", none, { chat: true })).toBe("denied");
+    expect(routeVerdict("/chat", all, {}, false)).toBe("absent");
+    expect(routeVerdict("/chat", all, { chat: true }, false)).toBe("granted");
+    expect(routeVerdict("/chat", none, { chat: true }, false)).toBe("denied");
+  });
+
+  it("treats a team-space route as absent in a personal space, whatever the grants", () => {
+    // The owner of a personal space holds the admin preset there, and the server
+    // still answers 409 `personal_space_*` to every write behind these pages.
+    const all = () => true;
+    const teamSpaceOnly: RoutePath[] = [
+      "/org-settings/space/members",
+      "/org-settings/space/api-keys",
+      "/org-settings/space/oauth",
+      "/end-users",
+    ];
+    for (const path of teamSpaceOnly) {
+      expect(routeVerdict(path, all, { oidc: true }, true)).toBe("absent");
+      expect(routeVerdict(path, all, { oidc: true }, false)).toBe("granted");
+    }
+    expect(routeVerdict("/org-settings/space/general", all, {}, true)).toBe("granted");
+    expect(routeVerdict("/agents", all, {}, true)).toBe("granted");
   });
 
   it("opens an ungated route to a caller holding nothing", () => {
     const open: RoutePath[] = ["/", "/agents/:scope/:name/edit", "/preferences/general"];
-    for (const path of open) expect(routeVerdict(path, none, {})).toBe("granted");
+    for (const path of open) expect(routeVerdict(path, none, {}, false)).toBe("granted");
   });
 });
 
@@ -117,7 +135,7 @@ describe("routeOf", () => {
 
   it("feeds routeVerdict, so a concrete link is judged by its route's gate", () => {
     const runsOnly = (p: string) => p === "runs:read";
-    const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, {});
+    const verdict = (url: string) => routeVerdict(routeOf(url)!, runsOnly, {}, false);
     expect(verdict("/agents/@acme/triage/runs/run_1")).toBe("granted");
     expect(verdict("/agents/@acme/triage")).toBe("denied");
   });

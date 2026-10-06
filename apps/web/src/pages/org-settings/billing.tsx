@@ -3,8 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "@appstrate/core/format";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { formatBytes } from "../../lib/format-bytes";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -63,7 +62,7 @@ export function OrgSettingsBillingPage() {
   const canManageBilling = can("billing:manage");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }
@@ -81,10 +80,6 @@ export function OrgSettingsBillingPage() {
   // offers the first one.
   const firstUpgradeId = upgradeIds[0];
 
-  const onMutationError = (err: unknown) => {
-    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-  };
-
   const handleManage = () => {
     portalMutation.mutate(
       {},
@@ -92,7 +87,6 @@ export function OrgSettingsBillingPage() {
         onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: onMutationError,
       },
     );
   };
@@ -115,7 +109,6 @@ export function OrgSettingsBillingPage() {
               toast.success(t("billing.planChangeRequested"));
               void queryClient.invalidateQueries({ queryKey: billingKey });
             },
-            onError: onMutationError,
           },
         );
         return;
@@ -126,7 +119,6 @@ export function OrgSettingsBillingPage() {
             onSuccess: ({ url }) => {
               window.location.href = url;
             },
-            onError: onMutationError,
           },
         );
         return;

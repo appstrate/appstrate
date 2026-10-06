@@ -7,9 +7,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
-import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
+import { useLocation } from "react-router-dom";
+import { useAuth, EmailChangeError } from "../../hooks/use-auth";
+import { emailChangeLanding } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+import { errorMessage } from "../../lib/mutation-error";
 
 function EmailVerificationBadge() {
   const { t } = useTranslation(["settings", "common"]);
@@ -64,9 +67,9 @@ function EmailVerificationBadge() {
 function EmailChangeForm() {
   const { t } = useTranslation(["settings", "common"]);
   const { user, changeEmail } = useAuth();
-  const { features } = useAppConfig();
   const [success, setSuccess] = useState("");
   const [verificationPendingEmail, setVerificationPendingEmail] = useState("");
+  const { search } = useLocation();
 
   const {
     register,
@@ -84,24 +87,28 @@ function EmailChangeForm() {
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailValue.trim());
   const canSubmit = isDirty && isValidEmail && !isSubmitting;
 
+  // What the email-change link that led here did — until the form is used again.
+  const landing =
+    user && !success && !verificationPendingEmail && !errors.root
+      ? emailChangeLanding(search)
+      : null;
+
   const onSubmit = async (data: { newEmail: string }) => {
     setSuccess("");
     setVerificationPendingEmail("");
     try {
-      await changeEmail(data.newEmail.trim());
+      const outcome = await changeEmail(data.newEmail.trim());
       reset();
-      if (features.smtp) {
+      if (outcome === "confirmation_sent") {
         setVerificationPendingEmail(data.newEmail.trim());
       } else {
         setSuccess(t("preferences.emailChanged"));
-        await refreshAuth();
       }
     } catch (err) {
-      if (err instanceof EmailChangeError && err.conflict) {
+      if (err instanceof EmailChangeError) {
         setError("root", { message: t("preferences.emailConflict") });
       } else {
-        const message = err instanceof Error && err.message ? err.message : t("login.error");
-        setError("root", { message });
+        setError("root", { message: errorMessage(err) });
       }
     }
   };
@@ -118,13 +125,21 @@ function EmailChangeForm() {
           <Label>{t("preferences.newEmail")}</Label>
           <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
+        {landing === "failed" && (
+          <div className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</div>
+        )}
+        {landing === "accepted" && (
+          <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
+            {t("preferences.emailChangeLinkAccepted")}
+          </div>
+        )}
         {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
         {success && <div className="text-success text-sm">{success}</div>}
         {verificationPendingEmail && (
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
             <Trans
               ns="settings"
-              i18nKey="preferences.emailChangeVerificationSent"
+              i18nKey="preferences.emailChangeConfirmationSent"
               values={{ email: verificationPendingEmail }}
               components={{ strong: <strong /> }}
             />

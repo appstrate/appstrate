@@ -2,8 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
-import type { LucideIcon } from "lucide-react";
+import { SearchX, type LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { errorDetail } from "../lib/mutation-error";
+import { ApiError } from "../api/errors";
 
 export function LoadingState() {
   return (
@@ -13,14 +15,45 @@ export function LoadingState() {
   );
 }
 
-export function ErrorState({ message }: { message?: string }) {
+/** `error` is shown as its translated refusal; `message` is a line the caller already wrote. */
+export function ErrorState({ message, error }: { message?: string; error?: unknown }) {
   const { t } = useTranslation();
+  const detail = message ?? errorDetail(error);
   return (
     <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
       <p>{t("error.generic")}</p>
-      {message && <p className="mt-1 text-sm">{message}</p>}
+      {detail && <p className="mt-1 text-sm">{detail}</p>}
     </div>
   );
+}
+
+/**
+ * A detail page's unreadable resource: missing and forbidden get the same panel, as the API
+ * answers them alike. `hint` and `children` are the page's own way forward for that panel
+ * (what to ask for, where to go); any other failure shows neither.
+ */
+export function ResourceErrorState({
+  error,
+  hint,
+  children,
+}: {
+  error: unknown;
+  hint?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        message={t("error.resourceUnavailable")}
+        hint={hint ?? t("error.resourceUnavailableHint")}
+      >
+        {children}
+      </EmptyState>
+    );
+  }
+  return <ErrorState error={error} />;
 }
 
 export function EmptyState({

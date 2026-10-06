@@ -2793,7 +2793,7 @@ export interface paths {
         };
         /**
          * List user organizations
-         * @description List organizations the current user is a member of.
+         * @description List organizations the current user is a member of, oldest membership first.
          */
         get: operations["listOrganizations"];
         put?: never;
@@ -4439,7 +4439,7 @@ export interface paths {
         };
         /**
          * List spaces
-         * @description List all spaces for the organization.
+         * @description List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.
          */
         get: operations["listSpaces"];
         put?: never;
@@ -4901,7 +4901,7 @@ export interface paths {
         put?: never;
         /**
          * Send a test ping
-         * @description Send a synthetic test.ping event to verify webhook connectivity.
+         * @description Deliver a synthetic `test.ping` event to the webhook URL, signed like a real event. The call returns once the delivery is queued; its outcome is a single attempt (never retried) listed by `GET /api/webhooks/{id}/deliveries`. Sent whether or not the webhook is enabled or subscribed to any event.
          */
         post: operations["testWebhook"];
         delete?: never;
@@ -6112,7 +6112,7 @@ export interface components {
         OrgProxy: {
             id: string;
             label: string;
-            /** @description Masked proxy URL for display */
+            /** @description Proxy URL for display, its username and password both masked */
             urlPrefix: string;
             enabled: boolean;
             is_default: boolean;
@@ -6834,6 +6834,8 @@ export interface components {
             /** Format: email */
             email: string;
             name: string;
+            /** @description Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`). */
+            can_create_org: boolean;
         };
         /** @description Webhook configuration object */
         WebhookObject: {
@@ -8639,7 +8641,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9569,6 +9571,8 @@ export interface operations {
                     /** Format: email */
                     email: string;
                     password: string;
+                    /** @description Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`. */
+                    callbackURL?: string;
                 };
             };
         };
@@ -9592,6 +9596,7 @@ export interface operations {
                      */
                     "application/json": {
                         redirect?: boolean;
+                        url?: string;
                         user?: components["schemas"]["User"];
                         token?: string | null;
                     };
@@ -9599,6 +9604,18 @@ export interface operations {
             };
             /** @description Invalid credentials */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9648,6 +9665,8 @@ export interface operations {
                     email: string;
                     password: string;
                     name: string;
+                    /** @description Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`. */
+                    callbackURL?: string;
                 };
             };
         };
@@ -15029,7 +15048,7 @@ export interface operations {
                     api_key: string;
                     /**
                      * Format: uri
-                     * @description Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
+                     * @description Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
                      */
                     base_url_override?: string | null;
                 };
@@ -15715,6 +15734,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -15763,7 +15783,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time. */
+            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15927,6 +15947,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when one of `model_ids` is outside the provider's catalog offer. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -16049,11 +16070,20 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["ModelAlreadyAdded"];
+            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     testModel: {
@@ -17179,6 +17209,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description Forbidden. `code` is `org_creation_disabled` when the instance sets `AUTH_DISABLE_ORG_CREATION` and the caller is not a platform admin. */
             403: components["responses"]["Forbidden"];
         };
     };
@@ -17766,7 +17797,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18242,7 +18273,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18253,13 +18284,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -18384,7 +18422,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18395,13 +18433,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -18485,7 +18530,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19471,7 +19516,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -20085,7 +20130,7 @@ export interface operations {
                     "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Already owned, name collision, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type), `name_collision` or `validation_failed` (`errors[].field` names the manifest key). */
+            /** @description Already owned, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `validation_failed` (`errors[].field` names the manifest key). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20098,6 +20143,15 @@ export interface operations {
             /** @description Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A package with the fork's name already exists in the organization (`code: name_collision`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The SOURCE package's published artifact cannot be read: it expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`), or the source's latest published version exists but its archive is gone from storage (`version_artifact_unavailable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
             422: {
                 headers: {
@@ -20448,7 +20502,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "fr",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20490,7 +20545,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "en",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20643,7 +20699,7 @@ export interface operations {
                      *         {
                      *           "id": "cm6pqr678",
                      *           "label": "US Residential Proxy",
-                     *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *           "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
                      *           "is_default": false,
@@ -20702,7 +20758,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
@@ -20750,7 +20806,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": true,
@@ -20837,7 +20893,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
@@ -22720,7 +22776,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23044,11 +23100,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
+            /** @description It is the organization's default space (`default_space_not_deletable`), runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -24403,6 +24458,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24550,6 +24606,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24709,7 +24766,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Test event generated */
+            /** @description Test event queued for delivery */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -25792,7 +25849,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). */
+            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs) plus `created`. For a new member `role` is the invitation's role. A caller who was already a member keeps their role: `created` is `false` and `role` is the one they hold, while the invitation's space assignments are still applied. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -25811,10 +25868,14 @@ export interface operations {
                      *         "spaces:read"
                      *       ],
                      *       "createdAt": "2026-01-10T08:00:00Z",
-                     *       "deleting_at": null
+                     *       "deleting_at": null,
+                     *       "created": true
                      *     }
                      */
-                    "application/json": components["schemas"]["Organization"];
+                    "application/json": components["schemas"]["Organization"] & {
+                        /** @description Whether the acceptance created the membership. `false` when the caller was already a member of the organization. */
+                        created: boolean;
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];

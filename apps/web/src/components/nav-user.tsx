@@ -2,7 +2,6 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { Check, LogOut, Settings, FileText, Palette } from "lucide-react";
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
@@ -46,17 +45,11 @@ export function NavUser({ minimal = false }: NavUserProps) {
   const { t } = useTranslation();
   const { user, profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
-  const queryClient = useQueryClient();
 
   if (!user) return null;
 
   const displayName = profile?.displayName || user.email || "";
   const initials = getInitials(displayName);
-
-  const handleLogout = async () => {
-    await logout();
-    queryClient.clear();
-  };
 
   return (
     <DropdownMenu>
@@ -132,7 +125,7 @@ export function NavUser({ minimal = false }: NavUserProps) {
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void handleLogout()} className="flex items-center gap-2">
+        <DropdownMenuItem onSelect={() => void logout()} className="flex items-center gap-2">
           <LogOut size={14} />
           {t("userMenu.logout")}
         </DropdownMenuItem>

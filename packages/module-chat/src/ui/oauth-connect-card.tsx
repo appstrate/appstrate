@@ -139,10 +139,12 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
+  const { can, t } = useChatHost();
   // Without `integrations:read` the chip keeps the bare package id.
-  const readsIntegration = useChatHost().can("integrations:read");
+  const readsIntegration = can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
   const resumed = useRef(false);
   const label = meta?.name ?? packageId ?? "l'intégration";
@@ -290,9 +292,11 @@ export function OAuthConnectCard({
     const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
     waiter.popupOpened(popup);
     if (!popup) {
-      // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
-      // + SSE backstops still resume the (now backgrounded) chat tab.
-      window.location.href = authUrl;
+      // Blocked. Never navigate THIS tab to the flow: the conversation that must
+      // resume lives here. A link to a new tab replaces the button instead.
+      setPopupBlocked(true);
+      setPhase("error");
+      setErrMsg(t("connect.popupBlocked"));
     }
   };
 
@@ -336,21 +340,29 @@ export function OAuthConnectCard({
           </span>
         ) : (
           <>
-            <Button
-              type="button"
-              onClick={start}
-              disabled={preparing || phase === "pending"}
-              className="gap-2"
-            >
-              {preparing || phase === "pending" ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : null}
-              {preparing
-                ? "Préparation…"
-                : phase === "pending"
-                  ? "En attente de connexion…"
-                  : "Connecter"}
-            </Button>
+            {popupBlocked ? (
+              <Button asChild className="shrink-0">
+                <a href={authUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connect.openInTab")}
+                </a>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={start}
+                disabled={preparing || phase === "pending"}
+                className="gap-2"
+              >
+                {preparing || phase === "pending" ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : null}
+                {preparing
+                  ? "Préparation…"
+                  : phase === "pending"
+                    ? "En attente de connexion…"
+                    : "Connecter"}
+              </Button>
+            )}
             {phase === "error" && errMsg ? (
               <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
                 <AlertTriangleIcon className="size-3.5 shrink-0" />

@@ -376,9 +376,14 @@ test("an operator's runs page and run detail hold only its own runs", async ({
     await expect(page.locator(`a[href$="/runs/${aliceRun}"]`)).toBeVisible();
     await expect(page.locator(`a[href$="/runs/${bobRun}"]`)).toHaveCount(0);
     // Not a 403: a run the caller may not read is indistinguishable from one
-    // that does not exist, so the detail page renders its error state.
+    // that does not exist, so the detail page stays on its URL and renders the
+    // "not found or not accessible" panel — no redirect, none of the run.
     await page.goto(`/agents/${scope}/${agentB}/runs/${bobRun}`);
-    await expect(page.getByText(/Une erreur est survenue|An error occurred/)).toBeVisible();
+    await expect(
+      page.getByText(/Élément introuvable ou inaccessible|Not found, or not accessible/),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/runs/${bobRun}$`));
+    await expect(page.getByRole("tab")).toHaveCount(0);
   } finally {
     await context.close();
   }

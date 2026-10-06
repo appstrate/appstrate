@@ -3,6 +3,7 @@
 /** The skill picker's data and pure rules. */
 
 import { z } from "zod";
+import { parseScopedName } from "@appstrate/core/naming";
 import { MAX_PINNED_SKILLS, parseSkillList, type SkillHint } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
@@ -59,7 +60,8 @@ export function togglePinned(pinned: readonly string[], packageId: string): stri
 
 /**
  * A choosable picker row: the catalogue, then every pin missing from it
- * (`available: false`), so a dead pin can still be removed. Enforced skills are
+ * (`available: false`, named by its package's bare name), so a dead pin can
+ * still be removed. Enforced skills are
  * listed apart, locked.
  */
 export function skillPickerRows(
@@ -73,6 +75,9 @@ export function skillPickerRows(
     ...catalogue
       .filter((skill) => !enforced.has(skill.packageId))
       .map((skill) => ({ skill, available: true })),
-    ...dead.map((id) => ({ skill: { packageId: id }, available: false })),
+    ...dead.map((id) => ({
+      skill: { packageId: id, display_name: parseScopedName(id)?.name ?? id },
+      available: false,
+    })),
   ];
 }

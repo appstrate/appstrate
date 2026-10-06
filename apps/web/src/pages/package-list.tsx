@@ -60,7 +60,7 @@ export function PackageTab({
   headerContent,
 }: PackageTabProps) {
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState error={error} />;
 
   const header = title ? (
     <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>

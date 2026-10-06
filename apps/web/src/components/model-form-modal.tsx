@@ -32,12 +32,13 @@ import {
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../api/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
+  modelFormRefusals,
   type ModelFormFields,
   type ModelFormSubmit,
 } from "@/lib/model-form-payload";
@@ -75,7 +76,7 @@ interface ModelFormBodyProps {
 export function ModelFormBody(props: ModelFormBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
-  if (registryQuery.error) return <ErrorState message={getErrorMessage(registryQuery.error)} />;
+  if (registryQuery.error) return <ErrorState error={registryQuery.error} />;
   if (!registryQuery.data) return <LoadingState />;
   // A row whose provider left the registry has no endpoint to describe and no
   // credential to match: say so rather than render an empty form.
@@ -240,6 +241,7 @@ function ModelForm({
    */
   const dropEndpointBinding = () => {
     setCreatedCredentialId(null);
+    clearErrors(["credentialId", "modelId"]);
     dropListing();
   };
 
@@ -330,8 +332,14 @@ function ModelForm({
             models: data.models,
             truncated: data.truncated,
           }),
-        onError: () =>
-          setDiscovery({ key, outcome: "request_failed", models: [], truncated: false }),
+        onError: (err) =>
+          setDiscovery({
+            key,
+            // The platform's own rate limit; `rate_limited` is the endpoint's.
+            outcome: err instanceof ApiError && err.status === 429 ? "throttled" : "request_failed",
+            models: [],
+            truncated: false,
+          }),
       },
     );
   };
@@ -378,12 +386,9 @@ function ModelForm({
       isEdit: !!model,
       catalogEntry: catalogEntry(data.modelId.trim()),
     });
-    if (!result.ok) {
-      setError(result.field, { message: t(result.messageKey) });
-      return;
-    }
+    if (!result) return;
     // The host closes on success and reports nothing here.
-    const outcome = await onSubmit(result.data);
+    const outcome = await onSubmit(result);
     if (outcome.failedModelIds.length > 0) {
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
       setError("modelId", {
@@ -404,13 +409,24 @@ function ModelForm({
     if (!overridable || parsesAsUrl(v)) return undefined;
     return t(v.trim() ? "validation.urlFormat" : "validation.required", { ns: "common" });
   };
-  // An empty id with no arrangement to type it in names the steps, not the field.
-  const modelIdValidate = (v: string) =>
-    v.trim()
-      ? undefined
-      : manual
-        ? t("validation.required", { ns: "common" })
-        : t("models.form.modelStepRequired");
+  const refusals = (modelId: string) =>
+    modelFormRefusals({
+      modelId,
+      manual,
+      provider: selectedProvider,
+      selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
+      inlineApiKey,
+      offeredIds:
+        source === "catalog" && selectedProvider ? selectedProvider.models.map((m) => m.id) : null,
+    });
+  const credentialValidate = () => {
+    const key = refusals("").credentialId;
+    return key ? t(key) : undefined;
+  };
+  const modelIdValidate = (v: string) => {
+    const key = refusals(v).modelId;
+    return key ? t(key, { provider: selectedProvider?.displayName }) : undefined;
+  };
 
   const modelIdError =
     showError("modelId") && errors.modelId?.message ? (
@@ -424,7 +440,8 @@ function ModelForm({
   );
 
   return (
-    <form id="model-form" onSubmit={onFormSubmit} className="space-y-4">
+    <form id="model-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
+      <input type="hidden" {...register("credentialId", { validate: credentialValidate })} />
       <ProviderPicker
         id="mdl-provider"
         registry={registry}

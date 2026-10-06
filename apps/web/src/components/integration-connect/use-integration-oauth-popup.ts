@@ -9,6 +9,8 @@ import {
   acceptsCompletionMessage,
   completionMatches,
 } from "@appstrate/core/connect-handshake";
+import { ApiError } from "../../api/errors";
+import { toastError } from "../../lib/mutation-error";
 import {
   invalidateIntegrationQueries,
   useInitiateIntegrationConnect,
@@ -152,6 +154,11 @@ export function useHostedConnectPopup() {
         }
         if (err instanceof Error && err.message === "connect_timeout") {
           toast.error(t("integration.popup.timeout"));
+          return;
+        }
+        // The space's admin gate: retrying cannot help, so the reason is the message.
+        if (err instanceof ApiError && err.code === "connection_blocked_by_admin") {
+          toastError(err);
           return;
         }
         // Mint failure (e.g. portal not configured / 5xx), network error, or any

@@ -10,6 +10,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useAuth } from "../hooks/use-auth";
 import type { ReauthMethod } from "../lib/reauth-methods";
+import { errorMessage } from "../lib/mutation-error";
 
 const PROVIDER_LABELS: Record<"google" | "github", string> = {
   google: "Google",
@@ -58,7 +59,7 @@ export function ReauthModal({ open, onClose, methods, onReauthenticated }: Reaut
       await onReauthenticated();
       handleClose();
     } catch (err: unknown) {
-      setError(err instanceof Error && err.message ? err.message : t("login.error"));
+      setError(errorMessage(err));
       setSubmitting(false);
     }
   };

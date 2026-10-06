@@ -71,6 +71,22 @@ describe("Webhooks API", () => {
      * rule this route must NOT have — the id has to be `spc_` + a canonical
      * UUID, and a `spc_`-prefixed id that isn't one has to be rejected.
      */
+    it("names a private-network target with its own code", async () => {
+      const res = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "org",
+          url: "https://10.0.0.1/hook",
+          events: ["run.success"],
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("blocked_url");
+      expect(body.param).toBe("url");
+    });
+
     it("rejects a space webhook whose spaceId is not a space id at all", async () => {
       const res = await app.request("/api/webhooks", {
         method: "POST",

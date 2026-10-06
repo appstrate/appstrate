@@ -19,6 +19,7 @@ import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { withConnectionOverride } from "../lib/connection-set";
+import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
 import {
@@ -100,12 +101,34 @@ export function RunOverridesPanel({
   // users can still clear an override and see which model will be resolved.
   const orgDefaultModel = orgModels?.find((model) => model.is_default);
   const orgDefaultProxy = orgProxies?.find((proxy) => proxy.is_default && proxy.enabled);
+  // "Inherit" names what applies with no override.
+  const inheritedModel = inheritedEntry(
+    orgModels,
+    persistedModelId,
+    orgDefaultModel,
+    isModelSelectable,
+  );
+  const inheritedProxy = inheritedEntry(
+    orgProxies,
+    persistedProxyId,
+    orgDefaultProxy,
+    (proxy) => proxy.enabled,
+  );
+  // A schedule keeps an override whose entry was deleted: show it, not a blank select.
+  const goneModelOverride =
+    value.model_id_override && !orgModels?.some((m) => m.id === value.model_id_override)
+      ? value.model_id_override
+      : null;
+  const goneProxyOverride =
+    value.proxy_id_override &&
+    value.proxy_id_override !== NONE &&
+    !orgProxies?.some((p) => p.id === value.proxy_id_override)
+      ? value.proxy_id_override
+      : null;
 
   const setModel = (next: string) => {
-    const nextModelId = next === INHERIT ? persistedModelId : next;
     const nextModel =
-      orgModels?.find((model) => model.id === nextModelId) ??
-      (nextModelId === null ? orgDefaultModel : undefined);
+      next === INHERIT ? inheritedModel : orgModels?.find((model) => model.id === next);
     const generation = reconcileModelGenerationSettings(
       value.generation_config_override ?? {},
       nextModel?.generation,
@@ -136,11 +159,10 @@ export function RunOverridesPanel({
     }
   };
 
-  const modelSelectValue = value.model_id_override ?? persistedModelId ?? INHERIT;
+  const modelSelectValue = value.model_id_override ?? INHERIT;
   const selectedModel =
-    orgModels?.find((model) => model.id === (value.model_id_override ?? persistedModelId)) ??
-    orgDefaultModel;
-  const proxySelectValue = value.proxy_id_override ?? persistedProxyId ?? INHERIT;
+    orgModels?.find((model) => model.id === value.model_id_override) ?? inheritedModel;
+  const proxySelectValue = value.proxy_id_override ?? INHERIT;
 
   return (
     <div className="space-y-4">
@@ -157,15 +179,20 @@ export function RunOverridesPanel({
                   user who wants to clear one. */}
               <SelectItem value={INHERIT}>
                 <span className="inline-flex items-center gap-1.5">
-                  {orgDefaultModel
+                  {inheritedModel
                     ? t("run.overrides.modelInheritWithDefault", {
                         ns: "agents",
-                        name: orgDefaultModel.label,
+                        name: inheritedModel.label,
                       })
                     : t("run.overrides.modelInherit", { ns: "agents" })}
-                  {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
+                  {inheritedModel && <ModelUnselectableNote model={inheritedModel} />}
                 </span>
               </SelectItem>
+              {goneModelOverride && (
+                <SelectItem value={goneModelOverride} disabled>
+                  {t("run.overrides.modelGone", { ns: "agents" })}
+                </SelectItem>
+              )}
               {orgModels.map((m) => {
                 const MIcon = getModelIcon(m, registry ?? []);
                 return (
@@ -214,14 +241,24 @@ export function RunOverridesPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={INHERIT}>
-                {orgDefaultProxy
+                {persistedProxyId === NONE
                   ? t("run.overrides.proxyInheritWithDefault", {
                       ns: "agents",
-                      name: orgDefaultProxy.label,
+                      name: t("run.overrides.proxyNone", { ns: "agents" }),
                     })
-                  : t("run.overrides.proxyInherit", { ns: "agents" })}
+                  : inheritedProxy
+                    ? t("run.overrides.proxyInheritWithDefault", {
+                        ns: "agents",
+                        name: inheritedProxy.label,
+                      })
+                    : t("run.overrides.proxyInherit", { ns: "agents" })}
               </SelectItem>
               <SelectItem value={NONE}>{t("run.overrides.proxyNone", { ns: "agents" })}</SelectItem>
+              {goneProxyOverride && (
+                <SelectItem value={goneProxyOverride} disabled>
+                  {t("run.overrides.proxyGone", { ns: "agents" })}
+                </SelectItem>
+              )}
               {orgProxies.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.label}

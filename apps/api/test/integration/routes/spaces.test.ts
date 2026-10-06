@@ -52,6 +52,34 @@ describe("Spaces API", () => {
       const res = await app.request("/api/spaces");
       expect(res.status).toBe(401);
     });
+
+    it("lists the default space, then the caller's personal space, then team spaces oldest first", async () => {
+      const first = await seedSpace({ orgId: ctx.orgId, name: "Studio" });
+      const second = await seedSpace({ orgId: ctx.orgId, name: "Vitrine" });
+      await db
+        .update(spaces)
+        .set({ createdAt: new Date("2021-01-01T00:00:00Z") })
+        .where(eq(spaces.id, second.id));
+      const list = async () => {
+        const res = await app.request("/api/spaces", { headers: authHeaders(ctx) });
+        return ((await res.json()) as { data: { id: string; personal: boolean }[] }).data;
+      };
+      // The listing provisions the personal space; date it AFTER every team
+      // space, where an order by creation alone would leave it last — a
+      // different rank for each member, by the day they joined.
+      const personal = (await list()).find((space) => space.personal)!;
+      await db
+        .update(spaces)
+        .set({ createdAt: new Date("2099-01-01T00:00:00Z") })
+        .where(eq(spaces.id, personal.id));
+
+      expect((await list()).map((space) => space.id)).toEqual([
+        ctx.defaultSpaceId,
+        personal.id,
+        second.id,
+        first.id,
+      ]);
+    });
   });
 
   describe("POST /api/spaces", () => {
@@ -192,6 +220,16 @@ describe("Spaces API", () => {
       const listBody = (await listRes.json()) as any;
       const found = listBody.data.find((a: { id: string }) => a.id === created.id);
       expect(found).toBeUndefined();
+    });
+
+    it("refuses the default space with a named 409, like every other undeletable space", async () => {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+
+      await expectProblem(res, 409, { code: "default_space_not_deletable" });
+      await assertDbHas(spaces, eq(spaces.id, ctx.defaultSpaceId));
     });
 
     // `packages.home_space_id` is `ON DELETE RESTRICT`: a homed package cannot

@@ -12,13 +12,13 @@ import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
 
-export function useProxies() {
+export function useProxies(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/proxies",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
 }
 
@@ -51,7 +51,9 @@ export function useSetDefaultProxy() {
 }
 
 export function useTestProxy() {
-  return $api.useMutation("post", "/api/proxies/{id}/test");
+  return $api.useMutation("post", "/api/proxies/{id}/test", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 /** `agents:read` alone: unlike the agent detail, `agents:run` does not open it. */

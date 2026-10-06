@@ -12,7 +12,6 @@ import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
-import { onMutationError } from "../lib/mutation-error";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 
@@ -122,7 +121,6 @@ export function useCreateSchedule(packageId: string) {
       return created!;
     },
     onSuccess: () => invalidateSchedules(qc),
-    onError: onMutationError,
   });
 }
 
@@ -154,7 +152,6 @@ export function useUpdateSchedule() {
       return updated!;
     },
     onSuccess: () => invalidateSchedules(qc),
-    onError: onMutationError,
   });
 }
 
@@ -165,7 +162,6 @@ export function useDeleteSchedule() {
       await client.DELETE("/api/schedules/{id}", { params: { path: { id } } });
     },
     onSuccess: () => invalidateSchedules(qc),
-    onError: onMutationError,
   });
 }
 

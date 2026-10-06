@@ -29,7 +29,7 @@
   "delete.success": "File deleted.",
   "preview.frameTitle": "Preview of {{name}}",
   "preview.unavailable": "This file cannot be previewed.",
-  "storage.usedUnlimited": "{{used}} used",
-  "storage.usedOfLimit": "{{used}} used of {{limit}}",
+  "storage.usedUnlimited": "Organization storage: {{used}} used",
+  "storage.usedOfLimit": "Organization storage: {{used}} used of {{limit}}",
   "storage.limitReached": "Storage limit reached. New uploads and agent outputs are blocked until you free up space; existing files are unaffected."
 }

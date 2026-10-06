@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { errorMessage } from "../lib/mutation-error";
 
 /**
  * What a role catalog (`useSpaceRoleOptions`) says when it has no usable list:
@@ -40,7 +40,7 @@ export function RoleCatalogState({
       <Alert variant="destructive" className={className}>
         <AlertDescription>
           <p>{t("spaceMembers.rolesLoadError")}</p>
-          <p className="text-xs opacity-80">{getErrorMessage(error)}</p>
+          <p className="text-xs opacity-80">{errorMessage(error)}</p>
           <Button type="button" variant="outline" size="sm" onClick={refetch}>
             {t("btn.retry", { ns: "common" })}
           </Button>

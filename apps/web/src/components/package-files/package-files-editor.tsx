@@ -8,7 +8,7 @@ import {
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import type { PackageType } from "@appstrate/core/validation";
 import { $api } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
@@ -247,17 +247,17 @@ export function PackageFilesEditor({
           onSubmit={(to) => stage([{ op: "move", from: dialog.path, to }], to)}
         />
       )}
-      <ConfirmModal
-        open={dialog?.kind === "delete"}
-        onClose={() => setDialog(null)}
-        title={t("files.delete")}
-        description={t("files.deleteConfirm", {
-          path: dialog?.kind === "delete" ? dialog.path : "",
-        })}
-        confirmLabel={t("files.delete")}
-        isPending={busy}
-        onConfirm={() => dialog?.kind === "delete" && stage([{ op: "delete", path: dialog.path }])}
-      />
+      {dialog?.kind === "delete" && (
+        <ConfirmModal
+          open
+          onClose={() => setDialog(null)}
+          title={t("files.delete")}
+          description={t("files.deleteConfirm", { path: dialog.path })}
+          confirmLabel={t("files.delete")}
+          isPending={busy}
+          onConfirm={() => stage([{ op: "delete", path: dialog.path }])}
+        />
+      )}
     </div>
   );
 }

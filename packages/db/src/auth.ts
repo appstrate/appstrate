@@ -2,12 +2,12 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
-import { renderEmail } from "@appstrate/emails";
+import { renderEmail, type RenderedEmail } from "@appstrate/emails";
 import { createLogger } from "@appstrate/core/logger";
 
 const logger = createLogger("info");
@@ -215,12 +215,13 @@ export function setRealmResolver(resolver: RealmResolver): void {
 // ─── Magic-link issued hook (injected at boot by the OIDC module) ───
 //
 // Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
-// email leaves the transport, with the freshly minted single-use token and
-// the request headers of the `sign-in/magic-link` call. The OIDC module
-// uses it to persist a server-side `(token → OAuth client)` binding so the
-// later `/magic-link/verify` leg — driven entirely by Better Auth — can
-// resolve the user's realm from state the browser cannot strip or forge
-// (CRIT-15).
+// email leaves the transport, with the freshly minted single-use token, the
+// verify URL Better Auth built for it and the request headers of the
+// `sign-in/magic-link` call. The OIDC module uses it to persist a server-side
+// `(token → OAuth client)` binding so the later `/magic-link/verify` leg —
+// driven entirely by Better Auth — can resolve the user's realm from state
+// the browser cannot strip or forge (CRIT-15), and to return the URL of its
+// own confirmation page, which is the one the email then carries.
 //
 // FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
 // surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
@@ -231,14 +232,28 @@ export interface MagicLinkIssuedInfo {
   token: string;
   /** Normalized (lowercased/trimmed) recipient email. */
   email: string;
+  /** Better Auth's verify URL for this token. */
+  url: string;
   /** Headers of the `sign-in/magic-link` request — `null` outside HTTP. */
   headers: Headers | null;
 }
 
-let _magicLinkIssuedHook: ((info: MagicLinkIssuedInfo) => Promise<void>) | null = null;
+/** Returns the URL to put in the email. */
+type MagicLinkIssuedHook = (info: MagicLinkIssuedInfo) => Promise<string>;
 
-export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Promise<void>): void {
+let _magicLinkIssuedHook: MagicLinkIssuedHook | null = null;
+
+export function setMagicLinkIssuedHook(hook: MagicLinkIssuedHook): void {
   _magicLinkIssuedHook = hook;
+}
+
+/** Test-only: swap the hook (null = no OIDC module) and return the previous one. */
+export function _swapMagicLinkIssuedHookForTesting(
+  hook: MagicLinkIssuedHook | null,
+): MagicLinkIssuedHook | null {
+  const previous = _magicLinkIssuedHook;
+  _magicLinkIssuedHook = hook;
+  return previous;
 }
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
@@ -461,13 +476,50 @@ export function shouldAutoVerifyEmailOnCreate(
   return undefined;
 }
 
-function buildBasePlugins(
+// How long each emailed link stays valid: enforced by Better Auth, stated in the email.
+export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
+const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
+const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
+
+export const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
+
+/**
+ * Better Auth's verify URL, re-pointed at a confirmation page that keeps its
+ * query. The verify endpoint spends the token on its first GET and mail
+ * scanners open the links they see, so the email carries a page that is inert
+ * until its reader presses the button leading to the verify endpoint.
+ *
+ * `null` when `verifyUrl` is not the verify endpoint (a Better Auth upgrade
+ * moved it): the caller emails the direct link, and the warning says so.
+ */
+export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): URL | null {
+  const url = new URL(verifyUrl);
+  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) {
+    logger.warn("auth: unexpected magic-link verify path, emailing the direct link", {
+      pathname: url.pathname,
+    });
+    return null;
+  }
+  url.pathname = pagePath;
+  return url;
+}
+
+/** Send an auth email through the tenant transport when one is active, else the instance one. */
+async function sendAuthMail(
   env: ReturnType<typeof getEnv>,
-  smtpTransport: ReturnType<typeof createTransport> | null,
-) {
-  const smtpEnabled = !!smtpTransport;
+  smtpTransport: Transporter,
+  to: string,
+  { subject, html }: RenderedEmail,
+): Promise<void> {
+  const override = getSmtpOverride();
+  const transport = override?.transport ?? smtpTransport;
+  const from = override ? formatFrom(override) : env.SMTP_FROM;
+  await transport.sendMail({ from, to, subject, html });
+}
+
+function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transporter | null) {
   return [
-    ...(smtpEnabled
+    ...(smtpTransport
       ? [
           magicLink({
             // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
@@ -482,81 +534,42 @@ function buildBasePlugins(
             // recipient's inbox (forwarded mail, shared/compromised mailbox,
             // mail-archive breach) replay the link and take over the account.
             // 15 minutes is enough for a human to click through immediately
-            // while closing the replay window. `allowedAttempts` still lets
-            // email prefetchers hit the URL without burning the token early.
-            expiresIn: 15 * 60, // 15 minutes
-            allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
+            // while closing the replay window.
+            expiresIn: MAGIC_LINK_TTL_SECONDS,
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
-                // Give the OIDC module a chance to persist the server-side
-                // `(token → OAuth client)` transaction binding BEFORE the
-                // email is sent (see `setMagicLinkIssuedHook`). A throw here
-                // aborts the send via the surrounding catch — fail closed:
-                // an OIDC magic link must never leave without its binding,
-                // otherwise the verify leg would fall back to forgeable
-                // browser state for realm resolution (CRIT-15).
-                if (_magicLinkIssuedHook) {
-                  // `EndpointContext.headers` is typed `HeadersInit` — copy
-                  // into a real `Headers` so the hook contract stays uniform
-                  // with the other signup-hook channels.
-                  const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
-                  await _magicLinkIssuedHook({
-                    token,
-                    email: normalizedEmail,
-                    headers: rawHeaders ? new Headers(rawHeaders) : null,
-                  });
-                }
-
-                // Rewrite the verify URL to route through the OIDC module's
-                // confirmation interstitial so that one-shot token consumption
-                // is gated behind an explicit click. Without this, email
-                // clients (Resend click-tracking, Outlook SafeLinks, Gmail
-                // preview, Apple Mail preview, corporate URL scanners)
-                // prefetch the `GET` link and burn the token before the user
-                // clicks — producing a `session_expired` on the relying-party
-                // callback. Mirrors Slack/Notion/Linear/Supabase.
-                //
-                // The confirm page lives in the OIDC module but is generic
-                // (falls back to platform branding when the callbackURL has
-                // no client_id, e.g. invitation flows).
-                const rewritten = new URL(rawUrl);
-                if (rewritten.pathname === "/api/auth/magic-link/verify") {
-                  rewritten.pathname = "/api/oauth/magic-link/confirm";
-                  // Surface the recipient email on the confirm interstitial
-                  // ("You are signing in as foo@bar.com") to match SOTA UX
-                  // (Slack/Linear). Safe: the recipient already owns the
-                  // email, and the URL is only delivered to their inbox.
-                  rewritten.searchParams.set("email", normalizedEmail);
-                } else {
-                  // Defense against a silent BA path change in future upgrades.
-                  // If the path ever moves, the rewrite above becomes a no-op
-                  // and we'd regress to prefetch-vulnerable behavior — log
-                  // loudly so the drift is caught in ops before it reaches
-                  // users.
-                  logger.warn(
-                    "oidc: magic-link URL rewrite skipped — unexpected BA path, falling back to direct verify",
-                    { pathname: rewritten.pathname },
-                  );
-                }
-                const url = rewritten.toString();
+                // `EndpointContext.headers` is typed `HeadersInit` — copy
+                // into a real `Headers` so the hook contract stays uniform
+                // with the other signup-hook channels.
+                const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
+                // A throw aborts the send via the surrounding catch — fail closed.
+                const url = _magicLinkIssuedHook
+                  ? await _magicLinkIssuedHook({
+                      token,
+                      email: normalizedEmail,
+                      url: rawUrl,
+                      headers: rawHeaders ? new Headers(rawHeaders) : null,
+                    })
+                  : (magicLinkConfirmPageUrl(rawUrl, "/magic-link/confirm")?.toString() ?? rawUrl);
 
                 // Magic-link is now a pure passwordless-login channel. The
                 // invitation flow no longer rides on magic-link: an invited
                 // user opens the `/invite/{token}` page and authenticates
                 // through the standard login/signup path, then accepts. So a
                 // single generic template covers every magic-link send.
-                const { subject, html } = renderEmail("magic-link", {
-                  email: normalizedEmail,
-                  url,
-                  locale: "fr",
-                });
-
-                const override = getSmtpOverride();
-                const transport = override?.transport ?? smtpTransport!;
-                const from = override ? formatFrom(override) : env.SMTP_FROM;
-                await transport.sendMail({ from, to: email, subject, html });
+                await sendAuthMail(
+                  env,
+                  smtpTransport,
+                  email,
+                  renderEmail("magic-link", {
+                    email: normalizedEmail,
+                    url,
+                    expiresInMinutes: MAGIC_LINK_TTL_SECONDS / 60,
+                    locale: "fr",
+                  }),
+                );
               } catch {
                 // Fire-and-forget
               }
@@ -661,6 +674,19 @@ function buildAuth(options: CreateAuthOptions) {
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
+  const notifyPasswordChanged = async (email: string): Promise<void> => {
+    if (!smtpTransport) return;
+    try {
+      await sendAuthMail(
+        env,
+        smtpTransport,
+        email,
+        renderEmail("password-changed", { locale: "fr" }),
+      );
+    } catch {
+      // Fire-and-forget — the password is already changed
+    }
+  };
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
@@ -728,7 +754,7 @@ function buildAuth(options: CreateAuthOptions) {
       // generic `bootstrap_signup_rejected` 400, which names no length.
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
-      requireEmailVerification: smtpEnabled,
+      requireEmailVerification: !!smtpTransport,
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
       // most tests sign up a real user per `beforeEach`. When the test harness
@@ -752,45 +778,78 @@ function buildAuth(options: CreateAuthOptions) {
               new Bun.CryptoHasher("sha256").update(password).digest("hex") === hash,
           },
         }),
-      ...(smtpEnabled && {
+      ...(smtpTransport && {
+        resetPasswordTokenExpiresIn: RESET_PASSWORD_TTL_SECONDS,
         sendResetPassword: async ({ user, url }) => {
           try {
-            const { subject, html } = renderEmail("reset-password", {
-              email: user.email,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("reset-password", {
+                email: user.email,
+                url,
+                expiresInMinutes: RESET_PASSWORD_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block reset flow if email fails
+          }
+        },
+        onPasswordReset: async ({ user }) => {
+          await notifyPasswordChanged(user.email);
+        },
+        // The signup answer is the same as for a free address, so the SPA
+        // announces an email: this is it, sent to the account's owner.
+        onExistingUserSignUp: async ({ user }) => {
+          try {
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("existing-account", { locale: "fr" }),
+            );
+          } catch {
+            // Fire-and-forget — the signup response must not depend on it
           }
         },
       }),
     },
 
-    ...(smtpEnabled && {
+    ...(smtpTransport && {
       emailVerification: {
         sendOnSignUp: true,
         sendOnSignIn: true,
         autoSignInAfterVerification: true,
+        expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
         sendVerificationEmail: async ({ user, url }) => {
           try {
-            const { subject, html } = renderEmail("verification", {
-              user,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("verification", {
+                user,
+                url,
+                expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block signup if email fails
           }
         },
+      },
+      // The one account change Better Auth has no callback for.
+      hooks: {
+        after: createAuthMiddleware(async (ctx) => {
+          if (ctx.path !== "/change-password") return;
+          const returned = ctx.context.returned;
+          if (returned instanceof APIError) return;
+          const email = (returned as { user?: { email?: string } } | undefined)?.user?.email;
+          if (email) await notifyPasswordChanged(email);
+        }),
       },
     }),
 
@@ -861,7 +920,28 @@ function buildAuth(options: CreateAuthOptions) {
       },
       changeEmail: {
         enabled: true,
-        updateEmailWithoutVerification: !smtpEnabled,
+        updateEmailWithoutVerification: !smtpTransport,
+        // The owner is told at the current address, and must approve there,
+        // before anything is sent to the new one.
+        ...(smtpTransport && {
+          sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+            try {
+              await sendAuthMail(
+                env,
+                smtpTransport,
+                user.email,
+                renderEmail("email-change-confirmation", {
+                  newEmail,
+                  url,
+                  expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                  locale: "fr",
+                }),
+              );
+            } catch {
+              // Fire-and-forget — same as every other auth email
+            }
+          },
+        }),
       },
     },
 

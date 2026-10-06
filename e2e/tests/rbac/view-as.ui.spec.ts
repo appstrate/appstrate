@@ -79,10 +79,6 @@ test.describe("View as role", () => {
 
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText("Lecteur");
-    // Landed in the persona's space.
-    await expect
-      .poll(() => page.evaluate(() => localStorage.getItem("appstrate_current_space")))
-      .toBe(browserCtx.org.defaultSpaceId);
     await expect(banner(page)).not.toContainText(/espace ouvert|open space/);
 
     await page.goto(agentUrl);
@@ -393,6 +389,9 @@ test.describe("View as role", () => {
       browserCtx.org.orgId,
       browserCtx.org.defaultSpaceId,
     );
+    // A returning user's browser: the boot primes the org list before React
+    // mounts, and that primed read is the one the refusal answers.
+    await context.addInitScript(() => localStorage.setItem("appstrate_signed_in", "1"));
     const page = await context.newPage();
     try {
       await seedPersona(page, {

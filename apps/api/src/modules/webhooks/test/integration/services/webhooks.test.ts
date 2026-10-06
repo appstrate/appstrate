@@ -13,10 +13,13 @@ import {
   rotateSecret,
   listDeliveries,
   dispatchWebhookEvents,
+  sendTestPing,
+  processDelivery,
   initWebhookWorker,
   shutdownWebhookWorker,
 } from "../../../service.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
+import { PermanentJobError } from "../../../../../infra/queue/index.ts";
 
 setDefaultTimeout(30_000);
 
@@ -319,29 +322,41 @@ describe("webhooks service", () => {
   // ── dispatchWebhookEvents ────────────────────────────────
 
   describe("dispatchWebhookEvents", () => {
+    // DNS is injected: every host is unresolvable whatever the machine's
+    // resolver answers for `.test`, and nothing leaves the process.
     beforeAll(async () => {
-      await initWebhookWorker();
+      // Replace whatever worker an earlier boot of the module left running.
+      await shutdownWebhookWorker();
+      await initWebhookWorker(async () => {
+        throw new Error("ENOTFOUND (injected)");
+      });
     });
 
     afterAll(async () => {
       await shutdownWebhookWorker();
     });
 
-    async function waitForDelivery(
-      webhookId: string,
-      timeoutMs = 20_000,
-    ): Promise<{ eventType: string; status: string } | null> {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const rows = await db
-          .select({ eventType: webhookDeliveries.eventType, status: webhookDeliveries.status })
-          .from(webhookDeliveries)
-          .where(eq(webhookDeliveries.webhookId, webhookId))
-          .limit(1);
-        if (rows.length > 0) return rows[0]!;
-        await new Promise((r) => setTimeout(r, 100));
+    async function deliveriesOf(webhookId: string) {
+      return db
+        .select({
+          eventType: webhookDeliveries.eventType,
+          status: webhookDeliveries.status,
+          attempt: webhookDeliveries.attempt,
+          error: webhookDeliveries.error,
+        })
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.webhookId, webhookId))
+        .orderBy(webhookDeliveries.attempt);
+    }
+
+    async function firstDelivery(webhookId: string) {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const [row] = await deliveriesOf(webhookId);
+        if (row) return row;
+        if (Date.now() > deadline) throw new Error("no delivery after 20s");
+        await new Promise((r) => setTimeout(r, 50));
       }
-      return null;
     }
 
     it("fires org-level webhook for a run in any app of the org", async () => {
@@ -358,9 +373,60 @@ describe("webhooks service", () => {
         status: "success",
       });
 
-      const row = await waitForDelivery(orgWh.id);
-      expect(row).not.toBeNull();
-      expect(row?.eventType).toBe("run.success");
+      expect((await firstDelivery(orgWh.id)).eventType).toBe("run.success");
+    });
+
+    it("a DNS miss is retryable on attempts 1 and 2, final from attempt 3", async () => {
+      // A miss reached nothing, so it is not the SSRF guard's permanent
+      // "blocked address" verdict — but a lapsed domain must not be retried on
+      // the full eight-attempt schedule either. The bound is the delivery's
+      // attempt number: the processor is called directly with each.
+      const wh = await createWebhook(
+        appLevel({ url: "https://unresolvable.example/hook", events: ["run.success"] }),
+      );
+      const attempt = (attemptsMade: number) =>
+        processDelivery(
+          {
+            id: `job_${attemptsMade}`,
+            name: "deliver",
+            attemptsMade,
+            data: { webhookId: wh.id, eventId: "evt_dns", eventType: "run.success", payload: "{}" },
+          },
+          async () => {
+            throw new Error("ENOTFOUND (injected)");
+          },
+        ).then(
+          () => null,
+          (err: unknown) => err,
+        );
+
+      for (const attemptsMade of [0, 1]) {
+        const err = await attempt(attemptsMade);
+        expect(err).toBeInstanceOf(Error);
+        expect(err).not.toBeInstanceOf(PermanentJobError);
+      }
+      expect(await attempt(2)).toBeInstanceOf(PermanentJobError);
+
+      const rows = await deliveriesOf(wh.id);
+      expect(rows.map((r) => r.attempt)).toEqual([1, 2, 3]);
+      for (const row of rows) {
+        expect(row.status).toBe("failed");
+        expect(row.error).toBe("Delivery target hostname could not be resolved");
+      }
+    });
+
+    it("sendTestPing delivers one test.ping the webhook is not subscribed to", async () => {
+      const wh = await createWebhook(
+        appLevel({ url: "https://unresolvable.example/hook", events: ["run.failed"] }),
+      );
+
+      const { eventId, payload } = await sendTestPing(wh);
+      expect(payload.type).toBe("test.ping");
+
+      const row = await firstDelivery(wh.id);
+      expect([row.eventType, row.attempt]).toEqual(["test.ping", 1]);
+      const { data } = await listDeliveries({ orgId }, wh.id);
+      expect(data.map((d) => d.eventId)).toEqual([eventId]);
     });
   });
 });

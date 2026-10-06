@@ -3,10 +3,12 @@
 /**
  * Currently selected chat model (org preset id).
  *
- * Two scopes: the localStorage value is the user's DEFAULT, what a new
- * conversation starts on; `activeModelId` is the OPEN conversation's model,
- * seeded from its newest turn that carries a model and overridden by a pick. The seed is a
+ * Two scopes: the DEFAULT is what a new conversation starts on — the user's own
+ * pick (localStorage) when they made one, else the organization's default
+ * model; `activeModelId` is the OPEN conversation's model, seeded from its
+ * newest turn that carries a model and overridden by a pick. The seed is a
  * pre-selection, not a lock — the server honours each turn's `X-Model-Id`.
+ * Only a pick is stored: the organization's default is read off the catalog.
  * INVARIANT: once the catalog is known, the selection is always a live model,
  * whichever of catalog and seed lands first.
  * Generation settings are ONE global preference, pruned only against the
@@ -29,10 +31,12 @@ import {
 } from "@appstrate/core/model-generation";
 import { isModelLive } from "../model-liveness.ts";
 
-const KEY = "appstrate.chat.model";
+const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
 
+/** The user's own pick; `null` = none. */
 let cache: string | null = typeof localStorage === "undefined" ? null : localStorage.getItem(KEY);
+let orgDefaultModelId: string | null = null;
 const listeners = new Set<() => void>();
 const generationListeners = new Set<() => void>();
 let generationCapabilities = new Map<string, ModelGenerationCapabilities>();
@@ -60,7 +64,11 @@ let activeConversationId: string | null = null;
 let activeModelId: string | null = null;
 
 export function getSelectedModel(): string | null {
-  return activeModelId ?? cache;
+  return activeModelId ?? defaultModel();
+}
+
+function defaultModel(): string | null {
+  return cache ?? orgDefaultModelId;
 }
 
 /** A seed never overrides a pick made while the history was in flight. */
@@ -83,7 +91,7 @@ export function attachConversation(id: string | null, seedModelId: string | null
   if (changed) notifyModel();
 }
 
-/** A pick sets both the open conversation's model and the stored default. */
+/** A pick sets both the open conversation's model and the user's stored default. */
 export function setSelectedModel(id: string | null): void {
   const reconciled = reconcileModelGenerationSettings(
     generationCache,
@@ -96,11 +104,11 @@ export function setSelectedModel(id: string | null): void {
     activeModelId = id;
     changed = true;
   }
-  if (setDefaultModel(id)) changed = true;
+  if (storePick(id)) changed = true;
   if (changed) notifyModel();
 }
 
-function setDefaultModel(id: string | null): boolean {
+function storePick(id: string | null): boolean {
   if (cache === id) return false;
   cache = id;
   try {
@@ -134,10 +142,10 @@ export function setModelCatalog(
   const live = models.filter(isModelLive);
   liveModelIds = new Set(live.map((m) => m.id));
 
+  orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;
+
   if (activeModelId !== null && !liveModelIds.has(activeModelId)) activeModelId = null;
-  if (cache === null || !liveModelIds.has(cache)) {
-    setDefaultModel((live.find((m) => m.is_default) ?? live[0])?.id ?? null);
-  }
+  if (cache !== null && !liveModelIds.has(cache)) storePick(null);
 
   const reconciled = reconcileModelGenerationSettings(generationCache, defaultCapabilities());
   if (reconciled !== generationCache) setGenerationSettings(reconciled);
@@ -145,7 +153,8 @@ export function setModelCatalog(
 }
 
 function defaultCapabilities(): ModelGenerationCapabilities | undefined {
-  return cache === null ? undefined : generationCapabilities.get(cache);
+  const id = defaultModel();
+  return id === null ? undefined : generationCapabilities.get(id);
 }
 
 export function subscribeGeneration(listener: () => void): () => void {

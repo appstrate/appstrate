@@ -11,12 +11,11 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { ConfirmModal } from "../../components/confirm-modal";
 import type { components } from "../../api/client";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
-import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { SpaceCreateModal } from "../../components/space-create-modal";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 type SpaceObject = components["schemas"]["SpaceObject"];
 
@@ -34,7 +33,7 @@ export function OrgSettingsSpacesPage() {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const canCreate = can("spaces:write");
   // An ORPHANED personal space is the one a caller sees without being able to
@@ -86,10 +85,10 @@ export function OrgSettingsSpacesPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  disabled={space.access !== "member"}
+                  disabled={!isSpaceEnterable(space)}
                   onClick={() => handleSpaceClick(space.id)}
                   title={
-                    space.access === "member"
+                    isSpaceEnterable(space)
                       ? t("nav.spaceSettings", { ns: "common" })
                       : t("spaces.requestAccess")
                   }
@@ -127,7 +126,6 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           setPending(null);
           toast.success(t("spaces.personal.converted"));
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
       });
       return;
     }
@@ -141,7 +139,6 @@ function OrphanedPersonalSpaces({ spaces }: { spaces: SpaceObject[] }) {
           }),
         );
       },
-      onError: (error) => toast.error(getErrorMessage(error)),
     });
   };
 

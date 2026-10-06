@@ -274,18 +274,16 @@ export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
 /**
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.
- * Signals the change (`generating` flipped true) so connected clients update
- * the spinner without polling. `updated_at` is stamped in the same statement:
- * it is what lets the resume route tell a freshly claimed turn from a marker
- * whose producer died (see {@link STALE_MARKER_MIN_AGE_MS}).
+ * `updated_at` is stamped in the same statement: it is what lets the resume
+ * route tell a freshly claimed turn from a marker whose producer died (see
+ * {@link STALE_MARKER_MIN_AGE_MS}). Emits no signal: the caller's user-message
+ * write does; on its failure `clearActiveStream` does.
  */
 export async function setActiveStream(sessionId: string, streamId: string): Promise<void> {
-  const [row] = await db
+  await db
     .update(chatSessions)
     .set({ activeStreamId: streamId, updatedAt: new Date() })
-    .where(eq(chatSessions.id, sessionId))
-    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (row) notifySessionUpdate(sessionId, row.orgId, row.userId);
+    .where(eq(chatSessions.id, sessionId));
 }
 
 /**

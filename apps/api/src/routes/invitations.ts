@@ -12,7 +12,7 @@ import {
   getInviterName,
   getOrgName,
 } from "../services/invitations.ts";
-import { getOrgById, provisionMember } from "../services/organizations.ts";
+import { getOrgById, getOrgMember, provisionMember } from "../services/organizations.ts";
 import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { auditSpaceAssignments } from "../lib/space-role-assignment.ts";
@@ -136,7 +136,12 @@ router.post("/:token/accept", async (c) => {
     if (!current) return null;
     // The claim locks and returns the current grant, including edits committed
     // since the initial token lookup. Never apply that earlier snapshot.
-    await provisionMember(tx, current.orgId, session.user.id, current.role as AssignableOrgRole);
+    const invitedRole = current.role as AssignableOrgRole;
+    const { created } = await provisionMember(tx, current.orgId, session.user.id, invitedRole);
+    // An existing member keeps their role: the answer names that one.
+    const member = created ? null : await getOrgMember(current.orgId, session.user.id, tx);
+    if (!created && !member) throw new Error("Membership vanished while accepting an invitation");
+    const role = member?.role ?? invitedRole;
     const assignments = await applySpaceAssignments(tx, {
       orgId: current.orgId,
       userId: session.user.id,
@@ -144,7 +149,7 @@ router.post("/:token/accept", async (c) => {
       assignments: current.spaceAssignments,
       onMissing: "skip",
     });
-    return { invitation: current, assignments };
+    return { invitation: current, assignments, role, created };
   });
 
   if (!claimed) {
@@ -192,8 +197,9 @@ router.post("/:token/accept", async (c) => {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    role: claimed.invitation.role,
-    permissions: listedOrgPermissions(claimed.invitation.role),
+    role: claimed.role,
+    permissions: listedOrgPermissions(claimed.role),
+    created: claimed.created,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
   });

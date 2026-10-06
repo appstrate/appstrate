@@ -21,12 +21,20 @@ type _OrgRoleParity = [CoreOrgRole] extends [OrgRole]
 const _orgRoleParity: _OrgRoleParity = true;
 void _orgRoleParity;
 
-export type EmailType = "verification" | "invitation" | "magic-link" | "reset-password";
+export type EmailType =
+  | "verification"
+  | "invitation"
+  | "magic-link"
+  | "reset-password"
+  | "email-change-confirmation"
+  | "existing-account"
+  | "password-changed";
 
 export interface EmailPropsMap {
   verification: {
     user: { name: string; email: string };
     url: string;
+    expiresInMinutes: number;
     locale: SupportedLocale;
   };
   invitation: {
@@ -40,11 +48,27 @@ export interface EmailPropsMap {
   "magic-link": {
     email: string;
     url: string;
+    expiresInMinutes: number;
     locale: SupportedLocale;
   };
   "reset-password": {
     email: string;
     url: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  };
+  /** Sent to the CURRENT address. */
+  "email-change-confirmation": {
+    newEmail: string;
+    url: string;
+    expiresInMinutes: number;
+    locale: SupportedLocale;
+  };
+  /** Sign-up attempted on an existing account. No link: the recipient's sign-in page may be a tenant's. */
+  "existing-account": {
+    locale: SupportedLocale;
+  };
+  "password-changed": {
     locale: SupportedLocale;
   };
 }

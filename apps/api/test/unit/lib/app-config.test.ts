@@ -44,7 +44,6 @@ describe("buildAppConfig — bootstrapOwnerEmail surfacing", () => {
     const cfg = buildAppConfig();
     expect(cfg.bootstrapOwnerEmail).toBeUndefined();
     expect(cfg.features.signupDisabled).toBe(false);
-    expect(cfg.features.orgCreationDisabled).toBe(false);
   });
 
   it("surfaces bootstrapOwnerEmail verbatim when set", () => {
@@ -72,11 +71,9 @@ describe("buildAppConfig — bootstrapOwnerEmail surfacing", () => {
 
   it("reflects closed-mode flags in features", () => {
     process.env.AUTH_DISABLE_SIGNUP = "true";
-    process.env.AUTH_DISABLE_ORG_CREATION = "true";
     _resetCacheForTesting();
     const cfg = buildAppConfig();
     expect(cfg.features.signupDisabled).toBe(true);
-    expect(cfg.features.orgCreationDisabled).toBe(true);
   });
 });
 

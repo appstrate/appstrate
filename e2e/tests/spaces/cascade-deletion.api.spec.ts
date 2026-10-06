@@ -113,11 +113,11 @@ test.describe("Space cascade deletion", () => {
 
   test("Cannot delete the default space", async ({ orgContext, orgOnlyClient }) => {
     const res = await orgOnlyClient.delete(`/spaces/${orgContext.org.defaultSpaceId}`);
-    // 400 exactly: `deleteSpace` raises `invalidRequest("Cannot delete default
-    // space")`. This used to accept 403 as well, which is a DIFFERENT outcome —
-    // this same client deletes custom spaces above and gets 204, so a 403 here
-    // would mean the RBAC guard, not the default-space rule, did the rejecting.
-    expect(res.status()).toBe(400);
+    // 409 exactly: `deleteSpace` raises `default_space_not_deletable`. A 403 is
+    // a DIFFERENT outcome — this same client deletes custom spaces above and
+    // gets 204, so a 403 here would mean the RBAC guard, not the default-space
+    // rule, did the rejecting.
+    expect(res.status()).toBe(409);
   });
 
   test("Deleting a custom space does not affect the default space's resources", async ({

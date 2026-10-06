@@ -20,7 +20,6 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { client } from "../api/client";
-import { onMutationError } from "../lib/mutation-error";
 
 const MEMBER_PIN_PATH =
   "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}";
@@ -45,7 +44,6 @@ export function useUpsertMemberIntegrationPin() {
       });
       return data;
     },
-    onError: onMutationError,
   });
 }
 
@@ -66,6 +64,5 @@ export function useDeleteMemberIntegrationPin() {
         },
       });
     },
-    onError: onMutationError,
   });
 }

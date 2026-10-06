@@ -7,11 +7,16 @@
  * future runtime resolver.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
+import {
+  fetchMcpServerManifest,
+  getIntegration,
+  listIntegrations,
+} from "../../../src/services/integration-service.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -50,6 +55,25 @@ describe("integration-service", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
+  });
+
+  describe("fetchMcpServerManifest", () => {
+    it("answers a reference to a non-mcp-server package without a warn line", async () => {
+      // Every read of the referencing integration's draft goes through here.
+      await seedPackage({
+        id: "@testorg/self-ref",
+        orgId: ctx.orgId,
+        type: "integration",
+        draftManifest: validIntegrationManifest("@testorg/self-ref"),
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await fetchMcpServerManifest("@testorg/self-ref")).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   describe("getIntegration", () => {

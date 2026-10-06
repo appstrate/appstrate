@@ -39,6 +39,11 @@ export const authPaths = {
                   maxLength: MAX_PASSWORD_LENGTH,
                 },
                 name: { type: "string" },
+                callbackURL: {
+                  type: "string",
+                  description:
+                    "Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`.",
+                },
               },
             },
           },
@@ -93,6 +98,11 @@ export const authPaths = {
               properties: {
                 email: { type: "string", format: "email" },
                 password: { type: "string" },
+                callbackURL: {
+                  type: "string",
+                  description:
+                    "Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`.",
+                },
               },
             },
           },
@@ -109,6 +119,7 @@ export const authPaths = {
                   // Better Auth's sign-in response carries a `redirect` flag
                   // (post-login redirect signalling) alongside user + token.
                   redirect: { type: "boolean" },
+                  url: { type: "string" },
                   user: { $ref: "#/components/schemas/User" },
                   token: { type: ["string", "null"] },
                 },
@@ -126,6 +137,11 @@ export const authPaths = {
           },
         },
         "401": { description: "Invalid credentials", content: betterAuthError },
+        "403": {
+          description:
+            "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
+          content: betterAuthError,
+        },
       },
     },
   },

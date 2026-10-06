@@ -3,8 +3,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OnboardingLayout,
   useOnboardingGuard,
@@ -41,9 +39,6 @@ export function OnboardingPlanStep() {
       {
         onSuccess: ({ url }) => {
           window.location.href = url;
-        },
-        onError: (err) => {
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
         },
       },
     );

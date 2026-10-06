@@ -29,7 +29,7 @@ export function ScheduleCreatePage() {
   // all there is nothing to wait for, so the (empty) selector stays reachable.
   // A detail query that FAILED never lands either, so it gets the error
   // affordance rather than an endless spinner.
-  if (depsError) return <ErrorState message={depsError.message} />;
+  if (depsError) return <ErrorState error={depsError} />;
   if (effectiveAgentId && !deps) return <LoadingState />;
 
   return (

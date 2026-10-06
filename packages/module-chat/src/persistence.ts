@@ -420,11 +420,22 @@ function titleCandidate(message: UIMessage): string | null {
   return titleFromText(uiMessageText(message.parts));
 }
 
-/** A message's text as a title: trimmed to 60 chars (57 + ellipsis); null when empty. */
-function titleFromText(text: string): string | null {
+const TITLE_HEAD = 57;
+
+/**
+ * A message's text as a title; null when empty. Past 60 chars it is cut to its
+ * head plus an ellipsis — on the last word boundary, unless that sits before
+ * char 30 (a short word, then a long unbroken token), where the word is cut.
+ */
+export function titleFromText(text: string): string | null {
   if (!text) return null;
+  if (text.length <= 60) return toPgSafe(text);
+  const head = text.slice(0, TITLE_HEAD);
+  const midWord = /\S/.test(text.charAt(TITLE_HEAD)) && /\S$/.test(head);
+  const boundary = head.search(/\s+\S*$/);
+  const kept = midWord && boundary >= 30 ? head.slice(0, boundary) : head.trimEnd();
   // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE (#1501).
-  return toPgSafe(text.length > 60 ? `${text.slice(0, 57)}…` : text);
+  return toPgSafe(`${kept}…`);
 }
 
 /**

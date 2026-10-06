@@ -31,6 +31,7 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
   it("an admin pin locks its own set", () => {
     const view = describeResolution(resolution({ admin_pinned_connection_ids: ["a", "b"] }));
     expect(view.lockedConnectionIds).toEqual(["a", "b"]);
+    expect(view.lockedBy).toBe("admin_pin");
   });
 
   it("an enforced org default locks the default's set", () => {
@@ -38,6 +39,7 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
       resolution({ org_default_connection_ids: ["d"], org_default_enforced: true }),
     );
     expect(view.lockedConnectionIds).toEqual(["d"]);
+    expect(view.lockedBy).toBe("org_default");
   });
 
   it("the admin pin wins over an enforced default, as in the cascade", () => {
@@ -67,6 +69,7 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
       resolution({ source: "org_default", org_default_connection_ids: ["d"] }),
     );
     expect(view.lockedConnectionIds).toEqual([]);
+    expect(view.lockedBy).toBeNull();
   });
 });
 

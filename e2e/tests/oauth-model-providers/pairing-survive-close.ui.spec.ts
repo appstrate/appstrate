@@ -120,15 +120,17 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     expect(stored).not.toContain(token);
     expect(stored).not.toContain("appp_");
 
-    // Close the modal while busy → confirm-on-close guard, then confirm.
-    await page
-      .getByRole("dialog", { name: CREDENTIAL_DIALOG })
-      .getByRole("button", { name: "Fermer", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: CONFIRM_DIALOG })
-      .getByRole("button", { name: "Fermer", exact: true })
-      .click();
+    // Close the modal while busy → confirm-on-close guard, then confirm. Both
+    // are the dialog's own text button, not its corner ✕: the ✕ carries the
+    // same accessible name ("Fermer") through a screen-reader-only label, which
+    // is what tells the two apart.
+    const closeButton = (dialogName: string) =>
+      page
+        .getByRole("dialog", { name: dialogName })
+        .getByRole("button", { name: "Fermer", exact: true })
+        .filter({ hasNot: page.locator(".sr-only") });
+    await closeButton(CREDENTIAL_DIALOG).click();
+    await closeButton(CONFIRM_DIALOG).click();
     await expect(page.getByRole("dialog", { name: CREDENTIAL_DIALOG })).toBeHidden();
 
     // Helper redeems AFTER the modal is gone — the watcher must complete it.

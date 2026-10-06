@@ -13,6 +13,7 @@ describe("email registry", () => {
     const result = renderEmail("verification", {
       user: { name: "Test", email: "test@example.com" },
       url: "https://example.com/verify",
+      expiresInMinutes: 60,
       locale: "fr",
     });
     expect(result.subject).toBe("Vérifiez votre adresse email");
@@ -42,6 +43,7 @@ describe("email registry", () => {
     const result = renderEmail("verification", {
       user: { name: "Test", email: "test@example.com" },
       url: "https://example.com/verify",
+      expiresInMinutes: 60,
       locale: "fr",
     });
     expect(result.subject).toBe("Custom: Verify");

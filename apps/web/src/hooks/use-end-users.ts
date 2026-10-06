@@ -65,12 +65,18 @@ function useInvalidateEndUsers() {
 
 export function useCreateEndUser() {
   const invalidate = useInvalidateEndUsers();
-  return $api.useMutation("post", "/api/end-users", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/end-users", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateEndUser() {
   const invalidate = useInvalidateEndUsers();
-  return $api.useMutation("patch", "/api/end-users/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/end-users/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useDeleteEndUser() {

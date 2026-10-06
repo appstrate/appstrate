@@ -12,6 +12,7 @@ import { VerifyEmailPage } from "./pages/verify-email";
 import { ForgotPasswordPage } from "./pages/forgot-password";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { MagicLinkPage } from "./pages/magic-link";
+import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
@@ -21,7 +22,9 @@ import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 
-import { useAuth } from "./hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "./hooks/use-auth";
+import { signedOutDestination } from "./lib/auth-flow";
+import { orgLessEntry } from "./lib/onboarding-entry";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
@@ -439,6 +442,7 @@ function BootScreen() {
 
 function MainLayout() {
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
+  const { pathname } = useLocation();
   useSpaceResolver();
 
   return (
@@ -459,7 +463,11 @@ function MainLayout() {
             pages a persona is precisely there to provoke. */}
         <ViewAsBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <Outlet />
+          {/* A page that crashes on render takes only itself down: the sidebar
+              and the header stay, and navigating away clears the error. */}
+          <ErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </SidebarInset>
     </SidebarProvider>
@@ -507,7 +515,7 @@ function AuthLoginReturnToBridge() {
 
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
-  const { features } = useAppConfig();
+  const canCreateOrg = useCanCreateOrg();
   const location = useLocation();
 
   if (
@@ -521,14 +529,9 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   }
 
   // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
-  // when org creation is locked down — issue #228 closed mode).
+  // when this user may not create one — issue #228 closed mode).
   if (orgs.length === 0) {
-    return (
-      <Navigate
-        to={features.orgCreationDisabled ? "/onboarding/waiting" : "/onboarding/create"}
-        replace
-      />
-    );
+    return <Navigate to={orgLessEntry(canCreateOrg)} replace />;
   }
 
   // Orgs exist but none selected yet (auto-select happening)
@@ -563,6 +566,11 @@ function useExternalRedirect(isAuthenticated: boolean) {
   }, [isAuthenticated, trustedOrigins]);
 }
 
+function SignedOutFallback() {
+  const { search } = useLocation();
+  return <Navigate to={signedOutDestination(search)} replace />;
+}
+
 export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
@@ -580,6 +588,15 @@ export function App() {
     return (
       <ErrorBoundary>
         <HostedConnectPage />
+      </ErrorBoundary>
+    );
+  }
+
+  // Honoured whoever is signed in: the link's account replaces the session.
+  if (window.location.pathname === "/magic-link/confirm") {
+    return (
+      <ErrorBoundary>
+        <MagicLinkConfirmPage />
       </ErrorBoundary>
     );
   }
@@ -699,7 +716,7 @@ export function App() {
            * inputs — see invite-accept.tsx.
            */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<SignedOutFallback />} />
         </Routes>
       </ErrorBoundary>
     );

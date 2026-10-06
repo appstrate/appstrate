@@ -17,14 +17,19 @@
 
 import type { AssistantState } from "@assistant-ui/react";
 import { getExternalStoreMessages } from "@assistant-ui/react";
-import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import {
+  turnMetadataFromMessage,
+  type AppstrateTurnMetadata,
+} from "@appstrate/core/chat-turn-metadata";
 
 import {
   clientTurnErrorFromMarker,
   clientTurnErrorFromRateLimit,
+  problemRequestId,
   refusalCode,
+  type ClientTurnError,
 } from "../turn-error.ts";
-import type { ChatTranslate } from "./runtime-context.ts";
+import type { ChatCan, ChatTranslate } from "./runtime-context.ts";
 
 /**
  * The ORIGINAL AI-SDK message behind an assistant-ui message. assistant-ui
@@ -45,8 +50,35 @@ const TURN_ERROR_KEY = {
   unknown: "turn.error.unknown",
 } as const;
 
-/** The SPA's billing page. A plain path: the module never imports the router. */
-const BILLING_HREF = "/org-settings/billing";
+/**
+ * Where an administrator fixes a failure. The link needs EVERY permission: the
+ * fix's and the page's. Plain paths: the module never imports the router.
+ */
+const FIX = {
+  billing: {
+    permissions: ["billing:manage"],
+    label: "turn.error.manageBilling",
+    href: "/org-settings/billing",
+  },
+  models: {
+    permissions: ["model-provider-credentials:write", "models:read"],
+    label: "turn.error.manageModels",
+    href: "/org-settings/models",
+  },
+} as const;
+
+/** `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for. */
+interface Fixable {
+  text: string;
+  memberText?: string;
+  fix: keyof typeof FIX;
+}
+
+const DEAD_CREDENTIAL: Fixable = {
+  text: "turn.error.credentialUnavailable",
+  memberText: "turn.error.credentialUnavailableMember",
+  fix: "models",
+};
 
 /**
  * Sentences for the refusals a turn can be denied with BEFORE the stream opens.
@@ -55,10 +87,14 @@ const BILLING_HREF = "/org-settings/billing";
  * the wire code, loosely: a code we have no sentence for degrades to the
  * generic failure rather than rendering a missing i18n key.
  */
-const REFUSAL: Record<string, { text: string; billing?: true }> = {
-  quota_exceeded: { text: "turn.error.quotaExceeded", billing: true },
-  subscription_blocked: { text: "turn.error.subscriptionBlocked", billing: true },
-  needs_reconnection: { text: "turn.error.needsReconnection" },
+const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
+  quota_exceeded: { text: "turn.error.quotaExceeded", fix: "billing" },
+  subscription_blocked: { text: "turn.error.subscriptionBlocked", fix: "billing" },
+  needs_reconnection: {
+    text: "turn.error.needsReconnection",
+    memberText: "turn.error.needsReconnectionMember",
+    fix: "models",
+  },
   org_deleting: { text: "turn.error.orgDeleting" },
 };
 
@@ -67,6 +103,36 @@ interface TurnErrorState {
   retryable: boolean;
   requestId: string | undefined;
   action?: { label: string; href: string };
+}
+
+function withFix(
+  { text, memberText, fix }: Fixable,
+  t: ChatTranslate,
+  can: ChatCan,
+): Pick<TurnErrorState, "text" | "action"> {
+  const { permissions, label, href } = FIX[fix];
+  if (permissions.every((permission) => can(permission)))
+    return { text: t(text), action: { label: t(label), href } };
+  return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
+}
+
+/** A dead credential cannot be retried: it names where it is fixed instead. */
+function classifiedState(
+  category: ClientTurnError["category"],
+  t: ChatTranslate,
+  can: ChatCan,
+): Pick<TurnErrorState, "text" | "action"> {
+  return category === "credential_unavailable"
+    ? withFix(DEAD_CREDENTIAL, t, can)
+    : { text: t(TURN_ERROR_KEY[category]) };
+}
+
+/** Errored outright, or cut by the deadline while failing (see `turnErrorState`). */
+export function turnFailed(turn: AppstrateTurnMetadata | null): turn is AppstrateTurnMetadata {
+  return (
+    turn?.finishReason === "error" ||
+    (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
+  );
 }
 
 /**
@@ -81,7 +147,7 @@ interface TurnErrorState {
 export function turnErrorState(
   message: AssistantState["message"],
   t: ChatTranslate,
-  canManageBilling: boolean,
+  can: ChatCan,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   // A turn cut by the wall-clock ceiling can ALSO have been failing upstream
@@ -99,18 +165,10 @@ export function turnErrorState(
   // "generation failed" sentence would contradict a notice that says the turn
   // was cut mid-work. Hence the category is required for that branch, while the
   // `"error"` branch degrades a category-less turn to `unknown`.
-  if (
-    turn?.finishReason === "error" ||
-    (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
-  ) {
+  if (turnFailed(turn)) {
     return {
-      // `errorCategory` is OPTIONAL on the persisted shape — it is stamped only
-      // on a turn that carried an error, so the type forces a default here and
-      // the compiler rejects the bare index. Not a legacy accommodation: the
-      // `"deadline"` disjunct above has already proved it present, but a
-      // disjunction narrows nothing, and the metadata is read back out of
-      // unvalidated JSONB either way.
-      text: t(TURN_ERROR_KEY[turn.errorCategory ?? "unknown"]),
+      // Optional on the persisted shape (unvalidated JSONB): default it.
+      ...classifiedState(turn.errorCategory ?? "unknown", t, can),
       // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
       // whose cause was rate limiting is retryable, one whose credential is
       // dead is not. Read the persisted verdict either way.
@@ -126,30 +184,24 @@ export function turnErrorState(
     // `code` we localize here. A refusal names an action the user must take, so
     // retrying cannot clear it.
     const classified = clientTurnErrorFromMarker(err) ?? clientTurnErrorFromRateLimit(err);
+    const requestId = classified?.requestId ?? problemRequestId(err);
     if (classified) {
       return {
-        text: t(TURN_ERROR_KEY[classified.category]),
+        ...classifiedState(classified.category, t, can),
         retryable: classified.retryable,
-        // The marker carries a category and nothing else; a request id only ever
-        // reaches the client through the persisted turn metadata above.
-        requestId: undefined,
+        requestId,
       };
     }
     const code = refusalCode(err);
     const refusal =
       code && Object.prototype.hasOwnProperty.call(REFUSAL, code) ? REFUSAL[code] : undefined;
     if (!refusal) {
-      return { text: t("turn.error.unknown"), retryable: true, requestId: undefined };
+      return { text: t("turn.error.unknown"), retryable: true, requestId };
     }
-    const manager = refusal.billing === true && canManageBilling;
     return {
-      text:
-        refusal.billing && !manager
-          ? `${t(refusal.text)} ${t("turn.error.contactAdmin")}`
-          : t(refusal.text),
+      ...(refusal.fix ? withFix(refusal, t, can) : { text: t(refusal.text) }),
       retryable: false,
-      requestId: undefined,
-      ...(manager && { action: { label: t("turn.error.manageBilling"), href: BILLING_HREF } }),
+      requestId,
     };
   }
 

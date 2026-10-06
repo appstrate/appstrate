@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
@@ -23,7 +24,7 @@ import {
   useSetAgentModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
-import { isModelSelectable } from "../../lib/model-selectability";
+import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -229,7 +230,7 @@ function ModelSectionEditor({
   initialModelId: string | null;
   initialGeneration: ModelGenerationSettings;
 }) {
-  const { t } = useTranslation(["settings"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
   const [modelId, setModelId] = useState<string | null>(initialModelId);
@@ -283,6 +284,11 @@ function ModelSectionEditor({
           })}
         </SelectContent>
       </Select>
+      {isModelPinUnavailable(orgModels, modelId) && (
+        <p className="text-warning text-xs" data-testid="agent-model-pin-unavailable">
+          {t("input.modelPinUnavailable", { ns: "agents" })}
+        </p>
+      )}
       <ModelGenerationFields
         value={generation}
         capabilities={resolvedModel?.generation}
@@ -294,10 +300,10 @@ function ModelSectionEditor({
           size="sm"
           disabled={setAgentModel.isPending}
           onClick={() =>
-            setAgentModel.mutate({
-              modelId,
-              generation: Object.keys(generation).length > 0 ? generation : null,
-            })
+            setAgentModel.mutate(
+              { modelId, generation: Object.keys(generation).length > 0 ? generation : null },
+              { onSuccess: () => toast.success(t("models.agent.saved")) },
+            )
           }
         >
           {t("models.generation.save")}

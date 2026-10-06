@@ -93,7 +93,7 @@ import {
 } from "./services/social.ts";
 import { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
-import { withSmtpOverride } from "@appstrate/db/auth";
+import { BA_MAGIC_LINK_VERIFY_PATH, withSmtpOverride } from "@appstrate/db/auth";
 import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
@@ -1140,17 +1140,21 @@ export function createOidcRouter() {
     const verificationCallbackURL = `/api/auth/oauth2/authorize${url.search}`;
     let authResponse: Response;
     try {
-      authResponse = (await authApi.signInEmail({
-        // `callbackURL` is accepted by BA's sign-in endpoint (it becomes the
-        // email-verification resend target) but is missing from the exported
-        // input type — cast narrowly to keep the rest of the body strict.
-        body: { email, password, callbackURL: verificationCallbackURL } as {
-          email: string;
-          password: string;
-        },
-        headers: c.req.raw.headers,
-        asResponse: true,
-      })) as Response;
+      // Signing in to an unverified account re-sends the verification email:
+      // through the tenant's transport, like the one sent at sign-up.
+      authResponse = (await withSmtpOverride(ctx.smtp, () =>
+        authApi.signInEmail({
+          // `callbackURL` is accepted by BA's sign-in endpoint (it becomes the
+          // email-verification resend target) but is missing from the exported
+          // input type — cast narrowly to keep the rest of the body strict.
+          body: { email, password, callbackURL: verificationCallbackURL } as {
+            email: string;
+            password: string;
+          },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        }),
+      )) as Response;
     } catch (err) {
       const msg = getErrorMessage(err);
       // Distinguish infrastructure failures from bad credentials. Connection
@@ -1863,7 +1867,7 @@ export function createOidcRouter() {
     // Hand off to Better Auth's verify endpoint in the USER's browser — BA
     // consumes the single-use token, sets the session cookie on their origin,
     // and 302s to callbackURL (the authorize endpoint).
-    const verifyUrl = new URL("/api/auth/magic-link/verify", getPublicAppOrigin());
+    const verifyUrl = new URL(BA_MAGIC_LINK_VERIFY_PATH, getPublicAppOrigin());
     verifyUrl.searchParams.set("token", token);
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
@@ -2106,11 +2110,15 @@ export function createOidcRouter() {
     const authApi = getOidcAuthApi();
     let resetResponse: Response;
     try {
-      resetResponse = (await authApi.resetPassword({
-        body: { newPassword: password, token },
-        headers: c.req.raw.headers,
-        asResponse: true,
-      })) as Response;
+      // A successful reset emails a "password changed" notice — through the
+      // tenant's transport, like the reset link that led here.
+      resetResponse = (await withSmtpOverride(ctx.smtp, () =>
+        authApi.resetPassword({
+          body: { newPassword: password, token },
+          headers: c.req.raw.headers,
+          asResponse: true,
+        }),
+      )) as Response;
     } catch (err) {
       const msg = getErrorMessage(err);
       logger.warn("oidc: resetPassword threw", { error: msg });

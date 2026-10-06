@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { FolderInput, Package, Share2, X } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
@@ -60,6 +59,7 @@ import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
 import { SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ConfirmModal } from "./confirm-modal";
+import { toastError } from "../lib/mutation-error";
 
 const TABS = ["agents", "skills", "mcpServers", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -268,12 +268,7 @@ function ActivationCheckbox({
       title={title}
       onCheckedChange={() => {
         if (blocked) return;
-        setActive.mutate(
-          { spaceId: space.id, packageId: pkg.id, active: !active },
-          {
-            onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")),
-          },
-        );
+        setActive.mutate({ spaceId: space.id, packageId: pkg.id, active: !active });
       }}
     />
   );
@@ -420,7 +415,7 @@ function PlacementMap({
                 <span className="text-xs">{space.name}</span>
                 {space.isDefault && (
                   <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem]">
-                    default
+                    {t("spaces.default", { ns: "settings" })}
                   </Badge>
                 )}
               </TableHead>
@@ -478,17 +473,14 @@ function PlacementMap({
                             aria-label={t("library.revokeShare")}
                             disabled={revoke.isPending}
                             onClick={() =>
-                              revoke.mutate(
-                                {
-                                  params: {
-                                    path: {
-                                      ...splitPackageRef(pkg.id),
-                                      target: placement.space_id,
-                                    },
+                              revoke.mutate({
+                                params: {
+                                  path: {
+                                    ...splitPackageRef(pkg.id),
+                                    target: placement.space_id,
                                   },
                                 },
-                                { onError: (err) => toast.error(getErrorMessage(err)) },
-                              )
+                              })
                             }
                           >
                             <X size={10} />
@@ -597,7 +589,8 @@ function SpacePlacements({
 
   const notifyChatEnforceError = (err: unknown) => {
     const key = chatEnforceErrorKey(err);
-    toast.error(key ? t(key) : getErrorMessage(err) || t("error.generic"));
+    if (key) toast.error(t(key));
+    else toastError(err);
   };
 
   if (pkgs.length === 0) {

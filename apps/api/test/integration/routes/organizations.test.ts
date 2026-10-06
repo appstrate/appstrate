@@ -79,6 +79,31 @@ describe("Organizations API", () => {
       expect(res.status).toBe(401);
     });
 
+    it("lists oldest membership first, and a rename does not move an organization", async () => {
+      const ctx = await createTestContext({ orgName: "Alpha" });
+      const { org: beta } = await createTestOrg(ctx.user.id, { name: "Beta" });
+      const { org: gamma } = await createTestOrg(ctx.user.id, { name: "Gamma" });
+      // Gamma is the oldest membership although its row was written last, so
+      // the expected order is not the insertion order an unordered scan returns.
+      await db
+        .update(organizationMembers)
+        .set({ joinedAt: new Date("2020-01-01T00:00:00Z") })
+        .where(eq(organizationMembers.orgId, gamma.id));
+      const listed = async () => {
+        const res = await app.request("/api/orgs", { headers: { Cookie: ctx.cookie } });
+        return ((await res.json()) as { data: { id: string }[] }).data.map((o) => o.id);
+      };
+      expect(await listed()).toEqual([gamma.id, ctx.orgId, beta.id]);
+
+      const renamed = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PATCH",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Alpha renamed" }),
+      });
+      expect(renamed.status).toBe(200);
+      expect(await listed()).toEqual([gamma.id, ctx.orgId, beta.id]);
+    });
+
     // RBAC spec §6.5 — each item carries the caller's ORG-LEVEL effective set
     // in that org, so the SPA never re-derives anything from `role`.
     describe("permissions", () => {
@@ -232,6 +257,12 @@ describe("Organizations API", () => {
         const { _resetCacheForTesting } = await import("@appstrate/env");
         _resetCacheForTesting();
       };
+      // What the SPA reads to decide whether to show the creation form: it
+      // must agree with what the POST beside it answers.
+      const profileSaysCanCreate = async (cookie: string) => {
+        const res = await app.request("/api/profile", { headers: { Cookie: cookie } });
+        return ((await res.json()) as { can_create_org: boolean }).can_create_org;
+      };
 
       it("blocks non-admin signups from creating an org", async () => {
         const testUser = await createTestUser({ email: "regular@test.com" });
@@ -244,6 +275,8 @@ describe("Organizations API", () => {
             body: JSON.stringify({ name: "Blocked Org", slug: "blocked-org" }),
           });
           expect(res.status).toBe(403);
+          expect(((await res.json()) as { code?: string }).code).toBe("org_creation_disabled");
+          expect(await profileSaysCanCreate(testUser.cookie)).toBe(false);
         } finally {
           for (const [k, v] of Object.entries(SNAPSHOT)) {
             if (v === undefined) delete process.env[k];
@@ -266,6 +299,7 @@ describe("Organizations API", () => {
             body: JSON.stringify({ name: "Admin Org", slug: "admin-org" }),
           });
           expect(res.status).toBe(201);
+          expect(await profileSaysCanCreate(adminUser.cookie)).toBe(true);
         } finally {
           for (const [k, v] of Object.entries(SNAPSHOT)) {
             if (v === undefined) delete process.env[k];

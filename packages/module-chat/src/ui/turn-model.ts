@@ -7,11 +7,18 @@
  */
 
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
-import { sourceMessage } from "./turn-error-state.ts";
+import { sourceMessage, turnFailed } from "./turn-error-state.ts";
 
 /** Frozen at write time, so it still names a model whose org row is gone. */
 export function turnModelLabel(message: unknown): string | null {
   return turnMetadataFromMessage(sourceMessage(message))?.modelLabel ?? null;
+}
+
+/** The sentence the badge reads out: a failed turn names its model but answered nothing. */
+export function turnModelSentenceKey(message: unknown): "model.answeredBy" | "model.failedWith" {
+  return turnFailed(turnMetadataFromMessage(sourceMessage(message)))
+    ? "model.failedWith"
+    : "model.answeredBy";
 }
 
 function turnModelId(message: unknown): string | null {

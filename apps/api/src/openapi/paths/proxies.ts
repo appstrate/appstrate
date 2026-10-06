@@ -35,7 +35,7 @@ export const proxiesPaths = {
                   {
                     id: "cm6pqr678",
                     label: "US Residential Proxy",
-                    urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                    urlPrefix: "http://***:***@us-proxy.example.com:8080",
                     source: "custom",
                     enabled: true,
                     is_default: false,
@@ -92,7 +92,7 @@ export const proxiesPaths = {
               example: {
                 id: "cm6pqr679",
                 label: "US Residential Proxy",
-                urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                urlPrefix: "http://***:***@us-proxy.example.com:8080",
                 source: "custom",
                 enabled: true,
                 is_default: false,
@@ -146,7 +146,7 @@ export const proxiesPaths = {
               example: {
                 id: "cm6pqr679",
                 label: "US Residential Proxy",
-                urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                urlPrefix: "http://***:***@us-proxy.example.com:8080",
                 source: "custom",
                 enabled: true,
                 is_default: true,
@@ -212,7 +212,7 @@ export const proxiesPaths = {
               example: {
                 id: "cm6pqr679",
                 label: "US Residential Proxy",
-                urlPrefix: "http://user:****@us-proxy.example.com:8080",
+                urlPrefix: "http://***:***@us-proxy.example.com:8080",
                 source: "custom",
                 enabled: true,
                 is_default: false,

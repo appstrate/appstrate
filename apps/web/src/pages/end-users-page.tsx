@@ -4,7 +4,6 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -122,7 +121,7 @@ function EndUsersPageContent() {
   }, [endUsers, search]);
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   return (
     <div className="p-6">

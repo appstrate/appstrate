@@ -10,6 +10,7 @@ import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
 import { AuthLayout } from "../components/auth-layout";
+import { errorMessage } from "../lib/mutation-error";
 
 export function WelcomePage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -44,7 +45,7 @@ export function WelcomePage() {
 
       finishAndRedirect();
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : t("error.generic", { ns: "common" }));
+      setServerError(errorMessage(err));
       setLoading(false);
     }
   };

@@ -10,11 +10,12 @@ import type {
   DiscoveredModelsResponse,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
+import { normalizeHttpUrl } from "@appstrate/core/url";
 
 export interface DiscoveryState {
   /** Identifies the endpoint+key the listing came from — see `discoveryKey`. */
   key: string;
-  outcome: DiscoveredModelsResponse["outcome"] | "request_failed";
+  outcome: DiscoveredModelsResponse["outcome"] | "request_failed" | "throttled";
   models: DiscoveredModel[];
   /** The endpoint serves more than `models` lists — a cap stopped the read. */
   truncated: boolean;
@@ -28,6 +29,8 @@ export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {
       return "models.form.discoverBlockedUrl";
     case "request_failed":
       return "models.form.discoverRequestFailed";
+    case "throttled":
+      return "models.form.discoverThrottled";
     case "rate_limited":
       return "models.form.discoverRateLimited";
     case "unreachable":
@@ -59,11 +62,7 @@ export function buildDiscoverBody(input: {
   };
 }
 
+/** An endpoint is reached over HTTP(S): any other scheme parses and then serves nothing. */
 export function parsesAsUrl(value: string): boolean {
-  try {
-    new URL(value.trim());
-    return true;
-  } catch {
-    return false;
-  }
+  return normalizeHttpUrl(value.trim()) !== null;
 }

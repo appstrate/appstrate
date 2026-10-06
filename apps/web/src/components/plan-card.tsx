@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import {
   PLAN_ICONS,
   PLAN_DESCRIPTION_KEYS,

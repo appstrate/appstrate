@@ -12,24 +12,25 @@ const strings = {
   },
   en: {
     subject: "Invitation to join {orgName}",
-    body: "{inviterName} invites you to join {orgName} with the role {role}.",
+    body: "{inviterName} invites you to join {orgName} with the role “{role}”.",
     cta: "Accept the invitation:",
     footer: "This link expires in 7 days.",
   },
 } satisfies Record<SupportedLocale, Record<string, string>>;
 
+// Same wording and casing as the role names the dashboard shows.
 const roleLabels = {
   fr: {
-    owner: "propriétaire",
-    admin: "administrateur",
-    member: "utilisateur standard",
-    guest: "invité",
+    owner: "Propriétaire",
+    admin: "Administrateur",
+    member: "Utilisateur standard",
+    guest: "Invité",
   },
   en: {
-    owner: "owner",
-    admin: "administrator",
-    member: "standard user",
-    guest: "guest",
+    owner: "Owner",
+    admin: "Administrator",
+    member: "Standard user",
+    guest: "Guest",
   },
 } satisfies Record<SupportedLocale, Record<OrgRole, string>>;
 

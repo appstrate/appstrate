@@ -80,7 +80,7 @@ describe("patchRunDetail", () => {
       duration: null,
     });
 
-    expect(stale).toBeNull();
+    expect(stale).toBe(false);
     const run = qc.getQueryData<EnrichedRun>(runKeys.detail(ORG, SPACE, RUN));
     expect(run?.status).toBe("success");
     expect(run?.completed_at).toBe(FRAME.completedAt);
@@ -91,7 +91,7 @@ describe("patchRunDetail", () => {
     const qc = new QueryClient();
     qc.setQueryData(runKeys.detail(ORG, SPACE, RUN), { id: RUN, status: "running" });
 
-    expect(patchRunDetail(qc, ORG, SPACE, FRAME)).not.toBeNull();
+    expect(patchRunDetail(qc, ORG, SPACE, FRAME)).toBe(true);
     expect(qc.getQueryData<EnrichedRun>(runKeys.detail(ORG, SPACE, RUN))?.status).toBe("success");
   });
 

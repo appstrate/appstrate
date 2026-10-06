@@ -201,11 +201,21 @@ function throwOnTokenBudgetViolation(
   }
 }
 
+function modelNotOffered(providerId: string, modelId: string, param?: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "model_not_offered",
+    title: "Invalid Request",
+    detail: `Model ${modelId} is not offered by provider ${providerId}`,
+    param,
+  });
+}
+
 /** A named provider binds only the ids of its offer — see `restrictsToOffer`. */
 function throwOnModelOutsideOffer(providerId: string, modelId: string): void {
   const def = getModelProvider(providerId);
   if (def && restrictsToOffer(def) && !lookupCatalogModel(def, modelId)) {
-    throw invalidRequest(`Model ${modelId} is not offered by provider ${providerId}`, "modelId");
+    throw modelNotOffered(providerId, modelId, "modelId");
   }
 }
 
@@ -363,7 +373,7 @@ export function createModelsRouter() {
     for (const modelId of data.model_ids) {
       const cat = catalogById.get(modelId);
       if (!cat) {
-        throw invalidRequest(`Model ${modelId} is not offered by provider ${creds.providerId}`);
+        throw modelNotOffered(creds.providerId, modelId);
       }
       models.push(cat);
     }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-import type { EmailPropsMap, RenderedEmail } from "@appstrate/emails";
+import { linkValiditySentence, type EmailPropsMap, type RenderedEmail } from "@appstrate/emails";
 import { wrapEeLayout, ctaButton, escapeHtml } from "../layout.ts";
 
 const strings = {
@@ -23,7 +23,7 @@ const strings = {
 } as const;
 
 export function renderEeMagicLinkEmail(props: EmailPropsMap["magic-link"]): RenderedEmail {
-  const { url, locale } = props;
+  const { url, locale, expiresInMinutes } = props;
   const s = strings[locale] ?? strings.fr;
 
   const content = `
@@ -35,6 +35,10 @@ ${ctaButton(s.button, url)}
 
   return {
     subject: s.subject,
-    html: wrapEeLayout({ locale, content, footer: s.footer }),
+    html: wrapEeLayout({
+      locale,
+      content,
+      footer: `${linkValiditySentence(expiresInMinutes, locale)} ${s.footer}`,
+    }),
   };
 }

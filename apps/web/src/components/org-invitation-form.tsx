@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -18,12 +17,14 @@ import { $api, type components } from "../api/client";
 import { OrgRoleOptions } from "./org-role-options";
 import {
   hasUnavailableAssignments,
+  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
 } from "../lib/space-assignments";
 import { SpaceAssignmentsField } from "./space-assignments-field";
 import { Spinner } from "./spinner";
+import { errorMessage } from "../lib/mutation-error";
 
 /** Rising reach first, then the exception: standard user, admin, guest. */
 const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["member", "admin", "guest"];
@@ -69,7 +70,7 @@ export function OrgInvitationForm({
   const queryClient = useQueryClient();
   const spacesQuery = useSpaces();
   const rolesQuery = useSpaceRoleOptions();
-  const spaces = spacesQuery.data ?? [];
+  const spaces = assignableSpaces(spacesQuery.data ?? []);
   const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
   const catalogError = spacesQuery.error || rolesQuery.error;
   const form = useForm<InviteFormValues>({
@@ -89,8 +90,9 @@ export function OrgInvitationForm({
     form.reset();
     onSuccess?.();
   };
-  const onError = (error: unknown) => form.setError("root", { message: getErrorMessage(error) });
+  const onError = (error: unknown) => form.setError("root", { message: errorMessage(error) });
   const invite = $api.useMutation("post", "/api/orgs/{orgId}/members", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (_result, request) => {
       toast.success(t("orgSettings.inviteSuccess", { email: request.body.email }));
       complete();
@@ -99,6 +101,7 @@ export function OrgInvitationForm({
   });
 
   const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       toast.success(t("orgSettings.inviteUpdated"));
       complete();
