@@ -24,6 +24,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
@@ -99,6 +100,12 @@ const SINK = {
   secret: "abcdefghijklmnopqrstuvwxyz0123456789",
 };
 
+/** The dialect of Pi's record of the backing, or null when it keeps none. */
+function backingDialect(backing: Backing) {
+  const record = getPiModel(backing.piProvider, backing.modelId, backing.apiShape);
+  return record ? piModelDialect(record) : null;
+}
+
 /**
  * The launcher → container-env → Pi-model chain, for one backing. `modelId` is
  * the ALIAS, exactly as `run-launcher/pi.ts` passes it: the container's
@@ -116,6 +123,8 @@ function containerModelFor(
       api: backing.apiShape,
       modelId: aliased ? ALIAS_ID : backing.modelId,
       piProvider: backing.piProvider,
+      // As the launcher sends it: the dialect of the platform's record of the backing.
+      dialect: backingDialect(backing),
       input: ["text"],
       contextWindow: backing.contextWindow,
       maxTokens: backing.maxTokens,
@@ -234,8 +243,8 @@ describe("aliased container wire shape", () => {
     for (const key of Object.keys(options)) expect(PI_MESSAGES_OPTIONS).toContain(key);
 
     // And the one portable knob that did travel carries the PORTABLE level,
-    // not the backing's native mapping of it — that lives in Pi's record of
-    // the backing, read sidecar-side only.
+    // not the backing's native mapping of it — that lives in the backing's
+    // dialect, which only the sidecar is sent.
     expect(options["reasoning"]).toBe("high");
   });
 

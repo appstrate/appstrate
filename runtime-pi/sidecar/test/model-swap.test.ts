@@ -60,7 +60,7 @@ describe("parseModelSwapEnv", () => {
     real: "deepseek-chat",
     clientApiShape: "pi-messages" as const,
     backingApiShape: "openai-completions" as const,
-    backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
+    backing: { providerId: "deepseek", dialect: null, reasoning: false, input: ["text"] },
   };
 
   it("accepts a well-formed descriptor", () => {
@@ -70,7 +70,7 @@ describe("parseModelSwapEnv", () => {
   it("accepts a gateway backing, which names no Pi provider", () => {
     const gateway = {
       ...wellFormed,
-      backing: { providerId: null, reasoning: false, input: ["text"] },
+      backing: { providerId: null, dialect: null, reasoning: false, input: ["text"] },
     };
     expect(parseModelSwapEnv(JSON.stringify(gateway))).toEqual(gateway);
     const blank = { ...wellFormed, backing: { ...gateway.backing, providerId: " " } };
@@ -88,11 +88,38 @@ describe("parseModelSwapEnv", () => {
       backingApiShape: "openai-completions" as const,
       backing: {
         providerId: "deepseek",
+        dialect: {
+          name: "DeepSeek Chat",
+          thinkingLevelMap: { off: null, high: "high" },
+          compat: { thinkingFormat: "deepseek" },
+        },
         reasoning: true,
         input: ["text"],
       },
     };
     expect(parseModelSwapEnv(JSON.stringify(reoriginating))).toEqual(reoriginating);
+  });
+
+  it("rejects a backing dialect that is not one", () => {
+    const withDialect = (dialect: unknown) =>
+      JSON.stringify({ ...wellFormed, backing: { ...wellFormed.backing, dialect } });
+    for (const broken of [
+      "claude",
+      { compat: {} },
+      { name: "" },
+      { name: "x", thinkingLevelMap: { high: 1 } },
+      { name: "x", compat: [] },
+    ]) {
+      expect(() => parseModelSwapEnv(withDialect(broken))).toThrow(/malformed "backing.dialect"/);
+    }
+  });
+
+  // A platform that predates the key: every backing would be built bare.
+  it("rejects a backing that does not say what its dialect is", () => {
+    const { dialect: _absent, ...silent } = wellFormed.backing;
+    expect(() => parseModelSwapEnv(JSON.stringify({ ...wellFormed, backing: silent }))).toThrow(
+      /missing "backing.dialect"/,
+    );
   });
 
   it("rejects a descriptor with no protocol fields (the pre-#1198 platform payload)", () => {
@@ -159,19 +186,25 @@ describe("parseModelSwapEnv", () => {
       parseModelSwapEnv(
         JSON.stringify({
           ...base,
-          backing: { providerId: "deepseek", reasoning: "yes", input: ["text"] },
+          backing: { providerId: "deepseek", dialect: null, reasoning: "yes", input: ["text"] },
         }),
       ),
     ).toThrow(/"backing.reasoning"/);
-    // Absent = unknown: the sidecar's builder lets Pi's record decide.
+    // Absent: the sidecar's builder reads it as no reasoning.
     expect(
       parseModelSwapEnv(
-        JSON.stringify({ ...base, backing: { providerId: "deepseek", input: ["text"] } }),
+        JSON.stringify({
+          ...base,
+          backing: { providerId: "deepseek", dialect: null, input: ["text"] },
+        }),
       ).backing,
     ).not.toHaveProperty("reasoning");
     expect(() =>
       parseModelSwapEnv(
-        JSON.stringify({ ...base, backing: { providerId: "deepseek", reasoning: false } }),
+        JSON.stringify({
+          ...base,
+          backing: { providerId: "deepseek", dialect: null, reasoning: false },
+        }),
       ),
     ).toThrow(/"backing.input"/);
   });

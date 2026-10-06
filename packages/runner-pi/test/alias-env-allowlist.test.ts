@@ -58,6 +58,7 @@ const RUN: RuntimePiEnvOptions = {
     // flag and the output difference is therefore the alias policy itself.
     modelId: "appstrate-medium",
     piProvider: "deepseek",
+    dialect: { name: "DeepSeek Chat", compat: { thinkingFormat: "deepseek" } },
     // No `oauthApiKeyPlaceholder`: an OAuth run is never aliased (the launcher
     // refuses the pair), and it changes a value, never the key set.
     input: ["text", "image"],
@@ -161,11 +162,12 @@ const ALIASED_CONTAINER_ENV_KEYS = [
 
 /**
  * What a NON-aliased run gets on top: the whole of what an alias withholds, each
- * naming the backing — `MODEL_PROVIDER` is the vendor key itself, and
- * `MODEL_COST` the published rate card, one catalog lookup from a name. A BYOK
- * model the org configured itself has nothing to hide, so it keeps both.
+ * naming the backing — `MODEL_PROVIDER` is the vendor key itself,
+ * `MODEL_DIALECT` its record's name and compat flags, and `MODEL_COST` the
+ * published rate card, one catalog lookup from a name. A BYOK model the org
+ * configured itself has nothing to hide, so it keeps all three.
  */
-const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_PROVIDER"] as const;
+const ALIAS_WITHHELD_KEYS = ["MODEL_COST", "MODEL_DIALECT", "MODEL_PROVIDER"] as const;
 
 /**
  * Shared keys whose VALUE is masked rather than the key withheld. The key-set
@@ -187,7 +189,7 @@ const WHY_THIS_GATE_EXISTS = [
   "ALIASED_CONTAINER_ENV_KEYS in this file and say there why it is safe. If it",
   "varies with the backing — a provider id, a rate card, an endpoint, a protocol",
   "family — withhold or mask it in buildRuntimePiEnv the way MODEL_PROVIDER,",
-  "MODEL_COST and MODEL_API are, and pin it in ALIAS_WITHHELD_KEYS /",
+  "MODEL_DIALECT, MODEL_COST and MODEL_API are, and pin it in ALIAS_WITHHELD_KEYS /",
   "ALIAS_MASKED_VALUE_KEYS instead.",
   "",
   "Updating the list without answering that question is exactly how MODEL_PROVIDER",

@@ -583,6 +583,34 @@ export const MODEL_API_SHAPES = [
 export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
 
 /**
+ * What of a Pi registry record shapes a request beyond the resolved values
+ * (limits, modalities, reasoning, price): its name, thinking-level map and
+ * compat flags. Pi's own vocabulary, opaque to everything but the Pi SDK. The
+ * platform reads it off the registry and hands it to whatever builds the model.
+ */
+export interface PiModelDialect {
+  name: string;
+  thinkingLevelMap?: Record<string, string | null>;
+  compat?: Record<string, unknown>;
+}
+
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Whether `value` has the shape of a {@link PiModelDialect}; its vocabulary is Pi's and is not read. */
+export function isPiModelDialect(value: unknown): value is PiModelDialect {
+  if (!isJsonObject(value) || typeof value.name !== "string" || value.name.length === 0) {
+    return false;
+  }
+  const levels = value.thinkingLevelMap;
+  const levelsOk =
+    levels === undefined ||
+    (isJsonObject(levels) &&
+      Object.values(levels).every((level) => level === null || typeof level === "string"));
+  return levelsOk && (value.compat === undefined || isJsonObject(value.compat));
+}
+
+/**
  * Model-alias swap (LLM-gateway alias pattern). Present only for model aliases.
  * The agent container is handed the public `alias` as its `MODEL_ID`, so every
  * inference request arrives with `model: <alias>`. The sidecar rewrites it to
@@ -626,11 +654,16 @@ export interface ModelSwap {
 export interface ModelSwapBacking {
   /**
    * Pi provider key of the real vendor, or `null` for a gateway Pi keeps no
-   * record of. Selects the Pi registry record — dialect, thinking levels —
-   * the sidecar re-originates with; the container never sees it.
+   * record of. Names the provider the sidecar re-originates through; the
+   * container never sees it.
    */
   providerId: string | null;
-  /** Whether the backing supports extended thinking; absent = unknown, Pi's record decides. */
+  /**
+   * The backing's Pi dialect, as the platform read it; `null` without a record.
+   * Never absent: a sidecar handed no key would build every backing bare.
+   */
+  dialect: PiModelDialect | null;
+  /** Whether the backing supports extended thinking; absent = it does not. */
   reasoning?: boolean;
   /** Input modalities the backing accepts — pi-ai gates image content on them. */
   input: ReadonlyArray<string>;

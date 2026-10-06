@@ -31,6 +31,7 @@ import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { logger } from "../src/logger.ts";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
 
 const ANSWER = "Bonjour le monde";
@@ -205,6 +206,7 @@ function orgModel(): OrgModel {
     apiShape: "openai-completions",
     providerId: "openai",
     pi_provider: "openai",
+    pi_dialect: null,
     label: "Live engine test model",
     enabled: true,
     input: ["text"],
@@ -331,6 +333,9 @@ describe("runPiChat against a stub provider", () => {
       modelId: "deepseek-flash",
       providerId: "deepseek",
       pi_provider: "deepseek",
+      // As the listing resolves them off the record: its dialect and its reasoning.
+      pi_dialect: piModelDialect(getPiModel("deepseek", "deepseek-flash", "openai-completions")!),
+      reasoning: true,
     };
     await runTurn(() => "bearer", undefined, undefined, {
       model: alias,

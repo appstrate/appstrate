@@ -192,6 +192,7 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       source: "built-in",
       providerId: null,
       pi_provider: null,
+      pi_dialect: null,
       modelId: null,
       contextWindow: null,
       maxTokens: null,
@@ -331,7 +332,9 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     ).rejects.toThrow(/preset_dead_default.*can no longer be used/);
   });
 
-  it("takes the dialect from Pi's record for the preset's upstream model", async () => {
+  const DEEPSEEK_DIALECT = { name: "DeepSeek V4 Pro", compat: { thinkingFormat: "deepseek" } };
+
+  it("takes the dialect the platform sends", async () => {
     const { model } = await resolvePresetModel({
       profileName: "default",
       instance: "https://app.example.com",
@@ -343,59 +346,83 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
           apiShape: "openai-completions",
           providerId: "opencode-go",
           pi_provider: "opencode-go",
-          modelId: "deepseek-v4-flash",
+          pi_dialect: DEEPSEEK_DIALECT,
+          // An id no registry records: the dialect is the platform's alone.
+          modelId: "deepseek-v9-unreleased",
         }),
       ],
     });
     expect(model).toMatchObject({
       id: "preset_native",
+      name: "DeepSeek V4 Pro",
       provider: "opencode-go",
       compat: { thinkingFormat: "deepseek" },
     });
   });
 
-  it("builds from the record the platform-sent `pi_provider` names, record limits included", async () => {
-    const { model } = await resolvePresetModel({
-      profileName: "default",
-      instance: "https://app.example.com",
-      bearerToken: "ask_test",
-      orgId: "org_1",
-      presetsLoader: async () => [
-        makePreset({
-          id: "preset_ds",
-          apiShape: "openai-completions",
-          pi_provider: "opencode-go",
-          modelId: "deepseek-v4-pro",
-        }),
-      ],
-    });
-    expect(model).toMatchObject({
+  // `deepseek-v4-pro` is recorded by the CLI's own Pi with a 1M window: read
+  // from the platform alone, an unsent limit is the default.
+  it("takes its limits from the platform, never from its own registry", async () => {
+    const preset = {
       id: "preset_ds",
-      provider: "opencode-go",
-      compat: { thinkingFormat: "deepseek" },
-      contextWindow: 1_000_000,
-      maxTokens: 384_000,
+      apiShape: "openai-completions" as const,
+      pi_provider: "opencode-go",
+      pi_dialect: DEEPSEEK_DIALECT,
+      modelId: "deepseek-v4-pro",
+    };
+    const resolve = (limits: Partial<ModelPreset>) =>
+      resolvePresetModel({
+        profileName: "default",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [makePreset({ ...preset, ...limits })],
+      });
+    expect((await resolve({})).model).toMatchObject({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+    });
+    expect((await resolve({ contextWindow: 500_000, maxTokens: 16_000 })).model).toMatchObject({
+      contextWindow: 500_000,
+      maxTokens: 16_000,
     });
   });
 
-  it("lets a platform-sent limit win over the record's", async () => {
-    const { model } = await resolvePresetModel({
-      profileName: "default",
-      instance: "https://app.example.com",
-      bearerToken: "ask_test",
-      orgId: "org_1",
-      presetsLoader: async () => [
-        makePreset({
-          id: "preset_capped",
-          apiShape: "openai-completions",
-          pi_provider: "opencode-go",
-          modelId: "deepseek-v4-pro",
-          contextWindow: 500_000,
-          maxTokens: 16_000,
-        }),
-      ],
+  it("refuses an instance that names a Pi provider and sends no dialect", async () => {
+    const { pi_dialect: _absent, ...predating } = makePreset({
+      id: "preset_old",
+      apiShape: "openai-completions",
+      pi_provider: "opencode-go",
+      modelId: "deepseek-v4-pro",
     });
-    expect(model).toMatchObject({ contextWindow: 500_000, maxTokens: 16_000 });
+    await expect(
+      resolvePresetModel({
+        profileName: "default",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [predating as ModelPreset],
+      }),
+    ).rejects.toThrow(/too old for this CLI/);
+  });
+
+  it("refuses a dialect that is not one", async () => {
+    await expect(
+      resolvePresetModel({
+        profileName: "default",
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        orgId: "org_1",
+        presetsLoader: async () => [
+          makePreset({
+            id: "preset_bad",
+            apiShape: "openai-completions",
+            pi_provider: "opencode-go",
+            pi_dialect: { compat: {} } as never,
+          }),
+        ],
+      }),
+    ).rejects.toThrow(/malformed `pi_dialect`/);
   });
 
   it("builds a preset with no `pi_provider` without a record: preset id on the wire, the default limits", async () => {

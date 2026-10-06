@@ -162,6 +162,20 @@ could not be resolved`) instead of failing for good on the first. Without
   - A model or proxy connection test that is refused at the TCP level
     answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
 
+- **One process reads the Pi model registry: the API** (#PRNUM). It hands every
+  model builder the record's _dialect_ (`name`, `thinkingLevelMap`, `compat`)
+  next to the limits, modalities, reasoning and price it already resolved. The
+  agent container reads it from `MODEL_DIALECT`, the sidecar from
+  `PI_MODEL_SWAP_JSON` (`backing.dialect`), the chat and the CLI from
+  `pi_dialect` on `GET /api/models` (opaque, `null` for a gateway and for an
+  alias). None of them looks a model up any more, so a model's dialect no
+  longer depends on which Pi registry an image or a CLI was built with; the
+  request is still serialized by each one's own Pi code. The field is never
+  absent where a Pi provider is named (`null` when Pi keeps no record), and a
+  consumer handed a provider without it refuses instead of building the model
+  bare: the container and the sidecar at boot, `appstrate run --model-source
+preset` with "too old for this CLI". Plan:
+  `docs/plans/live-model-catalog.md`, step 1.
 - **`claude-sonnet-5-5` replaces `claude-sonnet-5` among the featured models**
   of the `anthropic` and `claude-code` providers (#1705), now that the pinned
   Pi registry (`@earendil-works/pi-ai` 1.0.4) records it; existing

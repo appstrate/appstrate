@@ -14,6 +14,7 @@
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost, ModelProviderDefinition } from "@appstrate/core/module";
+import type { PiModelDialect } from "@appstrate/core/sidecar-types";
 import {
   MODEL_REASONING_LEVELS,
   type ModelCapabilitySupport,
@@ -25,6 +26,7 @@ import {
   getPiModel,
   isPiProvider,
   listPiModels,
+  piModelDialect,
   piReasoningLevels,
   usableRecordMaxTokens,
 } from "@appstrate/runner-pi/pi-model";
@@ -65,6 +67,13 @@ export function lookupCatalogModel(
   const provider = piProviderOf(def);
   const record = provider ? getPiModel(provider, modelId, def.apiShape) : undefined;
   return record ? toCatalogEntry(record) : null;
+}
+
+/** The dialect of the provider's record of `modelId`, or null without one. */
+export function lookupCatalogDialect(def: CatalogProvider, modelId: string): PiModelDialect | null {
+  const provider = piProviderOf(def);
+  const record = provider ? getPiModel(provider, modelId, def.apiShape) : undefined;
+  return record ? piModelDialect(record) : null;
 }
 
 /**

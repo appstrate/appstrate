@@ -11,6 +11,7 @@
 import { Type, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { piModelDialect } from "../src/pi-model.ts";
 import type { Api, Model } from "../src/pi-sdk.ts";
 
 type Payload = Record<string, unknown>;
@@ -46,6 +47,18 @@ export async function capturePayload(
     throw new Error(`${model.provider}/${model.id}: ${result.errorMessage}`);
   }
   return payload as Payload;
+}
+
+/** A registry record as the platform resolves it for a builder: its dialect and its own values. */
+export function recordSpec(record: Model<Api>) {
+  return {
+    dialect: piModelDialect(record),
+    reasoning: record.reasoning,
+    input: record.input,
+    cost: record.cost,
+    contextWindow: record.contextWindow,
+    maxTokens: record.maxTokens,
+  };
 }
 
 /** Pi's own registry record, untouched: what the vendor natively receives. */

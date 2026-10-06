@@ -101,6 +101,7 @@ function orgModel(): OrgModel {
     apiShape: "openai-completions",
     providerId: "openai",
     pi_provider: "openai",
+    pi_dialect: null,
     label: "Teardown test model",
     enabled: true,
     input: ["text"],

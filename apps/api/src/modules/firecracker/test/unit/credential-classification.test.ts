@@ -109,7 +109,7 @@ const platformSpec = buildSpec({
     real: "real-model-id",
     clientApiShape: "pi-messages" as const,
     backingApiShape: "openai-completions" as const,
-    backing: { providerId: "openai", reasoning: false, input: ["text"] },
+    backing: { providerId: "openai", dialect: null, reasoning: false, input: ["text"] },
   },
 });
 

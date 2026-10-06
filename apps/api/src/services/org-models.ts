@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { listCatalogModels, lookupCatalogModel, piProviderOf } from "./model-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogDialect,
+  lookupCatalogModel,
+  piProviderOf,
+} from "./model-catalog.ts";
 import { buildPiModel, clampPiReasoningLevel } from "@appstrate/runner-pi/pi-model";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
@@ -20,7 +25,7 @@ import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import { invalidateResolvedModel, resolveModelCached } from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
@@ -192,6 +197,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     providerId: null,
     provider_name: null,
     pi_provider: null,
+    pi_dialect: null,
     base_url: null,
     modelId: null,
     credentialId: null,
@@ -290,6 +296,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       providerId: def.providerId,
       provider_name: getModelProvider(def.providerId)?.displayName ?? null,
       pi_provider: resolvePiProvider(def.providerId),
+      pi_dialect: resolvePiDialect(def.providerId, def.modelId),
       base_url: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
@@ -322,6 +329,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         providerId: creds.providerId,
         provider_name: getModelProvider(creds.providerId)?.displayName ?? null,
         pi_provider: resolvePiProvider(creds.providerId),
+        pi_dialect: resolvePiDialect(creds.providerId, row.modelId),
         base_url: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
@@ -729,6 +737,8 @@ export interface ResolvedModel extends Pick<
    * a gateway. The key every runtime channel carries — never the Appstrate id.
    */
   piProvider: string | null;
+  /** The Pi dialect of the catalog's record; `null` for a model it does not record. */
+  dialect: PiModelDialect | null;
   /** Request controls supported by the backing model in the catalog. */
   generation?: ModelGenerationCapabilities;
   /**
@@ -835,12 +845,19 @@ function resolvePiProvider(providerId: string): string | null {
   return def ? piProviderOf(def) : null;
 }
 
+/** The Pi dialect of the provider's record of `modelId` — what every model builder is handed. */
+function resolvePiDialect(providerId: string, modelId: string): PiModelDialect | null {
+  const def = getModelProvider(providerId);
+  return def ? lookupCatalogDialect(def, modelId) : null;
+}
+
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
   return {
     providerId: def.providerId,
     piProvider: resolvePiProvider(def.providerId),
+    dialect: resolvePiDialect(def.providerId, def.modelId),
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
@@ -866,6 +883,7 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
   return {
     providerId: creds.providerId,
     piProvider: resolvePiProvider(creds.providerId),
+    dialect: resolvePiDialect(creds.providerId, row.modelId),
     apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
@@ -1146,7 +1164,7 @@ export function clampToBackingLevel(
   if (level == null) return settings;
   const piModel = buildPiModel({
     id: model.modelId,
-    registryModelId: model.modelId,
+    dialect: model.dialect,
     apiShape: model.apiShape,
     piProvider: model.piProvider,
     baseUrl: model.baseUrl,

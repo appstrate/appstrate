@@ -15,21 +15,23 @@ import {
 } from "@earendil-works/pi-ai/providers/all";
 import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
+import type { PiModelDialect } from "@appstrate/core/sidecar-types";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "./model-compat.ts";
 import { deriveProviderFromApi } from "./provider-map.ts";
 import type { Api, Model } from "./pi-sdk.ts";
 
 /**
- * Pi's registry record is the model's metadata and dialect; the spec adds the
- * wire fields and the org's EXPLICIT overrides (null/undefined = none).
+ * Everything a Pi `Model` is built from. The platform resolves it — the values
+ * and the record's {@link PiModelDialect} — and nothing here reads the registry.
  */
 export interface PiModelSpec {
   /** Wire id: a preset id through llm-proxy, else the upstream id. */
   id: string;
-  registryModelId?: string | null;
   apiShape: string;
-  /** Pi builtin provider key; null for a gateway, which gets no record. */
+  /** Pi builtin provider key; null for a gateway. */
   piProvider?: string | null;
+  /** The record's dialect; null or absent for a model Pi keeps no record of. */
+  dialect?: PiModelDialect | null;
   baseUrl: string;
   reasoning?: boolean | null;
   input?: readonly ModelInputModality[] | null;
@@ -117,29 +119,30 @@ export function piTokenCostUsd(
   return calculateCost({ cost: rates } as Model<Api>, tokens).total;
 }
 
+/** The dialect of a registry record — see {@link PiModelDialect}. */
+export function piModelDialect(record: Model<Api>): PiModelDialect {
+  return {
+    name: record.name,
+    ...(record.thinkingLevelMap ? { thinkingLevelMap: record.thinkingLevelMap } : {}),
+    ...(record.compat ? { compat: record.compat as Record<string, unknown> } : {}),
+  };
+}
+
 export function buildPiModel(spec: PiModelSpec): Model<Api> {
-  const record =
-    spec.piProvider && spec.registryModelId
-      ? getPiModel(spec.piProvider, spec.registryModelId, spec.apiShape)
-      : undefined;
-  const input = spec.input ?? record?.input;
+  const dialect = spec.dialect;
   return {
     id: spec.id,
-    name: record?.name ?? spec.id,
+    name: dialect?.name ?? spec.id,
     api: spec.apiShape as Api,
     provider: spec.piProvider ?? deriveProviderFromApi(spec.apiShape),
     baseUrl: spec.baseUrl,
-    reasoning: spec.reasoning ?? record?.reasoning ?? false,
-    ...(record?.thinkingLevelMap ? { thinkingLevelMap: record.thinkingLevelMap } : {}),
-    input: input ? [...input] : ["text"],
-    // An override replaces the record's card whole, tiers included.
-    cost: spec.cost
-      ? { ...ZERO_MODEL_COST, ...spec.cost }
-      : (record?.cost ?? { ...ZERO_MODEL_COST }),
-    compat: { ...record?.compat, ...PLATFORM_MODEL_COMPAT },
-    contextWindow: spec.contextWindow ?? record?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTokens:
-      spec.maxTokens ?? (record ? usableRecordMaxTokens(record) : null) ?? DEFAULT_MAX_TOKENS,
+    reasoning: spec.reasoning ?? false,
+    ...(dialect?.thinkingLevelMap ? { thinkingLevelMap: dialect.thinkingLevelMap } : {}),
+    input: spec.input ? [...spec.input] : ["text"],
+    cost: { ...ZERO_MODEL_COST, ...spec.cost },
+    compat: { ...dialect?.compat, ...PLATFORM_MODEL_COMPAT },
+    contextWindow: spec.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS,
     ...(spec.headers ? { headers: spec.headers } : {}),
   } as Model<Api>;
 }

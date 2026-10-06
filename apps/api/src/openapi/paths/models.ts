@@ -39,6 +39,7 @@ export const modelsPaths = {
                     providerId: "openai",
                     provider_name: "OpenAI",
                     pi_provider: "openai",
+                    pi_dialect: { name: "GPT-4o" },
                     apiShape: "openai-responses",
                     base_url: "https://api.openai.com/v1",
                     modelId: "gpt-4o",

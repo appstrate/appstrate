@@ -34,6 +34,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import { zstdDecompressSync } from "node:zlib";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import {
@@ -58,6 +59,7 @@ const RID = "run_inference_e2e";
 // In Pi's `openai-codex` offer, so the container resolves the registry record
 // exactly as it does for a run the platform launches.
 const MODEL_ID = "gpt-5.5";
+const RECORD = getPiModel("openai-codex", MODEL_ID, "openai-codex-responses")!;
 const ACCOUNT_ID = "acct_inference_e2e";
 const CREDENTIAL_ID = "cred_inference_e2e";
 const SINK_SECRET = "inference-e2e-secret-0123456789";
@@ -234,6 +236,11 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
             MODEL_ID,
             // Pi's provider key, as `buildRuntimePiEnv` emits it — not Appstrate's `codex`.
             MODEL_PROVIDER: "openai-codex",
+            // The rest of what the platform resolves off Pi's record of the model.
+            MODEL_DIALECT: JSON.stringify(piModelDialect(RECORD)),
+            MODEL_REASONING: String(RECORD.reasoning),
+            MODEL_CONTEXT_WINDOW: String(RECORD.contextWindow),
+            MODEL_MAX_TOKENS: String(RECORD.maxTokens),
             MODEL_BASE_URL: "http://sidecar:8080/llm",
             MODEL_API_KEY: PLACEHOLDER_JWT,
             SIDECAR_URL: "http://sidecar:8080",

@@ -26,6 +26,7 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
     providerId: "anthropic",
     provider_name: "Anthropic",
     pi_provider: "anthropic",
+    pi_dialect: null,
     base_url: "https://api.anthropic.com",
     modelId: "claude-sonnet-4",
     enabled: true,

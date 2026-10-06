@@ -30,7 +30,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 
 const REPO_ROOT = join(import.meta.dir, "../../../..");
 
@@ -174,18 +174,26 @@ describe("platform model compat coverage", () => {
     });
   });
 
-  it("the construction site's refusals beat Pi's record, and a caller cannot pass compat", () => {
+  it("the construction site's refusals beat the dialect, whatever it carries", () => {
     // `claude-fable-5`'s record lists fallback models; the refusal must win.
+    const record = getPiModel("anthropic", "claude-fable-5", "anthropic-messages")!;
+    expect(record.compat).toHaveProperty("allowedFallbackModels");
     const spec = {
       id: "preset_fable",
-      registryModelId: "claude-fable-5",
+      dialect: piModelDialect(record),
       apiShape: "anthropic-messages",
       piProvider: "anthropic",
       baseUrl: "https://appstrate.test/api/llm-proxy/anthropic-messages",
     };
     const model = buildPiModel(spec);
     expect(model.compat).toMatchObject({ ...PLATFORM_MODEL_COMPAT, forceAdaptiveThinking: true });
-    // @ts-expect-error — the record owns the dialect: there is no spec field for it.
+    // The dialect arrives over a wire: one that asks for what the platform refuses gets it refused.
+    const asking = {
+      ...spec.dialect,
+      compat: { ...spec.dialect.compat, supportsLongCacheRetention: true },
+    };
+    expect(buildPiModel({ ...spec, dialect: asking }).compat).toEqual(model.compat);
+    // @ts-expect-error — compat rides the dialect: there is no spec field for it.
     expect(buildPiModel({ ...spec, compat: { supportsLongCacheRetention: true } }).compat).toEqual(
       model.compat,
     );
