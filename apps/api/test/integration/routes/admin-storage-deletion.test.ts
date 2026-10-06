@@ -114,6 +114,21 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
     expect(body.hasMore).toBe(false);
   });
 
+  it("needs no organization: an operator who belongs to none is admitted without X-Org-Id", async () => {
+    const operator = await createTestUser({ email: "orgless-operator@test.com" });
+    process.env.AUTH_PLATFORM_ADMIN_EMAILS = operator.email;
+    _resetCacheForTesting();
+
+    const res = await app.request(LIST_PATH, { headers: { Cookie: operator.cookie } });
+    expect(res.status).toBe(200);
+
+    // Control: the same header-less request from a session that is not
+    // allowlisted is a 403 from the operator guard, not a 400 asking for an org.
+    const outsider = await createTestUser({ email: "orgless-outsider@test.com" });
+    const refused = await app.request(LIST_PATH, { headers: { Cookie: outsider.cookie } });
+    expect(refused.status).toBe(403);
+  });
+
   it("refuses a non-session token that resolves the allowlisted operator", async () => {
     const ctx = currentCtx!;
     // Same user, same allowlisted email, broad permissions — but the auth

@@ -592,5 +592,8 @@ function skipOrgContext(path: string): boolean {
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
   // spaceId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
+  // Platform-operator routes are instance-wide: an operator may belong to no
+  // organization. Each route carries its own guard.
+  if (path.startsWith("/api/admin/")) return true;
   return false;
 }
