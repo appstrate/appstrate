@@ -824,7 +824,7 @@ export const envSchema = z
     // (email/password, magic-link, social OIDC). Three exceptions always pass:
     //   1. Email matches a pending+non-expired invitation in `org_invitations`.
     //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
-    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL (1st run only).
+    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL, on proof of ownership.
     AUTH_DISABLE_SIGNUP: z
       .string()
       .default("false")
@@ -888,10 +888,9 @@ export const envSchema = z
         message: "AUTH_PLATFORM_ADMIN_EMAILS must be a comma-separated list of valid emails",
       }),
     // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
-    // self-hosted instances in closed mode. When set, this email is allowed
-    // to sign up even with AUTH_DISABLE_SIGNUP=true, and an organization is
-    // auto-created with this user as owner on first signup. Idempotent: if
-    // the user already owns an org, the after-hook is a no-op.
+    // self-hosted instances in closed mode. An organization is auto-created
+    // with this account as owner when it is created, which takes proof of
+    // ownership (AUTH_MODES.md). Idempotent if the user already owns an org.
     //
     // Empty is allowed (open mode); anything else must look like an email
     // so a typo (`AUTH_BOOTSTRAP_OWNER_EMAIL=admin`) is caught at boot
@@ -922,8 +921,8 @@ export const envSchema = z
     // logout, cross-device revocation, freshness gate, realm guard):
     // `apps/api/test/integration/auth/session-cookie-cache.test.ts`.
     AUTH_SESSION_COOKIE_CACHE_SECONDS: z.coerce.number().int().min(0).default(0),
-    // AUTH_BOOTSTRAP_TOKEN — one-shot redemption token for unattended
-    // installs that didn't supply a named owner email (#344 Layer 2b).
+    // AUTH_BOOTSTRAP_TOKEN — one-shot token that creates the owner account
+    // (the one AUTH_BOOTSTRAP_OWNER_EMAIL names, when set).
     // The CLI generates a 256-bit token at install time, writes it into
     // .env, and prints a banner with the redemption URL. The platform
     // reads it at boot, holds it in memory, and lets the first POST to

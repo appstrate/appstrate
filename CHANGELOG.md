@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **The owner account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` is created at
+  `/claim`, with `AUTH_BOOTSTRAP_TOKEN`** (or by a provider-verified
+  Google/GitHub sign-in, or a magic link) — no longer by the sign-up form.
+  An instance that names an owner who has no account yet must set
+  `AUTH_BOOTSTRAP_TOKEN` by hand (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`),
+  restart, and open `<APP_URL>/claim`; fresh installs get the token from the
+  installer. An account can no longer change its e-mail to that address or
+  to an `AUTH_PLATFORM_ADMIN_EMAILS` one (403 `email_change_refused`). A
+  Google sign-in now takes `emailVerified` from Google's `email_verified`
+  claim. Details and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at

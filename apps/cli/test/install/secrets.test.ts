@@ -223,6 +223,18 @@ describe("renderEnvFile", () => {
     expect(body).not.toContain("Auth lockdown (optional");
     expect(body).not.toContain("AUTH_MODES.md");
   });
+
+  it("points a named owner at /claim when the install issued a token", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com", bootstrapToken: "tok_abc123" },
+    );
+    const body = renderEnvFile(env);
+    expect(body).toContain("http://localhost:3000/claim");
+    expect(body).not.toContain("Auth lockdown (optional");
+  });
 });
 
 describe("generateEnvForTier — bootstrap (issue #228)", () => {
@@ -248,6 +260,19 @@ describe("generateEnvForTier — bootstrap (issue #228)", () => {
     // still call POST /api/orgs after the bootstrap (without it they'd be
     // locked out of creating any future tenant org).
     expect(env.AUTH_PLATFORM_ADMIN_EMAILS).toBe("admin@acme.com");
+  });
+
+  it("writes the owner address and the token together when both are provided", () => {
+    const env = generateEnvForTier(
+      3,
+      "http://localhost:3000",
+      {},
+      { bootstrapOwnerEmail: "admin@acme.com", bootstrapToken: "tok_abc123" },
+    );
+    expect(env.AUTH_BOOTSTRAP_OWNER_EMAIL).toBe("admin@acme.com");
+    expect(env.AUTH_BOOTSTRAP_TOKEN).toBe("tok_abc123");
+    expect(env.AUTH_DISABLE_SIGNUP).toBe("true");
+    expect(env.AUTH_DISABLE_ORG_CREATION).toBe("true");
   });
 
   it("emits AUTH_BOOTSTRAP_ORG_NAME only when explicitly provided", () => {

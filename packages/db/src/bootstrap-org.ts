@@ -4,8 +4,8 @@
 // auto-creating the root organization for `AUTH_BOOTSTRAP_OWNER_EMAIL`.
 //
 // Two callers:
-//   1. `auth.ts` after-hook  — fires when the bootstrap owner signs up via
-//      `/api/auth/sign-up/email`. Errors are logged, never thrown (we do not
+//   1. `auth.ts` after-hook  — fires when the bootstrap owner's account is
+//      created. Errors are logged, never thrown (we do not
 //      want a transient DB failure to break signup).
 //   2. `apps/api/scripts/bootstrap-org.ts` — explicit ops bootstrap (IaC /
 //      recovery). Errors propagate to the caller which decides exit code.

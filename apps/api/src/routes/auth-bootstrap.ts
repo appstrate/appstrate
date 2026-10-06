@@ -83,6 +83,18 @@ export const redeemSchema = z
 // point: only one process holds it at a time.
 const BOOTSTRAP_REDEEM_LOCK_KEY = 8729463725001923174n;
 
+function bootstrapUserExists(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "bootstrap_user_exists",
+    title: "Conflict",
+    detail:
+      "An account already exists for this address, and the bootstrap token only creates " +
+      "a new one. Sign in with that account, then make it owner of the root organization " +
+      "with `bun apps/api/scripts/bootstrap-org.ts --owner=<email>`.",
+  });
+}
+
 export function createAuthBootstrapRouter(): Hono {
   const router = new Hono();
 
@@ -157,8 +169,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: "Gone",
           detail:
             "No bootstrap token is currently redeemable. The instance has either " +
-            "no token configured, has already been claimed, or was bootstrapped " +
-            "via AUTH_BOOTSTRAP_OWNER_EMAIL.",
+            "no token configured or has already been claimed.",
         });
       }
 
@@ -181,6 +192,27 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
+      // After the token check, so only the operator learns the named address.
+      const namedOwner = getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL;
+      if (namedOwner && data.email !== namedOwner) {
+        throw new ApiError({
+          status: 403,
+          code: "bootstrap_owner_email_mismatch",
+          title: "Forbidden",
+          detail:
+            "This instance names its owner in AUTH_BOOTSTRAP_OWNER_EMAIL. " +
+            "Claim it with that e-mail address.",
+        });
+      }
+
+      // Looked up here: under mail verification Better Auth reports a duplicate as success.
+      const [taken] = await db
+        .select({ id: userTable.id })
+        .from(userTable)
+        .where(eq(userTable.email, data.email))
+        .limit(1);
+      if (taken) throw bootstrapUserExists();
+
       // Step 3: signup via BA inside the bypass envelope
       const authApi = getAuth().api;
       let authResponse: Response;
@@ -197,14 +229,7 @@ export function createAuthBootstrapRouter(): Hono {
         // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
         if (msg.includes("already exists") || msg.includes("duplicate")) {
-          throw new ApiError({
-            status: 409,
-            code: "bootstrap_user_exists",
-            title: "Conflict",
-            detail:
-              "An account with that email already exists. Use a different email — " +
-              "the bootstrap owner must be a fresh account.",
-          });
+          throw bootstrapUserExists();
         }
         // Domain allowlist rejection (#344 hardening — bootstrap-token
         // bypass does NOT skip AUTH_ALLOWED_SIGNUP_DOMAINS). Surface
@@ -263,7 +288,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: authResponse.status === 422 ? "Unprocessable Entity" : "Bad Request",
           detail:
             authResponse.status === 422
-              ? "Bootstrap signup rejected (likely duplicate email or weak password)."
+              ? "Bootstrap signup rejected (password refused by the password policy)."
               : "Bootstrap signup rejected by auth provider.",
         });
       }

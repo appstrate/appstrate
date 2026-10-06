@@ -52,6 +52,7 @@ export function isAllowedSignupDomain(email: string): boolean {
 
 /**
  * True when `email` matches `AUTH_BOOTSTRAP_OWNER_EMAIL`. Used by:
+ *   - the create hook, which requires proof of ownership for it (`auth.ts`);
  *   - the signup gate to let the bootstrap account through even with
  *     `AUTH_DISABLE_SIGNUP=true`;
  *   - the after-hook to auto-create the bootstrap organization.
@@ -105,11 +106,15 @@ export function evaluateSignupPolicy(
   email: string,
   hasPendingInvitation: boolean,
 ): SignupPolicyDecision {
-  const env = getEnv();
-
   if (isBootstrapOwner(email)) return { allowed: true, reason: "bootstrap" };
   if (isPlatformAdmin(email)) return { allowed: true, reason: "platform_admin" };
   if (hasPendingInvitation) return { allowed: true, reason: "invitation" };
+  return evaluateUnprivilegedSignup(email);
+}
+
+/** Rules 4-6 alone: the answer for an address that holds no exception. */
+export function evaluateUnprivilegedSignup(email: string): SignupPolicyDecision {
+  const env = getEnv();
 
   if (env.AUTH_DISABLE_SIGNUP) {
     if (!isAllowedSignupDomain(email)) {

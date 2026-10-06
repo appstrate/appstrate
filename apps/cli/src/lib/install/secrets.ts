@@ -62,8 +62,8 @@ function base64urlPassword24(): string {
 
 /**
  * 32 random bytes → base64url (43 chars, URL-safe). One-shot redemption
- * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` when an unattended
- * install lands without a named owner email (#344 Layer 2b).
+ * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` by every fresh closed
+ * install, named owner or not.
  *
  * 256 bits of entropy — brute-force exclu. Generated client-side at
  * install time; the platform reads it at boot, holds it in memory, and
@@ -93,8 +93,8 @@ interface PortOverrides {
  * Optional self-hosting closed-mode bootstrap (issue #228). When set,
  * the install writes the AUTH_DISABLE_SIGNUP / AUTH_DISABLE_ORG_CREATION
  * pair plus AUTH_BOOTSTRAP_OWNER_EMAIL into the generated `.env`, so
- * the operator's first signup with that email auto-creates the root
- * organization and the rest of the world is locked out by default.
+ * claiming the instance as that email creates the root organization and
+ * the rest of the world is locked out by default.
  *
  * Drives both the interactive prompt path (`appstrate install` ⇒
  * "Configure invitation-only mode now?") and the non-interactive path
@@ -136,13 +136,8 @@ export interface BootstrapOverrides {
   /** Org name shown in the dashboard. Defaults to "Default" when unset. */
   bootstrapOrgName?: string;
   /**
-   * One-shot redemption token (issue #344 Layer 2b). Set when the
-   * install runs unattended (`--yes` / no-TTY) without an
-   * `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` override — the alternative would
-   * be silently shipping an open instance (the historical default).
+   * One-shot redemption token, set on every fresh closed install.
    *
-   * Mutually exclusive with `bootstrapOwnerEmail`: a named owner closes
-   * the loop directly, a token closes it lazily on first redemption.
    * When this field is set the install writes:
    *   AUTH_DISABLE_SIGNUP=true
    *   AUTH_DISABLE_ORG_CREATION=true
@@ -251,29 +246,17 @@ export function generateEnvForTier(
     env.PORT = String(ports.port);
   }
 
-  if (bootstrap.bootstrapOwnerEmail) {
-    // Self-hosting closed mode (issue #228). The signup gate lets this
-    // email through even with AUTH_DISABLE_SIGNUP=true, and the
-    // after-hook auto-provisions the root org on first signup. The
-    // owner is also added to PLATFORM_ADMIN_EMAILS so they keep
-    // org-creation rights after the bootstrap (otherwise they'd be
-    // locked out of `POST /api/orgs` for any future tenant org).
+  if (bootstrap.bootstrapOwnerEmail || bootstrap.bootstrapToken) {
     env.AUTH_DISABLE_SIGNUP = "true";
     env.AUTH_DISABLE_ORG_CREATION = "true";
-    env.AUTH_PLATFORM_ADMIN_EMAILS = bootstrap.bootstrapOwnerEmail;
-    env.AUTH_BOOTSTRAP_OWNER_EMAIL = bootstrap.bootstrapOwnerEmail;
-    if (bootstrap.bootstrapOrgName) {
-      env.AUTH_BOOTSTRAP_ORG_NAME = bootstrap.bootstrapOrgName;
+    if (bootstrap.bootstrapOwnerEmail) {
+      // Also a platform admin, to keep org-creation rights after the bootstrap.
+      env.AUTH_PLATFORM_ADMIN_EMAILS = bootstrap.bootstrapOwnerEmail;
+      env.AUTH_BOOTSTRAP_OWNER_EMAIL = bootstrap.bootstrapOwnerEmail;
     }
-  } else if (bootstrap.bootstrapToken) {
-    // Closed-by-default unattended install (issue #344 Layer 2b). No
-    // named owner yet — the operator claims the instance later by
-    // POSTing the token to `/api/auth/bootstrap/redeem`. Until then
-    // signup is locked, so a fresh `curl … | bash -s -- --yes` on a
-    // public VPS is no longer silently exposed.
-    env.AUTH_DISABLE_SIGNUP = "true";
-    env.AUTH_DISABLE_ORG_CREATION = "true";
-    env.AUTH_BOOTSTRAP_TOKEN = bootstrap.bootstrapToken;
+    if (bootstrap.bootstrapToken) {
+      env.AUTH_BOOTSTRAP_TOKEN = bootstrap.bootstrapToken;
+    }
     if (bootstrap.bootstrapOrgName) {
       env.AUTH_BOOTSTRAP_ORG_NAME = bootstrap.bootstrapOrgName;
     }
@@ -342,8 +325,8 @@ export function generateEnvForTier(
  * re-generating).
  *
  * Footer branches on the closed-mode shape:
- *   - `AUTH_BOOTSTRAP_OWNER_EMAIL` set → no footer (lockdown already configured).
  *   - `AUTH_BOOTSTRAP_TOKEN` set → token-redemption pointer for the operator.
+ *   - `AUTH_BOOTSTRAP_OWNER_EMAIL` alone → no footer (lockdown already configured).
  *   - neither → 3-line pointer to AUTH_MODES.md for the self-hoster who'll
  *     edit `.env` anyway and wants to discover the feature.
  */
@@ -352,15 +335,15 @@ export function renderEnvFile(env: EnvVars): string {
     .sort()
     .map((key) => `${key}=${env[key]}`);
   let closedModeFooter: string;
-  if (env.AUTH_BOOTSTRAP_OWNER_EMAIL) {
-    closedModeFooter = "";
-  } else if (env.AUTH_BOOTSTRAP_TOKEN) {
+  if (env.AUTH_BOOTSTRAP_TOKEN) {
     closedModeFooter =
       `\n# ─── Bootstrap token redemption (closed-by-default install) ───\n` +
       `# Public signup is disabled. Claim ownership of this instance via:\n` +
       `#   ${env.APP_URL ?? "http://localhost:3000"}/claim\n` +
       `# Token above (AUTH_BOOTSTRAP_TOKEN) is single-use and self-clears\n` +
       `# once redeemed. See examples/self-hosting/AUTH_MODES.md.\n`;
+  } else if (env.AUTH_BOOTSTRAP_OWNER_EMAIL) {
+    closedModeFooter = "";
   } else {
     closedModeFooter =
       `\n# ─── Auth lockdown (optional, self-hosting) ───\n` +

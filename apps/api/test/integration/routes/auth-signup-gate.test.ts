@@ -164,13 +164,15 @@ describe("Platform signup gate — issue #228", () => {
       expect(res.status).toBe(200);
     });
 
-    it("allows signup for the bootstrap owner email", async () => {
+    it("does not let the bootstrap owner address through on its name alone", async () => {
+      // Proof of ownership is what opens this account, not the gate — the
+      // rows are in `auth-bootstrap-org.test.ts`.
       setAuthEnv({
         AUTH_DISABLE_SIGNUP: "true",
         AUTH_BOOTSTRAP_OWNER_EMAIL: "owner@acme.com",
       });
       const res = await attemptSignup("Owner@Acme.com");
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
     });
   });
 

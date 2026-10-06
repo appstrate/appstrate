@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { betterAuth } from "better-auth";
+import { BASE_ERROR_CODES, betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -18,8 +18,10 @@ import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
+  evaluateUnprivilegedSignup,
   isAllowedSignupDomain,
   isBootstrapOwner,
+  isPlatformAdmin,
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
@@ -436,46 +438,6 @@ export interface CreateAuthOptions {
   clientIpHeader: string;
 }
 
-/**
- * BA's OAuth callback endpoint path. Exposed as a constant so the create
- * hook and its unit tests reference the same string (if BA ever renames
- * the route, both sides fail together).
- */
-export const BA_OAUTH_CALLBACK_PATH = "/callback/:id";
-
-/**
- * Decide whether a `databaseHooks.user.create.before` invocation should
- * auto-verify the user's email.
- *
- * SECURITY: this must ONLY confirm verification the provider actually
- * asserted — never grant it unconditionally. BA already computes
- * `user.emailVerified` from the provider's real signal (Google's
- * `email_verified` id_token claim; GitHub's `/user/emails` verified flag).
- * We therefore auto-verify only when BOTH the request ran under BA's OAuth
- * callback endpoint AND the provider asserted the email is verified
- * (`providerAssertsVerified`). Blanket-verifying every OAuth callback let
- * an attacker link an UNVERIFIED GitHub email onto a victim's account
- * (pre-account-takeover), so the provider assertion is load-bearing.
- *
- * Returns `{ data: { emailVerified: true } }` (the shape BA's
- * `createWithHooks` merges into the row about to be inserted) when both
- * conditions hold, `undefined` otherwise — falling through to BA's own
- * `emailVerified` value for OAuth (which stays `false` for an unverified
- * provider email) and for email/password, magic-link, and seed paths.
- *
- * Exported for unit testing; the `databaseHooks.user.create.before` hook
- * inside `buildAuth()` is the only production caller.
- */
-export function shouldAutoVerifyEmailOnCreate(
-  context: { path?: string } | null | undefined,
-  providerAssertsVerified: boolean,
-): { data: { emailVerified: true } } | undefined {
-  if (context?.path === BA_OAUTH_CALLBACK_PATH && providerAssertsVerified) {
-    return { data: { emailVerified: true } };
-  }
-  return undefined;
-}
-
 // How long each emailed link stays valid: enforced by Better Auth, stated in the email.
 export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
 const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
@@ -632,7 +594,6 @@ function buildAuth(options: CreateAuthOptions) {
     {
       clientId: string;
       clientSecret: string;
-      mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
     }
   > = {
     google: {
@@ -642,24 +603,6 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
       },
-      // Google asserts `email_verified` in its OIDC id_token and BA maps it
-      // onto `user.emailVerified` (see `@better-auth/core` google provider).
-      // Google never issues a token for an email the user hasn't proven
-      // ownership of, so treating a successful Google round-trip as
-      // verified is safe. We keep the explicit override only for Google.
-      //
-      // SECURITY: we do NOT do the same for GitHub. GitHub lets a user add
-      // an UNVERIFIED email to their account, and BA already computes the
-      // real per-email verified flag from `/user/emails`
-      // (`emails.find(e => e.email === profile.email)?.verified ?? false`).
-      // Blanket-setting `emailVerified: true` there clobbered that real
-      // signal and opened a pre-account-takeover: an attacker adds the
-      // victim's email (unverified) to a GitHub account, signs in, and —
-      // because the email is (falsely) "verified" — BA account-links it to
-      // the victim's existing user (trusted provider + matching email),
-      // handing the attacker the account. Leaving GitHub without an
-      // override lets BA's genuine verified flag decide linking.
-      mapProfileToUser: () => ({ emailVerified: true }),
     },
     github: {
       get clientId() {
@@ -668,9 +611,6 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
-      // No `mapProfileToUser` override on purpose — see the GitHub note above.
-      // BA sets `emailVerified` from GitHub's real `/user/emails` verified
-      // flag; forcing it true here would defeat the takeover guard.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
@@ -1036,11 +976,35 @@ function buildAuth(options: CreateAuthOptions) {
             // gate (`AUTH_DISABLE_SIGNUP`). An active domain allowlist
             // (`AUTH_ALLOWED_SIGNUP_DOMAINS`) remains load-bearing
             // because the operator explicitly chose to lock down which
-            // emails can register; the bootstrap owner must satisfy
-            // that policy too. A pending invitation also overrides
+            // emails can register — except for the address the operator
+            // named as owner. A pending invitation also overrides
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            // Proof for the bootstrap owner's account: the bootstrap token, or a
+            // row born verified (provider assertion, consumed magic link). The
+            // refusal mirrors what an unprivileged or taken address gets.
+            const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
+            if (isBootstrapOwner(user.email) && !bootstrapTokenBypass && !bornVerified) {
+              logger.warn(
+                "auth: refused to create the AUTH_BOOTSTRAP_OWNER_EMAIL account without proof of " +
+                  "ownership — see examples/self-hosting/AUTH_MODES.md",
+              );
+              const unprivileged = evaluateUnprivilegedSignup(user.email);
+              if (!unprivileged.allowed) {
+                throw new APIError("FORBIDDEN", {
+                  message: unprivileged.reason,
+                  code: unprivileged.reason,
+                });
+              }
+              // Under mail verification Better Auth answers a 403 as it does a taken address.
+              throw smtpEnabled
+                ? new APIError("FORBIDDEN", { message: "signup_disabled", code: "signup_disabled" })
+                : APIError.from(
+                    "UNPROCESSABLE_ENTITY",
+                    BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+                  );
+            }
             // A pending invitation for this exact email overrides the signup
             // gate (Infisical-style breakage avoidance) so an invited user can
             // complete signup even when signup is locked down. It is matched on
@@ -1055,7 +1019,12 @@ function buildAuth(options: CreateAuthOptions) {
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
               if (bootstrapTokenBypass) {
-                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !invited) {
+                // The named owner is exempt, as in `evaluateSignupPolicy`.
+                if (
+                  envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 &&
+                  !invited &&
+                  !isBootstrapOwner(user.email)
+                ) {
                   if (!isAllowedSignupDomain(user.email)) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
@@ -1112,26 +1081,7 @@ function buildAuth(options: CreateAuthOptions) {
                     query: ctx?.query ?? null,
                   })
                 : "platform";
-            // Auto-verify ONLY when a trusted social provider produced the row
-            // (the BA OAuth callback path) AND the provider itself asserted the
-            // email is verified. BA has already set `user.emailVerified` from
-            // the provider's real signal (Google `email_verified` claim /
-            // GitHub `/user/emails` verified flag), so we pass that through as
-            // the gate — we never upgrade an unverified provider email to
-            // verified (which would enable GitHub-unverified-email account
-            // takeover). A pending invitation is likewise NOT a verification
-            // signal: it is matched on email alone, so granting `emailVerified`
-            // here would let anyone mint a verified account for any unclaimed
-            // address (create org → self-invite that email → sign up) AND would
-            // defeat the OIDC end-user adopter's `emailVerified === true`
-            // takeover guard. Invited users verify their inbox through the
-            // normal flow, like everyone else.
-            const providerAssertsVerified =
-              (user as { emailVerified?: boolean }).emailVerified === true;
-            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, providerAssertsVerified);
-            const data: Record<string, unknown> = { realm };
-            if (autoVerify) data.emailVerified = true;
-            return { data };
+            return { data: { realm } };
           },
           after: async (user, context) => {
             await db.insert(profiles).values({
@@ -1177,6 +1127,29 @@ function buildAuth(options: CreateAuthOptions) {
               } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
               await _afterSignupHook({ id: user.id, email: user.email }, afterCtx);
             }
+          },
+        },
+        update: {
+          // No account moves onto an address the environment names (owner,
+          // platform admins); every Better Auth writer of `user.email` passes here.
+          before: async (data) => {
+            const next = (data as { email?: unknown }).email;
+            if (typeof next !== "string") return;
+            if (!isBootstrapOwner(next) && !isPlatformAdmin(next)) return;
+            const [holder] = await db
+              .select({ id: user.id })
+              .from(user)
+              .where(eq(user.email, next))
+              .limit(1);
+            if (holder) return;
+            logger.warn(
+              "auth: refused to move an account onto an address named in " +
+                "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
+            );
+            throw new APIError("FORBIDDEN", {
+              message: "email_change_refused",
+              code: "email_change_refused",
+            });
           },
         },
       },

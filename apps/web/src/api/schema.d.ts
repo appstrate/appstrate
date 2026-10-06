@@ -8926,7 +8926,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies. */
+            /** @description Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (`signup_domain_not_allowed`) — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8944,7 +8944,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL) */
+            /** @description No bootstrap token is currently redeemable (none configured, or already redeemed) */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -9707,6 +9707,18 @@ export interface operations {
             };
             /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
