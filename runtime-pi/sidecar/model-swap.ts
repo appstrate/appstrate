@@ -81,14 +81,9 @@ export function parseModelSwapEnv(raw: string): ModelSwap {
   if (providerId !== null && (typeof providerId !== "string" || providerId.trim().length === 0)) {
     throw new Error('PI_MODEL_SWAP_JSON: missing or blank "backing.providerId"');
   }
-  // null = a backing Pi keeps no record of. A missing key is a platform that
-  // predates it: every backing would be built bare, with nothing saying why.
-  const dialect = b["dialect"];
-  if (dialect === undefined) {
-    throw new Error('PI_MODEL_SWAP_JSON: missing "backing.dialect"');
-  }
-  if (dialect !== null && !isPiModelDialect(dialect)) {
-    throw new Error('PI_MODEL_SWAP_JSON: malformed "backing.dialect"');
+  // null = a backing Pi keeps no record of.
+  if (b["dialect"] !== null && !isPiModelDialect(b["dialect"])) {
+    throw new Error('PI_MODEL_SWAP_JSON: missing or malformed "backing.dialect"');
   }
   if (b["reasoning"] !== undefined && typeof b["reasoning"] !== "boolean") {
     throw new Error('PI_MODEL_SWAP_JSON: non-boolean "backing.reasoning"');

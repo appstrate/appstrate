@@ -388,41 +388,24 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
     });
   });
 
-  it("refuses an instance that names a Pi provider and sends no dialect", async () => {
-    const { pi_dialect: _absent, ...predating } = makePreset({
-      id: "preset_old",
-      apiShape: "openai-completions",
-      pi_provider: "opencode-go",
-      modelId: "deepseek-v4-pro",
-    });
-    await expect(
-      resolvePresetModel({
-        profileName: "default",
-        instance: "https://app.example.com",
-        bearerToken: "ask_test",
-        orgId: "org_1",
-        presetsLoader: async () => [predating as ModelPreset],
-      }),
-    ).rejects.toThrow(/too old for this CLI/);
-  });
-
-  it("refuses a dialect that is not one", async () => {
-    await expect(
-      resolvePresetModel({
-        profileName: "default",
-        instance: "https://app.example.com",
-        bearerToken: "ask_test",
-        orgId: "org_1",
-        presetsLoader: async () => [
-          makePreset({
-            id: "preset_bad",
-            apiShape: "openai-completions",
-            pi_provider: "opencode-go",
-            pi_dialect: { compat: {} } as never,
-          }),
-        ],
-      }),
-    ).rejects.toThrow(/malformed `pi_dialect`/);
+  // `undefined`: the field is required, `null` being how "no record" is said.
+  it("refuses a preset whose dialect is missing or is not one", async () => {
+    for (const pi_dialect of [undefined, { compat: {} }, "deepseek"]) {
+      await expect(
+        resolvePresetModel({
+          profileName: "default",
+          instance: "https://app.example.com",
+          bearerToken: "ask_test",
+          orgId: "org_1",
+          presetsLoader: async () => [
+            {
+              ...makePreset({ id: "preset_bad", apiShape: "openai-completions" }),
+              pi_dialect: pi_dialect as never,
+            },
+          ],
+        }),
+      ).rejects.toThrow(/does not say what dialect preset "preset_bad" speaks/);
+    }
   });
 
   it("builds a preset with no `pi_provider` without a record: preset id on the wire, the default limits", async () => {
@@ -468,10 +451,12 @@ describe("resolvePresetModel — proxy routing per protocol", () => {
       "object": "list",
       "data": [
         { "id": "preset_other", "label": "Other", "apiShape": "openai-completions",
-          "providerId": "openai", "enabled": true, "is_default": false,
+          "providerId": "openai", "pi_provider": "openai", "pi_dialect": null,
+          "enabled": true, "is_default": false,
           "needs_reconnection": false, "source": "built-in" },
         { "id": "preset_default", "label": "Default", "apiShape": "openai-completions",
-          "providerId": "openai", "enabled": true, "is_default": true,
+          "providerId": "openai", "pi_provider": "openai", "pi_dialect": null,
+          "enabled": true, "is_default": true,
           "needs_reconnection": false, "source": "built-in" }
       ]
     }`);

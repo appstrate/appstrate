@@ -193,17 +193,12 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   if (isAnthropic) {
     headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
   }
-  // A platform that predates `pi_dialect` sends none, and a model built without
-  // its record's dialect sends requests the vendor refuses.
-  if (preset.pi_provider && preset.pi_dialect === undefined) {
+  // null = a model Pi keeps no record of. Built without the dialect of a
+  // record it has, a model sends requests the vendor refuses.
+  if (preset.pi_dialect !== null && !isPiModelDialect(preset.pi_dialect)) {
     throw new ModelResolutionError(
-      `The instance at ${inputs.instance} is too old for this CLI: it does not describe preset "${preset.id}".`,
-      "Upgrade the instance, or install the CLI version that matches it.",
-    );
-  }
-  if (preset.pi_dialect != null && !isPiModelDialect(preset.pi_dialect)) {
-    throw new ModelResolutionError(
-      `The instance at ${inputs.instance} sent a malformed \`pi_dialect\` for preset "${preset.id}".`,
+      `The instance at ${inputs.instance} does not say what dialect preset "${preset.id}" speaks (\`pi_dialect\`).`,
+      "Run the CLI version that matches the instance.",
     );
   }
   const model = buildPiModel({

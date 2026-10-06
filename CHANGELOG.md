@@ -168,13 +168,15 @@ could not be resolved`) instead of failing for good on the first. Without
   agent container reads it from `MODEL_DIALECT`, the sidecar from
   `PI_MODEL_SWAP_JSON` (`backing.dialect`), the chat and the CLI from
   `pi_dialect` on `GET /api/models` (opaque, `null` for a gateway and for an
-  alias). None of them looks a model up any more, so a model's dialect no
-  longer depends on which Pi registry an image or a CLI was built with; the
-  request is still serialized by each one's own Pi code. The field is never
-  absent where a Pi provider is named (`null` when Pi keeps no record), and a
-  consumer handed a provider without it refuses instead of building the model
-  bare: the container and the sidecar at boot, `appstrate run --model-source
-preset` with "too old for this CLI". Plan:
+  alias). None of them looks a model up, so a model's dialect does not depend
+  on which Pi registry an image or a CLI was built with; the request is still
+  serialized by each one's own Pi code. The field is required wherever a Pi
+  provider is named (`null` when Pi keeps no record), and a consumer handed a
+  provider without it refuses instead of building the model bare: the
+  container and the sidecar at boot, `appstrate run --model-source preset`
+  before any call. A preset run therefore needs the CLI and the instance at
+  the same version. `ModelSwapBacking.dialect` is a required field of
+  `@appstrate/core`: its next release is a major. Plan:
   `docs/plans/live-model-catalog.md`, step 1.
 - **`claude-sonnet-5-5` replaces `claude-sonnet-5` among the featured models**
   of the `anthropic` and `claude-code` providers (#1705), now that the pinned

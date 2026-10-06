@@ -583,10 +583,8 @@ export const MODEL_API_SHAPES = [
 export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
 
 /**
- * What of a Pi registry record shapes a request beyond the resolved values
- * (limits, modalities, reasoning, price): its name, thinking-level map and
- * compat flags. Pi's own vocabulary, opaque to everything but the Pi SDK. The
- * platform reads it off the registry and hands it to whatever builds the model.
+ * The part of a Pi registry record that shapes requests, beyond the values the
+ * platform resolves. Pi's own vocabulary, read by the Pi SDK alone.
  */
 export interface PiModelDialect {
   name: string;
@@ -597,7 +595,7 @@ export interface PiModelDialect {
 const isJsonObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-/** Whether `value` has the shape of a {@link PiModelDialect}; its vocabulary is Pi's and is not read. */
+/** A shape check: the vocabulary is Pi's and is not read. */
 export function isPiModelDialect(value: unknown): value is PiModelDialect {
   if (!isJsonObject(value) || typeof value.name !== "string" || value.name.length === 0) {
     return false;
@@ -658,10 +656,7 @@ export interface ModelSwapBacking {
    * container never sees it.
    */
   providerId: string | null;
-  /**
-   * The backing's Pi dialect, as the platform read it; `null` without a record.
-   * Never absent: a sidecar handed no key would build every backing bare.
-   */
+  /** The backing's Pi dialect; `null` when Pi keeps no record of it. */
   dialect: PiModelDialect | null;
   /** Whether the backing supports extended thinking; absent = it does not. */
   reasoning?: boolean;

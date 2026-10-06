@@ -162,10 +162,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // emits plain-OpenAI shape at every provider.
   // An ALIASED run never emits it — naming the vendor is the leak, and there is
   // nothing left to configure, `pi-messages` having one request shape.
-  // With it, the record's dialect, which the container builds its model from:
-  // `null` when Pi keeps none, never absent, so the container can refuse a
-  // platform that predates it. Withheld from an alias like the provider, its
-  // compat flags naming the vendor family.
+  // Its record's dialect rides with it, `null` when Pi keeps none. An alias
+  // gets neither: compat flags name the vendor family.
   if (model.piProvider && !model.aliased) {
     env.MODEL_PROVIDER = model.piProvider;
     env.MODEL_DIALECT = JSON.stringify(model.dialect ?? null);

@@ -58,7 +58,6 @@ describe("buildPiModelFromEnv — the platform's dialect", () => {
     expect(model.compat).toEqual(PLATFORM_MODEL_COMPAT);
   });
 
-  // A platform that predates the variable: every recorded model would run bare.
   it("refuses to boot when a Pi provider comes without a word on the dialect", () => {
     const { MODEL_DIALECT: _absent, ...env } = containerModel({ aliased: false }).env;
     expect(() => parseRuntimeEnv(env)).toThrow(/MODEL_DIALECT: required with MODEL_PROVIDER/);

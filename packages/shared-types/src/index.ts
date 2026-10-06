@@ -936,9 +936,8 @@ export interface OrgModelInfo extends ModelMetadata {
    */
   pi_provider: string | null;
   /**
-   * The Pi dialect of this model's registry record, which a client hands its
-   * model builder with {@link pi_provider}. `null` for a model Pi keeps no
-   * record of and for model aliases (part of the stripped backing).
+   * The Pi dialect of this model's registry record, for a client building its
+   * own Pi model. `null` without a record and for model aliases.
    */
   pi_dialect: PiModelDialect | null;
   base_url: string | null;

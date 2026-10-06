@@ -100,26 +100,22 @@ describe("parseModelSwapEnv", () => {
     expect(parseModelSwapEnv(JSON.stringify(reoriginating))).toEqual(reoriginating);
   });
 
-  it("rejects a backing dialect that is not one", () => {
+  // `undefined`: the key is required, `null` being how "no record" is said.
+  it("rejects a backing whose dialect is missing or is not one", () => {
     const withDialect = (dialect: unknown) =>
       JSON.stringify({ ...wellFormed, backing: { ...wellFormed.backing, dialect } });
     for (const broken of [
+      undefined,
       "claude",
       { compat: {} },
       { name: "" },
       { name: "x", thinkingLevelMap: { high: 1 } },
       { name: "x", compat: [] },
     ]) {
-      expect(() => parseModelSwapEnv(withDialect(broken))).toThrow(/malformed "backing.dialect"/);
+      expect(() => parseModelSwapEnv(withDialect(broken))).toThrow(
+        /missing or malformed "backing.dialect"/,
+      );
     }
-  });
-
-  // A platform that predates the key: every backing would be built bare.
-  it("rejects a backing that does not say what its dialect is", () => {
-    const { dialect: _absent, ...silent } = wellFormed.backing;
-    expect(() => parseModelSwapEnv(JSON.stringify({ ...wellFormed, backing: silent }))).toThrow(
-      /missing "backing.dialect"/,
-    );
   });
 
   it("rejects a descriptor with no protocol fields (the pre-#1198 platform payload)", () => {

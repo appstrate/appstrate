@@ -60,10 +60,7 @@ interface RuntimeEnv {
    * behind the sidecar. Absent for an alias or gateway.
    */
   modelProvider?: string;
-  /**
-   * The model's Pi dialect (`MODEL_DIALECT`), as the platform read it off the
-   * registry. Absent for an alias and for a model Pi keeps no record of.
-   */
+  /** The model's Pi dialect (`MODEL_DIALECT`); absent for an alias or a model Pi keeps no record of. */
   modelDialect?: PiModelDialect;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<ModelInputModality>;
@@ -419,13 +416,9 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   if (source.MODEL_PROVIDER && !isPiProvider(source.MODEL_PROVIDER)) {
     issues.push(`MODEL_PROVIDER: "${source.MODEL_PROVIDER}" is not a Pi provider key`);
   }
-  // A platform naming a Pi provider always says what its registry records of
-  // the model, `null` included. One that predates the variable would otherwise
-  // have every recorded model run bare, with nothing saying why.
+  // Without it a model Pi records would run bare, with nothing saying why.
   if (source.MODEL_PROVIDER && !source.MODEL_DIALECT) {
-    issues.push(
-      "MODEL_DIALECT: required with MODEL_PROVIDER (sent by the platform, `null` allowed)",
-    );
+    issues.push("MODEL_DIALECT: required with MODEL_PROVIDER (`null` when Pi keeps no record)");
   }
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
