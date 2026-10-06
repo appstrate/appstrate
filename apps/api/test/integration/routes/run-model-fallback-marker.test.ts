@@ -24,7 +24,11 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { deleteOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
+import {
+  deleteOrgModel,
+  setDefaultModel,
+  updateOrgModel,
+} from "../../../src/services/org-models.ts";
 import { MODEL_FALLBACK_EVENT } from "../../../src/services/run-context-builder.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
@@ -92,20 +96,35 @@ describe("run launch — model-fallback marker in run_logs", () => {
     return { run: run!, rows };
   }
 
-  it("records ONE warn run log when the agent's pinned model was deleted", async () => {
-    await deleteOrgModel(ctx.orgId, pinnedModelId);
+  const fallbackMarker = () => ({
+    platform: true,
+    pinnedModelId,
+    model: DEFAULT_LABEL,
+    reason: "pinned_model_unavailable",
+  });
+
+  it("records ONE warn run log when the agent's pinned model is switched off", async () => {
+    await updateOrgModel(ctx.orgId, pinnedModelId, { enabled: false });
 
     const { run, rows } = await launch();
 
     expect(run.modelLabel).toBe(DEFAULT_LABEL);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.level).toBe("warn");
-    expect(rows[0]!.data).toEqual({
-      platform: true,
-      pinnedModelId,
-      model: DEFAULT_LABEL,
-      reason: "pinned_model_unavailable",
-    });
+    expect(rows[0]!.data).toEqual(fallbackMarker());
+  });
+
+  it("records the marker for a pin that names no model row", async () => {
+    // Deleting a model clears the settings that name it, so the dangling pin is
+    // written back by hand: the column is free text and nothing else guards it.
+    await deleteOrgModel(ctx.orgId, pinnedModelId);
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT, { modelId: pinnedModelId });
+
+    const { run, rows } = await launch();
+
+    expect(run.modelLabel).toBe(DEFAULT_LABEL);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data).toEqual(fallbackMarker());
   });
 
   it("writes no marker for a pin that resolves under another spelling of its id", async () => {

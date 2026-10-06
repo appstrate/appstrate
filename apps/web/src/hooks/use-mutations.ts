@@ -129,7 +129,7 @@ export function useRunLauncher(packageId: string) {
           setMissingErrors(null);
           onSuccess?.();
         },
-        // The mutation's own `onError` reports every failure; this picks up the 409.
+        // The mutation cache reports every failure; this picks up the 409.
         onError: (err) => {
           const errors = missingConnectionErrors(err);
           if (errors) setMissingErrors(errors);
