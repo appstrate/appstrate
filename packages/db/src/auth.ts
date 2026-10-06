@@ -1152,16 +1152,9 @@ function buildAuth(options: CreateAuthOptions) {
             if (_beforeSignupHook) {
               await _beforeSignupHook(user.email, signupHookCtx);
             }
-            // The realm is the single data
-            // patch returned to BA. The realm resolver falls back to
-            // "platform" when no OIDC module is loaded (OSS mode).
-            //
-            // Bootstrap-token redeem (#344) FORCES "platform": the redeem
-            // route forwards `c.req.raw.headers` to BA, and a stray
-            // `oidc_pending_client` cookie on that request would otherwise
-            // route the bootstrap owner into an end-user realm — wrong
-            // audience for an instance-owner row, and unrecoverable once
-            // committed. Bypass the resolver entirely on this path.
+            // No resolver (no OIDC module) means "platform". A bootstrap-token
+            // redeem is "platform" whatever the request carries: an
+            // instance-owner row in another realm is unrecoverable.
             const realm = bootstrapTokenBypass
               ? "platform"
               : _realmResolver
