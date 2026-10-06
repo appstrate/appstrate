@@ -92,7 +92,9 @@ export function ModelSelect({
         <Tabs
           value={tab}
           onValueChange={(value) => setTab(value as "models" | "configuration")}
-          className="flex max-h-[min(18rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
+          // Tall enough for the reasoning levels wrapped on two rows (a popover
+          // narrowed by a small viewport) without an inner scroll.
+          className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
         >
           <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
             <TabsTrigger value="models" className="h-6 px-2 text-xs">
