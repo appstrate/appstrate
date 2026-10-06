@@ -275,6 +275,12 @@ export interface SmtpOverride {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
+  /**
+   * Set when the transport belongs to a tenant (a space's own SMTP server):
+   * the realm of that tenant's accounts. An auth mail is a credential, so it
+   * leaves through such a transport only for a recipient of that realm.
+   */
+  tenantRealm?: string;
 }
 
 const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
@@ -485,6 +491,20 @@ async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * True when `email` may be written to by the tenant owning `tenantRealm`: an
+ * account of that realm, or an address with no account that the environment
+ * does not name.
+ */
+async function isTenantRecipient(email: string, tenantRealm: string): Promise<boolean> {
+  const [holder] = await db
+    .select({ realm: user.realm })
+    .from(user)
+    .where(eq(user.email, normalizeEmail(email)))
+    .limit(1);
+  return holder ? holder.realm === tenantRealm : !isOperatorNamedEmail(email);
+}
+
 /** Send an auth email through the tenant transport when one is active, else the instance one. */
 async function sendAuthMail(
   env: ReturnType<typeof getEnv>,
@@ -493,6 +513,15 @@ async function sendAuthMail(
   { subject, html }: RenderedEmail,
 ): Promise<void> {
   const override = getSmtpOverride();
+  if (override?.tenantRealm && !(await isTenantRecipient(to, override.tenantRealm))) {
+    logger.warn(
+      "auth: withheld an auth e-mail from a tenant transport, recipient not of its realm",
+      {
+        tenantRealm: override.tenantRealm,
+      },
+    );
+    return;
+  }
   const transport = override?.transport ?? smtpTransport;
   const from = override ? formatFrom(override) : env.SMTP_FROM;
   await transport.sendMail({ from, to, subject, html });

@@ -46,6 +46,8 @@ export interface ResolvedSmtpConfig {
   fromAddress: string;
   fromName: string | null;
   source: "per-space" | "instance";
+  /** Per-space only: the realm whose accounts this transport may write to. */
+  tenantRealm?: string;
 }
 
 interface UpsertSmtpConfigInput {
@@ -179,6 +181,7 @@ async function resolvePerAppSmtp(spaceId: string): Promise<ResolvedSmtpConfig | 
       fromAddress: row.fromAddress,
       fromName: row.fromName,
       source: "per-space",
+      tenantRealm: `end_user:${spaceId}`,
     };
   });
 }
