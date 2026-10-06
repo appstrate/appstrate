@@ -267,6 +267,30 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(await sessionEmail(account.cookie)).toBe(account.email);
     });
 
+    it("still verifies a named address that signs up for itself", async () => {
+      const admin = `admin-${crypto.randomUUID()}@example.test`;
+      const savedAdmins = process.env.AUTH_PLATFORM_ADMIN_EMAILS;
+      process.env.AUTH_PLATFORM_ADMIN_EMAILS = admin;
+      _resetCacheForTesting();
+      try {
+        const mails = await captureMails(async () => {
+          const res = await postAuth("/sign-up/email", {
+            email: admin,
+            password: PASSWORD,
+            name: "Admin",
+          });
+          expect(res.status).toBe(200);
+        });
+
+        expect(mails).toHaveLength(1);
+        expect(mails[0]!.to).toBe(admin);
+      } finally {
+        if (savedAdmins === undefined) delete process.env.AUTH_PLATFORM_ADMIN_EMAILS;
+        else process.env.AUTH_PLATFORM_ADMIN_EMAILS = savedAdmins;
+        _resetCacheForTesting();
+      }
+    });
+
     it("a link issued before the address was named returns to the settings page with the refusal", async () => {
       const account = await createTestUser({ emailVerified: true });
       const target = `owner-${crypto.randomUUID()}@example.test`;
