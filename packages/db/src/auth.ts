@@ -671,7 +671,7 @@ function buildAuth(options: CreateAuthOptions) {
   // provider's own guard throw `CLIENT_ID_AND_SECRET_REQUIRED` — the BA
   // error surfaced to the UI when a tenant hasn't configured creds).
   //
-  // `anySocialEnabled` still gates account-linking + trusted providers on
+  // `anySocialEnabled` still gates account-linking on
   // env-configured providers only: per-space social applies exclusively to
   // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
@@ -887,10 +887,8 @@ function buildAuth(options: CreateAuthOptions) {
     account: {
       accountLinking: {
         enabled: anySocialEnabled,
-        trustedProviders: [
-          ...(googleEnvEnabled ? ["google" as const] : []),
-          ...(githubEnvEnabled ? ["github" as const] : []),
-        ],
+        // No trusted provider: an identity is attached to an existing account
+        // only when its provider asserts the e-mail as verified.
         allowDifferentEmails: true,
       },
     },

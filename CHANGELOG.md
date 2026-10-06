@@ -490,6 +490,14 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **A Google or GitHub identity is attached to an existing account only
+  when the provider asserts its e-mail as verified.** Both providers were
+  listed as trusted, so signing in with one attached it to the account
+  holding the same address without reading the provider's verified flag.
+  No provider is trusted any more: an unverified identity is refused
+  (`account not linked` at sign-in, `unable_to_link_account` when linking
+  from the preferences). An identity the provider verifies links as
+  before.
 - **A space's own SMTP server carries auth e-mails only to that space's
   accounts.** The hosted sign-in pages of a space-level OAuth client send
   Better Auth's e-mails through the space's transport, whatever address is

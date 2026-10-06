@@ -176,12 +176,6 @@ magic-link paths are for an instance configured without a token.
   row with `email_verified = false` was created by the plain sign-up form
   with no proof of ownership — if it is not yours, delete it and create
   the account again with proof.
-- **Social sign-in links onto an existing account by address.** Google
-  and GitHub are trusted providers: signing in with one attaches it to
-  the existing account that has the same address, and that step does not
-  check whether the provider verified the address. The provider's
-  verified flag decides how a NEW account is created (including the
-  owner's, above), not linking.
 
 Idempotent: if the user already owns an org, the after-hook is a no-op.
 Slug collisions add a numeric suffix.
