@@ -73,6 +73,7 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
       MODEL_PROVIDER: "deepseek",
+      MODEL_DIALECT: '{"name":"DeepSeek","compat":{"thinkingFormat":"deepseek"}}',
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
       MODEL_CONTEXT_WINDOW: "200000",
@@ -88,6 +89,7 @@ describe("parseRuntimeEnv — happy path", () => {
     // On a proxied run this is the only thing left for Pi to recognise the
     // provider by — MODEL_BASE_URL points at the sidecar.
     expect(env.modelProvider).toBe("deepseek");
+    expect(env.modelDialect).toEqual({ name: "DeepSeek", compat: { thinkingFormat: "deepseek" } });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
     expect(env.modelContextWindow).toBe(200_000);
@@ -160,7 +162,7 @@ describe("parseRuntimeEnv — non-fatal warnings", () => {
       ...VALID,
       MODEL_API: "openai-responses",
       MODEL_PROVIDER: "openai",
-      // Pi's record of this model carries the same tier: the base rate still wins.
+      MODEL_DIALECT: "null",
       MODEL_ID: "gpt-5.5",
       MODEL_COST: JSON.stringify({ ...base, tiers }),
     });
@@ -194,6 +196,7 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
         ...VALID,
         MODEL_API: "openai-codex-responses",
         MODEL_PROVIDER: "openai-codex",
+        MODEL_DIALECT: "null",
       }).modelProvider,
     ).toBe("openai-codex");
   });

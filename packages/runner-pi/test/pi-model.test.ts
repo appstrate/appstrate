@@ -10,6 +10,7 @@ import {
   getPiModel,
   isPiProvider,
   listPiModels,
+  piModelDialect,
   piTokenCostUsd,
   usableRecordMaxTokens,
 } from "../src/pi-model.ts";
@@ -29,7 +30,7 @@ describe("buildPiModel", () => {
 
     const model = buildPiModel({
       id: "preset_fable",
-      registryModelId: "claude-fable-5",
+      dialect: piModelDialect(native),
       apiShape: "anthropic-messages",
       piProvider: "anthropic",
       baseUrl: "https://appstrate.test/api/llm-proxy/anthropic-messages",
@@ -41,14 +42,14 @@ describe("buildPiModel", () => {
   // A record's Anthropic cache markers make OpenRouter bill cache writes the
   // metering prices at $0; the proxied model keeps pi-ai's own detection.
   it("never sends a record's cache-control format", async () => {
+    const native = nativeModel("openrouter", "~anthropic/claude-sonnet-latest")!;
     const spec = {
       id: "preset_or",
-      registryModelId: "~anthropic/claude-sonnet-latest",
+      dialect: piModelDialect(native),
       apiShape: "openai-completions",
       piProvider: "openrouter",
       baseUrl: "https://appstrate.test/api/llm-proxy/openai-completions/v1",
     };
-    const native = nativeModel("openrouter", spec.registryModelId)!;
     expect(native.compat).toMatchObject({ cacheControlFormat: "anthropic" });
     expect(JSON.stringify(await capturePayload({ ...native, id: spec.id }))).toContain(
       "cache_control",
@@ -59,14 +60,20 @@ describe("buildPiModel", () => {
     expect(JSON.stringify(await capturePayload(model))).not.toContain("cache_control");
   });
 
-  it("takes everything but the wire fields from the record when nothing is overridden", () => {
+  it("rebuilds a record from its dialect and its resolved values, the dialect off the wire", () => {
     const record = getPiModel("openai", "gpt-5.5", "openai-responses")!;
     const model = buildPiModel({
       id: "preset_gpt",
-      registryModelId: "gpt-5.5",
+      // As a container, a sidecar or a CLI receives it: through JSON.
+      dialect: JSON.parse(JSON.stringify(piModelDialect(record))),
       apiShape: "openai-responses",
       piProvider: "openai",
       baseUrl: PROXY,
+      reasoning: record.reasoning,
+      input: record.input,
+      cost: record.cost,
+      contextWindow: record.contextWindow,
+      maxTokens: record.maxTokens,
     });
     expect(model).toEqual({
       id: "preset_gpt",
@@ -89,7 +96,7 @@ describe("buildPiModel", () => {
     const cost = { input: 1, output: 2 };
     const model = buildPiModel({
       id: "preset_gpt",
-      registryModelId: "gpt-5.5",
+      dialect: piModelDialect(getPiModel("openai", "gpt-5.5", "openai-responses")!),
       apiShape: "openai-responses",
       piProvider: "openai",
       baseUrl: PROXY,
@@ -109,20 +116,14 @@ describe("buildPiModel", () => {
     expect(model.cost.tiers).toBeUndefined();
   });
 
-  // A gateway names no Pi provider: the api shape's generic key, no record.
-  it("looks nothing up without a Pi provider", () => {
-    const model = buildPiModel({
-      id: "claude-fable-5",
-      registryModelId: "claude-fable-5",
-      apiShape: "anthropic-messages",
-      piProvider: null,
-      baseUrl: "https://gateway.example",
-    });
-    expect(model).toEqual({
+  // The builder reads no registry: an id Pi records, under its own provider,
+  // gets nothing of that record unless the platform hands its dialect over.
+  it("looks nothing up: without a dialect a recorded id is a bare model", () => {
+    expect(getPiModel("anthropic", "claude-fable-5", "anthropic-messages")).toBeDefined();
+    const bare = {
       id: "claude-fable-5",
       name: "claude-fable-5",
       api: "anthropic-messages",
-      provider: deriveProviderFromApi("anthropic-messages"),
       baseUrl: "https://gateway.example",
       reasoning: false,
       input: ["text"],
@@ -130,6 +131,20 @@ describe("buildPiModel", () => {
       compat: { ...PLATFORM_MODEL_COMPAT },
       contextWindow: DEFAULT_CONTEXT_WINDOW,
       maxTokens: DEFAULT_MAX_TOKENS,
+    };
+    const spec = {
+      id: "claude-fable-5",
+      apiShape: "anthropic-messages",
+      baseUrl: "https://gateway.example",
+    };
+    expect(buildPiModel({ ...spec, piProvider: "anthropic" })).toEqual({
+      ...bare,
+      provider: "anthropic",
+    } as never);
+    // A gateway names no Pi provider: the api shape's generic key.
+    expect(buildPiModel({ ...spec, piProvider: null })).toEqual({
+      ...bare,
+      provider: deriveProviderFromApi("anthropic-messages"),
     } as never);
   });
 
@@ -143,26 +158,6 @@ describe("buildPiModel", () => {
       contextWindow: 32_000,
     });
     expect(model).toMatchObject({ contextWindow: 32_000, maxTokens: DEFAULT_MAX_TOKENS });
-  });
-
-  it("does not take a record's output cap that fills its whole window", () => {
-    const record = getPiModel("mistral", "mistral-medium-2604", "mistral-conversations")!;
-    expect(record.maxTokens).toBe(record.contextWindow);
-    const spec = {
-      id: "preset_mistral",
-      registryModelId: record.id,
-      apiShape: "mistral-conversations",
-      piProvider: "mistral",
-      baseUrl: "https://api.mistral.ai",
-    };
-    expect(buildPiModel(spec)).toMatchObject({
-      contextWindow: record.contextWindow,
-      maxTokens: DEFAULT_MAX_TOKENS,
-    });
-    // An explicit org value still wins, whatever it is.
-    expect(buildPiModel({ ...spec, maxTokens: record.contextWindow }).maxTokens).toBe(
-      record.contextWindow,
-    );
   });
 });
 

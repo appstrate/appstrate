@@ -1683,6 +1683,7 @@ export const schemas = {
       "providerId",
       "provider_name",
       "pi_provider",
+      "pi_dialect",
       "base_url",
       "modelId",
       "generation",
@@ -1718,7 +1719,13 @@ export const schemas = {
       pi_provider: {
         type: ["string", "null"],
         description:
-          "Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed.",
+          "Key of the Pi model-registry provider this model is served through (e.g. `moonshotai` for `moonshot`): the provider a client builds its Pi model under. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed.",
+      },
+      pi_dialect: {
+        type: ["object", "null"],
+        description:
+          "What the Pi model registry records about this model's request dialect, for a client that builds its own Pi model. Opaque: Pi's own vocabulary, handed to the Pi SDK as is. `null` for a model the registry does not record and for managed models — binding not exposed.",
+        additionalProperties: true,
       },
       base_url: {
         type: ["string", "null"],

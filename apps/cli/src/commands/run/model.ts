@@ -26,6 +26,7 @@ import { deriveProviderFromApi, llmProxyBaseUrl, PROVIDER_BY_API } from "@appstr
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { buildPiModel } from "@appstrate/runner-pi/pi-model";
 import type { ModelInputModality } from "@appstrate/core/module";
+import { isPiModelDialect } from "@appstrate/core/sidecar-types";
 import {
   isProxySupported,
   listModelPresets,
@@ -192,12 +193,20 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
   if (isAnthropic) {
     headers["Authorization"] = `Bearer ${inputs.bearerToken}`;
   }
+  // null = a model Pi keeps no record of. Built without the dialect of a
+  // record it has, a model sends requests the vendor refuses.
+  if (preset.pi_dialect !== null && !isPiModelDialect(preset.pi_dialect)) {
+    throw new ModelResolutionError(
+      `The instance at ${inputs.instance} does not say what dialect preset "${preset.id}" speaks (\`pi_dialect\`).`,
+      "Run the CLI version that matches the instance.",
+    );
+  }
   const model = buildPiModel({
     id: preset.id,
-    registryModelId: preset.modelId,
+    dialect: preset.pi_dialect,
     apiShape: preset.apiShape,
-    // The platform names the Pi record (null for a gateway: no record); its
-    // limits apply unless the preset carries its own.
+    // The platform names the Pi provider and its record's dialect (null for a
+    // gateway: no record) and resolves the limits.
     piProvider: preset.pi_provider,
     baseUrl,
     reasoning: preset.reasoning,

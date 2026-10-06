@@ -3,7 +3,7 @@
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { ConnectionResolutionSource } from "@appstrate/core/integration";
@@ -931,10 +931,15 @@ export interface OrgModelInfo extends ModelMetadata {
   provider_name: string | null;
   /**
    * Pi builtin provider key of {@link providerId}'s models (e.g. `moonshotai`
-   * for `moonshot`) — what a client builds the Pi model record from. `null`
+   * for `moonshot`) — the provider a client builds its Pi model under. `null`
    * for a gateway and for model aliases (part of the stripped backing).
    */
   pi_provider: string | null;
+  /**
+   * The Pi dialect of this model's registry record, for a client building its
+   * own Pi model. `null` without a record and for model aliases.
+   */
+  pi_dialect: PiModelDialect | null;
   base_url: string | null;
   modelId: string | null;
   enabled: boolean;

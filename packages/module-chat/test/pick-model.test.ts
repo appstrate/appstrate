@@ -20,6 +20,7 @@ function model(id: string, over: Partial<OrgModel> = {}): OrgModel {
     modelId: `upstream-${id}`,
     apiShape: "openai-completions",
     pi_provider: null,
+    pi_dialect: null,
     ...over,
   };
 }

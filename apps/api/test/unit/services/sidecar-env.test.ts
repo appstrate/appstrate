@@ -81,7 +81,7 @@ describe("applySpecToSidecarEnv", () => {
       real: "deepseek-chat",
       clientApiShape: "pi-messages" as const,
       backingApiShape: "openai-completions" as const,
-      backing: { providerId: "deepseek", input: ["text"] },
+      backing: { providerId: "deepseek", dialect: null, input: ["text"] },
     };
     const spec: SidecarLaunchSpec = {
       runToken: "rt_test",

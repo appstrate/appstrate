@@ -26,7 +26,11 @@ import {
 } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import { listCatalogModels, lookupCatalogModel } from "../../../src/services/model-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogDialect,
+  lookupCatalogModel,
+} from "../../../src/services/model-catalog.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -200,7 +204,7 @@ describe("Models API", () => {
       expect(row.credentialId).toBe(credentialId);
     });
 
-    it("exposes `pi_provider` — the Pi key of the credential's provider, null for a gateway, withheld for an alias", async () => {
+    it("exposes `pi_provider` and `pi_dialect` — the Pi key and the record's dialect, null for a gateway, withheld for an alias", async () => {
       const [kimi, kimiAlias] = listCatalogModels(getModelProvider("moonshot")!).map((m) => m.id);
       const moonshot = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
       const named = await seedOrgModel({
@@ -231,6 +235,13 @@ describe("Models API", () => {
       expect(projected(named.id).pi_provider).toBe("moonshotai");
       expect(projected(gateway.id).pi_provider).toBeNull();
       expect(projected(alias.id).pi_provider).toBeNull();
+      // The dialect a client builds its Pi model from is the registry record's.
+      const dialectOf = (id: string) =>
+        JSON.parse(JSON.stringify(lookupCatalogDialect(getModelProvider("moonshot")!, id)));
+      expect(dialectOf(kimi!)).toHaveProperty("name");
+      expect(projected(named.id).pi_dialect).toEqual(dialectOf(kimi!));
+      expect(projected(gateway.id).pi_dialect).toBeNull();
+      expect(projected(alias.id).pi_dialect).toBeNull();
 
       const loopback = mintLoopbackToken({
         userId: ctx.user.id,
@@ -244,6 +255,7 @@ describe("Models API", () => {
         "X-Org-Id": ctx.orgId,
       });
       expect(firstParty(alias.id).pi_provider).toBe("moonshotai");
+      expect(firstParty(alias.id).pi_dialect).toEqual(dialectOf(kimiAlias!));
     });
   });
 

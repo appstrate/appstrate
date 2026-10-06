@@ -21,6 +21,7 @@ const base: OrgModelInfo = {
   providerId: "openai-compatible",
   provider_name: "OpenAI-compatible (custom)",
   pi_provider: null,
+  pi_dialect: null,
   base_url: "https://api.deepseek.com/v1",
   modelId: "deepseek-chat",
   generation: {
@@ -192,10 +193,17 @@ describe("projectAliasedModel", () => {
     expect(out.base_url).toBeNull();
   });
 
-  it("withholds the backing's Pi provider key from an alias", () => {
-    const out = projectAliasedModel({ ...base, aliased: true, pi_provider: "moonshotai" });
+  it("withholds the backing's Pi provider key and dialect from an alias", () => {
+    const out = projectAliasedModel({
+      ...base,
+      aliased: true,
+      pi_provider: "moonshotai",
+      pi_dialect: { name: "Kimi K2.6", compat: { thinkingFormat: "moonshot" } },
+    });
     expect(out.pi_provider).toBeNull();
-    expect(JSON.stringify(out)).not.toContain("moonshotai");
+    expect(out.pi_dialect).toBeNull();
+    expect(JSON.stringify(out)).not.toContain("moonshot");
+    expect(JSON.stringify(out)).not.toContain("Kimi");
   });
 
   it("preserves a declared iconUrl on an aliased model", () => {

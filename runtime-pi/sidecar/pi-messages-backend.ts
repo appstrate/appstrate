@@ -331,13 +331,13 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
   }
   return buildPiModel({
     id: swap.real,
-    registryModelId: swap.real,
+    dialect: backing.dialect,
     apiShape: swap.backingApiShape,
     piProvider: backing.providerId,
     baseUrl: upstream.modelBaseUrl,
     reasoning: backing.reasoning,
     input: narrowInputModalities(backing.input),
-    // Explicit, so the record's card never applies: the disclosure control above.
+    // Zero, never a rate card: the disclosure control above.
     cost: ZERO_MODEL_COST,
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
     // sizes pi-ai's clamp; absent, `buildPiModel` sizes them as for the container.

@@ -5992,8 +5992,12 @@ export interface components {
             providerId: string | null;
             /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
             provider_name: string | null;
-            /** @description Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed. */
+            /** @description Key of the Pi model-registry provider this model is served through (e.g. `moonshotai` for `moonshot`): the provider a client builds its Pi model under. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed. */
             pi_provider: string | null;
+            /** @description What the Pi model registry records about this model's request dialect, for a client that builds its own Pi model. Opaque: Pi's own vocabulary, handed to the Pi SDK as is. `null` for a model the registry does not record and for managed models — binding not exposed. */
+            pi_dialect: {
+                [key: string]: unknown;
+            } | null;
             /** @description Provider endpoint. `null` for managed models — binding not exposed. */
             base_url: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
@@ -15642,6 +15646,9 @@ export interface operations {
                      *           "providerId": "openai",
                      *           "provider_name": "OpenAI",
                      *           "pi_provider": "openai",
+                     *           "pi_dialect": {
+                     *             "name": "GPT-4o"
+                     *           },
                      *           "apiShape": "openai-responses",
                      *           "base_url": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",

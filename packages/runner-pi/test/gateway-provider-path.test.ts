@@ -42,7 +42,6 @@ async function requestPaths(apiShape: keyof typeof LLM_PROXY_ROUTES): Promise<st
     const runner = new PiRunner({
       model: buildPiModel({
         id: "gateway-model",
-        registryModelId: "gateway-model",
         apiShape,
         piProvider: null,
         baseUrl: `${server.url.origin}${route.baseSuffix}`,

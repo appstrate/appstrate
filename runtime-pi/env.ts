@@ -21,7 +21,12 @@ import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
 import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { buildPiModel, isPiProvider } from "@appstrate/runner-pi/pi-model";
 import type { Api, Model } from "./pi-sdk.ts";
-import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
+import {
+  isPiModelDialect,
+  MODEL_API_SHAPES,
+  SIDECAR_AUTH_HEADER,
+  type PiModelDialect,
+} from "@appstrate/core/sidecar-types";
 import {
   modelReasoningLevelSchema,
   type ModelReasoningLevel,
@@ -51,10 +56,12 @@ interface RuntimeEnv {
   modelTemperature?: number;
   modelReasoningLevel?: ModelReasoningLevel;
   /**
-   * Pi provider key of the real upstream (`MODEL_PROVIDER`): selects Pi's registry
-   * record and names the provider behind the sidecar. Absent for an alias or gateway.
+   * Pi provider key of the real upstream (`MODEL_PROVIDER`): names the provider
+   * behind the sidecar. Absent for an alias or gateway.
    */
   modelProvider?: string;
+  /** The model's Pi dialect (`MODEL_DIALECT`); absent for an alias or a model Pi keeps no record of. */
+  modelDialect?: PiModelDialect;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<ModelInputModality>;
   /**
@@ -204,6 +211,26 @@ function parseModelInput(
       issues.push(`MODEL_INPUT: invalid modality "${String(v)}" (allowed: ${ALLOWED_MODALITIES})`);
   }
   return out.length > 0 ? out : ["text"];
+}
+
+/** `null` is the platform saying Pi keeps no record of the model. */
+function parseModelDialect(raw: string | undefined, issues: string[]): PiModelDialect | undefined {
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    issues.push(`MODEL_DIALECT: malformed JSON — ${getErrorMessage(err)}`);
+    return undefined;
+  }
+  if (parsed === null) return undefined;
+  if (!isPiModelDialect(parsed)) {
+    issues.push(
+      "MODEL_DIALECT: must be null or a Pi dialect (`name`, optional `thinkingLevelMap` and `compat`)",
+    );
+    return undefined;
+  }
+  return parsed;
 }
 
 function parseModelCost(
@@ -356,6 +383,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   const modelInput = parseModelInput(source.MODEL_INPUT, issues);
   const modelCost = parseModelCost(source.MODEL_COST, issues, warnings);
+  const modelDialect = parseModelDialect(source.MODEL_DIALECT, issues);
   // Same 0-means-absent convention as AGENT_TIMEOUT_SECONDS below.
   const modelContextWindow = parsePositiveInt(
     "MODEL_CONTEXT_WINDOW",
@@ -387,6 +415,10 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   // boot, then die on its first turn with `Unknown provider`.
   if (source.MODEL_PROVIDER && !isPiProvider(source.MODEL_PROVIDER)) {
     issues.push(`MODEL_PROVIDER: "${source.MODEL_PROVIDER}" is not a Pi provider key`);
+  }
+  // Without it a model Pi records would run bare, with nothing saying why.
+  if (source.MODEL_PROVIDER && !source.MODEL_DIALECT) {
+    issues.push("MODEL_DIALECT: required with MODEL_PROVIDER (`null` when Pi keeps no record)");
   }
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
@@ -424,6 +456,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
+    ...(modelDialect ? { modelDialect } : {}),
     modelInput,
     ...(modelCost !== undefined ? { modelCost } : {}),
     ...(modelContextWindow > 0 ? { modelContextWindow } : {}),
@@ -442,13 +475,13 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 }
 
 /**
- * Build the Pi SDK `Model` record the session is driven with: Pi's record for
- * `MODEL_PROVIDER` + `MODEL_ID`, under the platform's resolved values.
+ * Build the Pi SDK `Model` record the session is driven with, from the values
+ * and the dialect the platform resolved.
  */
 export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
   return buildPiModel({
     id: env.modelId,
-    registryModelId: env.modelId,
+    dialect: env.modelDialect,
     apiShape: env.modelApi,
     // An aliased container is given no MODEL_PROVIDER and must derive none: the
     // api-shape fallback yields Appstrate's own key, naming no vendor.
@@ -456,7 +489,7 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     baseUrl: env.modelBaseUrl,
     reasoning: env.modelReasoning,
     input: env.modelInput,
-    // Absent: the runner's `unpriced` flag keeps the record's card unreported.
+    // Absent: zeros, which the runner's `unpriced` flag keeps unreported.
     cost: env.modelCost,
     contextWindow: env.modelContextWindow,
     maxTokens: env.modelMaxTokens,

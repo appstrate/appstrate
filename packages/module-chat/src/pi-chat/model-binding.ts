@@ -103,8 +103,8 @@ export function createPiProxyModelBinding(args: {
     // llm-proxy resolves this preset id and replaces it with the real upstream
     // model. Passing modelId here would bypass aliasing and usage attribution.
     id: args.model.id,
-    // The loopback listing is unprojected: an alias carries its backing's id.
-    registryModelId: args.model.modelId,
+    // The loopback listing is unprojected: an alias carries its backing's dialect.
+    dialect: args.model.pi_dialect,
     apiShape: args.model.apiShape,
     piProvider: args.model.pi_provider,
     baseUrl,
@@ -129,13 +129,13 @@ export function createPiProxyModelBinding(args: {
 
 export function createPiOAuthModelBinding(
   model: SubscriptionChatModel,
-  piProvider: string | null,
+  listed: Pick<OrgModel, "pi_provider" | "pi_dialect">,
 ): PiOAuthModelBinding {
   const piModel = buildPiModel({
     id: model.modelId,
-    registryModelId: model.modelId,
+    dialect: listed.pi_dialect,
     apiShape: model.apiShape,
-    piProvider,
+    piProvider: listed.pi_provider,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
     input: model.input,
@@ -161,7 +161,7 @@ export function resolvePiChatModelBinding(args: {
 }): PiChatModelBindingResolution {
   if (args.subscription.subscription) {
     if ("needsReconnection" in args.subscription) return { status: "needs-reconnection" };
-    const binding = createPiOAuthModelBinding(args.subscription.model, args.model.pi_provider);
+    const binding = createPiOAuthModelBinding(args.subscription.model, args.model);
     return { status: "ready", binding };
   }
   const binding = createPiProxyModelBinding(args);

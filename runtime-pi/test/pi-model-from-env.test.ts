@@ -5,16 +5,21 @@ import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
 
-function containerModel(aliased: boolean) {
+const DIALECT = { name: "DeepSeek V4 Flash", compat: { thinkingFormat: "deepseek" } };
+
+function containerModel(opts: { aliased: boolean; dialect?: typeof DIALECT }) {
   const env = buildRuntimePiEnv({
     model: {
       api: "openai-completions",
+      // An id the container's own Pi records under this provider.
       modelId: "deepseek-v4-flash",
       piProvider: "opencode-go",
+      dialect: opts.dialect,
       input: ["text"],
       contextWindow: 128_000,
       maxTokens: 8_192,
-      aliased,
+      reasoning: true,
+      aliased: opts.aliased,
     },
     agentPrompt: "You are a helpful agent.",
     runId: "run_1",
@@ -32,11 +37,12 @@ function containerModel(aliased: boolean) {
   return { env, model: buildPiModelFromEnv(parseRuntimeEnv(env)) };
 }
 
-describe("buildPiModelFromEnv — Pi registry record", () => {
-  it("takes the dialect from Pi's record and keeps MODEL_ID on the wire", () => {
-    const { env, model } = containerModel(false);
+describe("buildPiModelFromEnv — the platform's dialect", () => {
+  it("takes the dialect the platform sent and keeps MODEL_ID on the wire", () => {
+    const { env, model } = containerModel({ aliased: false, dialect: DIALECT });
     expect(model).toMatchObject({
       id: "deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
       provider: "opencode-go",
       reasoning: true,
       compat: { thinkingFormat: "deepseek" },
@@ -44,11 +50,36 @@ describe("buildPiModelFromEnv — Pi registry record", () => {
     expect(env.MODEL_ID).toBe("deepseek-v4-flash");
   });
 
+  it("reads no registry of its own: a recorded id the platform sends no dialect for gets none", () => {
+    const { env, model } = containerModel({ aliased: false });
+    expect(env.MODEL_PROVIDER).toBe("opencode-go");
+    expect(env.MODEL_DIALECT).toBe("null");
+    expect(model.name).toBe("deepseek-v4-flash");
+    expect(model.compat).toEqual(PLATFORM_MODEL_COMPAT);
+  });
+
+  it("refuses to boot when a Pi provider comes without a word on the dialect", () => {
+    const { MODEL_DIALECT: _absent, ...env } = containerModel({ aliased: false }).env;
+    expect(() => parseRuntimeEnv(env)).toThrow(/MODEL_DIALECT: required with MODEL_PROVIDER/);
+  });
+
   it("learns nothing about an alias's backing, even when the alias reads like a model", () => {
-    const { env, model } = containerModel(true);
+    const { env, model } = containerModel({ aliased: true, dialect: DIALECT });
     expect(env.MODEL_PROVIDER).toBeUndefined();
+    expect(env).not.toHaveProperty("MODEL_DIALECT");
     expect(model.provider).toBe("appstrate");
     expect(model.compat).toEqual(PLATFORM_MODEL_COMPAT);
-    expect(model.reasoning).toBe(false);
+  });
+
+  it("refuses to boot on a dialect that is not one", () => {
+    const { env } = containerModel({ aliased: false, dialect: DIALECT });
+    for (const broken of [
+      '{"compat":{}}',
+      '{"name":"x","thinkingLevelMap":{"high":1}}',
+      "[]",
+      "{",
+    ]) {
+      expect(() => parseRuntimeEnv({ ...env, MODEL_DIALECT: broken })).toThrow(/MODEL_DIALECT/);
+    }
   });
 });
