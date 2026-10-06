@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
-import { createVersionAndUpload, finalizeDraftPublication } from "./package-versions.ts";
+import {
+  createVersionAndUpload,
+  finalizeDraftPublication,
+  getVersionForDownload,
+  replaceVersionContent,
+} from "./package-versions.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { createPackageDraft, mutatePackageDraftFiles } from "./package-files.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
@@ -30,6 +36,8 @@ export async function postInstallPackage(params: {
   lockVersion?: number;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
+  /** A forced import: an existing version with different bytes is replaced by `zipBuffer`. */
+  replaceExistingVersion?: boolean;
 }): Promise<void> {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
@@ -95,12 +103,21 @@ export async function postInstallPackage(params: {
     zipBuffer,
     manifest,
   });
-  if (published?.outcome === "created") {
-    await finalizeDraftPublication({
-      packageId,
-      orgId,
-      lockVersion: draft.lockVersion,
-      versionId: published.id,
-    });
+  if (!published) return;
+  if (published.outcome === "exists") {
+    // A concurrent publish can land after the importer's own check: only the
+    // stored row says whether the draft matches this version.
+    const stored = await getVersionForDownload(packageId, version);
+    if (stored?.integrity !== computeIntegrity(new Uint8Array(zipBuffer))) {
+      if (!params.replaceExistingVersion) return;
+      await replaceVersionContent({ packageId, version, zipBuffer, manifest });
+    }
   }
+  // The draft holds what that version holds. A non-latest version is left alone by the callee.
+  await finalizeDraftPublication({
+    packageId,
+    orgId,
+    lockVersion: draft.lockVersion,
+    versionId: published.id,
+  });
 }

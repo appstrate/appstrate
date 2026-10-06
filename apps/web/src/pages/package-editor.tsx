@@ -24,10 +24,13 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { JsonEditor } from "../components/json-editor";
 import { PackageFilesEditor } from "../components/package-files/package-files-editor";
 import { SourceSection } from "../components/integration-editor/source-section";
+import { getSource } from "../components/integration-editor/utils";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
 import { NoAccessState } from "../components/route-gate";
+import { ApiError } from "../api/errors";
+import { isQueryInFlight } from "../lib/query-state";
 import { EditorShell } from "../components/editor-shell";
 
 import { newPackageContent } from "../lib/package-file-drafts";
@@ -502,6 +505,10 @@ function IntegrationEditorInner({
       if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
+      const source = getSource(s.manifest);
+      if (source.kind === "remote" && !URL.canParse(source.remoteUrl)) {
+        return { error: t("integrationEditor.source.errorRemoteUrl"), tab: "source" };
+      }
       return null;
     },
   });
@@ -595,7 +602,6 @@ function IntegrationEditorInner({
 export function PackageEditorPage({ type }: { type: PackageType }) {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentOrg } = useOrg();
   const isEdit = !!scope;
@@ -609,7 +615,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // The detail read gates itself on the permission set, and a disabled query is
   // not loading: without `ready` a hard reload would redirect before it lands.
   const { ready } = usePermissions();
-  const isLoading = !ready || (type === "agent" ? agentQuery.isLoading : pkgQuery.isLoading);
+  const isLoading = !ready || isQueryInFlight(type === "agent" ? agentQuery : pkgQuery);
   const detail = type === "agent" ? agentQuery.data : pkgQuery.data;
 
   if (isEdit && isLoading) {
@@ -621,6 +627,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   }
 
   if (isEdit && !detail) {
+    // A package this caller reads but may not author answers 403 to its draft:
+    // the same refusal as the `home_writable` verdict below, so the same page.
+    const loadError = type === "agent" ? agentQuery.error : pkgQuery.error;
+    if (loadError instanceof ApiError && loadError.status === 403) return <NoAccessState />;
     return <Navigate to={packageListPath(type)} replace />;
   }
 
@@ -629,16 +639,10 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // verdict is read off the loaded detail. A route-level `<type>:write` gate
   // sent a builder who legitimately edits their own package — shown "Edit" from
   // the same `home_writable` — to a no-access page whenever they were browsing
-  // from a space where they only read.
+  // from a space where they only read. A system package is writable by nobody,
+  // so it lands here too.
   if (isEdit && detail && !detail.home_writable) {
     return <NoAccessState />;
-  }
-
-  // Only system packages are read-only. Org-owned packages are editable regardless of their
-  // scope name (registry integrity checks happen at publish time, not local edit).
-  if (isEdit && detail && (detail as { source?: string }).source === "system") {
-    navigate(packageDetailPath(type, packageId!), { replace: true });
-    return null;
   }
 
   // Agent editor

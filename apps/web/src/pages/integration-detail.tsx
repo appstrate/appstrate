@@ -1740,12 +1740,7 @@ export function IntegrationDetailPage() {
     setActive.mutate(
       { spaceId: currentSpaceId, packageId, active: next },
       {
-        onSuccess: () => {
-          toast.success(
-            t(next ? "integrations.activate.success" : "integrations.deactivate.success"),
-          );
-          onSuccess?.();
-        },
+        onSuccess,
         onError: () =>
           toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
       },
@@ -1812,6 +1807,12 @@ export function IntegrationDetailPage() {
           </>
         }
       />
+
+      {isBuiltIn && (
+        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400">
+          {t("ownership.readOnly", { ns: "agents" })}
+        </div>
+      )}
 
       <Tabs
         value={tab}

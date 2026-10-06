@@ -96,18 +96,34 @@ export async function toApiError(response: Response): Promise<Error> {
     .json()
     .catch(() => ({ detail: response.statusText }));
   if (body.code) {
+    const {
+      type: _type,
+      title: _title,
+      status: _status,
+      detail,
+      instance: _instance,
+      code,
+      request_id,
+      param,
+      retry_after: _retryAfter,
+      errors,
+      ...extensions
+    } = body;
     return new ApiError(
-      body.code,
-      body.detail || `API Error: ${response.status}`,
+      code,
+      detail || `API Error: ${response.status}`,
       response.status,
-      // `ApiError.details` is intentionally an open record: the spec models
-      // `errors` as a typed array, but runtime problem bodies are polymorphic
-      // by `code` (validation → array of field errors; conflict codes →
-      // code-specific object), so consumers narrow per `code`. The cast
-      // bridges the spec's array type to that open shape.
-      body.errors as unknown as Record<string, unknown> | undefined,
-      body.request_id,
-      body.param,
+      // `ApiError.details` is an open record, polymorphic by `code`, so
+      // consumers narrow per `code`: a validation problem carries its `errors`
+      // array (the cast bridges the spec's array type), any other problem its
+      // RFC 9457 §3.2 extension members — the code-specific half the server
+      // writes beside the standard fields (`member_count`, `active_version`).
+      // `errors` wins when a problem carries both: it is the typed standard
+      // field, and its consumers index it as an array.
+      (errors as unknown as Record<string, unknown> | undefined) ??
+        (Object.keys(extensions).length > 0 ? extensions : undefined),
+      request_id,
+      param,
     );
   }
   return new Error(body.detail || `API Error: ${response.status}`);

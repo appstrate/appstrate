@@ -24,13 +24,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
-    packageId: string;
-    active_version: string | null;
+    activeVersion: string | null;
   } | null>(null);
-  const [confirmIntegrity, setConfirmIntegrity] = useState<{
-    packageId: string;
-    version: string;
-  } | null>(null);
+  const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const importPackage = useImportPackage();
   const importGithub = useImportFromGithub();
@@ -112,18 +108,17 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
             resetAndClose();
           },
           onError: (err) => {
-            if (err instanceof ApiError && err.code === "draft_overwrite" && err.details) {
+            if (err instanceof ApiError && err.code === "draft_overwrite") {
               setConfirmOverwrite({
-                packageId: err.details.packageId as string,
-                active_version: (err.details.active_version as string) ?? null,
+                activeVersion: (err.details?.active_version as string | null) ?? null,
               });
+              // The same forced import also replaces a published version: say both.
+              if (err.details?.version)
+                setConfirmIntegrity({ version: err.details.version as string });
               return;
             }
-            if (err instanceof ApiError && err.code === "integrity_mismatch" && err.details) {
-              setConfirmIntegrity({
-                packageId: err.details.packageId as string,
-                version: err.details.version as string,
-              });
+            if (err instanceof ApiError && err.code === "integrity_mismatch") {
+              setConfirmIntegrity({ version: err.details?.version as string });
               return;
             }
             toast.error(i18n.t("error.prefix", { message: err.message }));
@@ -248,7 +243,9 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       {errorMessage && <p className="text-destructive mt-3 text-sm">{errorMessage}</p>}
       {confirmOverwrite && (
         <p className="text-destructive mt-3 text-sm">
-          {t("import.confirmOverwrite", { active_version: confirmOverwrite.active_version ?? "?" })}
+          {confirmOverwrite.activeVersion
+            ? t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion })
+            : t("import.confirmOverwriteNoVersion")}
         </p>
       )}
       {confirmIntegrity && (

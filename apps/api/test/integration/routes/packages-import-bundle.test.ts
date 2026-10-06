@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -26,6 +26,7 @@ import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
+import { postInstallPackage } from "../../../src/services/post-install-package.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import {
   _setRunLimitsForTesting,
@@ -631,6 +632,88 @@ describe("POST /api/packages/import-bundle — import", () => {
       .from(auditEvents)
       .where(eq(auditEvents.action, "package.version_created"));
     expect(auditRows).toHaveLength(3);
+  });
+
+  it("leaves the draft archived after importing the same bundle twice", async () => {
+    const sourceCtx = await createTestContext({ orgSlug: "srctwice" });
+    const { bytes } = await seedAndExportBundle({
+      ctx: sourceCtx,
+      rootId: "@srctwice/a",
+      skillA: "@srctwice/b",
+      skillB: "@srctwice/c",
+    });
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "desttwice" });
+
+    for (let i = 0; i < 2; i++) {
+      const form = new FormData();
+      form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+      const res = await app.request("/api/packages/import-bundle", {
+        method: "POST",
+        body: form,
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(201);
+    }
+
+    const detail = await app.request("/api/packages/skills/@srctwice/c", {
+      headers: authHeaders(ctx),
+    });
+    expect(detail.status).toBe(200);
+    expect(
+      ((await detail.json()) as { has_unarchived_changes: boolean }).has_unarchived_changes,
+    ).toBe(false);
+  });
+
+  it("neither replaces the version nor archives the draft when a publish raced the preflight", async () => {
+    // `detectBundleConflicts` reads before the import writes, so a version of
+    // the same number with OTHER bytes can exist by the time
+    // `postInstallPackage` runs. It must then keep the published bytes and
+    // leave the draft it just wrote marked as unarchived.
+    const sourceCtx = await createTestContext({ orgSlug: "srcrace" });
+    const { bytes } = await seedAndExportBundle({
+      ctx: sourceCtx,
+      rootId: "@srcrace/a",
+      skillA: "@srcrace/b",
+      skillB: "@srcrace/c",
+    });
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "destrace" });
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const imported = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(imported.status).toBe(201);
+
+    const id = "@srcrace/c";
+    const stored = await storage.downloadFile(BUCKET, `${id}/1.0.0.afps`);
+    const files: Record<string, Uint8Array> = unzipSync(new Uint8Array(stored!));
+    files["prompt.md"] = enc("Different content.");
+    const [row] = await db.select().from(packages).where(eq(packages.id, id));
+
+    await postInstallPackage({
+      create: false,
+      packageType: row!.type,
+      packageId: id,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      content: row!.draftContent ?? "",
+      files,
+      zipBuffer: Buffer.from(zipSync(files)),
+      homeSpaceId: ctx.defaultSpaceId,
+    });
+
+    const after = await storage.downloadFile(BUCKET, `${id}/1.0.0.afps`);
+    expect(computeIntegrity(new Uint8Array(after!))).toBe(
+      computeIntegrity(new Uint8Array(stored!)),
+    );
+    const detail = await app.request(`/api/packages/skills/${id}`, { headers: authHeaders(ctx) });
+    expect(
+      ((await detail.json()) as { has_unarchived_changes: boolean }).has_unarchived_changes,
+    ).toBe(true);
   });
 
   it("reports a bundle_conflict 409 when a version exists with different content", async () => {

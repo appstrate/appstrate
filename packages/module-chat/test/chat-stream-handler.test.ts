@@ -24,7 +24,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -38,6 +38,7 @@ import {
   type ChatEngine,
   type ChatEnv,
 } from "../src/chat-stream.ts";
+import { drainTurns } from "../src/inflight.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import { logger } from "../src/logger.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
@@ -222,6 +223,13 @@ async function tokenPermissions(input: PiChatInput): Promise<string[]> {
   expect(resolved).not.toBeNull();
   return [...(resolved!.permissions ?? [])].sort();
 }
+
+// A turn persists in a background task that outlives its response, and the registry of those
+// tasks is a process-wide singleton: a test that returns while one is still settling hands it
+// to whichever file runs next (`inflight.test.ts` then counts a turn it never tracked).
+afterEach(async () => {
+  await drainTurns(5_000);
+});
 
 describe("handleChatStream", () => {
   let ctx: TestContext;

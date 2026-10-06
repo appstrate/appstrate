@@ -240,6 +240,7 @@ function useUploadPackage(type: PackageType) {
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { t } = useTranslation("settings");
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (id: string) => {
@@ -249,6 +250,7 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+      toast.success(t("packages.deleted"));
       navigate("/");
     },
   });

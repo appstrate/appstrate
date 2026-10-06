@@ -46,7 +46,7 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
     display_name: "Gmail",
     description: "Gmail integration",
     // AFPS: local server → mcp-server reference (separate package).
-    source: { kind: "local", server: { name, version: "^0.1.0" } },
+    source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
     // AFPS §4.4 — the tool an agent inherits without an explicit selection.
     // Surfaced by the detail endpoint so an agent-builder sees the default.
     default_tools: ["api_call"],
@@ -861,7 +861,7 @@ describe("importConnectionSchema — non-string credential values (R8b)", () => 
       name,
       version: "0.1.0",
       display_name: "Mixed",
-      source: { kind: "local", server: { name, version: "^0.1.0" } },
+      source: { kind: "local", server: { name: `${name}-server`, version: "^0.1.0" } },
       auths: {
         api: {
           type: "api_key",

@@ -10,6 +10,7 @@ import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { onMutationError } from "../lib/mutation-error";
+import i18n from "../i18n";
 import {
   packageKeys,
   agentsKeys,
@@ -217,7 +218,7 @@ export function useImportPackage() {
       }
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
+    // No `onError`: the import modal is the one reporter of both import mutations.
   });
 }
 
@@ -236,7 +237,6 @@ export function useImportFromGithub() {
       invalidatePackageFiles(qc);
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
   });
 }
 
@@ -268,6 +268,7 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
+      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
@@ -341,7 +342,7 @@ export function useCreatePackage(type: PackageType) {
       manifest: Record<string, unknown>;
       content: string;
       operations?: components["schemas"]["PackageFileWriteOperation"][];
-    }): Promise<{ id: string }> => {
+    }): Promise<{ id: string; version_count?: number }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
         case "mcp-server":
@@ -359,19 +360,21 @@ export function useCreatePackage(type: PackageType) {
               manifest: body.manifest as components["schemas"]["AgentManifest"],
             },
           });
-          return { id: data!.id };
+          return data!;
         }
         case "skill": {
           const { data } = await client.POST("/api/packages/skills", { body });
-          return { id: data!.id };
+          return data!;
         }
         case "integration": {
           const { data } = await client.POST("/api/packages/integrations", { body });
-          return { id: data!.id };
+          return data!;
         }
       }
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // The create route skips the initial version when the publish gate would refuse it.
+      if (data.version_count === 0) toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);

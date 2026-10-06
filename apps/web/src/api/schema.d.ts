@@ -18253,13 +18253,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -18395,13 +18402,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];

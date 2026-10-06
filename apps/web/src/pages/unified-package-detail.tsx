@@ -24,6 +24,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
+import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 import { hasInputFields } from "../lib/agent-input";
 import { AlertTriangle } from "lucide-react";
@@ -157,11 +158,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const {
-    data: versionDetail,
-    isLoading: versionLoading,
-    error: versionError,
-  } = useVersionDetail(type, packageId, versionParam);
+  const versionQuery = useVersionDetail(type, packageId, versionParam);
+  const { data: versionDetail, error: versionError } = versionQuery;
+  const versionLoading = isQueryInFlight(versionQuery);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
@@ -323,7 +322,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
-    version,
+    // The header names the version on screen, not the live one behind it.
+    version: downloadVersion,
     homeSpaceName,
   };
 
@@ -386,7 +386,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        hasUnarchivedChanges={hasTimestampChanges}
+        // Authoring state: only whoever can publish the draft has a use for it.
+        hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
         actionsLeft={
           type === "agent" ? (
             <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
