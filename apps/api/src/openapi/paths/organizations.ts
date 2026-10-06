@@ -20,7 +20,7 @@ export const organizationsPaths = {
       operationId: "listOrganizations",
       tags: ["Organizations"],
       summary: "List user organizations",
-      description: "List organizations the current user is a member of.",
+      description: "List organizations the current user is a member of, oldest membership first.",
       parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {

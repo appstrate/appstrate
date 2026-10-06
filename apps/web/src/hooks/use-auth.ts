@@ -7,9 +7,7 @@ import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toLoginError, toUnlinkError } from "../lib/auth-errors";
 import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
-import { orgStore } from "../stores/org-store";
-import { spaceStore } from "../stores/space-store";
-import { exitViewAs } from "../stores/view-as-store";
+import { clearSession } from "../lib/clear-session";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -20,6 +18,7 @@ async function fetchProfile(): Promise<AuthProfile | null> {
       id: data.id,
       displayName: data.displayName ?? null,
       language: data.language,
+      canCreateOrg: data.can_create_org,
     };
     if (profile.language && profile.language !== i18n.language) {
       i18n.changeLanguage(profile.language);
@@ -28,25 +27,6 @@ async function fetchProfile(): Promise<AuthProfile | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Centralized session teardown. Resets the auth store AND the org/space scope
- * stores (clearing their persisted localStorage ids) so a subsequent login
- * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
- * the previous user — the scoping-header builder reads straight off these
- * stores, so leaving them set would leak the old scope onto the first
- * requests after re-login.
- */
-function clearSession() {
-  authStore.setState({ user: null, profile: null, loading: false });
-  orgStore.getState().setId(null);
-  spaceStore.getState().setId(null);
-  // Same reason, one scope deeper: a persona left behind would ride the next
-  // user's requests as `X-View-As`. Here rather than at the sign-out button —
-  // the OIDC branch navigates away before anything after `logout()` runs, and
-  // a session lost mid-flight never passes through a button at all.
-  exitViewAs();
 }
 
 function setAuthenticatedUser(
@@ -174,6 +154,11 @@ export async function refreshAuth(): Promise<void> {
       "Authentication did not complete — the session could not be established.",
     );
   }
+}
+
+/** `can_create_org`; `true` while the profile is unknown, so a failed read strands nobody on the waiting page. */
+export function useCanCreateOrg(): boolean {
+  return useStore(authStore, (s) => s.profile?.canCreateOrg ?? true);
 }
 
 export function useAuth() {

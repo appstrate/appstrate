@@ -3,7 +3,9 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { spaceStore } from "../stores/space-store";
+import { authStore } from "../stores/auth-store";
+import { orgStore } from "../stores/org-store";
+import { rememberedSpaceKey, spaceStore } from "../stores/space-store";
 import { useSpaces } from "./use-spaces";
 
 /** Reactive hook — re-renders when the current space changes; null until one is resolved. */
@@ -65,22 +67,28 @@ export function useSpaceSwitcher() {
 interface ResolvableSpace {
   id: string;
   isDefault: boolean;
+  personal: boolean;
   access: string;
 }
 
+/** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
+export function isSpaceEnterable(space: { access: string }): boolean {
+  return space.access === "member";
+}
+
 /**
- * The space to stand in: the remembered one while it is still enterable, else
- * the default, else any enterable one; null when none is. Only `member` access
- * enters — scoping to a `closed` space would 403 every space-scoped request.
+ * The space to stand in: remembered while enterable, else default, else a team
+ * space (a guest has no default), else the personal one; null when none is.
  */
 export function enterableSpaceId(
   remembered: string | null,
   spaces: readonly ResolvableSpace[],
 ): string | null {
-  const enterable = spaces.filter((s) => s.access === "member");
+  const enterable = spaces.filter(isSpaceEnterable);
   const pick =
     enterable.find((s) => s.id === remembered) ??
     enterable.find((s) => s.isDefault) ??
+    enterable.find((s) => !s.personal) ??
     enterable[0];
   return pick?.id ?? null;
 }
@@ -93,7 +101,12 @@ export function enterableSpaceId(
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
   const current = useStore(spaceStore, (s) => s.id);
-  const remembered = useStore(spaceStore, (s) => s.remembered);
+  const orgId = useStore(orgStore, (s) => s.id);
+  const userId = useStore(authStore, (s) => s.user?.id);
+  const remembered = useStore(
+    spaceStore,
+    (s) => (userId && orgId && s.remembered[rememberedSpaceKey(userId, orgId)]) || null,
+  );
   const { data: spaces } = useSpaces();
 
   useEffect(() => {

@@ -11657,7 +11657,7 @@
         "operationId": "listOrganizations",
         "tags": ["Organizations"],
         "summary": "List user organizations",
-        "description": "List organizations the current user is a member of.",
+        "description": "List organizations the current user is a member of, oldest membership first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XViewAs"
@@ -12571,7 +12571,8 @@
                   "displayName": "Alice Martin",
                   "language": "fr",
                   "email": "alice@example.com",
-                  "name": "Alice Martin"
+                  "name": "Alice Martin",
+                  "can_create_org": true
                 }
               }
             }
@@ -12635,7 +12636,8 @@
                   "displayName": "Alice Martin",
                   "language": "en",
                   "email": "alice@example.com",
-                  "name": "Alice Martin"
+                  "name": "Alice Martin",
+                  "can_create_org": true
                 }
               }
             }
@@ -19910,7 +19912,7 @@
         "operationId": "listSpaces",
         "tags": ["Spaces"],
         "summary": "List spaces",
-        "description": "List all spaces for the organization.",
+        "description": "List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20204,9 +20206,6 @@
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -20217,7 +20216,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
+            "description": "It is the organization's default space (`default_space_not_deletable`), runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -28022,7 +28021,7 @@
       "UserProfile": {
         "type": "object",
         "description": "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
-        "required": ["id", "language", "email", "name"],
+        "required": ["id", "language", "email", "name", "can_create_org"],
         "properties": {
           "id": {
             "type": "string"
@@ -28040,6 +28039,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "can_create_org": {
+            "type": "boolean",
+            "description": "Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`)."
           }
         }
       },

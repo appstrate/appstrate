@@ -50,6 +50,9 @@ describe("Profile API", () => {
       // `profiles.displayName`. Kept server-authoritative for the same
       // reason as `email`.
       expect(body.name).toBe(ctx.user.name);
+      // An open instance: `POST /api/orgs` accepts any user. The closed-mode
+      // answers are pinned next to that route's own (`organizations.test.ts`).
+      expect(body.can_create_org).toBe(true);
     });
 
     it("returns 401 without auth", async () => {

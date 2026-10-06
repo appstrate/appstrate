@@ -13,14 +13,18 @@ import { EmptyState, LoadingState } from "./page-states";
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
- * whose module is not loaded does not exist, and falls back to the dashboard.
+ * that does not exist here (module not loaded, team-space page in a personal
+ * space) falls back to the space's settings or the dashboard.
  */
 export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
-  const { can, ready } = usePermissions();
+  const { can, ready, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
-  const verdict = routeVerdict(path, can, features);
+  const verdict = routeVerdict(path, can, features, inPersonalSpace);
 
-  if (verdict === "absent") return <Navigate to="/" replace />;
+  if (verdict === "absent") {
+    const fallback = path.startsWith("/org-settings/space/") ? "/org-settings/space/general" : "/";
+    return <Navigate to={fallback} replace />;
+  }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
   return ready ? <NoAccessState /> : <LoadingState />;

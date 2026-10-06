@@ -14,9 +14,14 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 // The space store reads `localStorage` at module init.
 installFakeStorage();
 
-const { enterableSpaceId } = await import("../use-current-space.ts");
+const { enterableSpaceId, isSpaceEnterable } = await import("../use-current-space.ts");
 
-const space = (id: string, access: string, isDefault = false) => ({ id, access, isDefault });
+const space = (id: string, access: string, isDefault = false, personal = false) => ({
+  id,
+  access,
+  isDefault,
+  personal,
+});
 
 const spaces = [
   space("spc_closed", "closed"),
@@ -43,5 +48,26 @@ describe("enterableSpaceId", () => {
   it("scopes to no space when none is enterable", () => {
     expect(enterableSpaceId("spc_closed", [space("spc_closed", "closed", true)])).toBeNull();
     expect(enterableSpaceId("spc_default", [])).toBeNull();
+  });
+
+  it("lands a guest in the team space they were invited to, not in their empty personal space", () => {
+    // A guest holds no role in the default space (not listed to them), and the
+    // listing ranks the personal space before team spaces.
+    const guest = [space("spc_mine", "member", false, true), space("spc_studio", "member")];
+    expect(enterableSpaceId(null, guest)).toBe("spc_studio");
+    expect(enterableSpaceId("spc_mine", guest)).toBe("spc_mine");
+  });
+
+  it("falls back to the personal space when it is the only one enterable", () => {
+    const alone = [space("spc_mine", "member", false, true), space("spc_closed", "none")];
+    expect(enterableSpaceId(null, alone)).toBe("spc_mine");
+  });
+});
+
+describe("isSpaceEnterable", () => {
+  it("enters on member access only", () => {
+    expect(isSpaceEnterable({ access: "member" })).toBe(true);
+    // A closed space the caller may ask to join, an orphaned personal space.
+    expect(isSpaceEnterable({ access: "none" })).toBe(false);
   });
 });

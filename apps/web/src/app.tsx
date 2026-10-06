@@ -22,8 +22,9 @@ import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 
-import { useAuth } from "./hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "./hooks/use-auth";
 import { signedOutDestination } from "./lib/auth-flow";
+import { orgLessEntry } from "./lib/onboarding-entry";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
@@ -509,7 +510,7 @@ function AuthLoginReturnToBridge() {
 
 function OrgGate({ children }: { children: React.ReactNode }) {
   const { currentOrg, orgs, loading } = useOrg();
-  const { features } = useAppConfig();
+  const canCreateOrg = useCanCreateOrg();
   const location = useLocation();
 
   if (
@@ -523,14 +524,9 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   }
 
   // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
-  // when org creation is locked down — issue #228 closed mode).
+  // when this user may not create one — issue #228 closed mode).
   if (orgs.length === 0) {
-    return (
-      <Navigate
-        to={features.orgCreationDisabled ? "/onboarding/waiting" : "/onboarding/create"}
-        replace
-      />
-    );
+    return <Navigate to={orgLessEntry(canCreateOrg)} replace />;
   }
 
   // Orgs exist but none selected yet (auto-select happening)

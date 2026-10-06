@@ -16,6 +16,7 @@ import {
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useCanReach } from "../../hooks/use-can-reach";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
 import { AgentRunButton } from "./agent-run-button";
@@ -177,6 +178,8 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
+  // The key section follows the keys page (absent in a personal space).
+  const canReach = useCanReach();
 
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -232,7 +235,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
       <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
 
       {/* API Key section — the curl below stands on its own without it */}
-      {!can("api-keys:read") ? null : keysLoading ? (
+      {!canReach("/org-settings/space/api-keys") ? null : keysLoading ? (
         <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
         <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">

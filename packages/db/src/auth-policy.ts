@@ -32,6 +32,11 @@ export function isPlatformAdmin(email: string): boolean {
   return env.AUTH_PLATFORM_ADMIN_EMAILS.includes(normalizeEmail(email));
 }
 
+/** The one rule `POST /api/orgs` enforces and `GET /api/profile` reports as `can_create_org`. */
+export function mayCreateOrganization(email: string): boolean {
+  return !getEnv().AUTH_DISABLE_ORG_CREATION || isPlatformAdmin(email);
+}
+
 /**
  * True when the email's domain is allowed by `AUTH_ALLOWED_SIGNUP_DOMAINS`.
  * Returns true when the env var is empty (no restriction). False if the

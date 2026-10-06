@@ -78,9 +78,9 @@ test.describe("Space management in UI", () => {
 
   test("Cannot delete default space via API @critical", async ({ orgOnlyClient, browserCtx }) => {
     const res = await orgOnlyClient.delete(`/spaces/${browserCtx.org.defaultSpaceId}`);
-    // 400 exactly — the default-space rule (`invalidRequest`), not RBAC. See
-    // the same assertion in tests/spaces/cascade-deletion.api.spec.ts.
-    expect(res.status()).toBe(400);
+    // 409 exactly — the default-space rule (`default_space_not_deletable`),
+    // not RBAC. See the same assertion in tests/spaces/cascade-deletion.api.spec.ts.
+    expect(res.status()).toBe(409);
   });
 
   test("Switching cached spaces resets unsaved visibility and default-role edits", async ({

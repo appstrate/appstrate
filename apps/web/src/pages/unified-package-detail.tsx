@@ -79,12 +79,18 @@ function ModelRequiredAlert({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings"]);
   // The model verdict alone: it holds whatever else blocks the run first.
   const blocker = useAgentModelBlocker(packageId);
+  const { can } = usePermissions();
 
   const copy =
     blocker === "detail.titleModel"
       ? {
           title: t("models.alert.noModel"),
-          description: t("models.alert.noModelDescription"),
+          // Only `models:write` can act on "configure a model" (POST /api/models).
+          description: t(
+            can("models:write")
+              ? "models.alert.noModelDescription"
+              : "models.alert.noModelAskAdmin",
+          ),
         }
       : blocker === "detail.titleNoDefaultModel"
         ? {

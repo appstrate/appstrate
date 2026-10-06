@@ -2793,7 +2793,7 @@ export interface paths {
         };
         /**
          * List user organizations
-         * @description List organizations the current user is a member of.
+         * @description List organizations the current user is a member of, oldest membership first.
          */
         get: operations["listOrganizations"];
         put?: never;
@@ -4439,7 +4439,7 @@ export interface paths {
         };
         /**
          * List spaces
-         * @description List all spaces for the organization.
+         * @description List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.
          */
         get: operations["listSpaces"];
         put?: never;
@@ -6834,6 +6834,8 @@ export interface components {
             /** Format: email */
             email: string;
             name: string;
+            /** @description Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`). */
+            can_create_org: boolean;
         };
         /** @description Webhook configuration object */
         WebhookObject: {
@@ -20487,7 +20489,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "fr",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20529,7 +20532,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "en",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -23083,11 +23087,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
+            /** @description It is the organization's default space (`default_space_not_deletable`), runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
             409: {
                 headers: {
                     [name: string]: unknown;

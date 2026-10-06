@@ -11,7 +11,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { ConfirmModal } from "../../components/confirm-modal";
 import type { components } from "../../api/client";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
-import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { SpaceCreateModal } from "../../components/space-create-modal";
 import { formatDateField } from "../../lib/format-date";
@@ -86,10 +86,10 @@ export function OrgSettingsSpacesPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  disabled={space.access !== "member"}
+                  disabled={!isSpaceEnterable(space)}
                   onClick={() => handleSpaceClick(space.id)}
                   title={
-                    space.access === "member"
+                    isSpaceEnterable(space)
                       ? t("nav.spaceSettings", { ns: "common" })
                       : t("spaces.requestAccess")
                   }

@@ -18,6 +18,7 @@ import { $api, type components } from "../api/client";
 import { OrgRoleOptions } from "./org-role-options";
 import {
   hasUnavailableAssignments,
+  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -69,7 +70,7 @@ export function OrgInvitationForm({
   const queryClient = useQueryClient();
   const spacesQuery = useSpaces();
   const rolesQuery = useSpaceRoleOptions();
-  const spaces = spacesQuery.data ?? [];
+  const spaces = assignableSpaces(spacesQuery.data ?? []);
   const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
   const catalogError = spacesQuery.error || rolesQuery.error;
   const form = useForm<InviteFormValues>({

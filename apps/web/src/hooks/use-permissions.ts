@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useOrg } from "./use-org.ts";
 import { useSpaces } from "./use-spaces.ts";
 import type { SpaceGrant } from "../lib/package-permissions.ts";
-import { useCurrentSpaceId } from "./use-current-space.ts";
+import { isSpaceEnterable, useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
 import type { CorePermission } from "@appstrate/core/permissions";
 import { hasFullOrgAccess } from "../lib/org-role.ts";
@@ -100,10 +100,16 @@ export function usePermissions() {
   // or there is none this caller can enter. Only `useSpaceResolver` resolves
   // one, so `ready` never settles outside MainLayout; an org-level answer there
   // needs no wait, the org's set arriving with `currentOrg` itself.
-  const enterableSpaceExists = spaces?.some((s) => s.access === "member") ?? false;
+  const enterableSpaceExists = spaces?.some(isSpaceEnterable) ?? false;
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
-  return { can, ready, orgRole: currentOrg?.role ?? null };
+  return {
+    can,
+    ready,
+    orgRole: currentOrg?.role ?? null,
+    /** The current space is the caller's personal one (`teamSpaceOnly` routes are absent there). */
+    inPersonalSpace: space?.personal ?? false,
+  };
 }
 
 /**
