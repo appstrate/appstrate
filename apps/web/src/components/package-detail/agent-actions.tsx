@@ -8,7 +8,6 @@ import { schemaHasFileFields } from "@appstrate/core/form";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
-import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
   useDeleteAgent,
@@ -47,7 +46,6 @@ export function AgentActions({
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: runs } = useRuns(packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
@@ -116,7 +114,8 @@ export function AgentActions({
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         runningRuns={detail.running_runs}
-        hasRuns={!!runs && runs.length > 0}
+        // Under the same run visibility as the list the item would clear.
+        hasRuns={detail.last_run !== null}
         hasMemories={!!memories && memories.length > 0}
         hasFileInput={!!hasFileInput}
         onDeleteAgent={() =>

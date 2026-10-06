@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
+import { routeOf } from "../lib/route-match";
 import { EmptyState, LoadingState } from "./page-states";
 
 /**
@@ -14,15 +15,25 @@ import { EmptyState, LoadingState } from "./page-states";
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
  * that does not exist here (module not loaded, team-space page in a personal
- * space) falls back to the space's settings or the dashboard.
+ * space) falls back to the space's settings or the dashboard. Asked of the
+ * page the URL lands on too: a layout mounts before its child's gate.
  */
 export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
   const { can, ready, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
   const verdict = routeVerdict(path, can, features, inPersonalSpace);
+  const landing = routeOf(useLocation().pathname) ?? path;
+  const absent =
+    verdict === "absent"
+      ? path
+      : routeVerdict(landing, can, features, inPersonalSpace) === "absent"
+        ? landing
+        : null;
 
-  if (verdict === "absent") {
-    const fallback = path.startsWith("/org-settings/space/") ? "/org-settings/space/general" : "/";
+  if (absent) {
+    const fallback = absent.startsWith("/org-settings/space/")
+      ? "/org-settings/space/general"
+      : "/";
     return <Navigate to={fallback} replace />;
   }
   if (verdict === "granted") return <>{children}</>;

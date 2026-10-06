@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ApiError, client, type paths } from "../api/client";
-import { refreshAuth, useAuth } from "../hooks/use-auth";
+import { useAuth } from "../hooks/use-auth";
 import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
@@ -110,7 +110,6 @@ export function InviteAcceptPage() {
     const { data } = await client.POST("/invite/{token}/accept", {
       params: { path: { token: token ?? "" } },
     });
-    await refreshAuth();
     // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect.
     await queryClient.invalidateQueries({ queryKey: orgKeys.all });
     if (data?.id) {
@@ -305,7 +304,6 @@ export function InviteAcceptPage() {
         ) : (
           <LoginForm
             fixedEmail={info.email}
-            onSuccess={refreshAuth}
             header={null}
             footer={null}
             switchAuthSlot={switchToRegister}

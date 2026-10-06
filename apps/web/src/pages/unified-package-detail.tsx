@@ -137,9 +137,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
 
-  // Configuration tab data (must be before early returns — hooks rule)
-  const { data: orgProxies } = useProxies();
-  const { data: orgModels } = useModels();
+  // Configuration tab data, agents only (must be before early returns — hooks rule)
+  const { data: orgProxies } = useProxies(type === "agent");
+  const { data: orgModels } = useModels(type === "agent");
 
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();

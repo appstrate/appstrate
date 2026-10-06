@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef } from "react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InvalidateOptions, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -17,7 +17,6 @@ import { endPreviewIfRefused } from "../lib/view-as-refusal";
 import { useViewAsHeader } from "../stores/view-as-store";
 import {
   runKeys,
-  runsKeys,
   paginatedRunsKeys,
   packageKeys,
   agentsKeys,
@@ -37,7 +36,7 @@ import {
  * the connections page, the agent picker verdict, the integration detail
  * connection list, and the agent status cards. `refetchOnWindowFocus` is
  * globally false (`main.tsx`), so these caches move on exactly two things:
- * a live frame here, and the reconnect reconciliation in `connectOnce`.
+ * a live frame here, and the reconnect reconciliation (`trackStreamGaps`).
  *
  * Server-side actor filter in `services/realtime.ts:connection_update`
  * means we only see our own rows; a cross-actor change (e.g. someone else
@@ -122,9 +121,12 @@ function readContextChatSessionId(init: unknown): unknown {
  * schema pass (`{ sessionId, orgId, userId }`, `services/realtime.ts`).
  * `raw` undefined = reconnect reconciliation → unscoped.
  */
-function handleChatSessionUpdate(qc: QueryClient, raw?: string) {
+function handleChatSessionUpdate(qc: QueryClient, raw?: string, options?: InvalidateOptions) {
   const sessionId = raw === undefined ? undefined : parseChatSessionId(raw);
-  void qc.invalidateQueries({ predicate: (q) => matchesChatSessionQuery(q.queryKey, sessionId) });
+  void qc.invalidateQueries(
+    { predicate: (q) => matchesChatSessionQuery(q.queryKey, sessionId) },
+    options,
+  );
 }
 
 function parseChatSessionId(raw: string): string | undefined {
@@ -186,7 +188,7 @@ export function createBroadInvalidator(
 
 /**
  * Single writer of the run-detail cache from a `run_update` frame; returns the
- * patch to reuse on the run's list rows, or `null` when the frame is dropped:
+ * verdict, `false` when the frame is dropped:
  * a per-connection snapshot can predate a live frame, and status only moves on.
  */
 export function patchRunDetail(
@@ -194,7 +196,7 @@ export function patchRunDetail(
   orgId: string,
   spaceId: string,
   evt: RunUpdateEvent,
-): Partial<EnrichedRun> | null {
+): boolean {
   const key = runKeys.detail(orgId, spaceId, evt.id);
   const cached = qc.getQueryData<EnrichedRun>(key);
   if (
@@ -202,11 +204,11 @@ export function patchRunDetail(
     TERMINAL_RUN_STATUSES.has(cached.status) &&
     !TERMINAL_RUN_STATUSES.has(evt.status)
   ) {
-    return null;
+    return false;
   }
   const patch = runUpdateToRunPatch(evt);
   qc.setQueryData<EnrichedRun>(key, (prev) => (prev ? { ...prev, ...patch } : prev));
-  return patch;
+  return true;
 }
 
 /**
@@ -235,9 +237,57 @@ export function broadRunKeys(orgId: string): readonly (readonly unknown[])[] {
 function reconcileRunQueries(qc: QueryClient, orgId: string) {
   // Run detail/list caches are patched in place by live frames, so only a gap
   // needs them refetched — they are not part of the per-event throttle.
-  for (const queryKey of [runKeys.all, runsKeys.all, ...broadRunKeys(orgId)]) {
-    qc.invalidateQueries({ queryKey });
+  for (const queryKey of [runKeys.all, ...broadRunKeys(orgId)]) {
+    qc.invalidateQueries({ queryKey }, KEEP_IN_FLIGHT);
   }
+}
+
+/**
+ * A connection after a gap refetches what the lost frames would have moved.
+ * Only the first attempt of a scope's first stream owes nothing: its caches are
+ * created beside it. Coverage lives in the query cache, so a wipe forgets it.
+ * A frame between a read and the subscription is left to the polls.
+ */
+export function trackStreamGaps(
+  getQueryClient: () => QueryClient,
+  orgId: string,
+  scope: string,
+): StreamGaps {
+  getQueryClient().setQueryDefaults(STREAM_COVERAGE, { gcTime: Infinity });
+  const coverageKey = [...STREAM_COVERAGE, scope];
+  let gap = getQueryClient().getQueryData(coverageKey) !== undefined;
+  let lastRunReconcileAt = 0;
+  return {
+    missed() {
+      gap = true;
+    },
+    connected(now) {
+      const qc = getQueryClient();
+      qc.setQueryData(coverageKey, true);
+      if (!gap) {
+        gap = true;
+        return;
+      }
+      handleChatSessionUpdate(qc, undefined, KEEP_IN_FLIGHT);
+      invalidateNotificationQueries(qc, KEEP_IN_FLIGHT);
+      // A stream dropped in a loop would otherwise sweep the run caches at ~1 Hz.
+      if (now - lastRunReconcileAt >= RUN_RECONCILE_MIN_INTERVAL_MS) {
+        lastRunReconcileAt = now;
+        reconcileRunQueries(qc, orgId);
+        handleConnectionUpdate(qc);
+      }
+    },
+  };
+}
+
+// A read in flight at connect time left after the gap: restarting it issues it twice.
+const KEEP_IN_FLIGHT: InvalidateOptions = { cancelRefetch: false };
+const RUN_RECONCILE_MIN_INTERVAL_MS = 10_000;
+const STREAM_COVERAGE = ["realtime-covered"] as const;
+
+interface StreamGaps {
+  missed: () => void;
+  connected: (now: number) => void;
 }
 
 function handleSSEMessage(
@@ -256,28 +306,9 @@ function handleSSEMessage(
   const parsed = runUpdateEventSchema.safeParse(json);
   if (!parsed.success) return;
   const evt = parsed.data;
-  const { id: runId, packageId, status, scheduleId } = evt;
-  const patch = patchRunDetail(qc, orgId, spaceId, evt);
-  // Frame dropped as stale — the list rows below must not regress either.
-  if (!patch) return;
-
-  // Only the per-agent run list is keyed by packageId (nullable on the wire
-  // once a run's package is deleted — ON DELETE SET NULL).
-  if (packageId) {
-    const listKey = runsKeys.forAgent(orgId, spaceId, packageId);
-    const list = qc.getQueryData<EnrichedRun[]>(listKey);
-    if (list) {
-      if (list.some((ex) => ex.id === runId)) {
-        qc.setQueryData<EnrichedRun[]>(listKey, (prev) =>
-          prev?.map((ex) => (ex.id === runId ? { ...ex, ...patch } : ex)),
-        );
-      } else {
-        // A run not yet in this list (its first event) — refetch the full
-        // enriched row instead of inserting a 13-field partial as a full one.
-        qc.invalidateQueries({ queryKey: listKey });
-      }
-    }
-  }
+  const { status, scheduleId } = evt;
+  // Frame dropped as stale — nothing below may move on it either.
+  if (!patchRunDetail(qc, orgId, spaceId, evt)) return;
 
   // Broad invalidations are throttled (~2s) — the in-place cache patches above
   // keep the visible run data live in the meantime.
@@ -292,7 +323,6 @@ function handleSSEMessage(
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
     invalidateNotificationQueries(qc);
-    qc.invalidateQueries({ queryKey: runsKeys.all });
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.
@@ -373,10 +403,11 @@ export function useGlobalRunSync() {
     const BASE_DELAY_MS = 1000;
     const MAX_DELAY_MS = 30_000;
     let attempt = 0;
-    // Only a RE-connect has a gap; the first races the mount's own queries.
-    let hasConnectedOnce = false;
-    let lastReconcileAt = 0;
-    const RECONCILE_MIN_INTERVAL_MS = 10_000;
+    const reconciler = trackStreamGaps(
+      () => qcRef.current,
+      orgId,
+      JSON.stringify([orgId, spaceId, viewAs]),
+    );
 
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -415,27 +446,7 @@ export function useGlobalRunSync() {
         throw new Error(`realtime stream unavailable (${res.status})`);
       }
 
-      // The protocol is signal-only: frames emitted while the stream was down
-      // are lost forever. Reconcile on every (re)connect instead of leaving a
-      // missed frame to a polling safety net.
-      handleChatSessionUpdate(qcRef.current);
-      // Same reconciliation for the notification badges. This is what lets
-      // their `refetchInterval` be a 5-minute backstop instead of a 30-second
-      // poll: a terminal run seen live invalidates them (below), and a terminal
-      // run MISSED while the stream was down is caught here, on reconnect —
-      // seconds after connectivity returns, not at the next poll tick.
-      invalidateNotificationQueries(qcRef.current);
-      // Same reasoning for the run caches, which are patched frame by frame —
-      // rate-limited because the server writes a frame on every connection, so a
-      // repeatedly dropped stream would reconcile at ~1 Hz and storm itself.
-      const now = Date.now();
-      if (hasConnectedOnce && now - lastReconcileAt >= RECONCILE_MIN_INTERVAL_MS) {
-        lastReconcileAt = now;
-        reconcileRunQueries(qcRef.current, orgId);
-        // `connection_update` frames were missed on the same stream.
-        handleConnectionUpdate(qcRef.current);
-      }
-      hasConnectedOnce = true;
+      reconciler.connected(Date.now());
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -472,6 +483,7 @@ export function useGlobalRunSync() {
     };
 
     void reconnectUntilRefused(connectOnce, controller.signal, () => {
+      reconciler.missed();
       // Jitter — de-synchronize reconnect stampedes (every tab reconnects
       // at once after a redeploy).
       const delay =
