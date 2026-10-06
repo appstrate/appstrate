@@ -8,7 +8,7 @@
  * Three lookup phases, in order: the provider's own offer, every Pi provider
  * by exact id, every Pi provider by the id with one leading `<vendor>/`
  * segment stripped. The ordering is the whole point — two providers can both
- * serve `kimi-k2.6`, and the provider's own record is the one that describes
+ * serve `kimi-k2.7-code`, and the provider's own record is the one that describes
  * what it actually serves.
  *
  * A hint wins over the catalog for its own field and sets `source: "endpoint"`;
@@ -22,9 +22,9 @@ import { getModelProvider } from "../../src/services/model-providers/registry.ts
 import { describeKnownModel, lookupCatalogModel } from "../../src/services/model-catalog.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
-/** OpenCode Go serves `kimi-k2.6` with a smaller response cap than the first Pi record of it. */
+/** OpenCode Go serves `kimi-k2.7-code` under another response cap than the first Pi record of it. */
 const PROVIDER = "opencode-go";
-const SHARED_ID = "kimi-k2.6";
+const SHARED_ID = "kimi-k2.7-code";
 /** Deliberately never registered — exercises the cross-provider fallback. */
 const UNKNOWN_PROVIDER = "test-describe-unregistered";
 

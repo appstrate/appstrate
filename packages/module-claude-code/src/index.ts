@@ -127,7 +127,7 @@ const claudeCodeProvider: ModelProviderDefinition = {
   // A model the plan does not serve (Pro/Max/Team differ) fails at first run.
   catalogProviderId: "anthropic",
   // One current model per family, bumped with Pi.
-  featuredModels: ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5-1"],
+  featuredModels: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-fable-5-1"],
   modelDiscovery: { mode: "static" },
   // Anthropic OAuth tokens are not JWTs — no JWT identity decoding. There is no
   // fingerprint forging: both `claude-code` agent runs and the interactive chat

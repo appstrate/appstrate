@@ -17,7 +17,7 @@ const app = getTestApp();
 /** Synthetic api-key provider whose listing is unauthenticated (`publicModelListing`). */
 const PUBLIC_LISTING_PROVIDER_ID = "test-public-listing-route";
 /** An id Pi's OpenCode Go records serve. */
-const P_ONE = "kimi-k2.6";
+const P_ONE = "kimi-k2.7-code";
 
 function registerPublicListingProvider(): void {
   try {

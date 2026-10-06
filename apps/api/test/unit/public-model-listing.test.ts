@@ -15,7 +15,7 @@ import coreProvidersModule from "../../src/modules/core-providers/index.ts";
 
 // Pi's OpenCode Go records back the featured ids.
 const CATALOG = "opencode-go";
-const [FIRST, SECOND] = ["kimi-k2.6", "glm-5.2"] as const;
+const [FIRST, SECOND] = ["kimi-k2.7-code", "glm-5.2"] as const;
 const PUBLIC_ID = "test-public-listing";
 const PRIVATE_ID = "test-private-listing";
 

@@ -15,6 +15,10 @@ import type { Api, Model } from "../src/pi-sdk.ts";
 
 type Payload = Record<string, unknown>;
 
+// Shaped like a plain API key: pi-ai reads any other credential sent to
+// `api.openai.com` as a ChatGPT sign-in and shapes the request for it.
+const TEST_API_KEY = "sk-test-key";
+
 // pi-ai reads the ChatGPT account id off a codex token's JWT claims.
 const CODEX_TEST_TOKEN = `h.${btoa(
   JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" } }),
@@ -29,7 +33,7 @@ export async function capturePayload(
     model,
     { systemPrompt: "sys", messages: [{ role: "user", content: "hi", timestamp: 0 }] },
     {
-      apiKey: model.api === "openai-codex-responses" ? CODEX_TEST_TOKEN : "test-key",
+      apiKey: model.api === "openai-codex-responses" ? CODEX_TEST_TOKEN : TEST_API_KEY,
       maxTokens: 4_096,
       ...(reasoning ? { reasoning } : {}),
       onPayload: (next: unknown) => {
@@ -79,7 +83,7 @@ export async function captureRequest(
           },
         ],
       },
-      { apiKey: "test-key", maxTokens: 1_024, ...(reasoning ? { reasoning } : {}) },
+      { apiKey: TEST_API_KEY, maxTokens: 1_024, ...(reasoning ? { reasoning } : {}) },
     ).result();
   } finally {
     stub.stop(true);
