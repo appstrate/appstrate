@@ -9,13 +9,14 @@
 // Mirrors the env-toggle pattern from `auth-bootstrap-org.test.ts` so
 // the two suites can run side-by-side without state leakage.
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
   _rebuildAuthForTesting,
   setPostBootstrapOrgHook,
   setRealmResolver,
+  _swapRealmResolverForTesting,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
 import { db, truncateAll } from "../helpers/db.ts";
@@ -62,6 +63,15 @@ async function redeem(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
 }
+
+// The realm resolver is process-wide: hand the installed one back to the suites that follow.
+let installedRealmResolver: ReturnType<typeof _swapRealmResolverForTesting>;
+beforeAll(() => {
+  installedRealmResolver = _swapRealmResolverForTesting(null);
+});
+afterAll(() => {
+  _swapRealmResolverForTesting(installedRealmResolver);
+});
 
 describe("POST /api/auth/bootstrap/redeem", () => {
   beforeEach(async () => {

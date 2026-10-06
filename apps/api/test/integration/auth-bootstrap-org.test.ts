@@ -23,7 +23,7 @@
 // proof rule (it gets no organization): the "no proof" rows run over both
 // kinds of named address.
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -34,6 +34,7 @@ import {
   setBeforeSignupHook,
   setPostBootstrapOrgHook,
   setRealmResolver,
+  _swapRealmResolverForTesting,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
 import { createTestContext } from "../helpers/auth.ts";
@@ -169,6 +170,15 @@ async function expectRootOrgOwnedBy(email: string, slug: string) {
     .where(eq(organizationMembers.userId, u!.id));
   expect(membership).toMatchObject({ role: "owner", orgId: orgs[0]!.id });
 }
+
+// The realm resolver is process-wide: hand the installed one back to the suites that follow.
+let installedRealmResolver: ReturnType<typeof _swapRealmResolverForTesting>;
+beforeAll(() => {
+  installedRealmResolver = _swapRealmResolverForTesting(null);
+});
+afterAll(() => {
+  _swapRealmResolverForTesting(installedRealmResolver);
+});
 
 describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   beforeEach(async () => {

@@ -17,13 +17,14 @@
  * the signup it performs records).
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { session, user } from "@appstrate/db/schema";
 import {
   _rebuildAuthForTesting,
   setPostBootstrapOrgHook,
   setRealmResolver,
+  _swapRealmResolverForTesting,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -65,6 +66,15 @@ async function spendBudget(headers: Record<string, string>): Promise<void> {
     expect(await attemptSignIn(headers)).not.toBe(429);
   }
 }
+
+// The realm resolver is process-wide: hand the installed one back to the suites that follow.
+let installedRealmResolver: ReturnType<typeof _swapRealmResolverForTesting>;
+beforeAll(() => {
+  installedRealmResolver = _swapRealmResolverForTesting(null);
+});
+afterAll(() => {
+  _swapRealmResolverForTesting(installedRealmResolver);
+});
 
 describe("Better Auth rate limiting keys on the platform-resolved client IP", () => {
   beforeEach(async () => {

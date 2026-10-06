@@ -215,6 +215,13 @@ export function setRealmResolver(resolver: RealmResolver): void {
   _realmResolver = resolver;
 }
 
+/** Test-only: swap the resolver (null = no OIDC module) and return the previous one. */
+export function _swapRealmResolverForTesting(resolver: RealmResolver | null): RealmResolver | null {
+  const previous = _realmResolver;
+  _realmResolver = resolver;
+  return previous;
+}
+
 // A magic link signs in an account of the realm its transaction resolves to. Asserted at
 // Better Auth's writes, which come after its own read of the account.
 async function assertMagicLinkAudience(
