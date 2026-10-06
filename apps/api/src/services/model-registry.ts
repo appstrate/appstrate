@@ -232,7 +232,10 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             continue;
           }
           const validM = mResult.data;
-          if (restrictsToOffer(provider) && !lookupCatalogModel(provider, validM.modelId)) {
+          if (
+            restrictsToOffer(provider) &&
+            !lookupCatalogModel(provider, validM.modelId, "bundled")
+          ) {
             throw new Error(
               `[model-registry] SYSTEM_PROVIDER_KEYS entry "${validCredential.id}" declares model ` +
                 `${JSON.stringify(validM.modelId)}, which provider ` +

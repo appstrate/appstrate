@@ -15,6 +15,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sign-in; remove the token from `.env` once claimed. Check that you can
   sign in to the account of every named address: an existing one is not
   re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
+- **The API reads a live model catalog from `get.appstrate.dev`** (#PRNUM). A
+  new variable, `MODEL_CATALOG_URL` (default
+  `https://get.appstrate.dev/model-catalog`), names a signed file listing the
+  models a later Pi registry records and this build can serve, so a new model
+  becomes selectable without a release. It is two anonymous GETs, in the
+  background, re-checked every 6 h (every hour while the channel has no file
+  for this Pi version or cannot be read); nothing about the instance is sent
+  and boot never waits on it. Set the variable empty to run on the bundled
+  registry alone. Migration `0079` adds the `model_catalog_overlays` table
+  (additive). Until a file is published for a Pi version the read answers 404
+  and nothing changes.
+- **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
+  Run `bun run verify:system-models` with the platform env before the deploy:
+  a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
+  boot. Removed from the offer: OpenCode Go `glm-5.1`, `kimi-k2.6`,
+  `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-max`; Together AI
+  `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
+  `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
+  Fireworks `accounts/fireworks/models/glm-5p2` and
+  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`. An
+  existing `org_models` row on one of them keeps its stored values and loses
+  the catalog defaults (label, limits, capabilities, price); it can no longer
+  be created.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at
@@ -294,6 +317,17 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Added
 
+- **Live model catalog, read side** (#PRNUM): an instance accepts a file only
+  on its Ed25519 signature (public key in the source), its exact Pi SDK
+  version and a strict shape, stores it only when its `serial` follows the
+  stored one, then keeps the records whose dialect the pinned Pi code already
+  knows (provider and API shape together, compat keys, non-boolean compat
+  values, thinking levels and their effort words). It only adds models an
+  organization can bind with its own credentials: bundled ids, featured ids and
+  system models (boot rules, price, limits and dialect) read the bundled
+  registry, and a subscription provider is offered no model with a price tier
+  one request can reach. The channel cannot forge or roll back a file; it can
+  withhold a newer one. Plan: `docs/plans/live-model-catalog.md`, step 2.
 - **A schedule the system disabled says why** (#1641). `disabled_reason`
   (`actor_invalid`, `actor_left_org`, `connection_deleted`) is set by the
   system act, cleared on re-enable and `NULL` otherwise: on an enabled
