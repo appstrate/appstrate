@@ -8,37 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **The owner account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` is created at
-  `/claim`, with `AUTH_BOOTSTRAP_TOKEN`** (or by a provider-verified
-  Google/GitHub sign-in, or a magic link) — no longer by the sign-up form.
-  An instance that names an owner who has no account yet must set
-  `AUTH_BOOTSTRAP_TOKEN` by hand (`openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`),
-  restart, and open `<APP_URL>/claim`; fresh installs get the token from the
-  installer. An account can no longer change its e-mail to that address or
-  to an `AUTH_PLATFORM_ADMIN_EMAILS` one (403 `email_change_refused`). A
-  Google sign-in now takes `emailVerified` from Google's `email_verified`
-  claim. **The same rule covers every address in
-  `AUTH_PLATFORM_ADMIN_EMAILS`**: the sign-up form refuses a listed address
-  that has no account yet. An instance in that state creates the account
-  at `/claim` with the token while it has no organization (when no owner
-  is named, or the owner is that address), otherwise by a magic link or a
-  verified Google/GitHub sign-in, otherwise by unlisting the address,
-  creating the account as an ordinary one and listing it again. An account
-  that already holds a listed address is not re-examined: check that you
-  can sign in to the account of every listed address. Details and known
-  limits: `examples/self-hosting/AUTH_MODES.md`.
-- **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
-  Run `bun run verify:system-models` with the platform env before the deploy:
-  a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
-  boot. Removed from the offer: OpenCode Go `glm-5.1`, `kimi-k2.6`,
-  `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-max`; Together AI
-  `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
-  `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
-  Fireworks `accounts/fireworks/models/glm-5p2` and
-  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`. An
-  existing `org_models` row on one of them keeps its stored values and loses
-  the catalog defaults (label, limits, capabilities, price); it can no longer
-  be created.
+- **An account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or
+  `AUTH_PLATFORM_ADMIN_EMAILS` that does not exist yet is no longer created
+  by the sign-up form.** Set `AUTH_BOOTSTRAP_TOKEN`, restart and claim it at
+  `<APP_URL>/claim`, or use a magic link or a verified Google/GitHub
+  sign-in; remove the token from `.env` once claimed. Check that you can
+  sign in to the account of every named address: an existing one is not
+  re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at
@@ -513,46 +489,25 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
-- **A Google or GitHub identity is attached to an existing account only
-  when the provider asserts its e-mail as verified.** Both providers were
-  listed as trusted, so signing in with one attached it to the account
-  holding the same address without reading the provider's verified flag.
-  No provider is trusted any more: an unverified identity is refused
-  (`account not linked` at sign-in, `unable_to_link_account` when linking
-  from the preferences). An identity the provider verifies links as
-  before.
+- **An account the environment names needs proof of ownership.** The
+  account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an `AUTH_PLATFORM_ADMIN_EMAILS`
+  address is created by the bootstrap token, a provider-verified social
+  sign-in or a magic link, never by the sign-up form, and no existing
+  account can change its e-mail to such an address.
 - **A space's own SMTP server carries auth e-mails only to that space's
-  accounts.** The hosted sign-in pages of a space-level OAuth client send
-  Better Auth's e-mails through the space's transport, whatever address is
-  typed, and a magic link or a reset link is a credential. One rule now
-  lives where the transport is chosen (`sendAuthMail`): a tenant transport
-  writes to an account of that tenant's realm, or to an address with no
-  account that `AUTH_BOOTSTRAP_OWNER_EMAIL` / `AUTH_PLATFORM_ADMIN_EMAILS`
-  do not name. Anything else is withheld, the page answers as before, and
-  the server logs it. A per-space transport cannot be built without its
-  realm.
-- **A magic link signs in an account of the audience its transaction
-  serves.** A link issued through an OAuth client for an address that had
-  no account signed in whichever account held the address when it was
-  opened. The realm of the account a link signs in is now asserted where
-  Better Auth writes (`assertMagicLinkAudience`: before it touches an
-  unproven account, and at the session), against the realm the link
-  resolves to: the bound client's, else the platform's. A link whose client
-  no longer resolves (deleted or disabled) is refused by the verify guard.
-  Every refusal is the redirect a closed sign-up already gets
-  (`error=signup_disabled`), with no session and the account untouched.
-  The pending-client cookie binds a client only on a request a hosted
-  sign-in page made itself: a magic link or a password sign-up asked from
-  the dashboard is a platform one whatever cookie the browser still holds,
-  so the account it creates is a platform account under the platform
-  sign-up rules (it used to land in that space's realm).
-- **`/claim` answers the account-creation refusal with SMTP configured
-  too.** Under mail verification Better Auth answers a refused account
-  creation as a created one, so claiming an address outside
-  `AUTH_ALLOWED_SIGNUP_DOMAINS`, or one a module's sign-up hook refuses,
-  ended in `500 bootstrap_user_lookup_failed`. It is now a `403` carrying
-  the refusal's own code (`signup_domain_not_allowed`, …). The token stays
-  redeemable.
+  accounts**, or to an address with no account that the environment does
+  not name. Any other mail is withheld; the page answers as before.
+- **A magic link signs in an account of the audience it was issued for**:
+  the client's when a hosted sign-in page issued it, else the platform's.
+  A refusal redirects with `error=signup_disabled` and leaves the account
+  untouched; a link whose client was deleted or disabled is refused too.
+- **A pending-client cookie left in the browser binds nothing**: a magic
+  link or a sign-up asked from the dashboard creates a platform account.
+- **A Google or GitHub identity is attached to an existing account only
+  when the provider asserts its e-mail as verified**, and a new Google
+  account is created verified only on that same assertion.
+- **`/claim` answers a refused account creation as a `403` with the
+  refusal's code**, with or without SMTP, instead of a `500`.
 - **An `api_call` reaches an internal host only when the manifest and the
   operator both allow it** (#1657). The three paths disagreed: a run's
   sidecar skipped the SSRF gate for any host `authorized_uris` named

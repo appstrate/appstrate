@@ -6,11 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toAuthError, toLoginError, toUnlinkError } from "../lib/auth-errors";
-import {
-  EMAIL_CHANGE_CALLBACK_URL,
-  emailWasChanged,
-  rememberEmailChangeRequest,
-} from "../lib/auth-flow";
+import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
 import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
 import { registerSessionCheck } from "../lib/stale-authority";
@@ -328,10 +324,7 @@ export function useAuth() {
       });
       if (result.error?.status === 409) throw new EmailChangeError(result.error.message ?? "");
       if (result.error) throw toAuthError(result.error);
-      if (window.__APP_CONFIG__?.features?.smtp) {
-        rememberEmailChangeRequest(localStorage, newEmail);
-        return "confirmation_sent";
-      }
+      if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
       await refreshAuth();
       // Without SMTP the change is immediate: an address that did not move was taken.
       if (!emailWasChanged(newEmail, authStore.getState().user?.email)) {

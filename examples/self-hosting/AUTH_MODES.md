@@ -170,9 +170,9 @@ magic-link paths are for an instance configured without a token.
 - **An account that already holds a named address is not re-examined.**
   The rule is on creation. Whoever holds the account of an address in
   `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` has its
-  privilege from the next restart. Before naming an address, and once
-  after upgrading to this rule, look up its row in the `user` table: it
-  should be an account you can sign in to, with `realm = 'platform'`. A
+  privilege from the next restart. Before naming an address, look up its
+  row in the `user` table: it should be an account you can sign in to,
+  with `realm = 'platform'`. A
   row with `email_verified = false` was created by the plain sign-up form
   with no proof of ownership — if it is not yours, delete it and create
   the account again with proof.
