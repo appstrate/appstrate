@@ -93,6 +93,7 @@ function invalidateRunAndNotificationQueries(qc: ReturnType<typeof useQueryClien
 export function useMarkRead() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/{id}/read", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }
@@ -105,6 +106,8 @@ export function useMarkRead() {
 export function useMarkReadByRun() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/notifications/read/{runId}", {
+    // Background writes: nothing for the user to act on.
+    meta: { errorHandledByCaller: true },
     onSuccess: () => invalidateRunAndNotificationQueries(qc),
   });
 }

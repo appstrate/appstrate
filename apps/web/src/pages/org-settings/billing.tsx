@@ -81,10 +81,6 @@ export function OrgSettingsBillingPage() {
   // offers the first one.
   const firstUpgradeId = upgradeIds[0];
 
-  const onMutationError = (err: unknown) => {
-    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
-  };
-
   const handleManage = () => {
     portalMutation.mutate(
       {},
@@ -92,7 +88,6 @@ export function OrgSettingsBillingPage() {
         onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: onMutationError,
       },
     );
   };
@@ -115,7 +110,6 @@ export function OrgSettingsBillingPage() {
               toast.success(t("billing.planChangeRequested"));
               void queryClient.invalidateQueries({ queryKey: billingKey });
             },
-            onError: onMutationError,
           },
         );
         return;
@@ -126,7 +120,6 @@ export function OrgSettingsBillingPage() {
             onSuccess: ({ url }) => {
               window.location.href = url;
             },
-            onError: onMutationError,
           },
         );
         return;

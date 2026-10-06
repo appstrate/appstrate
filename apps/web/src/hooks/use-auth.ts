@@ -9,6 +9,7 @@ import { toLoginError, toUnlinkError } from "../lib/auth-errors";
 import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
 import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
+import { registerSessionCheck } from "../lib/stale-authority";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -63,6 +64,19 @@ function initAuth() {
     clearSession();
   });
 }
+
+// Only Better Auth's own "no user" signs out: unlike at boot, a profile that
+// failed to load proves nothing here.
+registerSessionCheck({
+  hasSession: async () => {
+    const result = await authClient.getSession();
+    return result.error ? null : !!result.data?.user;
+  },
+  endSession: async () => {
+    await authClient.signOut().catch(() => {});
+    clearSession();
+  },
+});
 
 /**
  * Start the session resync at boot rather than on the first `useAuth()`

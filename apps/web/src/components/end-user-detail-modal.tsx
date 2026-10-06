@@ -15,6 +15,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
 import { EndUserMetadataEditor } from "./end-user-metadata-editor";
 import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface Props {
   open: boolean;
@@ -23,14 +24,10 @@ interface Props {
 }
 
 function CopyableField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard(1500);
   const { t } = useTranslation("common");
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const handleCopy = () => void copy(value);
 
   return (
     <div className="space-y-1">

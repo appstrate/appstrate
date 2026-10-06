@@ -203,6 +203,7 @@ export function useInvalidatePackageActivation() {
 export function useSetChatEnforced() {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       spaceId,
       packageId,

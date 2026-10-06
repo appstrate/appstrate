@@ -297,6 +297,16 @@ could not be resolved`) instead of failing for good on the first. Without
   shown only to those who may create one, and a platform admin without an
   organization lands on the creation form. The last space used in each
   organization is restored after an organization switch and after sign-out.
+- **Accepting an invitation says whether it created the membership**
+  (#1676). `POST /invite/{token}/accept` now returns `created`. For a caller
+  who was already a member it is `false`, and `role` / `permissions` are those
+  of the role they keep; the response used to echo the invitation's role, so
+  the dashboard told an existing member they had been promoted.
+- **The dashboard no longer hides a failure** (#1676). An expired session
+  lands on the login screen instead of rendering empty lists, every refused
+  write produces one message, a 4xx is no longer retried behind a spinner, a
+  changed role or a lost space is picked up without a reload, and a resource
+  the caller cannot read shows one "not found or not accessible" panel.
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in

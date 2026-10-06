@@ -114,8 +114,6 @@ export function BillingContactSection() {
           void queryClient.invalidateQueries({ queryKey: contactKey });
           toast.success(t("billingContact.saveSuccess"));
         },
-        onError: (err) =>
-          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) })),
       },
     );
   };

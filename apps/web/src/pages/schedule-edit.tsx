@@ -12,7 +12,12 @@ import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { ScheduleForm } from "../components/schedule-form";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import {
+  LoadingState,
+  ErrorState,
+  ResourceErrorState,
+  EmptyState,
+} from "../components/page-states";
 import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
 import { Lock } from "lucide-react";
@@ -30,7 +35,7 @@ export function ScheduleEditPage() {
   const mayWrite = useCanWriteSchedule(schedule);
 
   if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error?.message} />;
+  if (error || !schedule) return <ResourceErrorState error={error} />;
   // Reached by URL on a schedule running as another member: every write would 403.
   if (!mayWrite) {
     return (

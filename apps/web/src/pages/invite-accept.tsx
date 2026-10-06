@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ApiError, client, type paths } from "../api/client";
@@ -115,8 +116,12 @@ export function InviteAcceptPage() {
     if (data?.id) {
       orgStore.getState().setId(data.id);
     }
+    // An existing member keeps their role, whatever the invitation offered.
+    if (data && !data.created) {
+      toast.info(t("invite.roleUnchanged", { role: t(roleI18nKey(data.role)) }));
+    }
     navigate("/");
-  }, [token, navigate, queryClient]);
+  }, [token, navigate, queryClient, t]);
 
   if (loading) {
     return (

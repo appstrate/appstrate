@@ -56,7 +56,6 @@ const INTEGRATION_TABS = [
 ] as const;
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { toast } from "sonner";
 import {
   Trash2,
   ShieldCheck,
@@ -95,7 +94,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, EmptyState, ResourceErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -143,7 +142,6 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ApiError } from "../api/errors";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
@@ -1766,7 +1764,7 @@ export function IntegrationDetailPage() {
       </EmptyState>
     );
   }
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ResourceErrorState error={error} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
   const active = Boolean(summary?.active);
@@ -1778,14 +1776,7 @@ export function IntegrationDetailPage() {
   const isOwned = !isBuiltIn;
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
-    setActive.mutate(
-      { spaceId: currentSpaceId, packageId, active: next },
-      {
-        onSuccess,
-        onError: () =>
-          toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
-      },
-    );
+    setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
   };
   const onActivate = () => setActivation(true);
 
@@ -2107,8 +2098,6 @@ export function IntegrationDetailPage() {
         onConfirm={() =>
           deletePkg.mutate(packageId, {
             onSuccess: () => setConfirmDelete(false),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
           })
         }
       />

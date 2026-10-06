@@ -39,6 +39,7 @@ import {
 } from "../hooks/use-model-provider-pairing";
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface OAuthPairingBodyProps {
   providerId: string;
@@ -66,7 +67,7 @@ export function OAuthPairingBody({
 }: OAuthPairingBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const qc = useQueryClient();
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const createPairing = useCreateModelProviderPairing();
@@ -156,15 +157,7 @@ export function OAuthPairingBody({
     await generatePairing();
   }
 
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error(t("credentials.oauth.copyFailed"));
-    }
-  }
+  const handleCopy = () => void copy(command);
 
   return (
     <div className="flex flex-col gap-4 text-sm">

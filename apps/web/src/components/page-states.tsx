@@ -2,8 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { Spinner } from "./spinner";
-import type { LucideIcon } from "lucide-react";
+import { SearchX, type LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../api/errors";
 
 export function LoadingState() {
   return (
@@ -21,6 +23,21 @@ export function ErrorState({ message }: { message?: string }) {
       {message && <p className="mt-1 text-sm">{message}</p>}
     </div>
   );
+}
+
+/** A detail page's unreadable resource: missing and forbidden get the same panel, as the API answers them alike. */
+export function ResourceErrorState({ error }: { error: unknown }) {
+  const { t } = useTranslation();
+  if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        message={t("error.resourceUnavailable")}
+        hint={t("error.resourceUnavailableHint")}
+      />
+    );
+  }
+  return <ErrorState message={error ? getErrorMessage(error) : undefined} />;
 }
 
 export function EmptyState({

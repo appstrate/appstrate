@@ -192,7 +192,6 @@ export function FileListPanel({
           toast.success(t("keep.success"));
           onKept?.(file.id);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
 
@@ -207,7 +206,6 @@ export function FileListPanel({
           onDeleted?.(id);
           setPendingDelete(null);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };

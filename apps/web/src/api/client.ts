@@ -12,6 +12,8 @@
  * - `X-Org-Id` / `X-Space-Id` headers injected from the org/space stores
  * - a non-2xx answer to a request that carried a role preview ends the preview
  *   when the persona itself was refused (`lib/view-as-refusal.ts`)
+ * - a 401 resyncs the session and a 403/404 re-reads the caller's permissions
+ *   (`lib/stale-authority.ts`), so neither is shown as an empty screen
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
  *   Note: because errors are thrown, the `{ error }` branch of direct
@@ -23,6 +25,7 @@ import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
 import { buildScopingHeaders } from "../lib/scoping-headers";
 import { noteViewAsRefusal } from "../lib/view-as-refusal";
+import { noteStaleAuthority } from "../lib/stale-authority";
 
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
@@ -135,6 +138,7 @@ const problemDetailErrors: Middleware = {
     // Before the throw, and for every route: a refused role preview must end
     // the preview wherever it is noticed, not only on the org listing.
     await noteViewAsRefusal(request.headers, response);
+    noteStaleAuthority(request, response);
     throw await toApiError(response);
   },
 };

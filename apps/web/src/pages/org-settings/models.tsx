@@ -478,7 +478,6 @@ export function OrgSettingsModelsPage() {
         ? t("credentials.deleteRefused")
         : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
     );
-    closeConfirm();
   };
 
   return (
@@ -604,12 +603,14 @@ export function OrgSettingsModelsPage() {
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          const options = { onSuccess: closeConfirm, onError: reportDeleteFailure };
           const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate({ params }, options);
+            deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
           } else {
-            deletePkMutation.mutate({ params }, options);
+            deletePkMutation.mutate(
+              { params },
+              { onSuccess: closeConfirm, onError: reportDeleteFailure },
+            );
           }
         }}
       />

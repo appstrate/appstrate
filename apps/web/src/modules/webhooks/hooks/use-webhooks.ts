@@ -99,6 +99,7 @@ export function useCreateWebhook() {
   const invalidate = useInvalidateWebhooks();
   const spaceId = useCurrentSpaceId();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       level,
       ...data
@@ -137,7 +138,10 @@ export function useDeleteWebhook() {
 
 export function useTestWebhook() {
   const invalidate = useInvalidateWebhooks();
-  return $api.useMutation("post", "/api/webhooks/{id}/test", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/webhooks/{id}/test", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useRotateWebhookSecret() {

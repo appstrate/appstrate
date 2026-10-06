@@ -51,7 +51,9 @@ export function useSetDefaultProxy() {
 }
 
 export function useTestProxy() {
-  return $api.useMutation("post", "/api/proxies/{id}/test");
+  return $api.useMutation("post", "/api/proxies/{id}/test", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 /** `agents:read` alone: unlike the agent detail, `agents:run` does not open it. */
