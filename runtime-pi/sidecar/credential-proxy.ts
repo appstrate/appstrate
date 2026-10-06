@@ -99,7 +99,7 @@ interface ApiCallArgs {
   connectionId: string;
   targetUrl: string;
   method: string;
-  /** Sidecar-control headers already dropped; `fetchApiCall` drops Host, hop-by-hop and framing. */
+  /** `fetchApiCall` drops Host, hop-by-hop and framing. */
   callerHeaders: Record<string, string>;
   body: ApiCallRequestBody;
   /** When true, substitute `{{credential}}` placeholders inside the body. */

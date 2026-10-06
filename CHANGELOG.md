@@ -92,6 +92,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **In a run, `api_call` forwards a header named like a credential proxy
+  control header instead of refusing the call** (#1670). `X-Integration-Id`,
+  `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,
+  `X-Max-Response-Size`, `X-Truncated`, `X-Truncated-Size` and
+  `X-Auth-Refreshed` were the request controls and response markers of the
+  sidecar's HTTP proxy route. That route is retired and nothing in the sidecar
+  reads them: they now reach the upstream like any other header, and the tool
+  description no longer mentions them. The platform credential proxy, which
+  still reads some of them, is unchanged. The sidecar also stops re-checking
+  the type of `target` and the case of `method`: the agent runtime validates
+  a model's arguments against the tool's schema before it calls.
 - **Models, proxies and endpoint URLs refuse three states they used to
   accept** (#1681). A disabled model cannot be the organization default:
   `PUT /api/models/default` naming one, and `PATCH /api/models/{id}` with
