@@ -33,7 +33,7 @@ import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { getVersionForDownload } from "../services/package-versions.ts";
+import { assertVersionNotLower, getVersionForDownload } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
@@ -2536,6 +2536,8 @@ export function createPackagesRouter() {
           detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
         });
       }
+      // No option overrides this one, so it is answered before the two below.
+      if (importedVersion) await assertVersionNotLower(packageId, importedVersion);
       // `force=true` waives two overwrites at once — the unpublished draft and a
       // published version of the same number with other bytes — so one refusal
       // names both. A GitHub import has no force option.

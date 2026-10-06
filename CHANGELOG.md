@@ -315,7 +315,8 @@ could not be resolved`) instead of failing for good on the first. Without
   (#1699). Importing a new version lower than the highest published one
   replaced the draft, published nothing and still answered 201. It is now
   refused before anything is written, with `409 version_not_higher`, forced
-  or not; a bundle import carrying such a version is refused the same way.
+  or not. A bundle import refuses such a root the same way, and leaves such
+  a dependency as the organization has it, with a warning.
 - **An aliased run backed by OpenAI keeps its output cap and temperature**
   (#1705). Pi 1.0 reads a credential that is not `sk-`-shaped as a ChatGPT
   sign-in and drops `max_output_tokens`, `temperature` and the cache

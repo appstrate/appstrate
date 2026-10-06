@@ -95,16 +95,27 @@ async function planVersionCreation(executor: DbOrTx, packageId: string, version:
 }
 
 /**
- * Refuse a version the forward-only rule would reject, before the caller
- * writes anything that announces it. An existing version passes: replacing or
- * reusing it is the caller's decision.
+ * The published version that makes the forward-only rule refuse `version`, or
+ * `null`. An existing version is not refused: replacing or reusing it is the
+ * caller's decision.
  */
-export async function assertVersionNotLower(packageId: string, version: string): Promise<void> {
+export async function findHigherPublishedVersion(
+  packageId: string,
+  version: string,
+): Promise<string | null> {
   const outcome = await planVersionCreation(db, packageId, version);
-  if (outcome.action !== "rejected" || outcome.error !== "VERSION_NOT_HIGHER") return;
+  return outcome.action === "rejected" && outcome.error === "VERSION_NOT_HIGHER"
+    ? outcome.highest
+    : null;
+}
+
+/** Refuse such a version before the caller writes anything that announces it. */
+export async function assertVersionNotLower(packageId: string, version: string): Promise<void> {
+  const highest = await findHigherPublishedVersion(packageId, version);
+  if (!highest) return;
   throw conflict(
     "version_not_higher",
-    `Version ${version} is lower than the highest published version (${outcome.highest}) — bump the version in the manifest`,
+    `Version ${version} of ${packageId} is lower than the highest published version (${highest})`,
     { packageId },
   );
 }

@@ -18303,7 +18303,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` is refused before anything is written and has no override: bump the version in the manifest. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18388,7 +18388,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org): `bundle_conflict`. An embedded package whose version is new but lower than the highest published one: `version_not_higher`. */
+            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org): `bundle_conflict`. A root whose version is new but lower than the highest published one: `version_not_higher` (a dependency in that case is left as the org has it, with a warning). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18452,7 +18452,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` is refused before anything is written and has no override: bump the version in the manifest. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
