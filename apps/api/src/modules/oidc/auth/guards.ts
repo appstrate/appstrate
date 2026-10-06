@@ -337,8 +337,9 @@ async function wouldCreateAccount(internalAdapter: unknown, token: string): Prom
 }
 
 /**
- * Pre-empt `/magic-link/verify` when the pending OAuth client has a closed
- * signup policy AND the token would create a new user. Produces the same
+ * Pre-empt `/magic-link/verify` when the client the link is bound to no
+ * longer resolves, or has a closed signup policy AND the token would create
+ * a new user. Produces the same
  * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
  * its own signup-gating (`disableSignUp` in magic-link, social callback
  * via `oauth2/link-account.mjs` → `callback.mjs:158`), so the OIDC login

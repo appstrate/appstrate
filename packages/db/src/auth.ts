@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BASE_ERROR_CODES, betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -347,7 +347,10 @@ export async function withBootstrapTokenRedemption<T>(
   return { result, refusal: redemption.refusal };
 }
 
-/** Wrap the create hook so a refusal it throws during a redemption is recorded on it. */
+/**
+ * Wrap the create hook so a 403 it throws during a redemption is recorded on
+ * it: the one status Better Auth answers as a created account.
+ */
 function recordingRedemptionRefusal<A extends unknown[], R>(
   hook: (...args: A) => Promise<R>,
 ): (...args: A) => Promise<R> {
@@ -356,7 +359,7 @@ function recordingRedemptionRefusal<A extends unknown[], R>(
       return await hook(...args);
     } catch (err) {
       const redemption = bootstrapTokenRedemptionStore.getStore();
-      if (redemption && err instanceof APIError) {
+      if (redemption && isAPIError(err) && err.statusCode === 403) {
         redemption.refusal = err.body?.code ?? "signup_refused";
       }
       throw err;

@@ -19,7 +19,11 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
-import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  enableDashboardSso,
+} from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   captureMails,
@@ -44,7 +48,12 @@ import oidcModule from "../../../index.ts";
 const app = getTestApp({ modules: [oidcModule] });
 
 /** A space whose admin runs the mail server, and a client of that space. */
-async function spaceWithOwnSmtp(): Promise<{ spaceId: string; clientId: string; qs: string }> {
+async function spaceWithOwnSmtp(): Promise<{
+  spaceId: string;
+  orgId: string;
+  clientId: string;
+  qs: string;
+}> {
   const ctx = await createTestContext({ orgSlug: `tenant-${crypto.randomUUID().slice(0, 8)}` });
   const spaceId = prefixedId("spc");
   await db.insert(spaces).values({
@@ -70,6 +79,7 @@ async function spaceWithOwnSmtp(): Promise<{ spaceId: string; clientId: string; 
   });
   return {
     spaceId,
+    orgId: ctx.orgId,
     clientId: client.clientId,
     qs: `?client_id=${encodeURIComponent(client.clientId)}&state=s`,
   };
@@ -298,6 +308,95 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
       await openDashboardLink(email, { [AUTHORITATIVE_PENDING_CLIENT_HEADER]: "1" });
 
       expect(await realmOf(email)).toBe("platform");
+    });
+  });
+
+  describe("whose account a link signs in", () => {
+    async function endUser(spaceId: string, emailVerified = true) {
+      const account = await createTestUser({ emailVerified });
+      const realm = `end_user:${spaceId}`;
+      await db.update(userTable).set({ realm }).where(eq(userTable.id, account.id));
+      await db.delete(sessionTable).where(eq(sessionTable.userId, account.id));
+      return { ...account, realm };
+    }
+
+    /** Open the link last issued for `email`, mailed or withheld. */
+    async function openLinkFor(email: string): Promise<Response> {
+      const rows = await db.select().from(verificationTable);
+      const link = rows.find((row) => row.value.includes(`"email":"${email}"`));
+      return app.request(
+        `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}&callbackURL=%2F`,
+      );
+    }
+
+    async function expectRefused(res: Response, userId: string) {
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location")!).searchParams.get("error")).toBe(
+        "signup_disabled",
+      );
+      expect(
+        await db.select().from(sessionTable).where(eq(sessionTable.userId, userId)),
+      ).toHaveLength(0);
+    }
+
+    const askDashboard = (email: string) =>
+      app.request("/api/auth/sign-in/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, callbackURL: "/" }),
+      });
+
+    it("not an end-user's, through a dashboard link", async () => {
+      const { spaceId } = await spaceWithOwnSmtp();
+      const account = await endUser(spaceId);
+
+      await askDashboard(account.email);
+
+      await expectRefused(await openLinkFor(account.email), account.id);
+    });
+
+    it("not another space's end-user, through a space's link", async () => {
+      const { qs } = await spaceWithOwnSmtp();
+      const account = await endUser(prefixedId("spc"));
+
+      await submitEmail("/api/oauth/magic-link", qs, account.email);
+
+      await expectRefused(await openLinkFor(account.email), account.id);
+    });
+
+    it("not an end-user's, through an org-level client's link", async () => {
+      const { spaceId, orgId } = await spaceWithOwnSmtp();
+      const account = await endUser(spaceId);
+      await enableDashboardSso(orgId);
+      const orgClient = await createClient({
+        level: "org",
+        name: "Org app",
+        redirectUris: ["https://org.example.com/oauth/callback"],
+        referencedOrgId: orgId,
+      });
+
+      await submitEmail(
+        "/api/oauth/magic-link",
+        `?client_id=${encodeURIComponent(orgClient.clientId)}&state=s`,
+        account.email,
+      );
+
+      await expectRefused(await openLinkFor(account.email), account.id);
+    });
+
+    it("an unverified end-user of the space, through that space's link", async () => {
+      const { spaceId, qs } = await spaceWithOwnSmtp();
+      const account = await endUser(spaceId, false);
+
+      await submitEmail("/api/oauth/magic-link", qs, account.email);
+      const res = await openLinkFor(account.email);
+
+      expect(res.headers.get("location")).not.toContain("error=");
+      const sessions = await db
+        .select()
+        .from(sessionTable)
+        .where(eq(sessionTable.userId, account.id));
+      expect(sessions.map((session) => session.realm)).toEqual([account.realm]);
     });
   });
 
