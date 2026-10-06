@@ -42,6 +42,7 @@ import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { Play } from "lucide-react";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
 import { isQueryInFlight } from "../lib/query-state";
 
@@ -382,28 +383,29 @@ export function RunDetailPage() {
               for the readings, the live cadence and when it renders nothing. */}
                 <ContextGaugeReadout turns={turnRows} status={run.status} />
                 {!isRunning && !isInline && agent && can("agents:run") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!permissionsReady || launcher.isPending || rerunRefusal !== null}
-                    title={rerunRefusal ? t(rerunRefusal) : undefined}
-                    onClick={() => {
-                      if (canReadAgent) {
-                        setInputOpen(true);
-                      } else {
-                        // The API conceals resolved input from runners. Replay
-                        // that snapshot server-side, preserving its parameters.
-                        launcher.launch({
-                          rerun_from: run.id,
-                          version: replayVersion(run.version_ref, agent.home_writable),
-                        });
-                      }
-                    }}
-                  >
-                    {launcher.isPending && <Spinner />}
-                    <Play className="size-3.5" />
-                    {t("run.rerun")}
-                  </Button>
+                  <DisabledReasonTooltip reason={rerunRefusal ? t(rerunRefusal) : null}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!permissionsReady || launcher.isPending || rerunRefusal !== null}
+                      onClick={() => {
+                        if (canReadAgent) {
+                          setInputOpen(true);
+                        } else {
+                          // The API conceals resolved input from runners. Replay
+                          // that snapshot server-side, preserving its parameters.
+                          launcher.launch({
+                            rerun_from: run.id,
+                            version: replayVersion(run.version_ref, agent.home_writable),
+                          });
+                        }
+                      }}
+                    >
+                      {launcher.isPending && <Spinner />}
+                      <Play className="size-3.5" />
+                      {t("run.rerun")}
+                    </Button>
+                  </DisabledReasonTooltip>
                 )}
                 {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel

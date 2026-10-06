@@ -95,6 +95,7 @@ const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
 const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
+const TEST_REQUEST_ID = "req_chat_handler_test";
 
 /**
  * One scripted openai-completions model row, in the list envelope
@@ -258,6 +259,7 @@ describe("handleChatStream", () => {
       return errorHandler(error, context as never);
     });
     app.post("/api/chat", (c) => {
+      c.set("requestId", TEST_REQUEST_ID);
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
       // What `enterSpaceContext` writes on every `/api/chat/*` route in
@@ -549,8 +551,12 @@ describe("handleChatStream", () => {
       await res.text();
 
       expect(marker).toStartWith("appstrate:chat-turn-error:");
+      expect(marker).toEndWith(`:${TEST_REQUEST_ID}`);
       expect(error.mock.calls).toEqual([
-        ["chat turn stream failed", { err: "Error: ESCAPED_EXECUTE_SENTINEL" }],
+        [
+          "chat turn stream failed",
+          { err: "Error: ESCAPED_EXECUTE_SENTINEL", requestId: TEST_REQUEST_ID },
+        ],
       ]);
     } finally {
       error.mockRestore();

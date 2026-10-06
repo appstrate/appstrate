@@ -55,7 +55,7 @@ const INTEGRATION_TABS = [
   "versions",
 ] as const;
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   Trash2,
   ShieldCheck,
@@ -66,7 +66,6 @@ import {
   ChevronRight,
   ArrowUpFromLine,
   AlertTriangle,
-  SearchX,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -94,7 +93,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, EmptyState, ResourceErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -140,8 +139,6 @@ import { useIntegrations } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
-import { useCanReach } from "../hooks/use-can-reach";
-import { ApiError } from "../api/errors";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
@@ -1744,27 +1741,10 @@ export function IntegrationDetailPage() {
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
-  const canBrowseIntegrations = useCanReach()("/integrations");
 
   if (isLoading) return <LoadingState />;
-  // Not placed in this space (or gone): the server answers one opaque 404 for
-  // both, so the page says what the member can do about either.
-  if ((error instanceof ApiError && error.status === 404) || (!error && !detail)) {
-    return (
-      <EmptyState
-        icon={SearchX}
-        message={t("integration.notInSpace.title")}
-        hint={t("integration.notInSpace.hint")}
-      >
-        {canBrowseIntegrations && (
-          <Button variant="outline" asChild>
-            <Link to="/integrations">{t("integration.notInSpace.back")}</Link>
-          </Button>
-        )}
-      </EmptyState>
-    );
-  }
   if (error) return <ResourceErrorState error={error} />;
+  if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
   const active = Boolean(summary?.active);

@@ -94,7 +94,12 @@ function ModelRequiredAlert({ packageId }: { packageId: string }) {
       : blocker === "detail.titleNoDefaultModel"
         ? {
             title: t("models.alert.noDefaultModel"),
-            description: t("models.alert.noDefaultModelDescription"),
+            // Only `models:write` can set the default (PUT /api/models/default).
+            description: t(
+              can("models:write")
+                ? "models.alert.noDefaultModelDescription"
+                : "models.alert.noDefaultModelAskAdmin",
+            ),
           }
         : null;
   if (!copy) return null;

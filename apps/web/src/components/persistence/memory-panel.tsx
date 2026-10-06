@@ -132,7 +132,7 @@ export function MemoryPanel({ packageId, runId }: MemoryPanelProps) {
         open={toDelete !== null}
         onClose={() => setToDelete(null)}
         onConfirm={() => {
-          if (toDelete) deletion.mutate(toDelete.id, { onSettled: () => setToDelete(null) });
+          if (toDelete) deletion.mutate(toDelete.id, { onSuccess: () => setToDelete(null) });
         }}
         title={t("detail.memoryDeleteTitle")}
         description={t("detail.memoryDeleteConfirm")}
