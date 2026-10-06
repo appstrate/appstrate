@@ -128,6 +128,11 @@ function EmailChangeForm() {
         {landing === "failed" && (
           <div className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</div>
         )}
+        {landing === "refused" && (
+          <div className="text-destructive text-sm">
+            {t("common:apiError.email_change_refused")}
+          </div>
+        )}
         {landing === "accepted" && (
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">
             {t("preferences.emailChangeLinkAccepted")}

@@ -305,13 +305,34 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
   return named[0]!;
 }
 
+/** Whether verifying `token` would create an account; an unreadable token is Better Auth's. */
+async function wouldCreateAccount(internalAdapter: unknown, token: string): Promise<boolean> {
+  const adapter = internalAdapter as
+    | {
+        findVerificationValue: (key: string) => Promise<{ value: string } | null>;
+        findUserByEmail: (email: string) => Promise<{ user: unknown } | null>;
+      }
+    | undefined;
+  if (!adapter) return false;
+  const row = await adapter.findVerificationValue(token);
+  if (!row) return false;
+  let email: unknown;
+  try {
+    email = (JSON.parse(row.value) as { email?: unknown }).email;
+  } catch {
+    return false;
+  }
+  if (typeof email !== "string" || !email) return false;
+  return !(await adapter.findUserByEmail(email))?.user;
+}
+
 /**
  * Build the guards plugin. Returned as an unknown-shaped object at this
  * layer to keep `@better-auth/core` types out of the module's public
  * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
  */
 /**
- * Pre-empt `/magic-link/verify` when the pending OAuth client has a closed
+ * Pre-empt `/magic-link/verify` when the bound OAuth client is gone, or has a closed
  * signup policy AND the token would create a new user. Produces the same
  * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
  * its own signup-gating (`disableSignUp` in magic-link, social callback
@@ -356,33 +377,12 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   const pendingClientId = binding.clientId;
 
   const policy = await loadClientSignupPolicy(pendingClientId);
-  if (!policy) return;
-  if (policy.allowSignup) return;
-
-  const adapter = ctx.context.internalAdapter as
-    | {
-        findVerificationValue: (key: string) => Promise<{ value: string; expiresAt: Date } | null>;
-        findUserByEmail: (email: string) => Promise<{ user: unknown } | null>;
-      }
-    | undefined;
-  if (!adapter) return;
-
-  const row = await adapter.findVerificationValue(token);
-  if (!row) return;
-  let email: string | undefined;
-  try {
-    const parsed = JSON.parse(row.value) as { email?: unknown };
-    if (typeof parsed.email === "string") email = parsed.email;
-  } catch {
+  if (
+    policy &&
+    (policy.allowSignup || !(await wouldCreateAccount(ctx.context.internalAdapter, token)))
+  )
     return;
-  }
-  if (!email) return;
 
-  const existing = await adapter.findUserByEmail(email);
-  if (existing?.user) return;
-
-  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
-  if (!rawErrorCallback) return;
   const baseURL = new URL(ctx.context.baseURL);
 
   // Shared fallback — used both for off-origin URLs (attack path:
@@ -410,6 +410,8 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
     safe.searchParams.set("error", "signup_disabled");
     throw ctx.redirect(safe.toString());
   }
+
+  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL ?? "/";
 
   // `decodeURIComponent` throws `URIError` on malformed percent-escapes
   // (`%ZZ`, lone `%`); `new URL` throws `TypeError` on syntactically

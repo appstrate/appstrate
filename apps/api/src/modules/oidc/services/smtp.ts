@@ -41,12 +41,15 @@ import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface ResolvedSmtpConfig {
+interface SmtpSender {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
-  source: "per-space" | "instance";
 }
+
+export type ResolvedSmtpConfig =
+  | (SmtpSender & { source: "per-space"; tenantRealm: string })
+  | (SmtpSender & { source: "instance" });
 
 interface UpsertSmtpConfigInput {
   host: string;
@@ -179,6 +182,7 @@ async function resolvePerAppSmtp(spaceId: string): Promise<ResolvedSmtpConfig | 
       fromAddress: row.fromAddress,
       fromName: row.fromName,
       source: "per-space",
+      tenantRealm: `end_user:${spaceId}`,
     };
   });
 }

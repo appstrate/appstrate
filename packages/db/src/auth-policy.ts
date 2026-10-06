@@ -63,6 +63,11 @@ export function isBootstrapOwner(email: string): boolean {
   return env.AUTH_BOOTSTRAP_OWNER_EMAIL === normalizeEmail(email);
 }
 
+/** Owner or platform admin: an address whose account takes proof of ownership (`auth.ts`). */
+export function isOperatorNamedEmail(email: string): boolean {
+  return isBootstrapOwner(email) || isPlatformAdmin(email);
+}
+
 /**
  * Reasons surfaced by `evaluateSignupPolicy`. Stable identifiers — used in
  * error messages and tests.
@@ -105,11 +110,14 @@ export function evaluateSignupPolicy(
   email: string,
   hasPendingInvitation: boolean,
 ): SignupPolicyDecision {
-  const env = getEnv();
-
   if (isBootstrapOwner(email)) return { allowed: true, reason: "bootstrap" };
   if (isPlatformAdmin(email)) return { allowed: true, reason: "platform_admin" };
   if (hasPendingInvitation) return { allowed: true, reason: "invitation" };
+  return evaluateUnprivilegedSignup(email);
+}
+
+export function evaluateUnprivilegedSignup(email: string): SignupPolicyDecision {
+  const env = getEnv();
 
   if (env.AUTH_DISABLE_SIGNUP) {
     if (!isAllowedSignupDomain(email)) {

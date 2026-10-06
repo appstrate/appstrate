@@ -3,8 +3,8 @@
 /**
  * `AUTH_BOOTSTRAP_TOKEN` lifecycle (issue #344 Layer 2b).
  *
- * The CLI writes a one-shot redemption token to `.env` when an unattended
- * install lands without a named owner email. The platform reads it at
+ * The CLI writes a one-shot redemption token to `.env` on every closed
+ * install, with or without a named owner email. The platform reads it at
  * boot, holds it in process memory, and lets the FIRST POST to
  * `/api/auth/bootstrap/redeem` matching that token claim ownership of
  * the instance — closing the historical "silent open mode after
@@ -157,7 +157,7 @@ export function markBootstrapTokenConsumed(): void {
   _inFlight = false;
   if (_consumed) return;
   _consumed = true;
-  logger.info("bootstrap-token: consumed");
+  if (isBootstrapTokenConfigured()) logger.info("bootstrap-token: consumed");
 }
 
 /** Test-only: reset the in-memory consume flag. Production callers must NOT use this. */

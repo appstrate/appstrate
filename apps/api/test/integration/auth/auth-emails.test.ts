@@ -8,9 +8,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { eq } from "drizzle-orm";
+import { user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite, captureMails, firstLink } from "../../helpers/smtp.ts";
 
 // Core only: no OIDC routes, as on an instance whose `MODULES` omits `oidc`.
@@ -212,6 +215,129 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(location.pathname).toBe("/preferences/general");
       expect(location.searchParams.get("email_change")).toBe("1");
       expect(location.searchParams.get("error")).toBe("INVALID_TOKEN");
+    });
+  });
+
+  describe("email change towards an address the environment names", () => {
+    const callbackURL = "/preferences/general?email_change=1";
+    const savedOwner = process.env.AUTH_BOOTSTRAP_OWNER_EMAIL;
+
+    function nameOwner(email: string | undefined) {
+      if (email === undefined) delete process.env.AUTH_BOOTSTRAP_OWNER_EMAIL;
+      else process.env.AUTH_BOOTSTRAP_OWNER_EMAIL = email;
+      _resetCacheForTesting();
+    }
+
+    afterEach(() => {
+      nameOwner(savedOwner);
+    });
+
+    it("answers as for a taken address and sends nothing", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const reserved = `owner-${crypto.randomUUID()}@example.test`;
+      nameOwner(reserved);
+
+      const mails = await captureMails(async () => {
+        const res = await postAuth(
+          "/change-email",
+          { newEmail: reserved, callbackURL },
+          account.cookie,
+        );
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ status: true });
+      });
+
+      expect(mails).toHaveLength(0);
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
+    });
+
+    it("sends nothing either when the account's own address is unverified", async () => {
+      const account = await createTestUser({ emailVerified: false });
+      const reserved = `owner-${crypto.randomUUID()}@example.test`;
+      nameOwner(reserved);
+
+      const mails = await captureMails(async () => {
+        const res = await postAuth(
+          "/change-email",
+          { newEmail: reserved, callbackURL },
+          account.cookie,
+        );
+        expect(res.status).toBe(200);
+      });
+
+      expect(mails).toHaveLength(0);
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
+    });
+
+    describe("a platform admin's address", () => {
+      const admin = "admin-named@example.test";
+      const savedAdmins = process.env.AUTH_PLATFORM_ADMIN_EMAILS;
+
+      beforeEach(() => {
+        process.env.AUTH_PLATFORM_ADMIN_EMAILS = admin;
+        _resetCacheForTesting();
+      });
+
+      afterEach(() => {
+        if (savedAdmins === undefined) delete process.env.AUTH_PLATFORM_ADMIN_EMAILS;
+        else process.env.AUTH_PLATFORM_ADMIN_EMAILS = savedAdmins;
+        _resetCacheForTesting();
+      });
+
+      it("signing up for it creates nothing and sends no mail", async () => {
+        const mails = await captureMails(async () => {
+          const res = await postAuth("/sign-up/email", {
+            email: admin,
+            password: PASSWORD,
+            name: "Admin",
+          });
+          // Better Auth's answer for any sign-up once verification is required.
+          expect(res.status).toBe(200);
+          expect(((await res.json()) as { token: unknown }).token).toBeNull();
+        });
+
+        expect(mails).toHaveLength(0);
+        expect(await db.select().from(userTable).where(eq(userTable.email, admin))).toHaveLength(0);
+      });
+
+      it("the account that already holds it is still sent its verification link", async () => {
+        await createTestUser({ email: admin, password: PASSWORD, emailVerified: false });
+
+        const mails = await captureMails(async () => {
+          const res = await postAuth("/sign-in/email", { email: admin, password: PASSWORD });
+          expect(res.status).toBe(403);
+        });
+
+        expect(mails).toHaveLength(1);
+        expect(mails[0]!.to).toBe(admin);
+      });
+    });
+
+    it("a link issued before the address was named returns to the settings page with the refusal", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const target = `owner-${crypto.randomUUID()}@example.test`;
+      const [toCurrent] = await captureMails(() =>
+        postAuth("/change-email", { newEmail: target, callbackURL }, account.cookie),
+      );
+      const approve = firstLink(toCurrent!);
+      const [toNew] = await captureMails(async () => {
+        await app.request(`${approve.pathname}${approve.search}`, {
+          headers: { Cookie: account.cookie },
+        });
+      });
+      const verify = firstLink(toNew!);
+      nameOwner(target);
+
+      const res = await app.request(`${verify.pathname}${verify.search}`, {
+        headers: { Cookie: account.cookie },
+      });
+
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.get("location")!, "http://x");
+      expect(location.pathname).toBe("/preferences/general");
+      expect(location.searchParams.get("email_change")).toBe("1");
+      expect(location.searchParams.get("error")).toBe("email_change_refused");
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
     });
   });
 

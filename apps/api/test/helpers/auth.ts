@@ -16,8 +16,9 @@
  *
  * Organizations, memberships, and spaces are seeded directly in the DB.
  */
+import { afterAll, beforeAll } from "bun:test";
 import { eq, sql } from "drizzle-orm";
-import { getAuth } from "@appstrate/db/auth";
+import { getAuth, _swapRealmResolverForTesting } from "@appstrate/db/auth";
 import { db } from "./db.ts";
 import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
@@ -318,4 +319,15 @@ export async function createTestContext(
     orgId: org.id,
     defaultSpaceId,
   };
+}
+
+/** For a suite that sets the process-wide realm resolver: start from none, hand the installed one back. */
+export function restoreRealmResolverAfterSuite(): void {
+  let installed: ReturnType<typeof _swapRealmResolverForTesting>;
+  beforeAll(() => {
+    installed = _swapRealmResolverForTesting(null);
+  });
+  afterAll(() => {
+    _swapRealmResolverForTesting(installed);
+  });
 }

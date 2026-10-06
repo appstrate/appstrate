@@ -12,12 +12,9 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { _resetCacheForTesting } from "@appstrate/env";
-import {
-  _rebuildAuthForTesting,
-  setPostBootstrapOrgHook,
-  setRealmResolver,
-} from "@appstrate/db/auth";
+import { _rebuildAuthForTesting, setPostBootstrapOrgHook } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
+import { restoreRealmResolverAfterSuite } from "../helpers/auth.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { organizations, organizationMembers, user } from "@appstrate/db/schema";
 import { _resetBootstrapTokenForTesting } from "../../src/lib/bootstrap-token.ts";
@@ -63,6 +60,8 @@ async function redeem(body: Record<string, unknown>) {
   });
 }
 
+restoreRealmResolverAfterSuite();
+
 describe("POST /api/auth/bootstrap/redeem", () => {
   beforeEach(async () => {
     await truncateAll();
@@ -78,7 +77,6 @@ describe("POST /api/auth/bootstrap/redeem", () => {
     // (covered in auth-bootstrap-org.test.ts) — we just need it not to
     // be a no-op that hides a regression in the default path.
     setPostBootstrapOrgHook(async () => {});
-    setRealmResolver(async () => "platform");
     setEnv({
       AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN,
       AUTH_DISABLE_SIGNUP: "true",

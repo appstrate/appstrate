@@ -640,9 +640,8 @@ export function App() {
           />
           {/*
            * `/register` stays mounted even when `signupDisabled` is true so
-           * the closed-mode bootstrap owner (and any
-           * `AUTH_PLATFORM_ADMIN_EMAILS` entry) can sign up via
-           * email/password without needing Google/GitHub/SMTP. The real
+           * an invited address can sign up via email/password without
+           * Google/GitHub/SMTP. The real
            * barrier is server-side in `databaseHooks.user.create.before` —
            * unauthorized signups receive a `signup_disabled` error that
            * `RegisterPage` surfaces. The signup link is still hidden from

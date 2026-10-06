@@ -19,7 +19,7 @@ bootstrap the first owner safely.
 | Lock down signup, allow invitations              | `AUTH_DISABLE_SIGNUP=true`                                                                     |
 | Lock down org creation too (single-org tenant)   | `AUTH_DISABLE_SIGNUP=true` + `AUTH_DISABLE_ORG_CREATION=true` + `AUTH_PLATFORM_ADMIN_EMAILS=…` |
 | Restrict to specific email domains               | `AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io`                                                  |
-| Auto-provision the root org on first deploy      | `AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com` (+ `AUTH_BOOTSTRAP_ORG_NAME="Acme"`)               |
+| Name the owner of the root org on first deploy   | `AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com` + `AUTH_BOOTSTRAP_TOKEN=…`, redeem at `/claim`     |
 | Unattended install, claim ownership later (#344) | (auto) — `appstrate install --yes` generates `AUTH_BOOTSTRAP_TOKEN`, redeem at `/claim`        |
 
 ---
@@ -36,9 +36,11 @@ When `true`, Appstrate rejects new account creation across **every** auth
 path: email/password, magic-link, social OIDC. Three exceptions always pass
 through, in priority order:
 
-1. The email matches `AUTH_BOOTSTRAP_OWNER_EMAIL` (bootstrap path, see
-   below).
-2. The email is in `AUTH_PLATFORM_ADMIN_EMAILS`.
+1. The email matches `AUTH_BOOTSTRAP_OWNER_EMAIL` **and the caller proves
+   it controls that address** (bootstrap path, see below).
+2. The email is in `AUTH_PLATFORM_ADMIN_EMAILS` **and the caller proves it
+   controls that address** (same proof, see "Accounts the environment
+   names" below).
 3. A non-expired `pending` invitation exists for the email in
    `org_invitations` — the **invitation override** that prevents the
    common Infisical-style breakage where invite links stop working when
@@ -63,8 +65,19 @@ Comma-separated email allowlist (case-insensitive). Default empty.
 
 Platform admins:
 
-- Bypass `AUTH_DISABLE_SIGNUP`.
+- Bypass `AUTH_DISABLE_SIGNUP` and `AUTH_ALLOWED_SIGNUP_DOMAINS` when
+  their account is created with proof of ownership (below).
 - Can call `POST /api/orgs` even when `AUTH_DISABLE_ORG_CREATION=true`.
+- Can call the platform-admin routes.
+
+The privilege is read off the account's address on every request, so the
+account of a listed address is created only for a caller who proves
+control of that address — the rule of the bootstrap owner, in "Accounts
+the environment names" below. The plain sign-up form refuses a listed
+address that has no account yet. An account that already holds a listed
+address is not re-examined: it signs in and uses the privilege as before,
+so list only addresses whose account you can sign in to, or that have no
+account yet.
 
 Declarative on purpose: no UI, no migration, IaC-friendly. Add or remove
 admins by editing the env and restarting the API.
@@ -90,12 +103,79 @@ AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io
 
 Declarative bootstrap path for fresh closed-mode instances.
 
-When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set:
+`AUTH_BOOTSTRAP_OWNER_EMAIL` says **which** account owns the instance. The
+moment that account is created, an organization named
+`AUTH_BOOTSTRAP_ORG_NAME` (default `"Default"`) is created with it as
+`owner`.
 
-1. The signup gate lets this email through even if `AUTH_DISABLE_SIGNUP=true`.
-2. As soon as that user signs up (dashboard, magic-link, social OIDC), an
-   organization named `AUTH_BOOTSTRAP_ORG_NAME` (default `"Default"`) is
-   created automatically with that user as `owner`.
+#### Accounts the environment names
+
+The owner's account is born owner, and the account of an address in
+`AUTH_PLATFORM_ADMIN_EMAILS` is born platform admin, so knowing such an
+address is not enough to create its account. The platform creates it only
+for a caller who proves control:
+
+| How the account is created                                                      | Accepted? |
+| ------------------------------------------------------------------------------- | --------- |
+| `/claim` with `AUTH_BOOTSTRAP_TOKEN` (see below)                                | yes       |
+| Google / GitHub sign-in, when the provider asserts the address is verified      | yes       |
+| Magic link sent to the address (requires SMTP)                                  | yes       |
+| Email + password on `/register`, with or without SMTP                           | **no**    |
+| An existing account changing its e-mail to the address (`email_change_refused`) | **no**    |
+
+The sign-up form refuses whatever else is configured — open or closed
+sign-up, a pending invitation, a sign-up on a hosted end-user page. A
+verification e-mail does not count: it shows who reads the inbox, not who
+chose the password. The refusal does not state its reason: it carries the
+status and body the form gives any address it will not register
+(`signup_disabled`, `signup_domain_not_allowed`, or "User already
+exists"), and the address is not sent to the browser. The reason is in
+the server log
+(`refused to create an account named in AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS without proof of ownership`);
+the recovery is under Pitfalls below.
+
+The token at `/claim` creates one account, on an instance that has no
+organization yet: the named owner's when `AUTH_BOOTSTRAP_OWNER_EMAIL` is
+set, otherwise the address its holder types — a listed admin address
+included. Every other listed address is created by a magic link or a
+verified social sign-in.
+
+The named owner is exempt from `AUTH_ALLOWED_SIGNUP_DOMAINS` on every
+accepted path: the operator named that address. A listed admin address
+is exempt on the social and magic-link paths, not at `/claim`: the token
+claims an admin address outside the allowlist only if it is also the
+named owner (`403 signup_domain_not_allowed` otherwise).
+
+While a bootstrap token is redeemable the dashboard shows `/claim` and
+nothing else to a signed-out visitor, so the token is the path to use
+whenever one is set (the installer always sets one). The social and
+magic-link paths are for an instance configured without a token.
+
+#### Known limits
+
+- **A named address can still be guessed and confirmed.** With sign-up
+  open and no SMTP, the refusal is answered after the password is hashed
+  while a really taken address is answered before, so response time tells
+  them apart. And without SMTP, a signed-in account that tries to change
+  its e-mail to the owner's address or to one in
+  `AUTH_PLATFORM_ADMIN_EMAILS` gets `403 email_change_refused`, which an
+  ordinary address does not. With SMTP the request is answered like any
+  other and no e-mail is sent: the refusal is only in the server log.
+  Confirming the address does not let anyone create its account.
+- **A space that runs its own SMTP server can tell whether an address is
+  its own or free.** A sign-in e-mail requested on that space's hosted
+  pages reaches its server only for one of the space's accounts or for an
+  address nobody holds; for any other address nothing arrives, which the
+  server's owner can observe. No link is delivered in that case.
+- **An account that already holds a named address is not re-examined.**
+  The rule is on creation. Whoever holds the account of an address in
+  `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` has its
+  privilege from the next restart. Before naming an address, look up its
+  row in the `user` table: it should be an account you can sign in to,
+  with `realm = 'platform'`. A
+  row with `email_verified = false` was created by the plain sign-up form
+  with no proof of ownership — if it is not yours, delete it and create
+  the account again with proof.
 
 Idempotent: if the user already owns an org, the after-hook is a no-op.
 Slug collisions add a numeric suffix.
@@ -105,15 +185,22 @@ AUTH_DISABLE_SIGNUP=true
 AUTH_DISABLE_ORG_CREATION=true
 AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com
 AUTH_BOOTSTRAP_ORG_NAME=Acme HQ
+AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>
 ```
 
 ### `AUTH_BOOTSTRAP_TOKEN` (single-shot redemption — closed-by-default)
 
-Companion to `AUTH_BOOTSTRAP_OWNER_EMAIL` for the case where you can't
-provide an email at install time — typically `curl … | bash -s -- --yes`
-or any unattended flow (Ansible, cloud-init, GitHub Actions). The CLI
-generates a 256-bit base64url token, writes it to `.env`, and prints a
-banner with the redemption URL.
+The secret that proves the person creating the owner account is the
+operator. The CLI generates a 256-bit base64url token on every closed
+install, writes it to `.env`, and prints a banner with the redemption URL.
+
+- With `AUTH_BOOTSTRAP_OWNER_EMAIL`: the token claims that address and no
+  other (`bootstrap_owner_email_mismatch` otherwise). If an account already
+  exists for it, the answer is `409 bootstrap_user_exists`: sign in with
+  that account and use the script of Recipe 4.
+- Alone — typically `curl … | bash -s -- --yes` or any unattended flow
+  (Ansible, cloud-init, GitHub Actions) where no email is known at install
+  time: the token holder picks the owner address on `/claim`.
 
 The platform reads the token at boot, holds it in memory, and lets the
 **first** POST to `/api/auth/bootstrap/redeem` matching that token claim
@@ -132,13 +219,13 @@ State machine:
 \* Reconciled at boot: when the env still carries a token but at least
 one org already exists, the platform flips the in-memory consumed flag
 during startup so the SPA stops sending returning visitors to `/claim`.
-You can leave the token in `.env` indefinitely without UX consequences,
-but rotating it out keeps the file honest.
 
-The DB-org-count check is the durable replay guard: even if the operator
-forgets to remove the token from `.env`, once any organization exists
-the token is dead — a process restart cannot reopen the redemption
-window.
+**Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is
+claimed.** What keeps a claimed token dead across restarts is the
+organization count: the token is redeemable while the instance has no
+organization at all. A token left in `.env` is therefore redeemable
+again after a restart if every organization has since been deleted, by
+whoever can read that file or an old copy of it.
 
 > **Reverse-proxy deployments:** the redeem endpoint is rate-limited to
 > 5 requests/minute **per source IP**. If you front the platform with a
@@ -153,8 +240,7 @@ window.
 > for hop semantics.
 
 ```env
-# Generated by `appstrate install --yes` when no APPSTRATE_BOOTSTRAP_OWNER_EMAIL
-# is provided. Do NOT commit. Single-use.
+# Generated by `appstrate install`. Do NOT commit. Single-use.
 AUTH_DISABLE_SIGNUP=true
 AUTH_DISABLE_ORG_CREATION=true
 AUTH_BOOTSTRAP_TOKEN=kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk
@@ -166,9 +252,8 @@ an explicit signup-gate bypass, then creates the bootstrap organization
 in the same round-trip and sets the session cookie so the SPA lands
 authenticated.
 
-Mutually exclusive with `AUTH_BOOTSTRAP_OWNER_EMAIL` — set one or the
-other, never both. (The CLI never generates both; this is a guard for
-hand-written `.env` files.)
+While a token is redeemable, every signed-out page of the dashboard
+leads to `/claim`.
 
 ---
 
@@ -186,9 +271,9 @@ so you usually never have to touch `.env` by hand:
 ```
 
 Type your email → install writes `AUTH_DISABLE_SIGNUP=true`,
-`AUTH_DISABLE_ORG_CREATION=true`, `AUTH_PLATFORM_ADMIN_EMAILS=…`, and
-`AUTH_BOOTSTRAP_OWNER_EMAIL=…` into the generated `.env`. Empty input
-keeps the default open mode.
+`AUTH_DISABLE_ORG_CREATION=true`, `AUTH_PLATFORM_ADMIN_EMAILS=…`,
+`AUTH_BOOTSTRAP_OWNER_EMAIL=…` and a fresh `AUTH_BOOTSTRAP_TOKEN=…` into
+the generated `.env`. Empty input keeps the default open mode.
 
 **Non-interactive** (`curl|bash`, CI, Ansible, cloud-init):
 
@@ -201,35 +286,34 @@ curl -fsSL https://get.appstrate.dev | bash
 Same result, no prompt. The env vars are read by the installer and
 written into the generated `.env`.
 
-After install, the CLI opens `/register` in your browser and prints the
+After install, the CLI opens the dashboard in your browser and prints the
 next step:
 
 ```
-┌  Next: create your owner account
+┌  Closed-by-default install — claim ownership
 │
-│  Opened  http://localhost:3000/register  in your browser.
-│  Sign up as  admin@acme.com  (the form is pre-filled and locked)
-│  Pick any password — the org "Acme" is created automatically.
+│  Open  http://localhost:3000/claim
+│  Claim it as  admin@acme.com  with a password of your choice.
+│
+│    Bootstrap token:
+│    kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk
 │
 └
 ```
 
-`/register` is rendered with the email field already
-filled in and disabled (so a typo can't diverge you from the configured
-bootstrap account). Pick a password, submit. The org is created
-synchronously by the signup after-hook, then you're routed through the
-rest of the onboarding (configure your first model, connect providers,
-invite teammates). Done.
+Paste the token, type the owner address and a password, submit. The org
+is created in the same round-trip and you land signed in, then go through
+the rest of the onboarding (configure your first model, connect
+providers, invite teammates). Done.
 
 > **How signup works in closed mode.** The signup link is hidden from
 > `/login` (no public discoverability) but `/register` itself stays
-> mounted. When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the SPA pre-fills
-> and locks the email field via `__APP_CONFIG__.bootstrapOwnerEmail` so
-> the bootstrap owner can't accidentally submit a different email. The
-> server-side gate is the real authority: any other email submitted on
-> the same form is rejected with a `signup_disabled` error surfaced
-> inline. Google/GitHub/SMTP also work and skip the form entirely if
-> configured.
+> mounted for invited addresses. The server-side gate is the real
+> authority: any other email submitted on that form is rejected with a
+> `signup_disabled` error surfaced inline, and the addresses the
+> environment names (bootstrap owner, platform admins) are refused there
+> too — those accounts are created at `/claim`, by a magic link or by a
+> verified social sign-in.
 
 ### Recipe 1 — public SaaS (default)
 
@@ -247,13 +331,14 @@ AUTH_DISABLE_ORG_CREATION=true
 AUTH_PLATFORM_ADMIN_EMAILS=admin@acme.com
 AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com
 AUTH_BOOTSTRAP_ORG_NAME=Acme
+AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>
 ```
 
 Workflow:
 
 1. Deploy with the env above.
-2. Open the dashboard, sign up as `admin@acme.com` (signup gate lets you
-   through, after-hook creates the `Acme` org with you as owner).
+2. Open `<APP_URL>/claim`, paste the token, claim the instance as
+   `admin@acme.com` (the `Acme` org is created with you as owner).
 3. Invite teammates from the dashboard — they receive standard invitations
    that bypass the signup lock thanks to the invitation override.
 
@@ -269,12 +354,18 @@ operator) creating each org manually:
 AUTH_DISABLE_SIGNUP=true
 AUTH_DISABLE_ORG_CREATION=true
 AUTH_PLATFORM_ADMIN_EMAILS=ops@acme.com
+AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>
 ```
 
 Workflow:
 
 1. Deploy.
-2. Sign up as `ops@acme.com` in the dashboard.
+2. Open `<APP_URL>/claim`, paste the token and claim the instance as
+   `ops@acme.com`: the account is created together with a first
+   organization it owns (`AUTH_BOOTSTRAP_ORG_NAME`, default `"Default"`).
+   With SMTP, Google or GitHub configured you can leave the token out and
+   sign in as `ops@acme.com` by magic link or social sign-in instead. The
+   sign-up form refuses that address.
 3. For each new tenant: create the org via `POST /api/orgs` (or the
    dashboard org switcher), then invite the customer's owner. The
    customer receives an invitation that lets them sign up despite the
@@ -292,9 +383,11 @@ bun apps/api/scripts/bootstrap-org.ts \
 ```
 
 The script connects directly to PostgreSQL (using your `DATABASE_URL`).
-The owner user **must already exist** — sign them up first (the
-`AUTH_BOOTSTRAP_OWNER_EMAIL` / `AUTH_PLATFORM_ADMIN_EMAILS` allowlist is
-how they get past the closed-mode signup gate).
+The owner user **must already exist**. The script creates no account: an
+address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or
+`AUTH_PLATFORM_ADMIN_EMAILS` gets its account by a magic link or a
+verified social sign-in (the sign-up form refuses it), any other address
+by the sign-up form or an invitation.
 
 Output is a single JSON line for IaC consumption:
 
@@ -324,7 +417,10 @@ need an explicit invitation.
 ## Migration — open → closed on a running instance
 
 1. Identify your platform admins. Add their emails to
-   `AUTH_PLATFORM_ADMIN_EMAILS` so they don't lose access.
+   `AUTH_PLATFORM_ADMIN_EMAILS` so they don't lose access. List addresses
+   that already have an account, and check you can sign in to each: an
+   existing account is not re-examined, and a listed address without one
+   is created only with proof of ownership (Pitfalls below).
 2. Set `AUTH_DISABLE_SIGNUP=true` and (optionally) `AUTH_DISABLE_ORG_CREATION=true`.
 3. Restart the API.
 4. Existing users keep working. New public signups are blocked. Pending
@@ -338,11 +434,38 @@ To go back to open mode, unset the flags and restart. No data migration.
 
 - **Forgot `AUTH_PLATFORM_ADMIN_EMAILS` after enabling `AUTH_DISABLE_ORG_CREATION`** — no
   one can create an org. Add at least one admin email and restart.
-- **Bootstrap email must complete signup once** — setting
+- **Bootstrap email must be claimed once** — setting
   `AUTH_BOOTSTRAP_OWNER_EMAIL` does nothing on its own; the org is
-  created by the after-hook when the owner first signs up. If you change
-  the email after the org exists, the new email won't get a fresh org
-  (idempotent on user-already-owns-an-org).
+  created when the owner account is. If you change the email after the
+  org exists, the new email won't get a fresh org (idempotent on
+  user-already-owns-an-org).
+- **`AUTH_BOOTSTRAP_OWNER_EMAIL` without a token** — the sign-up form
+  refuses that address like any address it will not register, and the
+  server log says why. This is the state of an instance installed before
+  the token accompanied a named owner, if its owner never signed up. Add
+  `AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>`
+  to `.env` by hand, restart, and claim the instance at `/claim`. The token is redeemable only while the instance has no
+  organization at all.
+- **`AUTH_BOOTSTRAP_OWNER_EMAIL` on an instance that already has an
+  organization, owner account absent** — no token can claim it (`/claim`
+  answers 410) and the sign-up form refuses the address. Without Google,
+  GitHub or SMTP (magic link) the recovery is: remove the address from
+  `AUTH_BOOTSTRAP_OWNER_EMAIL` and from `AUTH_PLATFORM_ADMIN_EMAILS`,
+  restart, create the account as an ordinary address (with sign-up closed
+  that takes an invitation, or sign-up reopened for the time it takes),
+  put the address back in `AUTH_PLATFORM_ADMIN_EMAILS` if it was there,
+  restart, then run
+  `bun apps/api/scripts/bootstrap-org.ts --owner=<email>` (Recipe 4).
+- **An address in `AUTH_PLATFORM_ADMIN_EMAILS` that has no account yet**
+  — the sign-up form refuses it like any address it will not register,
+  and the server log says why. While the instance has no organization,
+  set `AUTH_BOOTSTRAP_TOKEN`, restart and claim the instance with that
+  address at `/claim` (if `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the token
+  claims that address only). Otherwise sign in with a magic link (SMTP)
+  or a Google / GitHub identity that verifies the address. Otherwise
+  remove the address from the list, restart, create the account as an
+  ordinary address (invitation, or sign-up reopened for the time it
+  takes), put the address back and restart.
 - **Social OIDC + closed mode** — Google/GitHub callbacks go through the
   same signup gate. An external Google user without an invitation gets a
   `signup_disabled` redirect. Add their domain to

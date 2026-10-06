@@ -184,15 +184,13 @@ function writeToTty(line: string): void {
  * account yet, so the first thing the operator needs is the signup form —
  * open `/register` directly instead of the bare root (which only bounces
  * there after an extra redirect). One carve-out: the **bootstrap token**
- * flow (unattended closed install) claims ownership at `/claim` by pasting
+ * flow (every closed install) claims ownership at `/claim` by pasting
  * the printed token, NOT at `/register`, so it keeps the root landing and
  * the follow-up note points the operator at `/claim`.
  *
  * `localUrl` (not `appUrl`) because the browser runs on the install host
  * and must hit the local bind port; a remote `appUrl` is unreachable until
- * the operator wires their reverse proxy. The named-owner email is already
- * pre-filled + locked server-side (app config), so no query param is
- * needed on the URL.
+ * the operator wires their reverse proxy.
  */
 export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOverrides): string {
   if (bootstrap.bootstrapToken) return localUrl;
@@ -200,14 +198,7 @@ export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOver
 }
 
 /**
- * Print the closed-mode follow-up note. Two flavors:
- *   - **Named owner** (#228, `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`) — the
- *     dashboard pre-fills + locks the email field, the operator just
- *     picks a password.
- *   - **Bootstrap token** (#344 Layer 2b, unattended installs) — the
- *     operator claims ownership at `<appUrl>/claim` by pasting the
- *     printed token. Single-use, dies on first redemption or as soon
- *     as any organization exists.
+ * Print the closed-mode follow-up note: claim at `<appUrl>/claim` with the printed token.
  *
  * Renders nothing in true open mode (Tier 0 interactive). Called by
  * both Tier 0 and Docker-tier installers right before `outro()`.
@@ -223,23 +214,17 @@ export function printBootstrapFollowup(
   bootstrap: BootstrapOverrides,
   renderNote: (message: string, title?: string) => void = note,
 ): void {
-  const email = bootstrap.bootstrapOwnerEmail;
-  if (email) {
-    renderNote(
-      `Opened  ${appUrl}/register  in your browser.\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
-      "Next: create your owner account",
-    );
-    return;
-  }
   const token = bootstrap.bootstrapToken;
   if (token) {
+    const email = bootstrap.bootstrapOwnerEmail;
+    const claimAs = email ? `Claim it as  ${email}  with a password of your choice.\n` : "";
     const stdoutIsTty = process.stdout.isTTY === true;
     if (stdoutIsTty) {
       // Interactive install: stdout IS the operator's terminal, so
       // printing the token inline is fine — and the framed note renders
       // it nicely. No risk of capture into a log file.
       renderNote(
-        `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
+        `Open  ${appUrl}/claim\n${claimAs || "Paste the token below + your owner email/password.\n"}\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
         "Closed-by-default install — claim ownership",
       );
       return;
@@ -248,7 +233,7 @@ export function printBootstrapFollowup(
     // doesn't contain the secret) and write the token itself directly to
     // the TTY.
     renderNote(
-      `Open  ${appUrl}/claim\nThe bootstrap token is printed below directly to your\nterminal (and stored in <dir>/.env, mode 0600). It does\nNOT appear in the install log if you tee'd this output.\nPublic signup is disabled until you claim the instance.`,
+      `Open  ${appUrl}/claim\n${claimAs}The bootstrap token is printed below directly to your\nterminal (and stored in <dir>/.env, mode 0600). It does\nNOT appear in the install log if you tee'd this output.\nPublic signup is disabled until you claim the instance.`,
       "Closed-by-default install — claim ownership",
     );
     writeToTty(`\n[appstrate bootstrap token — keep secret]\n  ${token}\n`);
@@ -470,7 +455,7 @@ export async function composeUpgradeCommand(
  * Upgrades short-circuit to undefined: `mergeEnv` preserves whatever
  * `AUTH_*` keys the user already has in their `.env`, so re-running
  * `appstrate install` on a closed-mode instance never silently flips
- * the policy.
+ * the policy, and no token is minted: `mergeEnv` would keep the one on disk.
  */
 export async function resolveBootstrapEmail(opts: {
   tier: Tier;
@@ -485,7 +470,9 @@ export async function resolveBootstrapEmail(opts: {
       );
     }
     const orgName = process.env.APPSTRATE_BOOTSTRAP_ORG_NAME?.trim();
-    return { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
+    const named = { bootstrapOwnerEmail: fromEnv, bootstrapOrgName: orgName || undefined };
+    if (opts.mode === "upgrade") return named;
+    return { ...named, bootstrapToken: generateBootstrapToken() };
   }
   if (opts.mode === "upgrade") return {};
   // Tier 0 (local dev) stays open — invitation-only is meaningless when
@@ -517,7 +504,7 @@ export async function resolveBootstrapEmail(opts: {
     );
     return {};
   }
-  return { bootstrapOwnerEmail: answer };
+  return { bootstrapOwnerEmail: answer, bootstrapToken: generateBootstrapToken() };
 }
 
 /** Default-shaped `ExistingInstall` used when the resolver is called without upgrade context. */

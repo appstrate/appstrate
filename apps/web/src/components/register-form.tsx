@@ -30,19 +30,9 @@ interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
   socialCallbackURL?: string;
   /**
    * Path to navigate to after a successful signup — at once when no email
-   * verification is required, else from the verification link. Defaults to `/`. RegisterPage uses this
-   * to route the closed-mode bootstrap owner through the rest of the
-   * onboarding flow (`/onboarding/create` auto-skips to the next active
-   * step since the bootstrap after-hook already created the org).
+   * verification is required, else from the verification link. Defaults to `/`.
    */
   redirectAfterSignup?: string;
-  /**
-   * Pre-fills the display-name field. The user can still edit it. Used
-   * by RegisterPage in the closed-mode bootstrap path to derive a
-   * sensible name from the locked email so the operator only has to
-   * type a password.
-   */
-  defaultDisplayName?: string;
 }
 
 export function RegisterForm({
@@ -53,7 +43,6 @@ export function RegisterForm({
   switchAuthSlot,
   socialCallbackURL,
   redirectAfterSignup = "/",
-  defaultDisplayName = "",
   ...props
 }: RegisterFormProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -69,7 +58,7 @@ export function RegisterForm({
     showError,
     formState: { errors, isSubmitting },
   } = useAppForm<RegisterFormData>({
-    defaultValues: { displayName: defaultDisplayName, email: fixedEmail ?? "", password: "" },
+    defaultValues: { displayName: "", email: fixedEmail ?? "", password: "" },
   });
 
   const onSubmit = async (data: RegisterFormData) => {

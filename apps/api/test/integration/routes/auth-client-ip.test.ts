@@ -20,12 +20,9 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { session, user } from "@appstrate/db/schema";
-import {
-  _rebuildAuthForTesting,
-  setPostBootstrapOrgHook,
-  setRealmResolver,
-} from "@appstrate/db/auth";
+import { _rebuildAuthForTesting, setPostBootstrapOrgHook } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
+import { restoreRealmResolverAfterSuite } from "../../helpers/auth.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -65,6 +62,8 @@ async function spendBudget(headers: Record<string, string>): Promise<void> {
     expect(await attemptSignIn(headers)).not.toBe(429);
   }
 }
+
+restoreRealmResolverAfterSuite();
 
 describe("Better Auth rate limiting keys on the platform-resolved client IP", () => {
   beforeEach(async () => {
@@ -135,7 +134,6 @@ describe("an auth.api-backed route hands Better Auth the platform's address", ()
     await flushRedis();
     _resetBootstrapTokenForTesting();
     setPostBootstrapOrgHook(async () => {});
-    setRealmResolver(async () => "platform");
     process.env.AUTH_BOOTSTRAP_TOKEN = BOOTSTRAP_TOKEN;
     process.env.AUTH_BOOTSTRAP_ORG_NAME = "Client IP HQ";
     setTrustProxy("true");

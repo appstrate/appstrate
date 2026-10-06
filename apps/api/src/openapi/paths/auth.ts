@@ -78,6 +78,11 @@ export const authPaths = {
             "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
           content: betterAuthError,
         },
+        "422": {
+          description:
+            "The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free.",
+          content: betterAuthError,
+        },
       },
     },
   },
@@ -244,7 +249,7 @@ export const authPaths = {
         "401": { description: "Invalid bootstrap token", content: problemContent },
         "403": {
           description:
-            "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies.",
+            "Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or account creation refused it, with the refusal's own code — `signup_domain_not_allowed` when AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP; the allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL), a module's sign-up refusal code, or `bootstrap_signup_rejected` when the refusal carries none.",
           content: problemContent,
         },
         "409": {
@@ -254,7 +259,7 @@ export const authPaths = {
         },
         "410": {
           description:
-            "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
+            "No bootstrap token is currently redeemable (none configured, or already redeemed)",
           content: problemContent,
         },
         "422": {
