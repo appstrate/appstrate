@@ -904,6 +904,8 @@
   "integrations.badge.inactive": "Inactive",
   "integrations.btn.activate": "Activate",
   "integrations.activate.hint": "Activate this integration to configure its connections and access.",
+  "integration.notInSpace.hint": "It is neither homed nor shared here, or it no longer exists. Switch space, or ask an admin to share it here.",
+  "integration.notInSpace.back": "Browse this space's integrations",
   "integrations.deactivate.confirm": "Deactivate this integration? Connections and settings are kept and reused if you reactivate it.",
   "integration.tabs.connections": "Connections",
   "integration.tabs.configuration": "Configuration",

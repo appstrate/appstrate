@@ -55,7 +55,7 @@ const INTEGRATION_TABS = [
   "versions",
 ] as const;
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   Trash2,
   ShieldCheck,
@@ -140,6 +140,7 @@ import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections"
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
@@ -1741,9 +1742,22 @@ export function IntegrationDetailPage() {
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const canBrowseIntegrations = useCanReach()("/integrations");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ResourceErrorState error={error} />;
+  if (error) {
+    // Not placed in this space, or gone: one answer for both, and what the
+    // member can do about either.
+    return (
+      <ResourceErrorState error={error} hint={t("integration.notInSpace.hint")}>
+        {canBrowseIntegrations && (
+          <Button variant="outline" asChild>
+            <Link to="/integrations">{t("integration.notInSpace.back")}</Link>
+          </Button>
+        )}
+      </ResourceErrorState>
+    );
+  }
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);

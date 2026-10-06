@@ -76,6 +76,36 @@ describe("ResourceErrorState", () => {
     expect(html).not.toContain(t("error.resourceUnavailable"));
   });
 
+  // The integration page: what to ask for, and a way back to the listing.
+  const withWayForward = (status: number) =>
+    render(
+      <ResourceErrorState
+        error={new ApiError("not_found", "Integration not found", status)}
+        hint="ask-an-admin-hint"
+      >
+        <a href="/integrations">back-to-listing</a>
+      </ResourceErrorState>,
+    );
+
+  it("carries the page's hint and action on a 403 and on a 404 alike", () => {
+    for (const status of [403, 404]) {
+      const html = withWayForward(status);
+
+      expect(html).toContain(t("error.resourceUnavailable"));
+      expect(html).toContain("ask-an-admin-hint");
+      expect(html).toContain("back-to-listing");
+      expect(html).not.toContain(t("error.resourceUnavailableHint"));
+    }
+  });
+
+  it("shows neither the hint nor the action for another failure", () => {
+    const html = withWayForward(500);
+
+    expect(html).toContain(t("error.generic"));
+    expect(html).not.toContain("ask-an-admin-hint");
+    expect(html).not.toContain("back-to-listing");
+  });
+
   it("says the generic sentence once for a failure that carries no message", () => {
     const html = render(<ResourceErrorState error={new Error("")} />);
 
