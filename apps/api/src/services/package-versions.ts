@@ -5,7 +5,7 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, conflict } from "../lib/errors.ts";
 import {
   uploadPackageZip,
   downloadVersionZip,
@@ -73,6 +73,42 @@ interface CreateVersionParams {
   uploadZip?: () => Promise<void>;
 }
 
+/** Forward-only decision for `version` (yanked versions count: a duplicate stays one). */
+async function planVersionCreation(executor: DbOrTx, packageId: string, version: string) {
+  const allExisting = await executor
+    .select({ version: packageVersions.version })
+    .from(packageVersions)
+    .where(eq(packageVersions.packageId, packageId));
+
+  const [currentLatest] = await executor
+    .select({ version: packageVersions.version })
+    .from(packageDistTags)
+    .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
+    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
+    .limit(1);
+
+  return planCreateVersionOutcome(
+    version,
+    allExisting.map((v) => v.version),
+    currentLatest?.version ?? null,
+  );
+}
+
+/**
+ * Refuse a version the forward-only rule would reject, before the caller
+ * writes anything that announces it. An existing version passes: replacing or
+ * reusing it is the caller's decision.
+ */
+export async function assertVersionNotLower(packageId: string, version: string): Promise<void> {
+  const outcome = await planVersionCreation(db, packageId, version);
+  if (outcome.action !== "rejected" || outcome.error !== "VERSION_NOT_HIGHER") return;
+  throw conflict(
+    "version_not_higher",
+    `Version ${version} is lower than the highest published version (${outcome.highest}) — bump the version in the manifest`,
+    { packageId },
+  );
+}
+
 /**
  * Create a new version with semver, integrity, manifest snapshot. Auto-manages
  * "latest" dist-tag.
@@ -100,24 +136,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
   return await db.transaction(async (tx) => {
     await lockPackageVersions(tx, packageId);
 
-    // Forward-only enforcement (include yanked — duplicates must be rejected even if yanked)
-    const allExisting = await tx
-      .select({ version: packageVersions.version })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, packageId));
-
-    const [currentLatest] = await tx
-      .select({ version: packageVersions.version })
-      .from(packageDistTags)
-      .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
-      .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-      .limit(1);
-
-    const outcome = planCreateVersionOutcome(
-      version,
-      allExisting.map((v) => v.version),
-      currentLatest?.version ?? null,
-    );
+    const outcome = await planVersionCreation(tx, packageId, version);
 
     if (outcome.action === "exists") {
       // Published versions are immutable: return the existing row WITHOUT

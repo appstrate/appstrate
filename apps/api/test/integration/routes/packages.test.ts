@@ -2798,6 +2798,23 @@ describe("Packages API", () => {
         });
       });
 
+      it("refuses a new version below the highest published one, forced or not, and keeps the draft", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect((await importArchive(archive("1.2.0", "Second."))).status).toBe(201);
+
+        for (const query of ["", "?force=true"]) {
+          const res = await importArchive(archive("1.1.0", "Between."), query);
+          expect(res.status).toBe(409);
+          expect(await res.json()).toMatchObject({ code: "version_not_higher", packageId: id });
+        }
+        expect(await hasUnarchivedChanges()).toBe(false);
+        const versions = await app.request(`/api/packages/skills/${id}/versions`, {
+          headers: authHeaders(ctx),
+        });
+        const listed = ((await versions.json()) as { data: { version: string }[] }).data;
+        expect(listed.map((v) => v.version).sort()).toEqual(["1.0.0", "1.2.0"]);
+      });
+
       it("leaves a clean draft after a forced replacement, so the next import is not refused", async () => {
         expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
         expect((await importArchive(archive("1.0.0", "Replaced."), "?force=true")).status).toBe(
