@@ -20,12 +20,12 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 
 // --- URL Masking ---
 
+/** Username too: vendors carry the account token there, and `proxies:read` sees this string. */
 function maskProxyUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.password) {
-      parsed.password = "***";
-    }
+    if (parsed.username) parsed.username = "***";
+    if (parsed.password) parsed.password = "***";
     const str = parsed.toString();
     // Truncate long URLs for display
     return str.length > 60 ? `${str.slice(0, 57)}...` : str;

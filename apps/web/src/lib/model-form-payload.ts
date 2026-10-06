@@ -144,8 +144,6 @@ export interface ModelFormPayloadInput {
 
 type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
 
-type ModelFormPayloadResult = { ok: true; data: ModelFormData } | CredentialFailure;
-
 /** The credential half of any create: an existing selection, or the inline key to create first. */
 function resolveCredentialBinding(input: {
   provider: ModelFormProvider | undefined;
@@ -186,6 +184,34 @@ function resolveCredentialBinding(input: {
   };
 }
 
+/** What refuses a save before anything is sent: one namespaced i18n key per field. */
+export function modelFormRefusals(input: {
+  modelId: string;
+  /** The id is being typed, not picked from a list. */
+  manual: boolean;
+  provider: ModelFormProvider | undefined;
+  selectedCredentialId: string | null;
+  inlineApiKey: string;
+  /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
+  offeredIds: readonly string[] | null;
+}): { credentialId: string | null; modelId: string | null } {
+  const credential = input.provider
+    ? resolveCredentialBinding({ ...input, baseUrl: "" })
+    : { ok: true as const };
+  const credentialId = credential.ok ? null : `settings:${credential.messageKey}`;
+  const id = input.modelId.trim();
+  if (!id) {
+    if (input.manual) return { credentialId, modelId: "common:validation.required" };
+    // The key row already names the missing step.
+    return {
+      credentialId,
+      modelId: credentialId ? null : "settings:models.form.modelStepRequired",
+    };
+  }
+  const outsideOffer = input.offeredIds !== null && !input.offeredIds.includes(id);
+  return { credentialId, modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
+}
+
 function capabilityOverrides(
   input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit" | "catalogEntry">,
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
@@ -218,7 +244,8 @@ function capabilityOverrides(
   return answered;
 }
 
-export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPayloadResult {
+/** `null` without a credential to bind — {@link modelFormRefusals} is what says so to the user. */
+export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormData | null {
   const { fields, dirtyFields } = input;
   const credential = resolveCredentialBinding({
     provider: input.provider,
@@ -226,16 +253,13 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
     inlineApiKey: fields.inlineApiKey,
     baseUrl: fields.baseUrl,
   });
-  if (!credential.ok) return credential;
+  if (!credential.ok) return null;
 
   return {
-    ok: true,
-    data: {
-      ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
-      modelId: fields.modelId.trim(),
-      ...credential.binding,
-      ...capabilityOverrides(input),
-    },
+    ...(dirtyFields.label === true && fields.label.trim() ? { label: fields.label.trim() } : {}),
+    modelId: fields.modelId.trim(),
+    ...credential.binding,
+    ...capabilityOverrides(input),
   };
 }
 

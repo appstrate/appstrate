@@ -144,3 +144,17 @@ export function launchFromOptions({
     ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
   };
 }
+
+/**
+ * What a launch with no override resolves to: the agent's own setting, else the
+ * org default — also past a setting that is gone or not `usable`, as the server does.
+ */
+export function inheritedEntry<T extends { id: string }>(
+  entries: readonly T[] | undefined,
+  agentSettingId: string | null,
+  orgDefault: T | undefined,
+  usable: (entry: T) => boolean,
+): T | undefined {
+  const setting = entries?.find((entry) => entry.id === agentSettingId);
+  return setting && usable(setting) ? setting : orgDefault;
+}

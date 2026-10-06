@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  DEFAULT_MODEL_REASONING_LEVEL,
   mapModelReasoningLevels,
+  type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
+import { defaultReasoningLevel } from "./default-reasoning-level.ts";
 import type { ModelGenerationControlLabels } from "./model-generation-controls.tsx";
 
 /**
@@ -19,8 +20,11 @@ import type { ModelGenerationControlLabels } from "./model-generation-controls.t
  */
 export function buildGenerationLabels(
   t: (key: string, options?: { level: string }) => string,
+  capabilities?: ModelGenerationCapabilities | null,
 ): ModelGenerationControlLabels {
-  const defaultLevel = { level: t(`models.generation.levels.${DEFAULT_MODEL_REASONING_LEVEL}`) };
+  const defaultLevel = {
+    level: t(`models.generation.levels.${defaultReasoningLevel(capabilities)}`),
+  };
   return {
     temperature: t("models.generation.temperature"),
     temperatureHint: t("models.generation.temperatureHint"),

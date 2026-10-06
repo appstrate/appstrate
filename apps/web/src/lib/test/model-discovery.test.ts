@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { buildDiscoverBody } from "../model-discovery.ts";
+import { buildDiscoverBody, parsesAsUrl } from "../model-discovery.ts";
 
 const OPENAI_COMPATIBLE = {
   providerId: "openai-compatible",
@@ -58,5 +58,14 @@ describe("buildDiscoverBody — a key typed inline", () => {
         baseUrl: "https://api.anthropic.com",
       }),
     ).toEqual({ providerId: "anthropic", api_key: "sk-ant-test" });
+  });
+});
+
+describe("parsesAsUrl", () => {
+  it("accepts only an HTTP(S) endpoint", () => {
+    expect(parsesAsUrl(" http://localhost:11434/v1 ")).toBe(true);
+    expect(parsesAsUrl("https://api.example.com")).toBe(true);
+    expect(parsesAsUrl("ftp://example.com")).toBe(false);
+    expect(parsesAsUrl("not a url")).toBe(false);
   });
 });

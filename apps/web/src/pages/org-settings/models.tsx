@@ -141,18 +141,19 @@ function ModelsList({
                     </TableCell>
                     <TableCell>
                       {/* Shown but disabled, not hidden: `PUT /api/models/default`
-                          answers 409 `model_needs_reconnection` for such a row,
-                          and a control that silently vanishes is what made this
-                          state impossible to reason about. The why is on the
-                          row's `ModelUnavailableBadge` (first cell), whose
-                          `title` sits on a hoverable element. */}
+                          answers 409 (`model_needs_reconnection`, `model_disabled`)
+                          for such a row, and a control that silently vanishes is
+                          what made this state impossible to reason about. The why
+                          is on the row's badge (first cell). */}
                       <DefaultCell
                         isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
                         canSetDefault={canWrite}
-                        disabled={m.needs_reconnection}
+                        // A switched-off system model stays eligible: the server
+                        // resolves it, and refuses only a disabled custom row.
+                        disabled={m.needs_reconnection || (!isBuiltIn && !m.enabled)}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>
@@ -505,7 +506,12 @@ export function OrgSettingsModelsPage() {
             setModelModalOpen(true);
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
-          onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
+          onSetDefault={(m) =>
+            setDefaultModelMutation.mutate(
+              { body: { modelId: m.id } },
+              { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
+            )
+          }
           canWrite={canWriteModels}
           canDelete={canDeleteModels}
         />

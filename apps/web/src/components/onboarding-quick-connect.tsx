@@ -34,6 +34,7 @@ import {
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
+import { quickConnectProviders } from "../lib/provider-registry-helpers";
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -152,7 +153,7 @@ export function OnboardingQuickConnect() {
   const registryQuery = useProvidersRegistry();
   const credentialsQuery = useModelProviderCredentials();
 
-  const entries = (registryQuery.data ?? []).filter((p) => p.authMode === "oauth2");
+  const entries = quickConnectProviders(registryQuery.data);
 
   if (entries.length === 0) return null;
 

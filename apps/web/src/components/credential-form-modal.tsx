@@ -52,6 +52,7 @@ import {
   pickedProviderId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
+import { parsesAsUrl } from "@/lib/model-discovery";
 import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
@@ -250,12 +251,7 @@ function CredentialFormBody({
 
   const baseUrlValidate = (v: string) => {
     if (!v.trim()) return t("validation.required", { ns: "common" });
-    try {
-      new URL(v.trim());
-    } catch {
-      return t("validation.urlFormat", { ns: "common" });
-    }
-    return undefined;
+    return parsesAsUrl(v) ? undefined : t("validation.urlFormat", { ns: "common" });
   };
   // Editing keeps the stored key when nothing is typed.
   const apiKeyValidate = (v: string) =>
@@ -352,7 +348,7 @@ function CredentialFormBody({
         </>
       }
     >
-      <form id="pk-form" onSubmit={onFormSubmit} className="space-y-4">
+      <form id="pk-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
           <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>

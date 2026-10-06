@@ -2106,7 +2106,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      urlPrefix: { type: "string", description: "Masked proxy URL for display" },
+      urlPrefix: {
+        type: "string",
+        description: "Proxy URL for display, its username and password both masked",
+      },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },

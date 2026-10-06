@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, ne, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, inArray, ne, type AnyColumn, type SQL } from "drizzle-orm";
 import { type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, spacePackages, spaces } from "@appstrate/db/schema";
 import { notFound } from "./errors.ts";
 import { logger } from "./logger.ts";
 
@@ -309,14 +309,22 @@ interface DefaultPointer {
    */
   setDefaultIfUnset(tx: Tx, orgId: string, id: string): Promise<boolean>;
   /**
-   * After a row is deleted, clear the pointer iff it still names the deleted id
-   * — so a now-dangling pointer never outlives its row.
+   * After a row is deleted, clear the two pointers that still name the deleted
+   * id: the org default and each agent's per-space setting
+   * (`space_packages`). A schedule's or a run's own override is NOT cleared —
+   * that is governed state, and resolution falls through a missing id.
    */
   clearDanglingPointer(orgId: string, deletedId: string): Promise<void>;
 }
 
 /** Org `organizations` columns usable as a default pointer (nullable `text`). */
 type OrgPointerField = "defaultModelId" | "defaultProxyId";
+
+/** The `space_packages` column holding an agent's own pick of the same domain. */
+const PLACEMENT_FIELD = {
+  defaultModelId: "modelId",
+  defaultProxyId: "proxyId",
+} as const satisfies Record<OrgPointerField, "modelId" | "proxyId">;
 
 interface CreateDefaultPointerOptions {
   /** Domain table whose rows the pointer can name (needs a `uuid` `id` column). */
@@ -396,6 +404,20 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
       .update(organizations)
       .set(set)
       .where(and(eq(organizations.id, orgId), eq(pointerColumn, deletedId)));
+    // Free text (system ids, `none`): no FK clears the agent setting.
+    const placementField = PLACEMENT_FIELD[pointerField];
+    await db
+      .update(spacePackages)
+      .set({ [placementField]: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(spacePackages[placementField], deletedId),
+          inArray(
+            spacePackages.spaceId,
+            db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId)),
+          ),
+        ),
+      );
   }
 
   return { getDefaultId, promoteIfFirst, setDefault, setDefaultIfUnset, clearDanglingPointer };

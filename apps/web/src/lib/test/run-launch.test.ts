@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
+import { inheritedEntry, launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
 
 describe("launchFlight", () => {
   /** A launch whose request the test settles by hand. */
@@ -250,5 +250,26 @@ describe("launchFromOptions", () => {
         overrides: { model_id_override: "", proxy_id_override: "" },
       }),
     ).toEqual({ version: "draft" });
+  });
+});
+
+describe("inheritedEntry", () => {
+  const m1 = { id: "m1", enabled: true };
+  const m2 = { id: "m2", enabled: true };
+  const off = { id: "off", enabled: false };
+  const usable = (m: { id: string; enabled: boolean }) => m.enabled;
+
+  it("names the agent's own setting ahead of the organization default", () => {
+    expect(inheritedEntry([m1, m2], "m2", m1, usable)).toBe(m2);
+  });
+
+  it("falls to the organization default with no setting, or one whose entry is gone", () => {
+    expect(inheritedEntry([m1, m2], null, m1, usable)).toBe(m1);
+    expect(inheritedEntry([m1], "deleted", m1, usable)).toBe(m1);
+    expect(inheritedEntry(undefined, "m2", undefined, usable)).toBeUndefined();
+  });
+
+  it("falls to the organization default past a setting the server skips", () => {
+    expect(inheritedEntry([m1, off], "off", m1, usable)).toBe(m1);
   });
 });
