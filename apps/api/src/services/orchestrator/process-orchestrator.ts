@@ -189,6 +189,7 @@ interface ProcessHandle {
    * upstream (the platform's `pi.ts` error log only reads stdout).
    */
   stderrTail?: string[];
+  stopRequested?: boolean;
 }
 
 interface PendingSpec {
@@ -281,6 +282,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     await Promise.all(
       handles.map(async ([_id, handle]) => {
         if (handle.proc) {
+          handle.stopRequested = true;
           try {
             handle.proc.kill("SIGTERM");
             const exited = await Promise.race([
@@ -608,16 +610,20 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // `Bun.Subprocess.exited` never rejects and the handler only sleeps and logs.
     void proc.exited.then(async (code) => {
       if (code === 0) return;
+      // Read before the flush: a stop arriving after a crash must not relabel it.
+      const stopped = ph.stopRequested;
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
       await new Promise((r) => setTimeout(r, 100));
-      logger.error("Subprocess exited non-zero", {
+      const fields = {
         label: handle.id,
         runId: handle.runId,
         role: ph.role,
         exitCode: code,
         stderrTail: stderrTail.slice(-50).join("\n"),
-      });
+      };
+      if (stopped) logger.info("Subprocess stopped", fields);
+      else logger.error("Subprocess exited non-zero", fields);
     });
   }
 
@@ -625,6 +631,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const ph = this.processes.get(handle.id);
     if (!ph?.proc) return;
 
+    ph.stopRequested = true;
     ph.proc.kill("SIGTERM");
     const killed = await Promise.race([
       ph.proc.exited.then(() => true),
@@ -636,6 +643,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
     const ph = this.processes.get(handle.id);
     if (!ph) return;
+    ph.stopRequested = true;
     try {
       ph.proc?.kill("SIGKILL");
     } catch {

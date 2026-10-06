@@ -18,7 +18,18 @@ export function TestResultSpan({
   successKey: string;
   failedKey: string;
 }) {
-  const { t } = useTranslation(["settings"]);
+  const { t } = useTranslation(["settings", "common"]);
+  if (result.ok && result.status !== undefined && (result.status < 200 || result.status > 299)) {
+    return (
+      <span className="text-warning text-sm">
+        {t("test.acceptedWithStatus", {
+          ns: "common",
+          status: result.status,
+          latency: result.latency,
+        })}
+      </span>
+    );
+  }
   return (
     <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
       {result.ok

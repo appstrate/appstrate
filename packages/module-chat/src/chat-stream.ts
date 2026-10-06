@@ -167,7 +167,8 @@ export const chatStreamSchema = z
     path: ["pinned_skills"],
   });
 
-function clientErrorMessage(error: unknown): string {
+function logAndMarkStreamError(error: unknown): string {
+  logger.error("chat turn stream failed", { err: String(error) });
   return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
@@ -407,7 +408,17 @@ export async function handleChatStream(
     turn,
     enforcedSkills,
   ]);
-  const chosen = pickModel(models, modelId);
+  let chosen;
+  try {
+    chosen = pickModel(models, modelId);
+  } catch (error) {
+    logger.info("chat turn refused: no usable model", {
+      orgId,
+      requested: modelId ?? null,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   let generationSettings;
   try {
     generationSettings = resolveModelGenerationSettings({
@@ -684,7 +695,7 @@ export async function handleChatStream(
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
-        onError: clientErrorMessage,
+        onError: logAndMarkStreamError,
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
           void deps.recordChatUsage(record).catch((err) => {

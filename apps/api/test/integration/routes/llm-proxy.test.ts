@@ -28,11 +28,12 @@
  * network traffic leaves the test harness.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -507,6 +508,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       502,
       "upstream_unreachable",
       "destination_unavailable",
+      "error",
     ],
     [
       "silent",
@@ -514,22 +516,35 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       504,
       "upstream_timeout",
       "http_response_timeout",
+      "warn",
     ],
   ] as const)(
     "answers an %s upstream as its own failure, never a 500",
-    async (_, thrown, status, code, proxyError) => {
+    async (_, thrown, status, code, proxyError, level) => {
       const h = await buildHarness();
       mockUpstream(async () => {
         throw thrown;
       });
-      const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
-        method: "POST",
-        headers: authHeaders(h),
-        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
-      });
-      expect(res.status).toBe(status);
-      expect(((await res.json()) as { code: string }).code).toBe(code);
-      expect(res.headers.get("proxy-status")).toBe(`appstrate; error=${proxyError}`);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const error = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+          method: "POST",
+          headers: authHeaders(h),
+          body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+        });
+        expect(res.status).toBe(status);
+        expect(((await res.json()) as { code: string }).code).toBe(code);
+        expect(res.headers.get("proxy-status")).toBe(`appstrate; error=${proxyError}`);
+        // One line: `warn` for a silent provider, `error` for an upstream this
+        // platform could not reach at all (it may be its own egress).
+        const lines = { warn: warn.mock.calls, error: error.mock.calls };
+        expect(lines[level].map(([msg]) => msg)).toEqual(["llm-proxy: upstream fetch failed"]);
+        expect(lines[level === "warn" ? "error" : "warn"]).toEqual([]);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
     },
   );
 

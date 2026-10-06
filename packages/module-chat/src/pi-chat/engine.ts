@@ -604,9 +604,18 @@ export function runPiChat(input: PiChatInput): Response {
         // localizes the stable category.
         const meta = mapper.result();
         const stepCount = mapper.stepCount();
+        const turnError =
+          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
+        if (turnError !== undefined) {
+          logger.warn("Pi chat turn ended on a model error", {
+            err: turnError,
+            orgId: input.orgId,
+            presetId: input.presetId,
+            chatSessionId: input.chatSessionId,
+          });
+        }
         const closing = closePiTurn({
-          error:
-            meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined),
+          error: turnError,
           finishReason: meta.finishReason,
           streamStarted,
           aborted: turnAbort.signal.aborted,
