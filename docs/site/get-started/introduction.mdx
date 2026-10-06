@@ -37,7 +37,7 @@ import { Rocket, Blocks, Server, Code2 } from "lucide-react";
 
 Appstrate is an open-source platform that runs autonomous AI agents in isolated sandboxes. An agent is defined by a prompt, connects to the services your organization already uses through **integrations** (Gmail, Slack, GitHub, Jira, internal APIs, any MCP server), and works through its task on its own. You launch it from the dashboard or the chat, on a schedule, from the CLI, or from your own code through the REST API.
 
-Unlike workflow builders (n8n, Make, Zapier), Appstrate does not execute a predefined graph of steps. The agent receives a prompt, credentials and context, and the model decides how to accomplish the task, tool call by tool call. See [Compare](/docs/resources/compare) for the comparison with managed runtimes, personal agents, coding agents and workflow builders.
+Appstrate does not execute a predefined graph of steps. The agent receives a prompt, credentials and context, and the model decides how to accomplish the task, tool call by tool call. See [Design choices](/docs/resources/why-appstrate) for what that means in practice.
 
 ## How a run works
 
@@ -61,7 +61,7 @@ Each run gets its own sidecar and agent process. The **sidecar** holds the crede
 ## What you get
 
 - **Isolated runs.** One sandbox per run, created and destroyed with it. Logs stream live and are kept for replay.
-- **Integrations.** Connect external services with OAuth 2.0 (with discovery and PKCE), API key, basic auth, mTLS or custom credentials. Appstrate ships a catalog of system integrations, and you can [write your own](/docs/integrations/custom-providers) as an AFPS package, backed by an MCP server or a plain HTTP API.
+- **Integrations.** Connect external services with OAuth 2.0 (with discovery and PKCE), API key, basic auth, mTLS or custom credentials. Appstrate ships a catalog of system integrations, and you can [write your own](/docs/integrations/custom-integrations) as an AFPS package, backed by an MCP server or a plain HTTP API.
 - **Chat.** A conversational assistant in the dashboard that acts with your own permissions: it can run your agents, read your runs and files, and connect accounts. See [Chat](/docs/using-appstrate/chat).
 - **Skills.** Reusable `SKILL.md` instructions that agents (and the chat) load on demand.
 - **Scheduling.** Cron schedules with timezones. With Redis they are distributed and fire exactly once.

@@ -36,7 +36,7 @@ Clients that support browser OAuth can skip the key and log in instead. The dash
 - **Multi-instance workflows.** The CLI uses named profiles (`dev`, `staging`, `prod`). The agent can diff a configuration between them or replay a production change on staging first.
 - **End-user impersonation checks.** Ask the agent to validate that a flow works for three end-users. It loops through them with the `Appstrate-User` header.
 - **Less context switching.** Ship an internal feature that uses Appstrate from the same chat where you wrote the code.
-- **AFPS packaging.** The agent knows the manifest shape, dependencies, semver and the publish flow, including [custom integrations](/docs/integrations/custom-providers).
+- **AFPS packaging.** The agent knows the manifest shape, dependencies, semver and the publish flow, including [custom integrations](/docs/integrations/custom-integrations).
 
 ## Use cases that land well
 
@@ -54,4 +54,4 @@ The agent reads the skill's instructions and references on demand, picks the rig
 - [Using Appstrate / Skill](/docs/using-appstrate/skill): install, targets, update, customisation.
 - [CLI reference](/docs/using-appstrate/cli): the commands the skill drives.
 - [Skills as a feature](/docs/features/skills): how Appstrate itself consumes Agent Skills.
-- [Compare](/docs/resources/compare): how a coding agent plus Appstrate contrasts with a coding agent alone.
+- [Design choices](/docs/resources/why-appstrate): why runs are isolated, multi-tenant and API-first.

@@ -3,7 +3,7 @@ title: How Integrations Work
 description: What an integration is, how an agent reaches a third-party service through it, how users connect accounts, and how credentials stay out of the agent's reach.
 ---
 
-An **integration** is an [AFPS](/docs/resources/afps-specification) package of type `integration`, addressed as `@scope/name` (for example `@appstrate/gmail`). It declares how to authenticate against a third-party service, which URLs a credential may be sent to, and how the agent reaches the service. Appstrate ships [67 of them](/docs/integrations/providers); you can [write your own](/docs/integrations/custom-providers).
+An **integration** is an [AFPS](/docs/resources/afps-specification) package of type `integration`, addressed as `@scope/name` (for example `@appstrate/gmail`). It declares how to authenticate against a third-party service, which URLs a credential may be sent to, and how the agent reaches the service. Appstrate ships [67 of them](/docs/integrations/catalog); you can [write your own](/docs/integrations/custom-integrations).
 
 This page is the overview. The runtime detail lives in the repository: [`INTEGRATIONS_RUNTIME.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/INTEGRATIONS_RUNTIME.md) and, for the wire format, the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md).
 
@@ -150,10 +150,10 @@ Every layer yields connections the actor can still reach. A pinned or default co
 ## Where to go next
 
 <Cards>
-  <Card title="Built-in Integrations" href="/docs/integrations/providers">
+  <Card title="Built-in Integrations" href="/docs/integrations/catalog">
     The 67 shipped integrations and their auth methods.
   </Card>
-  <Card title="Custom Integrations" href="/docs/integrations/custom-providers">
+  <Card title="Custom Integrations" href="/docs/integrations/custom-integrations">
     Write an integration for a service that is not shipped.
   </Card>
   <Card title="Model providers" href="/docs/integrations/llm-models">

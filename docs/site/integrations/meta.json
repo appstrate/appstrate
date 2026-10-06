@@ -6,8 +6,8 @@
   "pages": [
     "overview",
     "how-integrations-work",
-    "providers",
-    "custom-providers",
+    "catalog",
+    "custom-integrations",
     "llm-models",
     "personal-agents",
     "coding-agents"

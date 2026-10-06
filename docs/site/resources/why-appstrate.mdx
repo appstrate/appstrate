@@ -1,0 +1,41 @@
+---
+title: Design choices
+description: The decisions behind Appstrate, and what they mean when you ship an agent to a team or embed one in a product.
+---
+
+Appstrate runs agents for teams and inside products. A few design choices explain most of how it behaves. This page lists them, so you can check each one against what you need.
+
+## What you get
+
+| Choice                               | What it means                                                                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open source core                     | The platform is Apache 2.0. The `@appstrate/module-ee` module (billing, credit quotas, custom space roles) is source-available and opt-in.               |
+| Self-host                            | Docker Compose, or Bun alone with no Docker for development. See [Self-hosting](/docs/self-hosting).                                                     |
+| Multi-tenant                         | Organizations, spaces and end-users, with typed permissions and roles. See [Multi-tenancy](/docs/features/multi-tenancy).                                |
+| Bring your own model                 | OpenAI, Anthropic, OpenAI-compatible endpoints. See [Models](/docs/integrations/llm-models).                                                             |
+| Sandboxed runs                       | Each run is isolated in Docker, or in a Firecracker microVM when you enable that backend. See [Sandbox and sidecar](/docs/features/sandbox-and-sidecar). |
+| Credentials out of the model's reach | A sidecar injects credentials into outbound requests. The agent never sees the secret.                                                                   |
+| Everything over an API               | The dashboard uses the same REST API (OpenAPI 3.1) you do. See [API reference](/docs/api).                                                               |
+| Portable packages                    | Agents, skills, integrations and MCP servers ship as AFPS packages with semantic versioning and integrity checks.                                        |
+
+## Sidecar isolation
+
+An agent runs on its own network, next to a sidecar. The agent talks to the sidecar over MCP. The sidecar holds the credentials and adds them to outbound requests just before they leave. A prompt injection can make the agent say anything, but it cannot read a token it never had. See [Architecture](/docs/resources/architecture).
+
+## Prompt-driven, not graph-driven
+
+A workflow defines a sequence of steps: fetch, filter, send. An Appstrate agent gets a goal such as "summarize important emails and notify me on Slack", and the model decides how. That is more adaptable and simpler to author, and less predictable. Output schemas, retries and run history keep it in check.
+
+## AFPS and Skills
+
+A `SKILL.md` file is a valid AFPS unit. AFPS wraps skills in a package model with a `manifest.json`, semantic versioning, declared `dependencies` and scoped names, so installs are reproducible and integrity can be verified. See the [AFPS specification](/docs/resources/afps-specification).
+
+## Use it with the tools you already have
+
+You can drive an Appstrate agent from a coding agent through the [API](/docs/api), the [CLI](/docs/using-appstrate/cli) or an [MCP client](/docs/using-appstrate/mcp-clients). A workflow tool can call an agent over HTTP when a step needs reasoning rather than routing.
+
+## Next
+
+- [Introduction](/docs/get-started/introduction): what Appstrate is and who it is for.
+- [Architecture](/docs/resources/architecture): how a run is built.
+- [Quickstart](/docs/get-started/quickstart): a running instance in a few minutes.
