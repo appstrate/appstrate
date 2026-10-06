@@ -241,6 +241,9 @@ services:
       - AUTH_ALLOWED_SIGNUP_DOMAINS
       - AUTH_BOOTSTRAP_OWNER_EMAIL
       - AUTH_BOOTSTRAP_ORG_NAME
+      # One-shot token the installer writes to `.env`; the first owner redeems it
+      # at /claim. Empty/unset = no pending token (normal signup flow).
+      - AUTH_BOOTSTRAP_TOKEN
       - BETTER_AUTH_ACTIVE_KID
       - CONNECTION_ENCRYPTION_KEY_ID
       - CONNECTION_ENCRYPTION_KEYS
@@ -253,6 +256,36 @@ services:
       - RUN_WATCHDOG_INTERVAL_SECONDS
       - RUN_BOOT_DEADLINE_SECONDS
       - RUNTIME_IMAGE_WARM_INTERVAL_SECONDS
+      # ── Optional operator settings, documented in `.env.example` ──
+      # Bare passthroughs: an unset host variable stays unset in the container
+      # (the schema owns every default), so none of these changes behaviour
+      # until the operator sets it.
+      - COOKIE_DOMAIN
+      - PROXY_URL
+      - SYSTEM_PROXIES
+      - OIDC_INSTANCE_CLIENTS
+      # Comma-separated hostnames trusted on a private address (SSRF allowlist).
+      - EGRESS_ALLOW_INTERNAL_HOSTS
+      # Social login (opt-in).
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      # SMTP (email verification, magic links, invitations).
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASS
+      - SMTP_FROM
+      - LEGAL_TERMS_URL
+      - LEGAL_PRIVACY_URL
+      # Run limits (validated by apps/api/src/services/run-limits.ts).
+      - PLATFORM_RUN_LIMITS
+      - INLINE_RUN_LIMITS
+      - REMOTE_RUN_REPLAY_WINDOW_SECONDS
+      - REMOTE_RUN_BUFFER_FLUSH_MS
+      - REMOTE_RUN_EVENT_LIMITS
+      - API_BODY_LIMIT_BYTES
       # ── Observability (OpenTelemetry, optional) ──────────────────
       # Off by default; a complete no-op until enabled. Enabling needs
       # @appstrate/module-observability in MODULES plus an endpoint (the vars
