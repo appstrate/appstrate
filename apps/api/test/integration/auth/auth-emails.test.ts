@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
+import { _resetCacheForTesting } from "@appstrate/env";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -212,6 +213,85 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(location.pathname).toBe("/preferences/general");
       expect(location.searchParams.get("email_change")).toBe("1");
       expect(location.searchParams.get("error")).toBe("INVALID_TOKEN");
+    });
+  });
+
+  describe("email change towards an address the environment names", () => {
+    const callbackURL = "/preferences/general?email_change=1";
+    const savedOwner = process.env.AUTH_BOOTSTRAP_OWNER_EMAIL;
+
+    function nameOwner(email: string | undefined) {
+      if (email === undefined) delete process.env.AUTH_BOOTSTRAP_OWNER_EMAIL;
+      else process.env.AUTH_BOOTSTRAP_OWNER_EMAIL = email;
+      _resetCacheForTesting();
+    }
+
+    afterEach(() => {
+      nameOwner(savedOwner);
+    });
+
+    it("answers as for a taken address and sends nothing", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const reserved = `owner-${crypto.randomUUID()}@example.test`;
+      nameOwner(reserved);
+
+      const mails = await captureMails(async () => {
+        const res = await postAuth(
+          "/change-email",
+          { newEmail: reserved, callbackURL },
+          account.cookie,
+        );
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ status: true });
+      });
+
+      expect(mails).toHaveLength(0);
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
+    });
+
+    it("sends nothing either when the account's own address is unverified", async () => {
+      const account = await createTestUser({ emailVerified: false });
+      const reserved = `owner-${crypto.randomUUID()}@example.test`;
+      nameOwner(reserved);
+
+      const mails = await captureMails(async () => {
+        const res = await postAuth(
+          "/change-email",
+          { newEmail: reserved, callbackURL },
+          account.cookie,
+        );
+        expect(res.status).toBe(200);
+      });
+
+      expect(mails).toHaveLength(0);
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
+    });
+
+    it("a link issued before the address was named returns to the settings page with the refusal", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const target = `owner-${crypto.randomUUID()}@example.test`;
+      const [toCurrent] = await captureMails(() =>
+        postAuth("/change-email", { newEmail: target, callbackURL }, account.cookie),
+      );
+      const approve = firstLink(toCurrent!);
+      const [toNew] = await captureMails(async () => {
+        await app.request(`${approve.pathname}${approve.search}`, {
+          headers: { Cookie: account.cookie },
+        });
+      });
+      const verify = firstLink(toNew!);
+      nameOwner(target);
+
+      const res = await app.request(`${verify.pathname}${verify.search}`, {
+        headers: { Cookie: account.cookie },
+      });
+
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.get("location")!, "http://x");
+      expect(location.pathname).toBe("/preferences/general");
+      expect(location.searchParams.get("email_change")).toBe("1");
+      expect(location.searchParams.get("error")).toBe("email_change_refused");
+      expect(await sessionEmail(account.cookie)).toBe(account.email);
     });
   });
 

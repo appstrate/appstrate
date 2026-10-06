@@ -466,6 +466,25 @@ export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): UR
   return url;
 }
 
+/**
+ * True when `email` is an address the environment names (owner, platform
+ * admins) that no account holds yet: no existing account may move onto it.
+ */
+async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
+  if (!isBootstrapOwner(email) && !isPlatformAdmin(email)) return false;
+  const [holder] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.email, email))
+    .limit(1);
+  if (holder) return false;
+  logger.warn(
+    "auth: refused to move an account onto an address named in " +
+      "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
+  );
+  return true;
+}
+
 /** Send an auth email through the tenant transport when one is active, else the instance one. */
 async function sendAuthMail(
   env: ReturnType<typeof getEnv>,
@@ -764,6 +783,8 @@ function buildAuth(options: CreateAuthOptions) {
         autoSignInAfterVerification: true,
         expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
         sendVerificationEmail: async ({ user, url }) => {
+          // An address with no account is the target of an e-mail change.
+          if (await isUnclaimedReservedEmail(user.email)) return;
           try {
             await sendAuthMail(
               env,
@@ -865,6 +886,9 @@ function buildAuth(options: CreateAuthOptions) {
         // before anything is sent to the new one.
         ...(smtpTransport && {
           sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+            // Answered like a taken address: Better Auth's neutral 200, and no
+            // e-mail, so no link ever leads to the `user.update.before` refusal.
+            if (await isUnclaimedReservedEmail(newEmail)) return;
             try {
               await sendAuthMail(
                 env,
@@ -1132,20 +1156,17 @@ function buildAuth(options: CreateAuthOptions) {
         update: {
           // No account moves onto an address the environment names (owner,
           // platform admins); every Better Auth writer of `user.email` passes here.
-          before: async (data) => {
+          before: async (data, context) => {
             const next = (data as { email?: unknown }).email;
             if (typeof next !== "string") return;
-            if (!isBootstrapOwner(next) && !isPlatformAdmin(next)) return;
-            const [holder] = await db
-              .select({ id: user.id })
-              .from(user)
-              .where(eq(user.email, next))
-              .limit(1);
-            if (holder) return;
-            logger.warn(
-              "auth: refused to move an account onto an address named in " +
-                "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
-            );
+            if (!(await isUnclaimedReservedEmail(next))) return;
+            // On an e-mailed link the refusal lands in the app with its code,
+            // as Better Auth does for a spent or expired link.
+            const callbackURL: unknown = context?.query?.callbackURL;
+            if (context?.path === "/verify-email" && typeof callbackURL === "string") {
+              const separator = callbackURL.includes("?") ? "&" : "?";
+              throw context.redirect(`${callbackURL}${separator}error=email_change_refused`);
+            }
             throw new APIError("FORBIDDEN", {
               message: "email_change_refused",
               code: "email_change_refused",

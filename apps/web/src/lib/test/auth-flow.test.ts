@@ -46,4 +46,15 @@ describe("emailChangeLanding", () => {
   it("reports a link that could not be honoured", () => {
     expect(emailChangeLanding(`${search}&error=TOKEN_EXPIRED`)).toBe("failed");
   });
+
+  it("reports a refused address apart from a bad link", () => {
+    expect(emailChangeLanding(`${search}&error=email_change_refused`)).toBe("refused");
+  });
+
+  it("reports the change once the session carries the requested address", () => {
+    expect(emailChangeLanding(search, "old@example.com", "new@example.com")).toBe("accepted");
+    expect(emailChangeLanding(search, "new@example.com", "new@example.com")).toBe("changed");
+    // Another browser asked: nothing to compare with.
+    expect(emailChangeLanding(search, "new@example.com", null)).toBe("accepted");
+  });
 });

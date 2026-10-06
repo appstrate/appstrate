@@ -9,7 +9,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
 import { useLocation } from "react-router-dom";
 import { useAuth, EmailChangeError } from "../../hooks/use-auth";
-import { emailChangeLanding } from "../../lib/auth-flow";
+import { emailChangeLanding, requestedEmailChange } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { errorMessage } from "../../lib/mutation-error";
@@ -90,7 +90,7 @@ function EmailChangeForm() {
   // What the email-change link that led here did — until the form is used again.
   const landing =
     user && !success && !verificationPendingEmail && !errors.root
-      ? emailChangeLanding(search)
+      ? emailChangeLanding(search, user.email, requestedEmailChange(localStorage))
       : null;
 
   const onSubmit = async (data: { newEmail: string }) => {
@@ -127,6 +127,14 @@ function EmailChangeForm() {
         </div>
         {landing === "failed" && (
           <div className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</div>
+        )}
+        {landing === "refused" && (
+          <div className="text-destructive text-sm">
+            {t("common:apiError.email_change_refused")}
+          </div>
+        )}
+        {landing === "changed" && (
+          <div className="text-success text-sm">{t("preferences.emailChanged")}</div>
         )}
         {landing === "accepted" && (
           <div className="text-muted-foreground bg-muted rounded-md px-3 py-2 text-sm">

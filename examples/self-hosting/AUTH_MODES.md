@@ -130,9 +130,11 @@ magic-link paths are for an instance configured without a token.
 - **The owner's address can still be guessed and confirmed.** With sign-up
   open and no SMTP, the refusal is answered after the password is hashed
   while a really taken address is answered before, so response time tells
-  them apart. And a signed-in account that tries to change its e-mail to
-  the owner's address (or to one in `AUTH_PLATFORM_ADMIN_EMAILS`) gets
-  `403 email_change_refused`, which an ordinary address does not.
+  them apart. And without SMTP, a signed-in account that tries to change
+  its e-mail to the owner's address (or to one in
+  `AUTH_PLATFORM_ADMIN_EMAILS`) gets `403 email_change_refused`, which an
+  ordinary address does not. With SMTP the request is answered like any
+  other and no e-mail is sent: the refusal is only in the server log.
   Confirming the address does not let anyone create its account.
 - **`AUTH_PLATFORM_ADMIN_EMAILS` addresses are not protected the same
   way.** A listed address is still created by plain e-mail/password

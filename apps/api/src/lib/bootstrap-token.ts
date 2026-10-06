@@ -157,7 +157,7 @@ export function markBootstrapTokenConsumed(): void {
   _inFlight = false;
   if (_consumed) return;
   _consumed = true;
-  logger.info("bootstrap-token: consumed");
+  if (isBootstrapTokenConfigured()) logger.info("bootstrap-token: consumed");
 }
 
 /** Test-only: reset the in-memory consume flag. Production callers must NOT use this. */
