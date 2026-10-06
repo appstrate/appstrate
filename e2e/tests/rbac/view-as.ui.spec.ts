@@ -389,6 +389,9 @@ test.describe("View as role", () => {
       browserCtx.org.orgId,
       browserCtx.org.defaultSpaceId,
     );
+    // A returning user's browser: the boot primes the org list before React
+    // mounts, and that primed read is the one the refusal answers.
+    await context.addInitScript(() => localStorage.setItem("appstrate_signed_in", "1"));
     const page = await context.newPage();
     try {
       await seedPersona(page, {

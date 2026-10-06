@@ -10,7 +10,6 @@ import { spaceStore } from "../stores/space-store";
 import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
-import { shouldRetryQuery } from "../lib/query-client";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 // Reactive hook for query key usage — re-renders when org changes
@@ -18,7 +17,7 @@ export function useCurrentOrgId(): string | null {
   return useStore(orgStore, (s) => s.id);
 }
 
-async function fetchOrgs(viewAs?: string) {
+async function requestOrgs(viewAs?: string) {
   const { data } = await client.GET(
     "/api/orgs",
     viewAs ? { params: { header: { [VIEW_AS_HEADER]: viewAs } } } : {},
@@ -26,7 +25,27 @@ async function fetchOrgs(viewAs?: string) {
   return data?.data ?? [];
 }
 
-type OrgList = Awaited<ReturnType<typeof fetchOrgs>>;
+/**
+ * A refused role preview is ended by the response middleware while the read
+ * that carried it fails: asked again, without the persona, it answers. In the
+ * read rather than as a query retry, which waits a second and pauses for good
+ * in an unfocused tab, leaving the org gate an empty list. Exported for its test.
+ */
+export async function readPastRefusedPreview<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (viewAsRefusalCode(error) === null) throw error;
+    return read();
+  }
+}
+
+/** The caller's org list, boot prime and mounted query alike. */
+function fetchOrgs() {
+  return readPastRefusedPreview(() => requestOrgs());
+}
+
+type OrgList = Awaited<ReturnType<typeof requestOrgs>>;
 
 /**
  * The org listing as it would be answered FOR `persona` — the `permissions`
@@ -36,7 +55,7 @@ type OrgList = Awaited<ReturnType<typeof fetchOrgs>>;
  * authority under the persona's banner.
  */
 export function fetchOrgsAs(persona: ViewAsPersona) {
-  return fetchOrgs(serializeViewAs(persona));
+  return requestOrgs(serializeViewAs(persona));
 }
 
 /**
@@ -74,13 +93,6 @@ function orgListQueryFn() {
   return primed ?? fetchOrgs();
 }
 
-/** A refused role preview is ended by the middleware: asked again, without it, the list answers. */
-export function shouldRetryOrgList(failureCount: number, error: unknown): boolean {
-  return (
-    failureCount < 1 && (viewAsRefusalCode(error) !== null || shouldRetryQuery(failureCount, error))
-  );
-}
-
 export function useOrg() {
   const queryClient = useQueryClient();
   const currentOrgId = useStore(orgStore, (s) => s.id);
@@ -91,7 +103,6 @@ export function useOrg() {
     // client's [method, path, init] one.
     queryKey: orgKeys.all,
     queryFn: orgListQueryFn,
-    retry: shouldRetryOrgList,
   });
 
   const setOrgId = useCallback((id: string) => orgStore.getState().setId(id), []);
