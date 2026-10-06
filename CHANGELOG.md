@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
+  Run `bun run verify:system-models` with the platform env before the deploy:
+  a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
+  boot. Removed from the offer: OpenCode Go `glm-5.1`, `kimi-k2.6`,
+  `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-max`; Together AI
+  `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
+  `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
+  Fireworks `accounts/fireworks/models/glm-5p2` and
+  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`. An
+  existing `org_models` row on one of them keeps its stored values and loses
+  the catalog defaults (label, limits, capabilities, price); it can no longer
+  be created.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at
@@ -139,6 +151,13 @@ could not be resolved`) instead of failing for good on the first. Without
   - A model or proxy connection test that is refused at the TCP level
     answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
 
+- **`claude-sonnet-5-5` replaces `claude-sonnet-5` among the featured models**
+  of the `anthropic` and `claude-code` providers (#1705), now that the pinned
+  Pi registry (`@earendil-works/pi-ai` 1.0.4) records it; existing
+  `org_models` rows are untouched and `claude-sonnet-5` stays in the offer.
+  OpenCode Go no longer features `kimi-k2.6`, `glm-5.1`, `qwen3.7-max`,
+  `qwen3.7-plus` and `qwen3.6-plus`, which left its offer. The registry also
+  adds `gpt-6.1-sol` (`openai`, `codex`).
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -270,6 +289,10 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **An aliased run backed by OpenAI keeps its output cap and temperature**
+  (#1705). Pi 1.0 reads a credential that is not `sk-`-shaped as a ChatGPT
+  sign-in and drops `max_output_tokens`, `temperature` and the cache
+  retention; the sidecar's placeholder key matched.
 - **Run guard-rails** (#1674). A double click on Run created two runs: the
   launcher now lets one launch through at a time. An agent whose `output` call
   is refused five times (an output schema no value satisfies, typically) is
