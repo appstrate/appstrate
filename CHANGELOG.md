@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (method, matched route pattern, status, duration, `Request-Id`). No longer at
   `error`: a refused organization delete (no line), a subprocess the platform
   stopped itself (`Subprocess stopped`, info), a chat turn the model failed
-  (`Pi chat turn ended on a model error`, warn; it used to be logged as
+  (`chat turn failed on a model error`, warn; it used to be logged as
   `chat ui stream processing failed`), and an LLM upstream timeout
   (`llm-proxy: upstream fetch failed`, warn). The three draft-lookup lines
   about a referenced mcp-server are now `debug`.

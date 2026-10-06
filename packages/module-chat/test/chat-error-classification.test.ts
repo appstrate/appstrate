@@ -72,9 +72,32 @@ describe("classifyClientTurnError", () => {
     // Pinned as a literal, because `toEqual(classified)` alone passes trivially
     // for any input that produces no `requestId`.
     expect(clientTurnErrorFromMarker(marker)).toEqual({ category: "unknown", retryable: true });
-    // The marker carries the CATEGORY only, and the two paths must still agree:
-    // the UI reads a failed turn through whichever arrived first.
+    // The two paths must still agree: the UI reads a failed turn through
+    // whichever arrived first.
     expect(clientTurnErrorFromMarker(marker)).toEqual(classified);
+  });
+
+  it("reports a failure that named no request id under the turn's own", () => {
+    expect(classifyClientTurnError("private opaque backend details", "req_turn1")).toEqual({
+      category: "unknown",
+      retryable: true,
+      requestId: "req_turn1",
+    });
+    // An id the upstream envelope exposed is the more specific one: it stays.
+    expect(
+      classifyClientTurnError("Upstream model error (status 503, req_upstream9)", "req_turn1"),
+    ).toMatchObject({ requestId: "req_upstream9" });
+  });
+
+  it("carries the request id through the marker, and nothing else", () => {
+    const classified = classifyClientTurnError("invalid api key sk-secret", "req_turn1");
+    const marker = clientTurnErrorMarker(classified);
+    expect(marker).toBe("appstrate:chat-turn-error:credential_unavailable:req_turn1");
+    expect(clientTurnErrorFromMarker(marker)).toEqual(classified);
+    // Whatever follows the category is shown to the user: only an id's shape passes.
+    expect(clientTurnErrorFromMarker("appstrate:chat-turn-error:unknown:<b>not an id</b>")).toEqual(
+      { category: "unknown", retryable: true },
+    );
   });
 });
 

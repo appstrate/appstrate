@@ -9,7 +9,7 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { ChatSkillMode } from "@appstrate/db/schema";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
+import type { ChatSkillSelection } from "../skills.ts";
 import type { GetHeaders } from "./runtime-context.ts";
 
 /** Fresh session id, minted client-side (`chs_` shape) — re-exported from the shared module. */
@@ -165,19 +165,18 @@ interface SessionHistory {
 
 /**
  * Stored `content` is the ai-sdk/v6 UIMessage minus its id (the id rides in the
- * row), so we reconstruct `{ id, ...content }`. A not-yet-persisted session
- * 404s → empty history and the default selection, which is what the server
- * resolves such a session to.
+ * row), so we reconstruct `{ id, ...content }`. `null` when the caller has no
+ * such conversation (the route's 404).
  */
 export async function loadHistory(
   getHeaders: GetHeaders | null | undefined,
   id: string,
-): Promise<SessionHistory> {
+): Promise<SessionHistory | null> {
   const res = await fetch(`/api/chat/sessions/${id}`, {
     credentials: "include",
     headers: headers(getHeaders),
   });
-  if (res.status === 404) return { messages: [], skills: DEFAULT_SKILL_SELECTION };
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to load session (HTTP ${res.status})`);
   const body = (await res.json()) as {
     messages?: StoredMessage[];

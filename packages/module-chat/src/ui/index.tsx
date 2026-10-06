@@ -34,11 +34,13 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelLeftIcon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
   ChatHostProvider,
   SelectConversationProvider,
+  useChatHost,
 } from "./runtime-context.ts";
 import type {
   ChatCan,
@@ -486,6 +488,12 @@ const Conversation = memo(function Conversation({
       </div>
     );
   }
+  // No composer on a 404: the server would create a session under that id.
+  // Mount-persisted only — the reconcile writes a refused first send's 404 into
+  // this same entry, and that conversation must keep its message and error.
+  if (persistedAtMount && history.data === null) {
+    return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
+  }
   return (
     <ConversationInner
       id={id}
@@ -498,6 +506,31 @@ const Conversation = memo(function Conversation({
     />
   );
 });
+
+function ConversationNotFound({
+  canWrite,
+  onNew,
+}: {
+  canWrite: boolean;
+  onNew: SelectConversation | undefined;
+}) {
+  const { t } = useChatHost();
+  return (
+    <div
+      role="status"
+      data-testid="chat-conversation-not-found"
+      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+    >
+      <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
+      <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>
+      {canWrite && onNew ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => onNew(null)}>
+          {t("threads.new")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 function ConversationInner({
   id,
@@ -636,7 +669,7 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        if (cancelled || !fetched || fetched.messages.length <= chatMessages.length) return;
         setMessages(fetched.messages);
       })
       .catch(() => {

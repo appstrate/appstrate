@@ -167,9 +167,9 @@ export const chatStreamSchema = z
     path: ["pinned_skills"],
   });
 
-function logAndMarkStreamError(error: unknown): string {
-  logger.error("chat turn stream failed", { err: String(error) });
-  return clientTurnErrorMarker(classifyClientTurnError(error));
+function logAndMarkStreamError(error: unknown, requestId: string): string {
+  logger.error("chat turn stream failed", { err: String(error), requestId });
+  return clientTurnErrorMarker(classifyClientTurnError(error, requestId));
 }
 
 /**
@@ -234,6 +234,7 @@ export async function handleChatStream(
   }
   const orgId = c.get("orgId");
   const user = c.get("user");
+  const requestId = c.get("requestId");
   // The space the router entered — the session's space, and the scope of every
   // space-scoped read this turn makes.
   const spaceId = c.get("space").id;
@@ -680,6 +681,7 @@ export async function handleChatStream(
         orgId,
         userId: user.id,
         chatSessionId: meteringSessionId,
+        requestId,
         messages,
         system,
         generation: generationSettings,
@@ -695,7 +697,7 @@ export async function handleChatStream(
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
-        onError: logAndMarkStreamError,
+        onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
           void deps.recordChatUsage(record).catch((err) => {

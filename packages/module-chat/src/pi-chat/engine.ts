@@ -71,6 +71,8 @@ export interface PiChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
+  /** The chat request's `Request-Id`. */
+  requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
@@ -606,14 +608,6 @@ export function runPiChat(input: PiChatInput): Response {
         const stepCount = mapper.stepCount();
         const turnError =
           meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
-        if (turnError !== undefined) {
-          logger.warn("Pi chat turn ended on a model error", {
-            err: turnError,
-            orgId: input.orgId,
-            presetId: input.presetId,
-            chatSessionId: input.chatSessionId,
-          });
-        }
         const closing = closePiTurn({
           error: turnError,
           finishReason: meta.finishReason,
@@ -628,7 +622,19 @@ export function runPiChat(input: PiChatInput): Response {
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
           modelId: input.presetId,
           modelLabel: input.modelLabel,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
         });
+        // A provider-reported error throws nothing: log it under the id shown.
+        if (closing.clientError) {
+          logger.warn("chat turn failed on a model error", {
+            requestId: closing.clientError.requestId,
+            orgId: input.orgId,
+            presetId: input.presetId,
+            chatSessionId: input.chatSessionId,
+            category: closing.clientError.category,
+            err: turnError,
+          });
+        }
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
         // — an `error` chunk is transient and never becomes a persisted part.
@@ -668,10 +674,6 @@ export function runPiChat(input: PiChatInput): Response {
         if (streamFinished) {
           logger.error("Pi chat failed after its finish chunk", { err: String(err) });
         } else {
-          logger.error("Pi chat turn failed", {
-            err: String(err),
-            chatSessionId: input.chatSessionId,
-          });
           const aborted = turnAbort.signal.aborted;
           const closing = closePiTurn({
             // An abort is a normal ending (the user already knows) — there is
@@ -686,6 +688,13 @@ export function runPiChat(input: PiChatInput): Response {
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
             modelId: input.presetId,
             modelLabel: input.modelLabel,
+            ...(input.requestId ? { requestId: input.requestId } : {}),
+          });
+          logger.error("Pi chat turn failed", {
+            err: String(err),
+            chatSessionId: input.chatSessionId,
+            requestId: closing.clientError?.requestId ?? input.requestId,
+            ...(closing.clientError ? { category: closing.clientError.category } : {}),
           });
           for (const chunk of closing.chunks) write(chunk);
         }
