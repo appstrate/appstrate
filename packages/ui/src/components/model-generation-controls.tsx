@@ -98,7 +98,7 @@ export function ModelGenerationControls({
         className={cn(
           "grid",
           compact ? "gap-2" : "gap-3",
-          !stacked && "@xl/generation:grid-cols-2",
+          !stacked && "@3xl/generation:grid-cols-2",
         )}
       >
         {(!hideUnsupported || !temperatureUnsupported) && (
@@ -186,8 +186,10 @@ export function ModelGenerationControls({
               variant="outline"
               aria-labelledby={`${id}-reasoning-label`}
               aria-describedby={compact ? undefined : `${id}-reasoning-description`}
-              // Eight on one row from 2rem a level; below that, two rows of four.
-              className="grid w-full grid-cols-4 gap-x-0 gap-y-1 @[16rem]/reasoning:grid-cols-8"
+              // One row needs 2.75rem a level: the widest short label ("Élevé+",
+              // "Moyen": ~34px at this size) plus the toggle's padding and border.
+              // Below that, two rows of four.
+              className="grid w-full grid-cols-4 gap-x-0 gap-y-1 @[22rem]/reasoning:grid-cols-8"
               onValueChange={(next) => {
                 if (!next) return;
                 onChange(
@@ -216,9 +218,9 @@ export function ModelGenerationControls({
                     "-ml-px h-8 min-w-0 rounded-none px-1 text-[0.65rem]",
                     index === MODEL_REASONING_LEVELS.length - 1 && "rounded-r-md",
                     // The seam between the two rows of four.
-                    index === ROW_BREAK - 2 && "@max-[16rem]/reasoning:rounded-r-md",
+                    index === ROW_BREAK - 2 && "@max-[22rem]/reasoning:rounded-r-md",
                     index === ROW_BREAK - 1 &&
-                      "@max-[16rem]/reasoning:ml-0 @max-[16rem]/reasoning:rounded-l-md",
+                      "@max-[22rem]/reasoning:ml-0 @max-[22rem]/reasoning:rounded-l-md",
                   )}
                 >
                   {labels.shortLevels[level]}
