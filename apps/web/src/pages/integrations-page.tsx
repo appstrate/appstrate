@@ -121,7 +121,7 @@ export function IntegrationsPage() {
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState message={String(error)} />
+        <ErrorState error={error} />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Boxes}

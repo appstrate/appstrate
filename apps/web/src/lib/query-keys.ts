@@ -68,13 +68,6 @@ export function invalidateRunDetails(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: runKeys.all });
 }
 
-/** Per-agent run list. Patched in place by the run SSE stream. */
-export const runsKeys = {
-  /** Prefix — every per-agent run list. */
-  all: ["runs"] as const,
-  forAgent: (orgId: Id, spaceId: Id, packageId: Id) => ["runs", orgId, spaceId, packageId] as const,
-};
-
 /** Cursor/offset-paginated run tables (runs page, agent runs tab). */
 export const paginatedRunsKeys = {
   /** Prefix — invalidates every paginated-runs query. */

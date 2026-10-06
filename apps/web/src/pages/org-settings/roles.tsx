@@ -6,7 +6,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -40,6 +39,7 @@ import { Modal } from "../../components/modal";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
+import { errorMessage } from "../../lib/mutation-error";
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -55,7 +55,7 @@ export function OrgSettingsRolesPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   // Authoring bundles is OSS platform code: the permission is the whole gate,
   // with no deployment-level feature on top of it.
@@ -92,7 +92,7 @@ export function OrgSettingsRolesPage() {
             );
             return;
           }
-          setDeleteError(getErrorMessage(err));
+          setDeleteError(errorMessage(err));
         },
       },
     );
@@ -179,6 +179,7 @@ export function OrgSettingsRolesPage() {
           (confirmDelete ? t("roles.deleteConfirm", { name: confirmDelete.name }) : "")
         }
         isPending={deleteRole.isPending}
+        keepOpenOnRefusal
         onConfirm={() => confirmDelete && onDelete(confirmDelete)}
       />
     </>
@@ -368,7 +369,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       return;
     }
     const trimmedKey = data.key.trim();
-    const onError = (err: unknown) => setFormError(getErrorMessage(err));
+    const onError = (err: unknown) => setFormError(errorMessage(err));
     const body = {
       name: data.name.trim(),
       description: data.description.trim() || null,
@@ -505,7 +506,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
             <LoadingState />
           ) : vocabularyError ? (
             <div role="alert">
-              <ErrorState message={getErrorMessage(vocabularyError)} />
+              <ErrorState error={vocabularyError} />
               <Button type="button" variant="outline" onClick={() => void refetch()}>
                 {t("common:btn.retry")}
               </Button>

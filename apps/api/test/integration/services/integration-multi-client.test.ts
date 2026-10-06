@@ -470,7 +470,7 @@ describe("integration multi-client", () => {
 
   describe("resolveConnectClient honours the default flag", () => {
     const LOCAL_MANIFEST = {
-      source: { kind: "local", server: { name: INTEGRATION, version: "^0.1.0" } },
+      source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
     } as unknown as IntegrationManifest;
 
     function customClient(isDefault: boolean): ResolvedOAuthConnect {

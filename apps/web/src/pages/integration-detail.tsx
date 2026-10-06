@@ -55,8 +55,7 @@ const INTEGRATION_TABS = [
   "versions",
 ] as const;
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { Link, useParams } from "react-router-dom";
 import {
   Trash2,
   ShieldCheck,
@@ -94,7 +93,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -141,6 +140,7 @@ import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections"
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
@@ -698,9 +698,12 @@ function AuthHeader({ status }: { status: IntegrationAuthStatus }) {
 function ConnectAuthBlock({
   packageId,
   status,
+  personalConnectionsBlocked,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
+  /** The space's `block_user_connections` gate — `integrations:configure` is exempt, as on the server. */
+  personalConnectionsBlocked: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { user } = useAuth();
@@ -735,7 +738,16 @@ function ConnectAuthBlock({
               ? t("integration.auth.noClientHintAdmin")
               : t("integration.auth.noClientHint")}
           </p>
-        ) : can("integrations:connect") ? (
+        ) : !can("integrations:connect") ? null : personalConnectionsBlocked && !canConfigure ? (
+          // The server answers 403 `connection_blocked_by_admin`: say why here
+          // instead of offering a button that can only fail.
+          <p
+            className="text-muted-foreground text-xs"
+            data-testid={`connections-blocked-hint-${status.auth_key}`}
+          >
+            {t("integration.auth.blockedByAdminHint")}
+          </p>
+        ) : (
           <InlineConnectButton
             packageId={packageId}
             authKey={status.auth_key}
@@ -744,7 +756,7 @@ function ConnectAuthBlock({
             forceAccountSelect={ownConnectionCount > 0}
             lockToAuthKey
           />
-        ) : null}
+        )}
       </div>
 
       <ConnectionsTable
@@ -1597,8 +1609,16 @@ function ConnectionTableRow({
             </DisabledReasonTooltip>
           ) : (
             <span className="text-muted-foreground text-xs">
-              {t("integration.connection.shareWithOrg.label")}
+              {isShared ? t("connections.sharedBadge") : "—"}
             </span>
+          )}
+          {lockHint && (isOwn || canToggleShare) && (
+            <p
+              className="text-muted-foreground mt-1 max-w-[16rem] text-[0.65rem] whitespace-normal"
+              data-testid={`connection-lock-reason-${connection.id}`}
+            >
+              {lockHint}
+            </p>
           )}
         </TableCell>
 
@@ -1722,9 +1742,22 @@ export function IntegrationDetailPage() {
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const canBrowseIntegrations = useCanReach()("/integrations");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={String(error)} />;
+  if (error) {
+    // Not placed in this space, or gone: one answer for both, and what the
+    // member can do about either.
+    return (
+      <ResourceErrorState error={error} hint={t("integration.notInSpace.hint")}>
+        {canBrowseIntegrations && (
+          <Button variant="outline" asChild>
+            <Link to="/integrations">{t("integration.notInSpace.back")}</Link>
+          </Button>
+        )}
+      </ResourceErrorState>
+    );
+  }
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
   const summary = integrations?.find((i) => i.id === packageId);
@@ -1737,19 +1770,7 @@ export function IntegrationDetailPage() {
   const isOwned = !isBuiltIn;
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
-    setActive.mutate(
-      { spaceId: currentSpaceId, packageId, active: next },
-      {
-        onSuccess: () => {
-          toast.success(
-            t(next ? "integrations.activate.success" : "integrations.deactivate.success"),
-          );
-          onSuccess?.();
-        },
-        onError: () =>
-          toast.error(t(next ? "integrations.activate.error" : "integrations.deactivate.error")),
-      },
-    );
+    setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
   };
   const onActivate = () => setActivation(true);
 
@@ -1812,6 +1833,12 @@ export function IntegrationDetailPage() {
           </>
         }
       />
+
+      {isBuiltIn && (
+        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400">
+          {t("ownership.readOnly", { ns: "agents" })}
+        </div>
+      )}
 
       <Tabs
         value={tab}
@@ -1878,6 +1905,7 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
+                personalConnectionsBlocked={summary?.block_user_connections ?? false}
               />
             ))
           )}
@@ -2064,8 +2092,6 @@ export function IntegrationDetailPage() {
         onConfirm={() =>
           deletePkg.mutate(packageId, {
             onSuccess: () => setConfirmDelete(false),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : t("packages.deleteDependedOn")),
           })
         }
       />

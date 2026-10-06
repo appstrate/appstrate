@@ -18,7 +18,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
@@ -54,7 +54,7 @@ export function ScheduleDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error?.message} />;
+  if (error || !schedule) return <ResourceErrorState error={error} />;
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;
@@ -70,12 +70,12 @@ export function ScheduleDetailPage() {
     <div className="p-6">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
-          title={schedule.name || schedule.id}
+          title={schedule.name || t("schedule.unnamed")}
           emoji="📅"
           breadcrumbs={[
             { label: t("nav.orgSection", { ns: "common" }), href: "/" },
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || schedule.id },
+            { label: schedule.name || t("schedule.unnamed") },
           ]}
           actions={
             <>
@@ -301,7 +301,7 @@ function ScheduleHistory({
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
-        schedule_name={schedule.name || schedule.id}
+        schedule_name={schedule.name || t("schedule.unnamed")}
         next_run_at={schedule.next_run_at}
       />
     ) : null;

@@ -3,11 +3,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useRuns } from "../../hooks/use-runs";
+import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
   useDeleteAgent,
@@ -46,7 +44,6 @@ export function AgentActions({
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
   const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: runs } = useRuns(packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
@@ -71,17 +68,9 @@ export function AgentActions({
   // about (a `runner` holds `agents:run` and no `agents:read`, so the space
   // library lists no agents at all) still gets a verdict here.
   const activeHere = detail.active;
-  // Two refusals the launcher would otherwise discover by round trip. Being
-  // switched off HERE comes first, because the cure is one item away in this
-  // very menu ("Activer dans cet espace") while publishing is somebody else's
-  // act. The second is a package with nothing published whose working copy is
-  // not this caller's: a launch that names no version gets `404
-  // no_published_version`.
-  const runBlockedReason = !activeHere
-    ? t("detail.titleNotActive")
-    : detail.definition === "draft" && !detail.home_writable
-      ? t("detail.titleNeverPublished")
-      : undefined;
+  // Not the full run verdict: the options modal picks the model and the version.
+  const refusal = agentLaunchRefusal(detail);
+  const runBlockedReason = refusal ? t(refusal) : undefined;
 
   const handleConfirm = () => {
     if (!confirmState) return;
@@ -123,7 +112,8 @@ export function AgentActions({
         onCreateVersion={onCreateVersion}
         onFork={onFork}
         runningRuns={detail.running_runs}
-        hasRuns={!!runs && runs.length > 0}
+        // Under the same run visibility as the list the item would clear.
+        hasRuns={detail.last_run !== null}
         hasMemories={!!memories && memories.length > 0}
         hasFileInput={!!hasFileInput}
         onDeleteAgent={() =>
@@ -142,12 +132,7 @@ export function AgentActions({
         canActivate={!activeHere}
         onActivate={() => {
           if (!currentSpaceId) return;
-          setActive.mutate(
-            { spaceId: currentSpaceId, packageId, active: true },
-            // The refusal has to be said: the optimistic cache write makes the
-            // switch look taken, and the rollback that follows is silent.
-            { onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")) },
-          );
+          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
         }}
         canDeactivate={activeHere}
         onDeactivate={() =>

@@ -11,6 +11,7 @@
 import { consumeStream, createUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { logger } from "./logger.ts";
+import { clientTurnErrorFromMarker } from "./turn-error.ts";
 
 /**
  * Decode an AI SDK UI-message SSE byte stream into its chunk objects.
@@ -110,6 +111,8 @@ export async function extractAssistantMessage(
   // a failure of the processor pipe through its own `onError`; both land here.
   let loggedProcessError = false;
   const reportProcessError = (err: unknown): void => {
+    // The engine's failed-turn marker is an outcome it logged, not a broken stream.
+    if (clientTurnErrorFromMarker(err)) return;
     if (loggedProcessError) return;
     loggedProcessError = true;
     logger.error("chat ui stream processing failed", { err: String(err) });

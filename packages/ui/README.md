@@ -39,7 +39,7 @@ The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/
 - `./components/sidebar-context` — the `.ts`-only escape hatch for the sidebar context (the wildcard above resolves `.tsx`).
 - `./cn` — the canonical `cn(...)` class-merge helper (`clsx` + `tailwind-merge`). The single implementation used by every component and the web app.
 - `./use-mobile` — `useIsMobile()` hook (breakpoint-based).
-- `./schema-form` — `SchemaForm` component, `FileWidgetLabels` type, RJSF widgets/templates.
+- `./schema-form` — `SchemaForm` component, `SchemaFormLabels` type, RJSF widgets/templates.
 
 > The `./components/*` wildcard is unguarded: a subpath naming a file that does
 > not exist (e.g. a component that was removed) resolves to a missing path and

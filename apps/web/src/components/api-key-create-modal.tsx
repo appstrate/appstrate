@@ -16,10 +16,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
+import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
   open: boolean;
@@ -114,7 +114,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
           if (result.key) onKeyCreated?.(result.key);
         },
         onError: (err) => {
-          setError("root", { message: getErrorMessage(err) });
+          setError("root", { message: errorMessage(err) });
         },
       },
     );

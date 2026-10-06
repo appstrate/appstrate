@@ -436,13 +436,18 @@ export const schemas = {
     type: "object",
     description:
       "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
-    required: ["id", "language", "email", "name"],
+    required: ["id", "language", "email", "name", "can_create_org"],
     properties: {
       id: { type: "string" },
       displayName: { type: ["string", "null"] },
       language: { type: "string", enum: ["fr", "en"] },
       email: { type: "string", format: "email" },
       name: { type: "string" },
+      can_create_org: {
+        type: "boolean",
+        description:
+          "Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`).",
+      },
     },
   },
   Organization: {
@@ -2106,7 +2111,10 @@ export const schemas = {
     properties: {
       id: { type: "string" },
       label: { type: "string" },
-      urlPrefix: { type: "string", description: "Masked proxy URL for display" },
+      urlPrefix: {
+        type: "string",
+        description: "Proxy URL for display, its username and password both masked",
+      },
       enabled: { type: "boolean" },
       is_default: { type: "boolean" },
       source: { type: "string", enum: ["built-in", "custom"] },

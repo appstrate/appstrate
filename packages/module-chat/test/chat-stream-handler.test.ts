@@ -24,7 +24,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -38,7 +38,9 @@ import {
   type ChatEngine,
   type ChatEnv,
 } from "../src/chat-stream.ts";
+import { drainTurns } from "../src/inflight.ts";
 import { mintSessionId } from "../src/session-id.ts";
+import { logger } from "../src/logger.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import {
@@ -93,6 +95,7 @@ const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
 const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
+const TEST_REQUEST_ID = "req_chat_handler_test";
 
 /**
  * One scripted openai-completions model row, in the list envelope
@@ -222,6 +225,13 @@ async function tokenPermissions(input: PiChatInput): Promise<string[]> {
   return [...(resolved!.permissions ?? [])].sort();
 }
 
+// A turn persists in a background task that outlives its response, and the registry of those
+// tasks is a process-wide singleton: a test that returns while one is still settling hands it
+// to whichever file runs next (`inflight.test.ts` then counts a turn it never tracked).
+afterEach(async () => {
+  await drainTurns(5_000);
+});
+
 describe("handleChatStream", () => {
   let ctx: TestContext;
   /** What `app.onError` saw, so a thrown invariant can be asserted on its message. */
@@ -249,6 +259,7 @@ describe("handleChatStream", () => {
       return errorHandler(error, context as never);
     });
     app.post("/api/chat", (c) => {
+      c.set("requestId", TEST_REQUEST_ID);
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
       // What `enterSpaceContext` writes on every `/api/chat/*` route in
@@ -494,6 +505,62 @@ describe("handleChatStream", () => {
     expect(calls).toEqual([]);
     const rows = await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId));
     expect(rows).toEqual([]);
+  });
+
+  it("names the reason of a turn refused for lack of a usable model, in one info line", async () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        dispatch: async (req) =>
+          new URL(req.url).pathname === "/api/models"
+            ? Response.json({ object: "list", hasMore: false, data: [] })
+            : scriptedDispatch()(req),
+      });
+
+      expect(res.status).toBe(400);
+      expect(calls).toEqual([]);
+      expect(
+        info.mock.calls.filter(([msg]) => msg === "chat turn refused: no usable model"),
+      ).toEqual([
+        [
+          "chat turn refused: no usable model",
+          {
+            orgId: ctx.orgId,
+            requested: null,
+            reason: "No enabled model is configured (Settings → Models).",
+          },
+        ],
+      ]);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("logs the raw error behind a marker the stream's onError produced", async () => {
+    // An exception escaping the engine's `execute` reaches the client as the
+    // same marker a model error does, and the drain ignores that marker.
+    const error = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const { engine } = scriptedEngine();
+      let marker: string | undefined;
+      const res = await postChat(mintSessionId(), undefined, (input) => {
+        marker = input.onError(new Error("ESCAPED_EXECUTE_SENTINEL"));
+        return engine(input);
+      });
+      await res.text();
+
+      expect(marker).toStartWith("appstrate:chat-turn-error:");
+      expect(marker).toEndWith(`:${TEST_REQUEST_ID}`);
+      expect(error.mock.calls).toEqual([
+        [
+          "chat turn stream failed",
+          { err: "Error: ESCAPED_EXECUTE_SENTINEL", requestId: TEST_REQUEST_ID },
+        ],
+      ]);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("ends the turn and clears the in-flight marker when the engine fails", async () => {

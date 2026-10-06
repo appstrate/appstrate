@@ -11,6 +11,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@appstrate/ui/components/dialog";
 import { useChatHeaders, useChatHost, useSelectConversation } from "./runtime-context.ts";
 import {
   renameSession,
@@ -77,19 +86,22 @@ export function ThreadList({
   } = useSessions();
   const now = useNowTick();
   const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="flex-1 text-sm font-medium">Conversations</span>
-        <button
-          type="button"
-          aria-label="Nouvelle conversation"
-          title="Nouvelle conversation"
-          onClick={() => select?.(null)}
-          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
-        >
-          <PlusIcon className="size-4" />
-        </button>
+        {canWrite && (
+          <button
+            type="button"
+            aria-label={t("threads.new")}
+            title={t("threads.new")}
+            onClick={() => select?.(null)}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-1.5"
+          >
+            <PlusIcon className="size-4" />
+          </button>
+        )}
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         {(sessions ?? []).map((s) => (
@@ -113,7 +125,7 @@ export function ThreadList({
         )}
         {!isLoading && (sessions ?? []).length === 0 && (
           <p className="text-muted-foreground px-2 py-6 text-center text-xs">
-            {t(can("chat:write") ? "threads.empty" : "threads.emptyReadOnly")}
+            {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
           </p>
         )}
       </div>
@@ -152,9 +164,12 @@ function ConversationRow({
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
-  const canWrite = useChatHost().can("chat:write");
+  const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const onDelete = async () => {
+    setConfirmingDelete(false);
     await deleteSession(getHeaders, session.id);
     // Reflect the delete in the cached list. Cancel any in-flight poll first so
     // its stale (pre-delete) response can't land afterwards and resurrect the
@@ -187,7 +202,7 @@ function ConversationRow({
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-none bg-transparent px-0 py-1 text-left text-inherit hover:bg-transparent"
       >
         <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
-          {session.title ?? "Nouvelle conversation"}
+          {session.title ?? t("threads.new")}
         </span>
       </button>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -228,7 +243,11 @@ function ConversationRow({
               type="button"
               aria-label="Supprimer"
               title="Supprimer"
-              onClick={() => void onDelete()}
+              // The mobile drawer closes on a button click: it would unmount the dialog.
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmingDelete(true);
+              }}
               className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
             >
               <Trash2Icon className="size-3.5" />
@@ -236,6 +255,24 @@ function ConversationRow({
           </div>
         )}
       </div>
+      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <DialogContent data-testid="chat-delete-confirm" onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>{t("threads.delete.title")}</DialogTitle>
+            <DialogDescription>
+              {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmingDelete(false)}>
+              {t("common:btn.cancel")}
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+              {t("common:btn.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -244,11 +281,12 @@ function ConversationRow({
 export function ActiveConversationTitle({ activeId }: { activeId: string | null }) {
   const { editing, setEditing, save } = useInlineRename(activeId ?? "");
   const { data: sessions } = useSessions();
-  const canWrite = useChatHost().can("chat:write");
+  const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
   if (!activeId) return null;
   const session = sessions?.find((s) => s.id === activeId);
   if (!session) return null;
-  const title = session.title ?? "Nouvelle conversation";
+  const title = session.title ?? t("threads.new");
 
   if (!canWrite) {
     return <span className="min-w-0 truncate px-1.5 text-sm font-medium">{title}</span>;

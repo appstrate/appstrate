@@ -20,7 +20,11 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
-import { seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  _setSystemPackagesForTesting,
+  type SystemPackageEntry,
+} from "../../../src/services/system-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -314,6 +318,32 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
     it("accepts a bare skill ZIP whose SKILL.md conforms", async () => {
       const res = await importZip({ "SKILL.md": enc(VALID_CONTENT) }, "gate-skill.zip");
       expect(res.status).toBe(201);
+    });
+
+    // A taken identifier is one refusal with one status, whichever check meets it.
+    const conformingArchive = () => ({
+      "manifest.json": enc(JSON.stringify(skillManifest())),
+      "SKILL.md": enc(VALID_CONTENT),
+    });
+
+    it("409s an archive that carries a system package's identifier", async () => {
+      const restore = _setSystemPackagesForTesting(new Map([[SKILL_ID, {} as SystemPackageEntry]]));
+      try {
+        const res = await importZip(conformingArchive(), "gate-skill.afps");
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as ProblemBody).code).toBe("name_collision");
+      } finally {
+        restore();
+      }
+    });
+
+    it("409s an archive whose identifier another organization owns", async () => {
+      const other = await createTestContext({ orgSlug: "fmother" });
+      await seedPackage({ id: SKILL_ID, orgId: other.orgId, type: "skill" });
+
+      const res = await importZip(conformingArchive(), "gate-skill.afps");
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as ProblemBody).code).toBe("name_collision");
     });
   });
 

@@ -8,7 +8,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { resolvesToUsableModel } from "../use-agent-readiness";
+import type { AgentDetail } from "@appstrate/shared-types";
+import {
+  agentLaunchRefusal,
+  agentModelBlocker,
+  agentRunBlocker,
+  resolvesToUsableModel,
+} from "../use-agent-readiness";
+import { isModelPinUnavailable } from "../../lib/model-selectability";
 import type { OrgModelInfo } from "../use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -73,5 +80,119 @@ describe("resolvesToUsableModel", () => {
 
   it("rejects an empty catalog", () => {
     expect(resolvesToUsableModel([], "m_pin")).toBe(false);
+  });
+});
+
+/** A launchable agent as a full read (`agents:read`) sees it. */
+function agent(over: Partial<AgentDetail> = {}): AgentDetail {
+  return {
+    id: "@acme/worker",
+    source: "local",
+    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
+    running_runs: 0,
+    last_run: null,
+    prompt: "Do the thing.",
+    manifest: { name: "@acme/worker" },
+    scope: "@acme",
+    version: "1.0.0",
+    definition: "published",
+    home_space_id: "spc_1",
+    home_writable: false,
+    home_deletable: false,
+    home_shareable: false,
+    effective_timeout_seconds: 300,
+    active: true,
+    ...over,
+  };
+}
+
+describe("agentRunBlocker", () => {
+  it("lets a ready agent run", () => {
+    expect(agentRunBlocker(agent(), agentModelBlocker([DEFAULT_OK], null))).toBeNull();
+  });
+
+  it("does not call a prompt empty when the read withholds it", () => {
+    // `agents:run` without `agents:read`: the summary carries no prompt, no manifest.
+    const summary = agent({ prompt: undefined, manifest: undefined });
+    expect(agentRunBlocker(summary, agentModelBlocker([DEFAULT_OK], null))).toBeNull();
+  });
+
+  it("blocks an empty prompt the caller can read", () => {
+    expect(agentRunBlocker(agent({ prompt: "  " }), agentModelBlocker([DEFAULT_OK], null))).toBe(
+      "detail.titleEmptyPrompt",
+    );
+  });
+
+  it("blocks a never-published agent for a reader who cannot run its draft", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false });
+    expect(agentRunBlocker(unpublished, agentModelBlocker([DEFAULT_OK], null))).toBe(
+      "detail.titleNeverPublished",
+    );
+    expect(
+      agentRunBlocker({ ...unpublished, active: false }, agentModelBlocker([DEFAULT_OK], null)),
+    ).toBe("detail.titleNotActive");
+  });
+
+  it("keeps the model verdict readable behind an earlier blocker", () => {
+    // The buttons say "empty prompt"; the page alert still has to say "no model".
+    expect(agentRunBlocker(agent({ prompt: "" }), agentModelBlocker([], null))).toBe(
+      "detail.titleEmptyPrompt",
+    );
+    expect(agentModelBlocker([], null)).toBe("detail.titleModel");
+    expect(agentModelBlocker([DEFAULT_OK], null)).toBeNull();
+  });
+
+  it("names the activation first, as the run gate does", () => {
+    expect(agentRunBlocker(agent({ active: false, prompt: "" }), agentModelBlocker([], null))).toBe(
+      "detail.titleNotActive",
+    );
+  });
+
+  it("tells a missing default from no model at all", () => {
+    expect(agentRunBlocker(agent(), agentModelBlocker([], null))).toBe("detail.titleModel");
+    expect(agentRunBlocker(agent(), agentModelBlocker([model({ id: "m_other" })], null))).toBe(
+      "detail.titleNoDefaultModel",
+    );
+  });
+
+  it("stays optimistic while the model catalog loads", () => {
+    expect(agentRunBlocker(agent(), agentModelBlocker(undefined, null))).toBeNull();
+  });
+});
+
+describe('agentLaunchRefusal — the gate of "run with options"', () => {
+  it("refuses what no option cures, activation first", () => {
+    const unpublished = agent({ definition: "draft", home_writable: false });
+    expect(agentLaunchRefusal(agent({ active: false }))).toBe("detail.titleNotActive");
+    expect(agentLaunchRefusal(unpublished)).toBe("detail.titleNeverPublished");
+    expect(agentLaunchRefusal({ ...unpublished, active: false })).toBe("detail.titleNotActive");
+  });
+
+  it("stays open for what the options modal can still change", () => {
+    // No usable default (a model override cures it) and an empty draft prompt
+    // (another version may not be): a plain run is blocked, this launch is not.
+    const curable = agent({ prompt: "" });
+    expect(agentRunBlocker(curable, agentModelBlocker([], null))).toBe("detail.titleEmptyPrompt");
+    expect(agentRunBlocker(agent(), agentModelBlocker([model({ id: "m_other" })], null))).toBe(
+      "detail.titleNoDefaultModel",
+    );
+    expect(agentLaunchRefusal(curable)).toBeNull();
+    expect(agentLaunchRefusal(agent())).toBeNull();
+  });
+});
+
+describe("isModelPinUnavailable", () => {
+  it("is false without a pin, and for a pin that can serve", () => {
+    expect(isModelPinUnavailable([DEFAULT_OK], null)).toBe(false);
+    expect(isModelPinUnavailable([model({ id: "m_pin" })], "m_pin")).toBe(false);
+  });
+
+  it("is true for a pin that is gone, switched off, or on a dead credential", () => {
+    expect(isModelPinUnavailable([DEFAULT_OK], "m_deleted")).toBe(true);
+    expect(isModelPinUnavailable([model({ id: "m_pin", enabled: false })], "m_pin")).toBe(true);
+    expect(isModelPinUnavailable([model({ id: "m_pin", needs_reconnection: true })], "m_pin")).toBe(
+      true,
+    );
   });
 });

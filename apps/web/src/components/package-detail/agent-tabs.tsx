@@ -8,7 +8,6 @@ import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
 import { useApiKeys } from "../../hooks/use-api-keys";
-import { useAgentReadiness } from "../../hooks/use-agent-readiness";
 import {
   isFileField,
   schemaHasFileFields,
@@ -17,12 +16,14 @@ import {
 } from "@appstrate/core/form";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useCanReach } from "../../hooks/use-can-reach";
 import { RunList } from "../run-list";
 import { ScheduleCard } from "../schedule-card";
-import { RunAgentButton } from "../run-agent-button";
+import { AgentRunButton } from "./agent-run-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
+import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 
 export function AgentRunsTab({
   packageId,
@@ -32,13 +33,6 @@ export function AgentRunsTab({
   versionLabel: string | undefined;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: detail } = usePackageDetail("agent", packageId);
-  const readiness = useAgentReadiness(detail);
-
-  if (!detail) return null;
-
-  const { hasPrompt, hasRequiredSkills } = readiness;
-  const runDisabled = !hasPrompt || !hasRequiredSkills;
 
   return (
     <RunList
@@ -47,13 +41,7 @@ export function AgentRunsTab({
       hideAgentName
       emptyState={
         <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
-          <RunAgentButton
-            packageId={packageId}
-            detail={detail}
-            version={versionLabel}
-            disabled={runDisabled}
-            showLabel
-          />
+          <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
         </EmptyState>
       }
     />
@@ -176,6 +164,13 @@ function buildCurlMultipartExample(params: CurlParams): string {
   return lines.join("\n");
 }
 
+/** The launch answers `201` with the run resource; abridged here. */
+const RUN_RESPONSE_EXAMPLE = `{
+  "id": "run_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "status": "pending",
+  …
+}`;
+
 // ─── Agent API Tab ─────────────────────────────────────────────────────
 
 export function AgentApiTab({ packageId }: { packageId: string }) {
@@ -184,10 +179,12 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
+  // The key section follows the keys page (absent in a personal space).
+  const canReach = useCanReach();
 
   const [rawKey, setRawKey] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
 
   if (!detail || !currentOrg) return null;
 
@@ -224,11 +221,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const curlExample = buildCurlExample(curlParams);
   const curlMultipart = hasFileInput ? buildCurlMultipartExample(curlParams) : null;
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const handleCopy = (text: string) => void copy(text);
 
   const handleKeyCreated = (key: string) => {
     setRawKey(key);
@@ -239,7 +232,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
       <h3 className="text-foreground text-sm font-medium">{t("api.title")}</h3>
 
       {/* API Key section — the curl below stands on its own without it */}
-      {!can("api-keys:read") ? null : keysLoading ? (
+      {!canReach("/org-settings/space/api-keys") ? null : keysLoading ? (
         <div className="text-muted-foreground text-sm">{t("loading", { ns: "common" })}</div>
       ) : !firstKey && !rawKey ? (
         <div className="border-warning/30 bg-warning/5 rounded-md border px-4 py-3">
@@ -335,7 +328,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
           {t("api.responseTitle")}
         </h4>
         <pre className="text-foreground bg-muted/50 border-border overflow-x-auto rounded-md border p-4 font-mono text-xs whitespace-pre-wrap">
-          {JSON.stringify({ runId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" }, null, 2)}
+          {RUN_RESPONSE_EXAMPLE}
         </pre>
         <p className="text-muted-foreground mt-2 text-xs">{t("api.responseHint")}</p>
       </div>

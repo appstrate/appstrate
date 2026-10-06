@@ -50,6 +50,7 @@ export type ChatEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     orgId: string;
+    requestId: string;
     /**
      * What the caller's credential IS, as the auth pipeline resolved it. The
      * loopback minter is the one reader: it refuses anything but `"user"`.

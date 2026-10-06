@@ -73,6 +73,7 @@ import { ensureCliClient } from "./services/ensure-cli-client.ts";
 import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { bindIssuedMagicLink } from "./services/oauth-transaction-binding.ts";
+import { toMagicLinkConfirmUrl } from "./pages/magic-link-confirm.ts";
 import { setRealmResolver, setMagicLinkIssuedHook } from "@appstrate/db/auth";
 import { setRunnerResolver } from "../../lib/runner-resolver.ts";
 import { lookupCliDeviceName } from "./services/cli-tokens.ts";
@@ -100,8 +101,12 @@ const oidcModule: AppstrateModule = {
     // Persist the server-side `(magic-link token → OAuth client)` binding at
     // issuance time so the BA-driven `/magic-link/verify` create leg can
     // resolve the realm from state the browser cannot strip or forge —
-    // see `services/oauth-transaction-binding.ts` (CRIT-15).
-    setMagicLinkIssuedHook(bindIssuedMagicLink);
+    // see `services/oauth-transaction-binding.ts` (CRIT-15) — then email the
+    // confirmation interstitial instead of the one-shot verify URL.
+    setMagicLinkIssuedHook(async (info) => {
+      await bindIssuedMagicLink(info);
+      return toMagicLinkConfirmUrl(info.url, info.email);
+    });
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();

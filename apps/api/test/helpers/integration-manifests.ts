@@ -166,15 +166,16 @@ function buildAuth(spec: AuthSpec): Record<string, unknown> {
 }
 
 /**
- * Build an AFPS integration manifest with a `local` source (referencing an
- * mcp-server package of the same name) and the given auths.
+ * Build an AFPS integration manifest with a `local` source (referencing the
+ * mcp-server package `<name>-server` unless `serverName` says otherwise) and the
+ * given auths.
  */
 export function localIntegrationManifest(opts: {
   name: string;
   version?: string;
   displayName?: string;
   description?: string;
-  /** Scoped name of the referenced mcp-server package (`source.server.name`). Defaults to `name`. */
+  /** Scoped name of the referenced mcp-server package (`source.server.name`). Defaults to `<name>-server`: never `name`, which the write routes refuse. */
   serverName?: string;
   auths: Record<string, AuthSpec>;
   tools_policy?: Record<
@@ -198,7 +199,7 @@ export function localIntegrationManifest(opts: {
     ...(opts.description !== undefined ? { description: opts.description } : {}),
     source: {
       kind: "local",
-      server: { name: opts.serverName ?? opts.name, version: `^${version}` },
+      server: { name: opts.serverName ?? `${opts.name}-server`, version: `^${version}` },
     },
     auths,
     ...(opts.tools_policy ? { tools_policy: opts.tools_policy } : {}),

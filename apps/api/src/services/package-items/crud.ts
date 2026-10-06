@@ -22,11 +22,8 @@ import { activeHereSql } from "../package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
-  constructor(
-    public packageId: string,
-    public packageType: string,
-  ) {
-    super(`A ${packageType} with identifier '${packageId}' already exists`);
+  constructor(public packageId: string) {
+    super(`A package with identifier '${packageId}' already exists`);
     this.name = "PackageAlreadyExistsError";
   }
 }
@@ -204,12 +201,7 @@ export async function createOrgItem(
     .returning();
 
   if (row) return row;
-  const [existing] = await executor
-    .select({ type: packages.type })
-    .from(packages)
-    .where(eq(packages.id, packageId))
-    .limit(1);
-  throw new PackageAlreadyExistsError(packageId, existing?.type ?? cfg.type);
+  throw new PackageAlreadyExistsError(packageId);
 }
 
 /**

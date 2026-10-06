@@ -169,6 +169,28 @@ describe("extractAssistantMessage", () => {
     }
   });
 
+  it("does not report the engine's failed-turn marker as a processing failure", async () => {
+    // A refused provider key ends the turn with this chunk: an outcome the
+    // engine already logged, not a broken stream.
+    const body = encode(async ({ writer }) => {
+      writer.write({ type: "start", messageId: "asst_err" });
+      writer.write({
+        type: "error",
+        errorText: "appstrate:chat-turn-error:credential_unavailable",
+      });
+      writer.write({ type: "finish" });
+    });
+    const errorSpy = mock(() => {});
+    const original = logger.error;
+    logger.error = errorSpy as unknown as typeof logger.error;
+    try {
+      expect((await extractAssistantMessage(body))?.id).toBe("asst_err");
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      logger.error = original;
+    }
+  });
+
   it("returns undefined for a stream that carries no `start` (a lone error chunk)", async () => {
     // The processor seeds an empty assistant message before the first chunk,
     // so "no message" has to be decided on what was seen, not on what the

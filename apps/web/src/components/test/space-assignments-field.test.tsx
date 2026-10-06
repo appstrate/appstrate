@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { SpaceAssignmentsField } from "../space-assignments-field.tsx";
-import { hasUnavailableAssignments } from "../../lib/space-assignments.ts";
+import { assignableSpaces, hasUnavailableAssignments } from "../../lib/space-assignments.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -93,5 +93,19 @@ describe("space assignment catalog recovery", () => {
     expect(html).toContain('disabled=""');
     expect(html).not.toContain("Impossible de charger les rôles disponibles.");
     expect(html).not.toContain('role="status"');
+  });
+});
+
+describe("assignable spaces", () => {
+  it("never offers a personal space: the API refuses one in space_assignments", () => {
+    const listed = [
+      { id: "spc_default", name: "Default", personal: false },
+      { id: "spc_mine", name: "Mon espace", personal: true },
+      { id: "spc_studio", name: "Studio", personal: false },
+    ];
+    expect(assignableSpaces(listed).map((space) => space.id)).toEqual([
+      "spc_default",
+      "spc_studio",
+    ]);
   });
 });

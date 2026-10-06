@@ -122,11 +122,8 @@ async function fetchIntegrationManifestUncached(
  * Resolve an `mcp-server` package's MCPB manifest from the package store.
  *
  * An integration whose `source.kind: "local"` references a SEPARATE
- * `mcp-server` package via `source.server.name`. The spawn resolver looks that
- * package up here (unscoped — internal callers already hold an auth context)
- * and reads its runnable server config (`server.{type, entry_point}`) to build
- * the sidecar spawn spec. Returns `null` when the package is absent, is not an
- * mcp-server, or fails MCPB manifest validation.
+ * `mcp-server` package via `source.server.name`. Reads that package's DRAFT; runs
+ * go through {@link resolveMcpServerForSpawn}. Returns `null` when it does not resolve.
  */
 export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
   const [pkgRow] = await db
@@ -134,12 +131,13 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
+  // `debug`: every read of an integration's draft comes through here.
   if (!pkgRow) {
-    logger.info("referenced mcp-server package not found", { packageId });
+    logger.debug("referenced mcp-server package not found", { packageId });
     return null;
   }
   if (pkgRow.type !== "mcp-server") {
-    logger.warn("referenced package is not an mcp-server", {
+    logger.debug("referenced package is not an mcp-server", {
       packageId,
       actualType: pkgRow.type,
     });
@@ -147,7 +145,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   }
   const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
   if (!parsed.success) {
-    logger.warn("mcp-server manifest failed validation", { packageId });
+    logger.debug("mcp-server manifest failed validation", { packageId });
     return null;
   }
   return parsed.data;

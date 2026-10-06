@@ -5,8 +5,10 @@ import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
+import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
@@ -18,7 +20,7 @@ import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ResourceErrorState } from "../components/page-states";
 import { RunOutcomeTab } from "../components/run-outcome-tab";
 import { RunExecutionTab } from "../components/run-execution-tab";
 import { RunConfigurationTab } from "../components/run-configuration-tab";
@@ -40,21 +42,12 @@ import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { Play } from "lucide-react";
+import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
+import { isQueryInFlight } from "../lib/query-state";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
-
-/**
- * Has this React Query subscription reached a state that will not change on its
- * own? Either it answered (data or error, so no longer `pending`), or it is
- * disabled and will never run (`pending` with an idle fetch). A query still
- * `fetching` — including the very first render, where v5 already reports the
- * optimistic `fetching` — has not.
- */
-function isQuerySettled(query: { isPending: boolean; fetchStatus: string }): boolean {
-  return !query.isPending || query.fetchStatus === "idle";
-}
 
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -75,7 +68,10 @@ export function RunDetailPage() {
   // said before the click rather than collected as a 404 after it. The verdict
   // rides this very response (`AgentDetail.active`), resolved for the space the
   // page is read from; the Re-run control renders only once it has landed.
-  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
+  const { data: agent, isLoading: agentLoading } = usePackageDetail(
+    "agent",
+    isInlinePath ? undefined : packageId,
+  );
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
 
@@ -145,7 +141,7 @@ export function RunDetailPage() {
   // while on a run that DID write memory. The tab controller captures its
   // default pane once and must not capture it from that transient 0 — hand it
   // the settled flag rather than the count alone.
-  const memorySettled = isQuerySettled(runMemoriesQuery) && isQuerySettled(runPinnedQuery);
+  const memorySettled = !isQueryInFlight(runMemoriesQuery) && !isQueryInFlight(runPinnedQuery);
 
   // File count for the tab badge — read off the run DTO the page already
   // has (same field `run-row.tsx` renders). Listing the run's files just to
@@ -232,7 +228,8 @@ export function RunDetailPage() {
 
   if (isLoading) return <LoadingState />;
 
-  if (error || !run) return <ErrorState message={error?.message} />;
+  if (error || !run) return <ResourceErrorState error={error} />;
+  const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
@@ -248,7 +245,12 @@ export function RunDetailPage() {
           ? `${inlineName} (${t("runs.inlineBadge").toLowerCase()})`
           : inlineName,
       }
-    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
+    : {
+        // The id is the fallback for an agent with no name, not a placeholder
+        // for one whose name is still on its way.
+        label: agent?.display_name || (agentLoading ? "…" : packageId),
+        href: `/agents/${packageId}`,
+      };
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
@@ -301,8 +303,16 @@ export function RunDetailPage() {
         integrationEntries={agent?.dependencies.integrations}
       />
 
-      {run.status === "failed" && run.error && (
-        <div className="bg-destructive/10 text-destructive mb-4 rounded-md px-4 py-3 text-sm">
+      {isTerminal && run.status !== "success" && run.error && (
+        <div
+          className={cn(
+            "mb-4 rounded-md px-4 py-3 text-sm",
+            run.status === "cancelled"
+              ? "bg-muted text-muted-foreground"
+              : "bg-destructive/10 text-destructive",
+          )}
+          data-testid="run-error-banner"
+        >
           {run.error}
         </div>
       )}
@@ -373,45 +383,29 @@ export function RunDetailPage() {
               for the readings, the live cadence and when it renders nothing. */}
                 <ContextGaugeReadout turns={turnRows} status={run.status} />
                 {!isRunning && !isInline && agent && can("agents:run") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    // Two refusals the launcher would otherwise discover by
-                    // round trip, in the order the detail page names them:
-                    // switched off HERE (the cure is one page away), then
-                    // nothing published and the working copy is not this
-                    // reader's — a re-run resolves the latest published
-                    // version and there is none.
-                    disabled={
-                      !permissionsReady ||
-                      launcher.isPending ||
-                      !agent.active ||
-                      (agent.definition === "draft" && !agent.home_writable)
-                    }
-                    title={
-                      !agent.active
-                        ? t("detail.titleNotActive")
-                        : agent.definition === "draft" && !agent.home_writable
-                          ? t("detail.titleNeverPublished")
-                          : undefined
-                    }
-                    onClick={() => {
-                      if (canReadAgent) {
-                        setInputOpen(true);
-                      } else {
-                        // The API conceals resolved input from runners. Replay
-                        // that snapshot server-side, preserving its parameters.
-                        launcher.launch({
-                          rerun_from: run.id,
-                          version: replayVersion(run.version_ref, agent.home_writable),
-                        });
-                      }
-                    }}
-                  >
-                    {launcher.isPending && <Spinner />}
-                    <Play className="size-3.5" />
-                    {t("run.rerun")}
-                  </Button>
+                  <DisabledReasonTooltip reason={rerunRefusal ? t(rerunRefusal) : null}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!permissionsReady || launcher.isPending || rerunRefusal !== null}
+                      onClick={() => {
+                        if (canReadAgent) {
+                          setInputOpen(true);
+                        } else {
+                          // The API conceals resolved input from runners. Replay
+                          // that snapshot server-side, preserving its parameters.
+                          launcher.launch({
+                            rerun_from: run.id,
+                            version: replayVersion(run.version_ref, agent.home_writable),
+                          });
+                        }
+                      }}
+                    >
+                      {launcher.isPending && <Spinner />}
+                      <Play className="size-3.5" />
+                      {t("run.rerun")}
+                    </Button>
+                  </DisabledReasonTooltip>
                 )}
                 {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel

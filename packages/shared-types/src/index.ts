@@ -210,8 +210,6 @@ export interface AppConfigFeatures {
   smtp: boolean;
   /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
   signupDisabled: boolean;
-  /** AUTH_DISABLE_ORG_CREATION — webapp routes org-less users to "waiting for invitation". */
-  orgCreationDisabled: boolean;
   /**
    * AUTH_BOOTSTRAP_TOKEN is set and unredeemed (#344 Layer 2b). The webapp
    * routes the user to `/claim` instead of `/login`, where they paste the

@@ -123,6 +123,8 @@ export interface ChatHost {
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;
+  /** A byte count in the language the host renders (`2,0 Ko` in French). */
+  formatBytes: (bytes: number) => string;
 }
 
 /**

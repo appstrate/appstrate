@@ -2,13 +2,13 @@
 
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
+import { ChevronsUpDown, Check, Plus, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
-import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanManageOrgCatalog } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
-import { spaceRoleLabel } from "../hooks/use-roles";
+import { useCanCreateOrg } from "../hooks/use-auth";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +29,7 @@ import {
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
 import { spaceLabel } from "../lib/space-label";
+import { SpaceMenuItems } from "./space-menu-items";
 
 function OrgAvatar({ name, className }: { name: string; className?: string }) {
   return (
@@ -50,17 +51,12 @@ export function OrgSwitcher() {
   const { isMobile } = useSidebar();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
-  const { switchSpace } = useSpaceSwitcher();
   const canReach = useCanReach();
   const canManageCatalog = useCanManageOrgCatalog();
+  const canCreateOrg = useCanCreateOrg();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
-  // "Mon espace" is pinned above the team spaces; `spaceLabel` is what makes it
-  // read as the caller's own translation rather than someone's stored French.
-  const label = (space: { personal: boolean; name: string }) => spaceLabel(space, t);
-  const personalSpaces = (spaces ?? []).filter((s) => s.personal);
-  const teamSpaces = (spaces ?? []).filter((s) => !s.personal);
 
   if (loading) {
     return (
@@ -73,46 +69,6 @@ export function OrgSwitcher() {
   }
 
   if (!currentOrg) return null;
-
-  function renderSpaceItem(space: (typeof teamSpaces)[number]) {
-    const isActive = space.id === currentSpaceId;
-    // A LIVE `private` space never reaches the client; `closed` ones do, listed
-    // but not enterable (`access: "none"`), and so does an ORPHANED personal
-    // space for an owner or admin — they may convert or sweep it, not enter it.
-    const enterable = space.access === "member";
-    return (
-      <DropdownMenuItem
-        key={space.id}
-        data-testid={`space-item-${space.id}`}
-        className="flex items-center justify-between gap-2"
-        disabled={!enterable}
-        title={enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })}
-        onSelect={() => {
-          if (enterable && !isActive) switchSpace(space.id);
-        }}
-      >
-        <span className="flex min-w-0 flex-col">
-          <span className="flex items-center gap-1.5 truncate">
-            {label(space)}
-            {space.isDefault && (
-              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
-            )}
-          </span>
-          {enterable && space.role && (
-            <span className="text-muted-foreground truncate text-xs">
-              {spaceRoleLabel(space.role, t)}
-            </span>
-          )}
-          {!enterable && (
-            <span className="text-muted-foreground truncate text-xs">
-              {t("spaces.requestAccess", { ns: "settings" })}
-            </span>
-          )}
-        </span>
-        {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
-      </DropdownMenuItem>
-    );
-  }
 
   return (
     <SidebarMenu>
@@ -130,7 +86,7 @@ export function OrgSwitcher() {
                 <span className="truncate font-semibold">{currentOrg.name}</span>
                 {currentSpace && (
                   <span className="text-muted-foreground truncate text-xs">
-                    {label(currentSpace)}
+                    {spaceLabel(currentSpace, t)}
                   </span>
                 )}
               </div>
@@ -174,36 +130,26 @@ export function OrgSwitcher() {
                   className="flex items-center gap-2"
                 >
                   <span className="flex-1 truncate">
-                    {currentSpace ? label(currentSpace) : null}
+                    {currentSpace ? spaceLabel(currentSpace, t) : null}
                   </span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-48 rounded-lg">
-                  {personalSpaces.length > 0 && (
-                    <DropdownMenuLabel className="text-muted-foreground text-xs">
-                      {t("spaces.personal.switcherGroup", { ns: "settings" })}
-                    </DropdownMenuLabel>
-                  )}
-                  {personalSpaces.map(renderSpaceItem)}
-                  {personalSpaces.length > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="text-muted-foreground text-xs">
-                    {personalSpaces.length > 0
-                      ? t("spaces.personal.teamGroup", { ns: "settings" })
-                      : t("switcher.spaceAriaLabel")}
-                  </DropdownMenuLabel>
-                  {teamSpaces.map(renderSpaceItem)}
+                  <SpaceMenuItems />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             )}
-            <DropdownMenuItem asChild>
-              <Link
-                to="/onboarding/create"
-                state={{ fromSwitcher: true }}
-                className="text-primary flex items-center gap-2"
-              >
-                <Plus size={14} />
-                {t("switcher.createOrg")}
-              </Link>
-            </DropdownMenuItem>
+            {canCreateOrg && (
+              <DropdownMenuItem asChild>
+                <Link
+                  to="/onboarding/create"
+                  state={{ fromSwitcher: true }}
+                  className="text-primary flex items-center gap-2"
+                >
+                  <Plus size={14} />
+                  {t("switcher.createOrg")}
+                </Link>
+              </DropdownMenuItem>
+            )}
             {canReach("/space/packages") && (
               <DropdownMenuItem asChild>
                 <Link to="/space/packages" className="text-primary flex items-center gap-2">

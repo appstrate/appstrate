@@ -44,18 +44,15 @@ describe("loadHistory decode", () => {
       )) as typeof fetch;
 
     const loaded = await loadHistory(() => ({}), "chs_1");
-    expect(loaded.skills).toEqual({
+    expect(loaded?.skills).toEqual({
       skillMode: "manual",
       pinnedSkills: ["@scope/a", "@scope/b"],
     });
   });
 
-  it("returns an empty, defaulted session for a not-yet-persisted conversation (404)", async () => {
+  it("reports a conversation the caller does not have (404) as null, not as an empty one", async () => {
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
-    expect(await loadHistory(() => ({}), "chs_new")).toEqual({
-      messages: [],
-      skills: { skillMode: "auto", pinnedSkills: [] },
-    });
+    expect(await loadHistory(() => ({}), "chs_gone")).toBeNull();
   });
 
   it("throws on other errors", async () => {

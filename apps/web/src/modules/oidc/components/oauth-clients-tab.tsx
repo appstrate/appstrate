@@ -28,7 +28,6 @@ import {
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 interface OAuthClientsTabProps {
   level?: "org" | "space";
@@ -53,7 +52,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   };
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!data) return <ErrorState />;
 
   return (
@@ -138,6 +137,7 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
           setRotateConfirmOpen(false);
           setRotatedSecret(result.clientSecret);
         },
+        onError: () => setRotateConfirmOpen(false),
       },
     );
   }
@@ -150,6 +150,7 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
           setDeleteConfirmOpen(false);
           toast.success(t("settings:oauthClients.deleted"));
         },
+        onError: () => setDeleteConfirmOpen(false),
       },
     );
   }

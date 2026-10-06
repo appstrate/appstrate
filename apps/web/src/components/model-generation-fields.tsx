@@ -27,7 +27,7 @@ export function ModelGenerationFields({
       capabilities={capabilities}
       onChange={onChange}
       disabled={disabled}
-      labels={buildGenerationLabels(t)}
+      labels={buildGenerationLabels(t, capabilities)}
     />
   );
 }

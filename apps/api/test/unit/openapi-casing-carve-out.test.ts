@@ -64,6 +64,10 @@ const CLI_SESSIONS = {
   reason: "5d Better Auth plugin mirror (CLI sessions)",
   within: ["#/paths/~1api~1auth~1cli~1", "#/paths/~1api~1orgs~1{orgId}~1cli-sessions"],
 };
+const AUTH_EMAIL_SIGN_IN_UP = {
+  reason: "4c Better Auth sign-up/sign-in mirror (where the verification link lands)",
+  within: ["#/paths/~1api~1auth~1sign-up~1email", "#/paths/~1api~1auth~1sign-in~1email"],
+};
 
 export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   createdAt: UNIVERSAL,
@@ -104,6 +108,7 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   displayName: "4c Better Auth profile/member DTO; 4e provider registry",
   joinedAt: "4c Better Auth member DTO",
   newPassword: "4c Better Auth setPassword mirror",
+  callbackURL: AUTH_EMAIL_SIGN_IN_UP,
 
   providerId: "4e model-provider registry",
   apiShape: "4e model-provider registry",

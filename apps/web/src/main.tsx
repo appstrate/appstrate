@@ -6,8 +6,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
+import { TranslatedUiLabels } from "./components/translated-ui-labels";
 import { queryClient } from "./lib/query-client";
 import { startAuthBootstrap } from "./hooks/use-auth";
+import { sessionExpected } from "./lib/session-read";
 import { primeOrgList } from "./hooks/use-org";
 import { primeSpaceList } from "./hooks/use-spaces";
 import { clearChunkReloadFlag, reloadOnceForChunkError } from "./lib/chunk-reload";
@@ -55,9 +57,9 @@ window.addEventListener("vite:preloadError", (event) => {
 // fetch's tail. `GET /api/spaces` needs the selected org id, which a
 // returning user already has persisted: it starts as soon as the org list
 // confirms that membership, still ahead of the layout, and every space-scoped
-// read waits on it (`useSpaceResolver`).
+// read waits on it (`useSpaceResolver`). A visitor's browser reads the session alone.
 startAuthBootstrap();
-primeSpaceList(primeOrgList());
+if (sessionExpected(localStorage)) primeSpaceList(primeOrgList());
 
 // Warm the chat route's chunk on the same idle window. `ChatModulePage` is
 // `lazy()`, so its download only STARTS once the route element renders — which
@@ -97,7 +99,9 @@ void i18nReady
       <StrictMode>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
-            <App />
+            <TranslatedUiLabels>
+              <App />
+            </TranslatedUiLabels>
           </BrowserRouter>
         </QueryClientProvider>
       </StrictMode>,

@@ -334,6 +334,7 @@ describe("Schedules API", () => {
       });
 
       expect(res.status).toBe(400);
+      expect(((await res.json()) as { code?: string }).code).toBe("invalid_cron_expression");
     });
 
     it("rejects generation settings unsupported by the overridden model", async () => {
@@ -1542,6 +1543,7 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
+      expect(body.code).toBe("invalid_timezone");
       expect(body.param).toBe("timezone");
     });
 

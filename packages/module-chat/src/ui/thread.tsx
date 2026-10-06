@@ -16,6 +16,7 @@ import {
   AttachmentPrimitive,
   ActionBarPrimitive,
   AuiIf,
+  useAuiEvent,
   useAuiState,
   type ReasoningGroupComponent,
   type ReasoningMessagePartComponent,
@@ -34,7 +35,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
-import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Collapsible,
@@ -55,7 +55,7 @@ import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
-import { turnModelLabel } from "./turn-model.ts";
+import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
 
@@ -170,6 +170,7 @@ function ScrollToBottom() {
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const size = useAuiState((s) => s.attachment.file?.size ?? 0);
+  const { formatBytes } = useChatHost();
   return (
     <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
@@ -241,6 +242,20 @@ function SentAttachmentChip() {
   return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
 }
 
+/** Why a picked file did not become a chip: a refused file has no attachment to carry the error. */
+function ComposerAttachmentError() {
+  const [message, setMessage] = React.useState<string | null>(null);
+  useAuiEvent("composer.attachmentAddError", (event) => setMessage(event.message));
+  useAuiEvent("composer.attachmentAdd", () => setMessage(null));
+  useAuiEvent("composer.send", () => setMessage(null));
+  if (!message) return null;
+  return (
+    <p role="alert" className="text-destructive text-xs">
+      {message}
+    </p>
+  );
+}
+
 function Composer({ slot }: { slot?: React.ReactNode }) {
   const { can, t } = useChatHost();
   // Sending, stopping and attaching all guard on `chat:write`.
@@ -261,6 +276,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
       <div className="flex flex-wrap gap-1.5 empty:hidden">
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
+      <ComposerAttachmentError />
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
@@ -440,17 +456,15 @@ function TurnModelBadge() {
   const { t } = useChatHost();
   // A plain string selector — never a derived object. See `turn-error-state.ts`.
   const label = useAuiState((s) => turnModelLabel(s.message));
+  const sentenceKey = useAuiState((s) => turnModelSentenceKey(s.message));
   if (label === null) return null;
-  const answeredBy = t("model.answeredBy", { model: label });
+  const sentence = t(sentenceKey, { model: label });
   return (
     // `min-w-0` lets `truncate` shrink inside the flex row. Assistive tech reads
     // the full sentence: a bare model name says nothing out of context.
-    <span
-      className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs"
-      title={answeredBy}
-    >
+    <span className="text-muted-foreground max-w-[14rem] min-w-0 truncate text-xs" title={sentence}>
       <span aria-hidden="true">{label}</span>
-      <span className="sr-only">{answeredBy}</span>
+      <span className="sr-only">{sentence}</span>
     </span>
   );
 }
@@ -477,11 +491,7 @@ export function MessageError() {
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const canManageBilling = can("billing:manage");
-  const errorState = React.useMemo(
-    () => turnErrorState(message, t, canManageBilling),
-    [message, t, canManageBilling],
-  );
+  const errorState = React.useMemo(() => turnErrorState(message, t, can), [message, t, can]);
   if (!errorState) return null;
   return (
     <div

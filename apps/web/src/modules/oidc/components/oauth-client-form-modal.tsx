@@ -26,6 +26,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "@/hooks/use-roles";
 import {
   hasUnavailableAssignments,
+  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -38,8 +39,8 @@ import {
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
 import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
+import { errorMessage } from "../../../lib/mutation-error";
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -80,12 +81,12 @@ function OAuthClientFormBody({
   // Either catalog feeds the org signup policy only.
   const spacesQuery = useSpaces(isOrgLevel);
   const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
-  const spaces = spacesQuery.data ?? [];
+  const spaces = assignableSpaces(spacesQuery.data ?? []);
   const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
   const catalogError = spacesQuery.error || rolesQuery.error;
   const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
-  const updateMutation = useUpdateOAuthClient();
+  const updateMutation = useUpdateOAuthClient({ errorHandledByCaller: true });
   const { data: availableScopes } = useOAuthScopes();
   const isPending = createMutation.isPending || updateMutation.isPending;
 
@@ -235,7 +236,7 @@ function OAuthClientFormBody({
             handleClose();
           },
           onError: (err) => {
-            setError("root", { message: getErrorMessage(err) });
+            setError("root", { message: errorMessage(err) });
           },
         },
       );
@@ -255,7 +256,7 @@ function OAuthClientFormBody({
             setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
           },
           onError: (err) => {
-            setError("root", { message: getErrorMessage(err) });
+            setError("root", { message: errorMessage(err) });
           },
         },
       );

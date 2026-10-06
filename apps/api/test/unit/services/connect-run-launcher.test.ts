@@ -77,7 +77,7 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
 
 // The local-source integration references an mcp-server package; the launcher
 // resolves its runnable server config. Injected here so the unit test needs no DB.
-const SERVER_ID = "@scope/connect-it";
+const SERVER_ID = "@scope/connect-it-server";
 const SERVER_VERSION = "1.4.2";
 const resolverCalls: { packageId: string; orgId: string; pin: string | null }[] = [];
 // The real resolver honours the `source.server.version` RANGE and answers with

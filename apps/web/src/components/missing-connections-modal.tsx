@@ -170,6 +170,7 @@ function MissingRow({
   const loadingVerdict = pickable && (!detail || !resolution);
 
   const displayName = detail?.manifest.display_name ?? packageId;
+  // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
   const colorClass = resolved

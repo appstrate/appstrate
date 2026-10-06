@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect } from "react";
+import { rememberSignedIn } from "../lib/session-read";
 
 /**
  * The single seam through which the SPA hands an unauthenticated visitor to
@@ -56,11 +57,12 @@ export function useHostedAuthRedirect(options: HostedAuthRedirectOptions = {}): 
   useEffect(() => {
     if (!active) return;
     void import("../modules/oidc/lib/oidc")
-      .then(({ startOidcLogin, startOidcSignup }) =>
-        starter === "signup"
+      .then(({ startOidcLogin, startOidcSignup }) => {
+        rememberSignedIn(localStorage, true);
+        return starter === "signup"
           ? startOidcSignup(redirectTo, loginHint)
-          : startOidcLogin(redirectTo, loginHint),
-      )
+          : startOidcLogin(redirectTo, loginHint);
+      })
       .catch((err) => onError?.(err));
     // `onError` is intentionally excluded — callers pass an inline closure that
     // would otherwise re-fire the redirect on every render. The redirect inputs

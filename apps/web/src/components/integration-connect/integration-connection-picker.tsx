@@ -198,7 +198,7 @@ export function IntegrationConnectionPicker({
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
-  const { lockedConnectionIds, byDefault, softDefaultIds, emptyPickerPrompt } =
+  const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
   // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
@@ -258,7 +258,12 @@ export function IntegrationConnectionPicker({
           {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
           <span className="truncate">{setLabel(bindingIds, lockedUnavailableIds)}</span>
           <Badge variant="secondary" className="ml-1 text-[0.6rem]">
-            {t("detail.integrationMemberPicker.adminLocked", { count: bindingIds.length })}
+            {t(
+              lockedBy === "org_default"
+                ? "detail.integrationMemberPicker.lockedByEnforcedDefault"
+                : "detail.integrationMemberPicker.lockedByAdminPin",
+              { count: bindingIds.length },
+            )}
           </Badge>
         </Button>
         {overrideMode && outranked && (

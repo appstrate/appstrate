@@ -16,7 +16,6 @@ import {
 } from "../hooks/use-api-keys";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { formatDateField } from "../lib/format-date";
 
 function isExpired(expiresAt: string | null | undefined): boolean {
@@ -36,7 +35,7 @@ export function ApiKeysPage() {
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const canCreate = can("api-keys:create");
   const canRevoke = can("api-keys:revoke");

@@ -11,6 +11,7 @@ import {
   buildRunContext,
   recordDroppedIntegrations,
   recordDroppedGenerationSettings,
+  recordModelFallback,
   type DroppedGenerationSetting,
   ModelNotConfiguredError,
   ModelCredentialMissingError,
@@ -494,6 +495,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // any earlier.
   let droppedIntegrations: DroppedIntegration[];
   let droppedGenerationSettings: DroppedGenerationSetting[];
+  let unavailablePinnedModelId: string | null;
   let contextMs: number;
   const contextStart = Date.now();
   try {
@@ -510,6 +512,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       generationConfig,
       droppedIntegrations,
       droppedGenerationSettings,
+      unavailablePinnedModelId,
     } = await runWithSpan("appstrate.run.context", { attributes: spanAttributes }, () =>
       buildRunContext({
         runId,
@@ -704,6 +707,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // neither slow down nor fail a normal kickoff.
   await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
   await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
+  await recordModelFallback({ orgId }, runId, modelLabel, unavailablePinnedModelId);
 
   // --- Step 6: Fire-and-forget execution ---
   executeAgentInBackground({

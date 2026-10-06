@@ -101,11 +101,26 @@ export const invitationsPaths = {
       responses: {
         "200": {
           description:
-            "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role).",
+            "Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs) plus `created`. For a new member `role` is the invitation's role. A caller who was already a member keeps their role: `created` is `false` and `role` is the one they hold, while the invitation's space assignments are still applied.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/Organization" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/Organization" },
+                  {
+                    type: "object",
+                    required: ["created"],
+                    properties: {
+                      created: {
+                        type: "boolean",
+                        description:
+                          "Whether the acceptance created the membership. `false` when the caller was already a member of the organization.",
+                      },
+                    },
+                  },
+                ],
+              },
               example: {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
@@ -114,6 +129,7 @@ export const invitationsPaths = {
                 permissions: ["org:read", "spaces:read"],
                 createdAt: "2026-01-10T08:00:00Z",
                 deleting_at: null,
+                created: true,
               },
             },
           },

@@ -22,6 +22,7 @@ import {
 import { collectSSEEvents } from "../../../apps/api/test/helpers/sse.ts";
 import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
+import { claimTurn } from "../src/chat-stream.ts";
 
 const app = getTestApp();
 
@@ -76,6 +77,27 @@ describe("chat_session_update SSE fan-out", () => {
     const data = JSON.parse(frame!.data) as { sessionId: string; userId: string };
     expect(data.sessionId).toBe(session.id);
     expect(data.userId).toBe(session.userId);
+  });
+
+  it("signals a claimed turn once, not once per statement", async () => {
+    // Every frame is a refetch of the conversation list on each of the owner's
+    // open pages. The claim marks the session generating and then writes the
+    // user message: one change as far as the list is concerned.
+    const session = await createSession(ctx);
+    const res = await openStream(ctx);
+    await wait();
+
+    await claimTurn(session.id, "strm_1", {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    });
+
+    // The helper rejects when fewer frames than asked arrive: asking for two
+    // and getting one is the assertion.
+    await expect(
+      collectSSEEvents(res.body!, 2, { timeoutMs: 800, ignoreEvents: ["ping"] }),
+    ).rejects.toThrow("collected 1/2");
   });
 
   it("never delivers another user's session frame (exact-owner gate)", async () => {

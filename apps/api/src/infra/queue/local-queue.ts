@@ -5,7 +5,8 @@
  * Suitable for single-instance self-hosted deployments.
  *
  * - Jobs are lost on restart (no persistence).
- * - Cron scheduling is evaluated every 30 seconds.
+ * - Cron scheduling is evaluated every 30 seconds, on the wall-clock :00 and
+ *   :30, so a schedule fires within moments of its minute.
  * - Retry with backoff via setTimeout — a backing-off job is delayed, not
  *   active, so it holds no worker slot.
  */
@@ -42,8 +43,11 @@ interface CronScheduler<T> {
   lastFiredAt: number;
 }
 
-/** Cron poll cadence (ms). The evaluator runs on this interval. */
+/** Cron poll cadence (ms). Polls land on wall-clock multiples of it. */
 const CRON_POLL_INTERVAL_MS = 30_000;
+
+/** Past the boundary: a timer firing a millisecond early would miss the occurrence. */
+const CRON_POLL_MARGIN_MS = 20;
 
 /**
  * Max occurrences a single scheduler may enqueue in one poll. Covers normal
@@ -79,7 +83,7 @@ export class LocalQueue<T> implements JobQueue<T> {
   private handler: JobHandler<T> | null = null;
   private workerOpts: WorkerOptions | null = null;
   private activeJobs = 0;
-  private cronInterval: ReturnType<typeof setInterval> | null = null;
+  private cronTimer: ReturnType<typeof setTimeout> | null = null;
   private drainInterval: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
   /**
@@ -164,12 +168,11 @@ export class LocalQueue<T> implements JobQueue<T> {
     // Evaluate cron schedulers every poll interval. Anchor the first window's
     // floor at start time so a poll never reaches back before the worker ran.
     this.lastCronPollAt = Date.now();
-    this.cronInterval = setInterval(() => this.evaluateCron(), CRON_POLL_INTERVAL_MS);
+    this.scheduleCronPoll();
 
     // Neither timer should keep the event loop alive on its own — the server
     // listener does that in prod, and this lets the test process exit cleanly.
     this.drainInterval.unref?.();
-    this.cronInterval.unref?.();
 
     // Drain any jobs that were added before the worker started
     this.drain();
@@ -189,9 +192,9 @@ export class LocalQueue<T> implements JobQueue<T> {
    */
   async shutdown(graceMs: number = SHUTDOWN_GRACE_MS): Promise<void> {
     this.shuttingDown = true;
-    if (this.cronInterval) clearInterval(this.cronInterval);
+    if (this.cronTimer) clearTimeout(this.cronTimer);
     if (this.drainInterval) clearInterval(this.drainInterval);
-    this.cronInterval = null;
+    this.cronTimer = null;
     this.drainInterval = null;
 
     // Draining is budgeted, and the budget covers backoff too. A delayed job
@@ -392,6 +395,25 @@ export class LocalQueue<T> implements JobQueue<T> {
     // only dereferences `entry` once it fires.
     const entry: DelayedJob<T> = { resumeAt, job, opts, timer };
     this.delayed.add(entry);
+  }
+
+  /** Delay from `now` to the next wall-clock poll boundary. */
+  private cronPollDelay(now: number): number {
+    return CRON_POLL_INTERVAL_MS - (now % CRON_POLL_INTERVAL_MS) + CRON_POLL_MARGIN_MS;
+  }
+
+  /** Arm the next poll; it re-arms itself even when an evaluation throws. */
+  private scheduleCronPoll(): void {
+    this.cronTimer = setTimeout(() => {
+      try {
+        this.evaluateCron();
+      } catch (err) {
+        this.log.error(`${this.name} cron evaluation failed`, { error: getErrorMessage(err) });
+      } finally {
+        if (!this.shuttingDown) this.scheduleCronPoll();
+      }
+    }, this.cronPollDelay(Date.now()));
+    this.cronTimer.unref?.();
   }
 
   /**

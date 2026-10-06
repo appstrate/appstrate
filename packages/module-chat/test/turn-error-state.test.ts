@@ -39,10 +39,15 @@ const problem = (body: Record<string, unknown>) => assistantError(JSON.stringify
 const failed = (error: unknown) =>
   message({ status: { type: "incomplete", reason: "error", error } });
 
-/** `turnErrorState`'s third argument: may the reader manage billing? */
-const member = false;
-const manager = true;
+/** `turnErrorState`'s third argument: the reader's grants. */
+const member = () => false;
+const manager = () => true;
 const BILLING = { label: "turn.error.manageBilling", href: "/org-settings/billing" };
+const MODELS = { label: "turn.error.manageModels", href: "/org-settings/models" };
+/** Edits model credentials AND reaches the page that lists them. */
+const modelAdmin = (p: string) => p === "model-provider-credentials:write" || p === "models:read";
+/** May edit a credential but cannot open `/org-settings/models`: no link to a page that refuses them. */
+const credentialsOnly = (p: string) => p === "model-provider-credentials:write";
 
 describe("turnErrorState", () => {
   it("is null for a turn that did not fail", () => {
@@ -108,7 +113,58 @@ describe("turnErrorState", () => {
         t,
         member,
       ),
-    ).toMatchObject({ text: "turn.error.credentialUnavailable", retryable: false });
+    ).toMatchObject({ text: "turn.error.credentialUnavailableMember", retryable: false });
+  });
+
+  it("gives a dead model credential a way out instead of a retry", () => {
+    // Retrying cannot clear a refused key, live (marker) or reloaded (metadata):
+    // whoever may edit the credential gets the link, anyone else an administrator.
+    const persisted = message(
+      turn({
+        finishReason: "error",
+        errorCategory: "credential_unavailable",
+        errorRetryable: false,
+      }),
+    );
+    const live = failed(assistantError("appstrate:chat-turn-error:credential_unavailable"));
+    for (const failure of [persisted, live]) {
+      expect(turnErrorState(failure, t, modelAdmin)).toMatchObject({
+        text: "turn.error.credentialUnavailable",
+        retryable: false,
+        action: MODELS,
+      });
+      // "Fix its connection" is not something to tell a reader who cannot: they
+      // get a sentence of their own, not that one with an admin tacked on.
+      for (const reader of [member, credentialsOnly]) {
+        const state = turnErrorState(failure, t, reader);
+        expect(state).toMatchObject({
+          text: "turn.error.credentialUnavailableMember",
+          retryable: false,
+        });
+        expect(state?.action).toBeUndefined();
+      }
+    }
+  });
+
+  it("shows the request id of a live failure, from the marker or the refused request", () => {
+    expect(
+      turnErrorState(
+        failed(assistantError("appstrate:chat-turn-error:upstream_unavailable:req_turn1")),
+        t,
+        member,
+      ),
+    ).toEqual({ text: "turn.error.upstreamUnavailable", retryable: true, requestId: "req_turn1" });
+    // Every problem document the API answers with carries its request id.
+    expect(
+      turnErrorState(
+        failed(problem({ status: 429, code: "rate_limited", request_id: "req_429" })),
+        t,
+        member,
+      ),
+    ).toMatchObject({ text: "turn.error.rateLimited", requestId: "req_429" });
+    expect(
+      turnErrorState(failed(problem({ status: 500, request_id: "req_500" })), t, member),
+    ).toEqual({ text: "turn.error.unknown", retryable: true, requestId: "req_500" });
   });
 
   it("adds no sentence to a deadline turn that carried no cause", () => {
@@ -154,7 +210,7 @@ describe("turnErrorState", () => {
     text,
     retryable: false,
     requestId: undefined,
-    action,
+    ...(action && { action }),
   });
 
   it.each([
@@ -166,13 +222,16 @@ describe("turnErrorState", () => {
     expect(turnErrorState(refusal, t, member)).toEqual(refused(`${text} turn.error.contactAdmin`));
   });
 
-  it("keeps one sentence for a dead credential, whoever reads it", () => {
+  it("links whoever may edit model credentials to a revoked one, and sends anyone else to them", () => {
     const reconnect = failed(problem({ status: 409, code: "needs_reconnection" }));
-    for (const canManageBilling of [member, manager]) {
-      expect(turnErrorState(reconnect, t, canManageBilling)).toEqual(
-        refused("turn.error.needsReconnection"),
-      );
-    }
+    expect(turnErrorState(reconnect, t, manager)).toEqual(
+      refused("turn.error.needsReconnection", MODELS),
+    );
+    // Billing rights do not reconnect a model, and "reconnect it" is not said
+    // to someone who cannot.
+    expect(turnErrorState(reconnect, t, (p) => p === "billing:manage")).toEqual(
+      refused("turn.error.needsReconnectionMember"),
+    );
   });
 
   it("names an organization being deleted, with no retry", () => {

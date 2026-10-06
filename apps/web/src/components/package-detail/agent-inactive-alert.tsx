@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { useSetPackageActive } from "../../hooks/use-library";
@@ -51,16 +49,7 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
           <Button
             size="sm"
             disabled={setActive.isPending}
-            onClick={() =>
-              setActive.mutate(
-                { spaceId: currentSpaceId, packageId, active: true },
-                // The offer behind this placement can be revoked from another
-                // tab between the render and the click: the optimistic write
-                // is rolled back and, without this, the button un-presses
-                // itself without a word.
-                { onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")) },
-              )
-            }
+            onClick={() => setActive.mutate({ spaceId: currentSpaceId, packageId, active: true })}
           >
             {t("detail.activate")}
           </Button>

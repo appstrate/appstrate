@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
@@ -13,6 +14,7 @@ interface ScheduleCardProps {
 }
 
 export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
+  const { t } = useTranslation("agents");
   // The three counters this card shows are served WITH the schedule list
   // (`enrichSchedules` in services/scheduler.ts). They used to come from a
   // per-card `GET .../schedules/:id/runs`, which made a list of N schedules
@@ -31,7 +33,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
       className="border-border bg-card hover:bg-accent/50 block rounded-lg border transition-colors"
     >
       <div className="flex items-center gap-2 p-3">
-        <span className="truncate font-medium">{schedule.name || schedule.id}</span>
+        <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
         {statusBadge}
         {unreadCount > 0 && (
           <span className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
@@ -51,7 +53,7 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
         <NextRunPreview
           runNumber={lastRunNumber + 1}
           agentName={agentName}
-          schedule_name={schedule.name || schedule.id}
+          schedule_name={schedule.name || t("schedule.unnamed")}
           next_run_at={schedule.next_run_at}
           className="border-border border-t border-dashed"
         />

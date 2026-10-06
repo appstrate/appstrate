@@ -34,8 +34,6 @@ import {
   deduplicateLabel,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -50,6 +48,7 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
+import { toastError } from "../../lib/mutation-error";
 
 function ModelsList({
   models,
@@ -80,7 +79,7 @@ function ModelsList({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   return (
     <>
@@ -141,18 +140,19 @@ function ModelsList({
                     </TableCell>
                     <TableCell>
                       {/* Shown but disabled, not hidden: `PUT /api/models/default`
-                          answers 409 `model_needs_reconnection` for such a row,
-                          and a control that silently vanishes is what made this
-                          state impossible to reason about. The why is on the
-                          row's `ModelUnavailableBadge` (first cell), whose
-                          `title` sits on a hoverable element. */}
+                          answers 409 (`model_needs_reconnection`, `model_disabled`)
+                          for such a row, and a control that silently vanishes is
+                          what made this state impossible to reason about. The why
+                          is on the row's badge (first cell). */}
                       <DefaultCell
                         isDefault={m.is_default}
                         defaultLabel={t("models.default")}
                         setLabel={t("models.setDefault")}
                         onSetDefault={() => onSetDefault(m)}
                         canSetDefault={canWrite}
-                        disabled={m.needs_reconnection}
+                        // A switched-off system model stays eligible: the server
+                        // resolves it, and refuses only a disabled custom row.
+                        disabled={m.needs_reconnection || (!isBuiltIn && !m.enabled)}
                         testId={`set-default-model-${m.id}`}
                       />
                     </TableCell>
@@ -261,7 +261,7 @@ function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
@@ -472,12 +472,7 @@ export function OrgSettingsModelsPage() {
 
   const closeConfirm = () => setConfirmState(null);
   const reportDeleteFailure = (err: unknown) => {
-    toast.error(
-      err instanceof ApiError && err.code === "credential_in_use"
-        ? t("credentials.deleteRefused")
-        : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
-    );
-    closeConfirm();
+    toastError(err);
   };
 
   return (
@@ -505,7 +500,12 @@ export function OrgSettingsModelsPage() {
             setModelModalOpen(true);
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
-          onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
+          onSetDefault={(m) =>
+            setDefaultModelMutation.mutate(
+              { body: { modelId: m.id } },
+              { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
+            )
+          }
           canWrite={canWriteModels}
           canDelete={canDeleteModels}
         />
@@ -598,12 +598,14 @@ export function OrgSettingsModelsPage() {
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          const options = { onSuccess: closeConfirm, onError: reportDeleteFailure };
           const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate({ params }, options);
+            deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
           } else {
-            deletePkMutation.mutate({ params }, options);
+            deletePkMutation.mutate(
+              { params },
+              { onSuccess: closeConfirm, onError: reportDeleteFailure },
+            );
           }
         }}
       />

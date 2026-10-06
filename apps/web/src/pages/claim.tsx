@@ -19,9 +19,9 @@ import { AuthLayout } from "../components/auth-layout";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { client } from "../api/client";
+import { errorMessage } from "../lib/mutation-error";
 
 export function ClaimPage() {
   const { t } = useTranslation(["common"]);
@@ -51,8 +51,7 @@ export function ClaimPage() {
       // and the SPA flows into the normal authenticated path.
       window.location.href = "/";
     } catch (err) {
-      const msg = getErrorMessage(err);
-      setErrorMsg(msg);
+      setErrorMsg(errorMessage(err));
       setSubmitting(false);
     }
   }

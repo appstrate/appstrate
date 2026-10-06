@@ -7,13 +7,13 @@ import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { canLeaveOrg } from "@appstrate/shared-types";
-import { $api, ApiError } from "../../api/client";
+import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
+import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
@@ -25,6 +25,7 @@ import { McpClientConnect } from "../../components/org-settings/mcp-client-conne
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
+import { toastError } from "../../lib/mutation-error";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -32,6 +33,7 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
   const { features } = useAppConfig();
+  const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
@@ -77,9 +79,6 @@ export function OrgSettingsGeneralPage() {
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
       setEditingName(false);
     },
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
@@ -90,20 +89,14 @@ export function OrgSettingsGeneralPage() {
 
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
       // The server is the real guard (owners may have changed meanwhile).
-      toast.error(
-        err instanceof ApiError && err.code === "last_owner"
-          ? t("orgSettings.leaveLastOwner")
-          : t("error.prefix", { message: getErrorMessage(err) }),
-      );
+      toastError(err);
     },
   });
 
@@ -240,9 +233,6 @@ export function OrgSettingsGeneralPage() {
                           : t("orgSettings.restrictCopyDisabled"),
                       );
                     },
-                    onError: (err) => {
-                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-                    },
                   },
                 )
               }
@@ -288,9 +278,6 @@ export function OrgSettingsGeneralPage() {
                             ? t("orgSettings.dashboardSsoEnabled")
                             : t("orgSettings.dashboardSsoDisabled"),
                         );
-                      },
-                      onError: (err) => {
-                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                       },
                     },
                   )
@@ -391,9 +378,9 @@ export function OrgSettingsGeneralPage() {
         </p>
         {orgs.length === 1 && (
           <p className="mt-2 text-sm font-medium">
-            {features.orgCreationDisabled
-              ? t("orgSettings.leaveLastOrgWaiting")
-              : t("orgSettings.leaveLastOrgCreate")}
+            {canCreateOrg
+              ? t("orgSettings.leaveLastOrgCreate")
+              : t("orgSettings.leaveLastOrgWaiting")}
           </p>
         )}
       </ConfirmModal>

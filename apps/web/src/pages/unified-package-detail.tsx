@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect } from "react";
-import { toast } from "sonner";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -21,11 +20,11 @@ import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
+import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
-import { isModelSelectable } from "../lib/model-selectability";
 import { hasInputFields } from "../lib/agent-input";
 import { AlertTriangle } from "lucide-react";
 
@@ -53,11 +52,10 @@ import {
 } from "../components/package-detail/agent-tabs";
 import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
 import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
-import { RunAgentButton } from "../components/run-agent-button";
+import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageCard } from "../components/package-card";
-import { useAgentReadiness } from "../hooks/use-agent-readiness";
-import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
-import { useModels, useAgentModel } from "../hooks/use-models";
+import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
+import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
@@ -76,73 +74,42 @@ type DetailTab =
 /** A version that declares no parameters — distinct from "use the draft". */
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
-// ─── Agent Run Button (inline, no wrapper) ────────────────────────────
+function ModelRequiredAlert({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["settings"]);
+  // The model verdict alone: it holds whatever else blocks the run first.
+  const blocker = useAgentModelBlocker(packageId);
+  const { can } = usePermissions();
 
-function AgentRunButtonInline({
-  packageId,
-  versionLabel,
-}: {
-  packageId: string;
-  versionLabel: string | undefined;
-}) {
-  const { t } = useTranslation("agents");
-  const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: models } = useModels();
-  const { data: agentModel } = useAgentModel(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
-  // Launch-time integration readiness — drives the non-blocking orange badge.
-  // Same server resolver as the run-kickoff 409 (see useAgentIntegrationsReadiness).
-  const integrationsReady = useAgentIntegrationsReadiness(packageId);
-
-  if (!detail) return null;
-
-  const { hasModel, hasPrompt, hasRequiredSkills } = readiness;
-  // The run gate is `system ∨ (placed here ∧ switched on)`: an agent this space
-  // merely READS answers 404 `agent_not_active_in_space` on launch. The detail
-  // response this button already holds answers it for this very space, so the
-  // control says it without a second source to fall out of step with — and
-  // without a system carve-out: a system agent switched off here is not active
-  // here, and the run gate refuses it like any other.
-  const inactiveHere = !detail.active;
-  // Integration connection gaps don't disable Run — they surface as a warning
-  // badge here and the recovery modal at run-kickoff (409 → MissingConnectionsModal).
-  const runDisabled = inactiveHere || !hasPrompt || !hasRequiredSkills || !hasModel;
-  const runDisabledTitle = inactiveHere
-    ? t("detail.titleNotActive")
-    : !hasPrompt
-      ? t("detail.titleEmptyPrompt")
-      : !hasRequiredSkills
-        ? t("detail.titleMissingSkill")
-        : !hasModel
-          ? t("detail.titleModel")
-          : undefined;
-
-  return (
-    <RunAgentButton
-      packageId={packageId}
-      detail={detail}
-      version={versionLabel}
-      disabled={runDisabled}
-      disabledTitle={runDisabledTitle}
-      connectionWarning={!runDisabled && !integrationsReady.ready}
-      showLabel
-    />
-  );
-}
-
-function ModelRequiredAlert() {
-  const { t } = useTranslation(["settings", "agents"]);
-  const { data: models } = useModels();
-
-  const hasAnyModel = models?.some((m) => m.is_default && isModelSelectable(m));
-  if (hasAnyModel || hasAnyModel === undefined) return null;
+  const copy =
+    blocker === "detail.titleModel"
+      ? {
+          title: t("models.alert.noModel"),
+          // Only `models:write` can act on "configure a model" (POST /api/models).
+          description: t(
+            can("models:write")
+              ? "models.alert.noModelDescription"
+              : "models.alert.noModelAskAdmin",
+          ),
+        }
+      : blocker === "detail.titleNoDefaultModel"
+        ? {
+            title: t("models.alert.noDefaultModel"),
+            // Only `models:write` can set the default (PUT /api/models/default).
+            description: t(
+              can("models:write")
+                ? "models.alert.noDefaultModelDescription"
+                : "models.alert.noDefaultModelAskAdmin",
+            ),
+          }
+        : null;
+  if (!copy) return null;
 
   return (
     <Alert variant="destructive" className="mb-4">
       <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
+      <AlertTitle>{copy.title}</AlertTitle>
       <AlertDescription className="flex items-center justify-between">
-        <span>{t("models.alert.noModelDescription", { ns: "settings" })}</span>
+        <span>{copy.description}</span>
       </AlertDescription>
     </Alert>
   );
@@ -174,9 +141,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
 
-  // Configuration tab data (must be before early returns — hooks rule)
-  const { data: orgProxies } = useProxies();
-  const { data: orgModels } = useModels();
+  // Configuration tab data, agents only (must be before early returns — hooks rule)
+  const { data: orgProxies } = useProxies(type === "agent");
+  const { data: orgModels } = useModels(type === "agent");
 
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();
@@ -201,11 +168,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const {
-    data: versionDetail,
-    isLoading: versionLoading,
-    error: versionError,
-  } = useVersionDetail(type, packageId, versionParam);
+  const versionQuery = useVersionDetail(type, packageId, versionParam);
+  const { data: versionDetail, error: versionError } = versionQuery;
+  const versionLoading = isQueryInFlight(versionQuery);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
@@ -234,7 +199,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Only a skill or an MCP server needs this: their detail response carries no
   // `active`, so the library's projection of the placement is the only answer
   // available. An agent's detail answers for itself (`AgentDetail.active`,
-  // read by `AgentRunButtonInline`, `AgentActions` and the banner below), and
+  // read by `AgentRunButton`, `AgentActions` and the banner below), and
   // asking the library too would be one page reading one fact twice — so the
   // query is not even mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
@@ -302,9 +267,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
-  if (error || !detail) {
-    return <Navigate to="/" replace />;
-  }
+  if (error || !detail) return <ResourceErrorState error={error} />;
 
   // A published version whose stored archive is unavailable EXISTS — redirecting
   // to the live page (what any other version failure does) would hide that it
@@ -367,7 +330,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
-    version,
+    // The header names the version on screen, not the live one behind it.
+    version: downloadVersion,
     homeSpaceName,
   };
 
@@ -430,10 +394,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        hasUnarchivedChanges={hasTimestampChanges}
+        // Authoring state: only whoever can publish the draft has a use for it.
+        hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
         actionsLeft={
           type === "agent" ? (
-            <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
+            <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
           ) : undefined
         }
         actionsRight={
@@ -485,16 +450,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 canActivate={isActiveInCurrentSpace === false}
                 onActivate={() => {
                   if (!currentSpaceId) return;
-                  setActive.mutate(
-                    { spaceId: currentSpaceId, packageId, active: true },
-                    // Same as the DEACTIVATE path below: the optimistic write
-                    // shows the switch taken and its rollback says nothing, so
-                    // the server's refusal is reported here or nowhere.
-                    {
-                      onError: (err) =>
-                        toast.error(err instanceof Error ? err.message : t("error.generic")),
-                    },
-                  );
+                  setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
                 }}
                 canDeactivate={isActiveInCurrentSpace === true}
                 onDeactivate={() => {
@@ -519,7 +475,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         activeUrl={packageDetailPath(type, packageId)}
       />
 
-      {type === "agent" && <ModelRequiredAlert />}
+      {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
 
       {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that
@@ -690,20 +646,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               { spaceId: currentSpaceId, packageId, active: false },
               {
                 onSuccess: close,
-                onError: (err) =>
-                  toast.error(err instanceof Error ? err.message : t("error.generic")),
               },
             );
           } else {
-            deletePkgMutation.mutate(packageId, {
-              onSuccess: close,
-              onError: (err) =>
-                toast.error(
-                  err instanceof Error
-                    ? err.message
-                    : t("packages.deleteDependedOn", { ns: "settings" }),
-                ),
-            });
+            deletePkgMutation.mutate(packageId, { onSuccess: close });
           }
         }}
       />

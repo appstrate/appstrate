@@ -49,7 +49,6 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { cn } from "@appstrate/ui/cn";
 import { Markdown } from "./markdown";
 import { LoadingState, ErrorState } from "./page-states";
@@ -175,7 +174,7 @@ export function FileViewer({
 
   function renderBody() {
     if (isLoading) return <LoadingState />;
-    if (error) return <ErrorState message={getErrorMessage(error)} />;
+    if (error) return <ErrorState error={error} />;
     if (!file?.preview_url) {
       return <UnavailablePreview message={t("preview.unavailable")} action={unavailableAction} />;
     }

@@ -42,7 +42,7 @@ export function DashboardPage() {
   const error = runsError || agentsError;
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState error={error} />;
 
   const runs = runsData?.data ?? [];
 

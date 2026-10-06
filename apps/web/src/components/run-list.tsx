@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useAgents } from "../hooks/use-packages";
 import { RunRow } from "./run-row";
-import { EmptyState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { inlineRunDisplayName } from "../lib/run-title";
 
@@ -130,7 +130,7 @@ export function RunList({
   const { t } = useTranslation(["agents"]);
   const [page, setPage] = useState(0);
 
-  const { data, isLoading } = usePaginatedRuns({
+  const { data, isLoading, error } = usePaginatedRuns({
     packageId,
     scheduleId,
     user,
@@ -145,6 +145,9 @@ export function RunList({
 
   // Only the first page shows a placeholder; paging keeps the previous rows.
   const showLoading = isLoading && page === 0;
+
+  // A refused or failed listing is not "no runs".
+  if (error && !data) return <ErrorState error={error} />;
 
   if (showLoading || runs.length === 0) {
     return (

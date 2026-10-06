@@ -122,6 +122,17 @@ interface PackageActionsDropdownProps {
   activationPending?: boolean;
 }
 
+/** A disabled menu item takes no focus or pointer event: its reason is shown, not titled. */
+function DisabledItemLabel({ label, reason }: { label: string; reason?: string }) {
+  if (!reason) return label;
+  return (
+    <span className="flex max-w-56 flex-col">
+      {label}
+      <span className="text-xs">{reason}</span>
+    </span>
+  );
+}
+
 export function PackageActionsDropdown({
   packageId,
   type,
@@ -242,10 +253,9 @@ export function PackageActionsDropdown({
               <DropdownMenuItem
                 onSelect={() => !runBlockedReason && onRunWithOptions()}
                 disabled={!!runBlockedReason}
-                title={runBlockedReason}
               >
                 <SlidersHorizontal size={14} />
-                {t("run.options.menuItem")}
+                <DisabledItemLabel label={t("run.options.menuItem")} reason={runBlockedReason} />
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
@@ -269,10 +279,12 @@ export function PackageActionsDropdown({
             <DropdownMenuItem
               onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
               disabled={!hasPublishedVersion}
-              title={!hasPublishedVersion ? t("bundle.requiresVersion") : undefined}
             >
               <Package size={14} />
-              {t("bundle.download")}
+              <DisabledItemLabel
+                label={t("bundle.download")}
+                reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
+              />
             </DropdownMenuItem>
           )}
 

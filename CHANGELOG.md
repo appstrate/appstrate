@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Log levels and messages changed; update any alert that matches them**
+  (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
+  (method, matched route pattern, status, duration, `Request-Id`). No longer at
+  `error`: a refused organization delete (no line), a subprocess the platform
+  stopped itself (`Subprocess stopped`, info), a chat turn the model failed
+  (`chat turn failed on a model error`, warn; it used to be logged as
+  `chat ui stream processing failed`), and an LLM upstream timeout
+  (`llm-proxy: upstream fetch failed`, warn). The three draft-lookup lines
+  about a referenced mcp-server are now `debug`.
 - **An integration calling an internal API needs its host in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
   reach a private, loopback or link-local address as soon as the
@@ -75,6 +84,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   still reads some of them, is unchanged. The sidecar also stops re-checking
   the type of `target` and the case of `method`: the agent runtime validates
   a model's arguments against the tool's schema before it calls.
+- **Models, proxies and endpoint URLs refuse three states they used to
+  accept** (#1681). A disabled model cannot be the organization default:
+  `PUT /api/models/default` naming one, and `PATCH /api/models/{id}` with
+  `enabled: false` on the current default, answer 409 `model_disabled` (move or
+  clear the default first). `base_url_override` / `base_url` on
+  `POST /api/model-provider-credentials`, `/discover` and `/test` must be
+  http(s), else 400. A proxy's `urlPrefix` masks the username as well as the
+  password. Deleting a model or a proxy now also clears the per-space agent
+  settings naming it; settings left dangling by earlier deletions are not
+  rewritten.
+- **Changing a verified email address is approved from the current address
+  first** (#1673). With SMTP configured, `change-email` used to send its one
+  link to the new address. It now emails the current address; once approved
+  there, the verification link goes to the new one, and the address changes
+  when that second link is opened. An account whose current mailbox is no
+  longer reachable cannot change its address on its own any more.
+- **Three account e-mails are new** (#1673, SMTP only): a notice after every
+  password change or reset, a notice to the owner when a sign-up is attempted
+  on an address that already has an account (the sign-up screen announced an
+  e-mail that was never sent), and the approval e-mail above. The
+  verification, magic-link and password-reset e-mails state how long their
+  link stays valid (1 hour, 15 minutes, 1 hour). `@appstrate/module-ee` has no
+  branded version of the three new ones: they go out in the plain template.
+  On a hosted (OIDC) password reset the notice leaves through the space's own
+  SMTP transport, as does the verification e-mail re-sent at hosted sign-in.
+- **`POST /api/webhooks/{id}/test` sends a real request** (#1683): one signed
+  `test.ping` to the webhook URL, single attempt, listed in its deliveries and
+  recorded as a `webhook.test_sent` audit event. A delivery whose hostname does
+  not resolve is retried up to its third attempt (`Delivery target hostname
+could not be resolved`) instead of failing for good on the first. Without
+  Redis, cron schedules now fire on the minute rather than up to 30 s late.
+- **BREAKING (API): deleting the default space answers
+  `409 default_space_not_deletable`** (#1680), was `400 invalid_request`.
+  Every refusal of `DELETE /api/spaces/{id}` that is about the space's state
+  is now a named 409.
+- **`GET /api/orgs` and `GET /api/spaces` have a defined order** (#1680).
+  Organizations are listed oldest membership first (there was no order: a
+  rename moved an organization). Spaces are listed default first, then
+  personal spaces, then team spaces, each oldest first (a personal space was
+  ranked by its creation date, a different place for each member).
+- **`GET /api/profile` reports `can_create_org`** (#1680): whether
+  `POST /api/orgs` would accept the user — true on an open instance, and for
+  platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
+  routes on it, so the `orgCreationDisabled` flag is gone from
+  `window.__APP_CONFIG__`.
+- **Six refusals answer with their own problem `code`, and a taken package
+  identifier is always a 409** (#1677). A client that branches on the old
+  value must follow; `detail`, `param` and the other statuses are unchanged.
+  - `POST /api/orgs` with `AUTH_DISABLE_ORG_CREATION` set, for a caller who
+    is not a platform admin: 403 `forbidden` → 403 `org_creation_disabled`.
+  - Schedule create/update with an invalid cron expression: 400
+    `invalid_request` → 400 `invalid_cron_expression`; with a timezone that
+    cannot be scheduled against: → 400 `invalid_timezone`; with an actor who
+    cannot fire it: → 400 `schedule_actor_invalid`.
+  - Model create/update/seed with a model outside its provider's catalog
+    offer: 400 `invalid_request` → 400 `model_not_offered`.
+  - Webhook create/update with a target on a private or reserved network:
+    400 `invalid_request` → 400 `blocked_url` (the code `/api/proxies`
+    already used).
+  - `name_collision` was a 400 or a 409 depending on which check met the
+    taken identifier. It is now **409** everywhere: package create
+    (`POST /api/packages/{type}`), fork, and the import routes (a system
+    package's identifier, or one owned by another organization).
+  - A model or proxy connection test that is refused at the TCP level
+    answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
+
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -206,6 +281,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Run guard-rails** (#1674). A double click on Run created two runs: the
+  launcher now lets one launch through at a time. An agent whose `output` call
+  is refused five times (an output schema no value satisfies, typically) is
+  stopped and its run fails, instead of retrying one paid turn at a time until
+  the run timeout — this ships in the runtime image. A run that falls back to
+  a default model because the one pinned on its agent or schedule is no longer
+  usable now says so in its log (`model_fallback`), and the run form and the
+  agent's model setting warn about the unusable pin.
+  On the agent page the two Run buttons share one verdict (the empty-list one
+  stayed live for an agent switched off or without a model), a caller with
+  `agents:run` but not `agents:read` no longer reads "the prompt is empty",
+  "no default model" is told apart from "no model", and the reason a button is
+  disabled shows on hover. The API tab documents the real response (201 and
+  the run, field `id`). Timed-out and cancelled runs show their cause on the
+  run page; an unnamed schedule no longer reads as its raw id; memory rows are
+  deleted behind a confirmation and only by a caller holding
+  `persistence:delete`; integer launch fields are numeric inputs and the
+  duplicated error summary of the launch form is gone.
+- **The magic-link e-mail works on an instance that does not load the `oidc`
+  module** (#1673). Its link always pointed at the module's confirmation page
+  and answered 401 without it; it now points at a confirmation page of the
+  dashboard (`/magic-link/confirm`), whose button is what spends the one-time
+  link — a mail scanner that opens the link does not. A spent or expired link
+  returns to `/magic-link` with a message. The `allowedAttempts` option, which
+  the installed Better Auth ignores, is gone; the hosted "check your inbox"
+  page announced a 7-day validity for a link that lives 15 minutes.
+- **Sign-up from an invitation returns to the invitation after e-mail
+  verification** (#1673): the verification link carried `/`, and the invitee
+  landed on "create your organization"; the link re-sent when an unverified
+  account signs in from the invitation carries it too. Also in the built-in
+  sign-in pages:
+  signing in to an unverified account opens the "check your inbox" screen
+  instead of a raw `Email not verified`; a verification link that is invalid
+  or expired says so; `/verify-email` opened on its own redirects to
+  `/login`; and changing one's e-mail to an address already in use no longer
+  reports success. Signing in from an invitation reloads the invitation page
+  (Better Auth's client follows the `callbackURL` it is given).
+- **The dashboard no longer offers what the server refuses around spaces**
+  (#1680). In a personal space the Members, API keys, end-user OAuth clients
+  and End-Users pages are not there (each write behind them was a 409), and a
+  personal space is no longer listed in an invitation's or an OAuth signup
+  policy's space assignments (400). The space selector of the space settings
+  listed closed spaces the caller cannot enter and fell back silently; it now
+  shows the same list as the sidebar. On an instance where organization
+  creation is disabled, `/onboarding/create` and "create organization" are
+  shown only to those who may create one, and a platform admin without an
+  organization lands on the creation form. The last space used in each
+  organization is restored after an organization switch and after sign-out.
+- **Accepting an invitation says whether it created the membership**
+  (#1676). `POST /invite/{token}/accept` now returns `created`. For a caller
+  who was already a member it is `false`, and `role` / `permissions` are those
+  of the role they keep; the response used to echo the invitation's role, so
+  the dashboard told an existing member they had been promoted.
+- **The dashboard no longer hides a failure** (#1676). An expired session
+  lands on the login screen instead of rendering empty lists, every refused
+  write produces one message, a 4xx is no longer retried behind a spinner, a
+  changed role or a lost space is picked up without a reload, and a resource
+  the caller cannot read shows one "not found or not accessible" panel.
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in

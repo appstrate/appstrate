@@ -275,6 +275,15 @@ const AUTH_CLIENT_BAN = {
     "Auth flows must go through useAuth() (hooks/use-auth.ts) — the single seam that routes login/recovery/account actions through the OIDC hosted-login redirect when configured. Never import auth-client directly.",
 };
 
+// An `ApiError`'s raw message is the server's English `detail`: the SPA shows
+// the translated refusal instead (apps/web/src/lib/mutation-error.ts).
+const RAW_ERROR_MESSAGE_BAN = {
+  group: ["@appstrate/core/errors"],
+  importNames: ["getErrorMessage"],
+  message:
+    "Show errorMessage(err) (or toast through onMutationError) from lib/mutation-error — getErrorMessage prints the server's untranslated detail.",
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -659,9 +668,13 @@ export default tseslint.config(
     //      login redirect (`HostedAuthGate` / `useHostedAuthRedirect`) by
     //      calling `auth-client` directly — the bug class this exists to kill.
     //      Exempted for the seam file itself in the next block.
+    //   3. Translated-error guard: `RAW_ERROR_MESSAGE_BAN`.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
+      "no-restricted-imports": [
+        "error",
+        { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN, RAW_ERROR_MESSAGE_BAN] },
+      ],
     },
   },
   {
@@ -671,7 +684,14 @@ export default tseslint.config(
     // block fully replaces the rule for this file.
     files: ["apps/web/src/hooks/use-auth.ts"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN] }],
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, RAW_ERROR_MESSAGE_BAN] }],
+    },
+  },
+  {
+    // Owns the raw-message fallback `RAW_ERROR_MESSAGE_BAN` forbids elsewhere.
+    files: ["apps/web/src/lib/mutation-error.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [API_BARREL_BAN, AUTH_CLIENT_BAN] }],
     },
   },
   {

@@ -5,8 +5,9 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { db } from "@appstrate/db/client";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, spacePackages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { initSystemProxies } from "../../../src/services/proxy-registry.ts";
 
 const app = getTestApp();
@@ -55,6 +56,22 @@ describe("Proxies API", () => {
       expect(body.urlPrefix).toBeTruthy();
       expect(body.createdAt).toBeTruthy();
       expect(body.updatedAt).toBeTruthy();
+    });
+  });
+
+  describe("urlPrefix masking", () => {
+    it("masks the username as well as the password", async () => {
+      const res = await app.request("/api/proxies", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: "Token in username",
+          url: "http://account-token:s3cret@masked.example.com:8080",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.urlPrefix).toBe("http://***:***@masked.example.com:8080/");
     });
   });
 
@@ -175,6 +192,39 @@ describe("Proxies API", () => {
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
       expect(after!.defaultProxyId).toBeNull();
+    });
+
+    it("clears the setting of an agent that used the deleted proxy", async () => {
+      const createRes = await app.request("/api/proxies", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "Used", url: "http://used.example.com:8080" }),
+      });
+      const { id } = (await createRes.json()) as any;
+      const agent = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/proxied` });
+      await seedSpacePackage(ctx.defaultSpaceId, agent.id, { proxyId: id });
+      // The same id stored by another organization's agent is not this delete's to clear.
+      const other = await createTestContext({ orgSlug: "other-org" });
+      const foreign = await seedPackage({ orgId: other.orgId, id: "@other-org/proxied" });
+      await seedSpacePackage(other.defaultSpaceId, foreign.id, { proxyId: id });
+
+      const del = await app.request(`/api/proxies/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const res = await app.request(`/api/agents/${agent.id}/proxy`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as any).proxyId).toBeNull();
+
+      const [kept] = await db
+        .select({ proxyId: spacePackages.proxyId })
+        .from(spacePackages)
+        .where(eq(spacePackages.packageId, foreign.id));
+      expect(kept!.proxyId).toBe(id);
     });
   });
 

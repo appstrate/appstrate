@@ -5,12 +5,11 @@ import { useParams } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { PageHeader } from "@/components/page-header";
-import { LoadingState, ErrorState } from "@/components/page-states";
+import { LoadingState, ResourceErrorState } from "@/components/page-states";
 import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
 import { WebhookSettingsTab } from "../components/webhook-settings-tab";
 import { useTabWithHash } from "@/hooks/use-tab-with-hash";
 import { useWebhook } from "../hooks/use-webhooks";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 export function WebhookDetailPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -20,8 +19,7 @@ export function WebhookDetailPage() {
   const [tab, setTab] = useTabWithHash(["deliveries", "settings"] as const, "deliveries");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-  if (!webhook) return <ErrorState />;
+  if (error || !webhook) return <ResourceErrorState error={error} />;
 
   return (
     <div className="p-6">
@@ -35,6 +33,9 @@ export function WebhookDetailPage() {
         ]}
         actions={
           <div className="flex items-center gap-2">
+            {webhook.level === "org" && (
+              <Badge variant="outline">{t("settings:webhooks.levelBadge.org")}</Badge>
+            )}
             <Badge variant={webhook.enabled ? "success" : "secondary"}>
               {webhook.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
             </Badge>

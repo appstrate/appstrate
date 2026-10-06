@@ -194,6 +194,25 @@ describe("integration-editor auths", () => {
     // credential property description preserved.
     expect(a.credentials.schema.properties.api_key.description).toBe("key");
   });
+
+  it("keeps an mtls auth mtls across an edit", () => {
+    // A type the form does not know is read back as `api_key` and SAVED as one.
+    const imported = {
+      auths: {
+        cert: {
+          type: "mtls",
+          authorized_uris: ["https://x.test/**"],
+          delivery: { files: { "client.pem": { value: "{$credential.cert}" } } },
+        },
+      },
+    };
+    const auths = getAuths(imported);
+    expect(auths[0]!.type).toBe("mtls");
+    auths[0]!.authorizedUris = ["https://y.test/**"];
+    const a = (setAuths(imported, auths).auths as any).cert;
+    expect(a.type).toBe("mtls");
+    expect(a.delivery).toEqual({ files: { "client.pem": { value: "{$credential.cert}" } } });
+  });
 });
 
 describe("integration-editor tools_policy", () => {

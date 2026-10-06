@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -87,9 +87,13 @@ function useInvalidateModelProviderCredentials() {
   };
 }
 
-export function useCreateModelProviderCredential() {
+/** `meta`: the model form reports a refused inline key itself; the key dialog leaves it to the cache. */
+export function useCreateModelProviderCredential(meta?: MutationMeta) {
   const invalidate = useInvalidateModelProviderCredentials();
-  return $api.useMutation("post", "/api/model-provider-credentials", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/model-provider-credentials", {
+    meta,
+    onSuccess: invalidate,
+  });
 }
 
 // `apiShape` / `baseUrl` are pinned by `providerId` at create time and cannot
@@ -104,12 +108,15 @@ export function useUpdateModelProviderCredential() {
 export function useDeleteModelProviderCredential() {
   const invalidate = useInvalidateModelProviderCredentials();
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
+    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }
 
 export function useTestModelProviderCredential() {
-  return $api.useMutation("post", "/api/model-provider-credentials/{id}/test");
+  return $api.useMutation("post", "/api/model-provider-credentials/{id}/test", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 /** Wire shape of `POST /api/model-provider-credentials/discover`'s 200 body. */
@@ -123,7 +130,9 @@ export type DiscoveredModel = DiscoveredModelsResponse["models"][number];
  * response, so no cache is invalidated.
  */
 export function useDiscoverModels() {
-  return $api.useMutation("post", "/api/model-provider-credentials/discover");
+  return $api.useMutation("post", "/api/model-provider-credentials/discover", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 export function deduplicateLabel(label: string, existingKeys: { label: string }[]): string {
@@ -134,5 +143,7 @@ export function deduplicateLabel(label: string, existingKeys: { label: string }[
 }
 
 export function useTestModelProviderCredentialInline() {
-  return $api.useMutation("post", "/api/model-provider-credentials/test");
+  return $api.useMutation("post", "/api/model-provider-credentials/test", {
+    meta: { errorHandledByCaller: true },
+  });
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db } from "@appstrate/db/client";
-import { conflict, forbidden, notFound } from "../lib/errors.ts";
+import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
@@ -33,6 +33,7 @@ import {
   or,
   count,
   sql,
+  asc,
 } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
@@ -136,7 +137,9 @@ export async function getUserOrganizations(
       orgIdFilter
         ? and(eq(organizationMembers.userId, userId), eq(organizationMembers.orgId, orgIdFilter))
         : eq(organizationMembers.userId, userId),
-    );
+    )
+    // Oldest membership first.
+    .orderBy(asc(organizationMembers.joinedAt), asc(organizations.id));
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),
@@ -660,6 +663,16 @@ export async function updateMemberRole(
   });
 }
 
+/** An expected refusal: no `cause`, so the error handler writes no error line. */
+function orgHasActiveRuns(): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "delete_failed",
+    title: "Bad Request",
+    detail: "Cannot delete organization: runs are in progress",
+  });
+}
+
 /**
  * Reserve the deletion of this organization.
  *
@@ -680,8 +693,7 @@ export async function updateMemberRole(
  * `createRun` takes, so no run can be admitted behind the modules' back.
  * Idempotent: a standing reservation is the state a retried DELETE finds.
  *
- * Throws the same `Error` messages the transaction would, so the route maps
- * either failure onto the same `400 delete_failed` response.
+ * Refuses with the same {@link orgHasActiveRuns} the transaction raises.
  */
 export async function reserveOrgDeletion(orgId: string): Promise<void> {
   await db.transaction(async (tx) => {
@@ -698,7 +710,7 @@ export async function reserveOrgDeletion(orgId: string): Promise<void> {
     if (!org) throw new Error("Failed to delete organization: not found");
 
     if ((await countInProgressRuns(tx, { orgId })) > 0) {
-      throw new Error("Cannot delete organization: runs are in progress");
+      throw orgHasActiveRuns();
     }
 
     if (org.deletingAt) return;
@@ -734,7 +746,7 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     if (!lockedOrg) throw new Error("Failed to delete organization: not found");
 
     if ((await countInProgressRuns(tx, { orgId })) > 0) {
-      throw new Error("Cannot delete organization: runs are in progress");
+      throw orgHasActiveRuns();
     }
 
     // Enumerate every storage object this org owns BEFORE the FK cascade drops

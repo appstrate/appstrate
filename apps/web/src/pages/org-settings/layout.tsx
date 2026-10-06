@@ -22,6 +22,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useSpace } from "../../hooks/use-spaces";
 import { useOrgSettings } from "../../hooks/use-org-settings";
+import { activeSettingsItem } from "../../lib/settings-nav";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
@@ -47,10 +48,7 @@ export function OrgSettingsLayout() {
       to: "/org-settings/space/members",
       icon: Users,
       label: t("spaceMembers.tabTitle"),
-      // A personal space takes no members at all (RBAC spec §3.6): the write
-      // routes answer 409 and the list would only ever hold its owner, so the
-      // tab is not there rather than there and empty.
-      show: !space?.personal && canReach("/org-settings/space/members"),
+      show: canReach("/org-settings/space/members"),
     },
     {
       to: "/org-settings/space/api-keys",
@@ -138,10 +136,10 @@ export function OrgSettingsLayout() {
       : []),
   ];
 
-  const allItems = sections.flatMap((s) => s.items);
-  const activeItem =
-    allItems.find((i) => location.pathname === i.to) ??
-    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
+  const activeItem = activeSettingsItem(
+    sections.flatMap((s) => s.items),
+    location.pathname,
+  );
   const isSpaceRoute = location.pathname.startsWith("/org-settings/space/");
 
   // A space page is reached through the org's Spaces list, not through the

@@ -23,13 +23,16 @@ export function toggleEvent(event: string, setter: Dispatch<SetStateAction<strin
   setter((prev) => (prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]));
 }
 
-export const WEBHOOK_EVENTS = [
-  "run.started",
-  "run.success",
-  "run.failed",
-  "run.timeout",
-  "run.cancelled",
-] as const;
+/** Keyed by the wire enum: a list that falls behind the API's does not compile. */
+const WEBHOOK_EVENT_SET: Record<WebhookEvent, true> = {
+  "run.started": true,
+  "run.success": true,
+  "run.failed": true,
+  "run.timeout": true,
+  "run.cancelled": true,
+  "run.connection_missing": true,
+};
+export const WEBHOOK_EVENTS = Object.keys(WEBHOOK_EVENT_SET) as WebhookEvent[];
 
 /**
  * Org/space context for queries. The spec-declared `X-Org-Id` header is passed
@@ -48,8 +51,7 @@ function useWebhookScope() {
 
 /**
  * List webhooks for the current space — org-level webhooks plus those
- * pinned to the current space (the only kind this UI creates), via the
- * spec-declared `spaceId` filter.
+ * pinned to the current space, via the spec-declared `spaceId` filter.
  */
 export function useWebhooks() {
   const scope = useWebhookScope();
@@ -97,23 +99,25 @@ export function useCreateWebhook() {
   const invalidate = useInvalidateWebhooks();
   const spaceId = useCurrentSpaceId();
   return useMutation({
-    mutationFn: async (data: {
+    meta: { errorHandledByCaller: true },
+    mutationFn: async ({
+      level,
+      ...data
+    }: {
+      level: WebhookInfo["level"];
       url: string;
       events: string[];
       packageId?: string | null;
       payloadMode?: "full" | "summary";
       enabled?: boolean;
     }) => {
-      // Webhooks created from this UI are always pinned to the current
-      // space — the level discriminator comes from context, not the
-      // call site. Form state holds plain strings; the wire enum cast is the
-      // same trust boundary as the legacy untyped helper.
-      const body: CreateWebhookBody = {
-        level: "space",
-        spaceId: spaceId!,
-        ...data,
-        events: data.events as WebhookEvent[],
-      };
+      // A space-level webhook is pinned to the CURRENT space. Form state holds
+      // plain strings, cast to the wire enum here.
+      const events = data.events as WebhookEvent[];
+      const body: CreateWebhookBody =
+        level === "org"
+          ? { level, ...data, events }
+          : { level, spaceId: spaceId!, ...data, events };
       const { data: created } = await client.POST("/api/webhooks", { body });
       if (!created) throw new Error("empty response");
       return created;
@@ -133,7 +137,11 @@ export function useDeleteWebhook() {
 }
 
 export function useTestWebhook() {
-  return $api.useMutation("post", "/api/webhooks/{id}/test");
+  const invalidate = useInvalidateWebhooks();
+  return $api.useMutation("post", "/api/webhooks/{id}/test", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useRotateWebhookSecret() {

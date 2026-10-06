@@ -82,6 +82,8 @@ export function FilePathDialog({
           id={inputId}
           value={path}
           autoFocus
+          // A rename opens on the current path: typing replaces it.
+          onFocus={(e) => e.currentTarget.select()}
           spellCheck={false}
           placeholder={t("files.pathPlaceholder")}
           aria-invalid={rejection !== null}

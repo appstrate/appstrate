@@ -33,7 +33,7 @@ import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
-import { getVersionForDownload, replaceVersionContent } from "../services/package-versions.ts";
+import { getVersionForDownload } from "../services/package-versions.ts";
 import { downloadVersionZip } from "../services/package-storage.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import {
@@ -269,7 +269,10 @@ async function validateManifestForRoute(
 
 export const githubImportSchema = z
   .object({
-    url: z.url("Missing 'url' field"),
+    // One message per case: a supplied value that is not a URL is not "missing".
+    url: z.url({
+      error: (issue) => (issue.input === undefined ? "Missing 'url' field" : "Invalid URL"),
+    }),
   })
   .strict();
 
@@ -761,12 +764,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       // Check for name collision
       const existingIds = await getAllPackageIds(orgId);
       if (existingIds.includes(packageId)) {
-        throw new ApiError({
-          status: 400,
-          code: "name_collision",
-          title: "Name Collision",
-          detail: `A ${rcfg.cfg.type} with identifier '${packageId}' already exists`,
-        });
+        // Same answer as the insert race below: a taken id is a 409, whichever check sees it.
+        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
       }
 
       draft = {
@@ -2141,12 +2140,10 @@ export function createPackagesRouter() {
         case "NOT_FOUND":
           throw notFound("Package not found");
         case "NAME_COLLISION":
-          throw new ApiError({
-            status: 400,
-            code: "name_collision",
-            title: "Name Collision",
-            detail: "A package with this name already exists in your organization",
-          });
+          throw conflict(
+            "name_collision",
+            "A package with this name already exists in your organization",
+          );
         case "UNKNOWN_TYPE":
           throw invalidRequest(`Unsupported package type: ${result.type}`);
         case "NO_PUBLISHED_VERSION":
@@ -2494,16 +2491,16 @@ export function createPackagesRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const { manifest, content, files, type: packageType, packageId } = parsed;
+    const manifestVersion = asRecord(manifest).version;
+    const importedVersion = typeof manifestVersion === "string" ? manifestVersion : undefined;
     await makePermissionGuard(packagePermission(packageType, "write"))(c, async () => {});
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
-      throw new ApiError({
-        status: 400,
-        code: "name_collision",
-        title: "Name Collision",
-        detail: `'${packageId}' is a system package and cannot be overwritten`,
-      });
+      throw conflict(
+        "name_collision",
+        `'${packageId}' is a system package and cannot be overwritten`,
+      );
     }
 
     // Phase 1 — for agent imports, cross-check integrations_configuration
@@ -2529,12 +2526,7 @@ export function createPackagesRouter() {
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
     if (existing) {
       if (existing.orgId !== orgId) {
-        throw new ApiError({
-          status: 400,
-          code: "name_collision",
-          title: "Name Collision",
-          detail: `A package with identifier '${packageId}' already exists`,
-        });
+        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
       }
       if (existing.type !== packageType) {
         throw new ApiError({
@@ -2544,12 +2536,23 @@ export function createPackagesRouter() {
           detail: `Package '${packageId}' exists as type '${existing.type}', cannot import as '${packageType}'`,
         });
       }
-      // Draft overwrite protection
+      // `force=true` waives two overwrites at once — the unpublished draft and a
+      // published version of the same number with other bytes — so one refusal
+      // names both. A GitHub import has no force option.
       if (!force) {
-        const [vCount, latestDate] = await Promise.all([
+        const remedy =
+          source === "zip"
+            ? "Use the force option to overwrite."
+            : "A GitHub import cannot overwrite: publish or discard the draft changes, or bump the version in the source manifest.";
+        const [vCount, latestDate, existingVer] = await Promise.all([
           getVersionCount(packageId),
           getLatestVersionCreatedAt(packageId),
+          importedVersion ? getVersionForDownload(packageId, importedVersion) : null,
         ]);
+        const replacedVersion =
+          existingVer && existingVer.integrity !== computeIntegrity(new Uint8Array(artifact))
+            ? existingVer.version
+            : null;
         if (
           computeHasUnpublishedChanges(
             existing.source,
@@ -2558,25 +2561,27 @@ export function createPackagesRouter() {
             latestDate,
           )
         ) {
+          const activeVersion = asRecord(existing.draftManifest).version;
           throw conflict(
             "draft_overwrite",
-            "This package has unpublished changes that will be overwritten by the import.",
+            "This package has unpublished changes that the import would overwrite." +
+              (replacedVersion
+                ? ` Published version ${replacedVersion} also exists with different content and would be replaced.`
+                : "") +
+              ` ${remedy}`,
+            {
+              packageId,
+              active_version: typeof activeVersion === "string" ? activeVersion : null,
+              ...(replacedVersion ? { version: replacedVersion } : {}),
+            },
           );
         }
-      }
-
-      // Integrity mismatch detection — same version, different content
-      const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
-      if (!force && importedVersion) {
-        const existingVer = await getVersionForDownload(packageId, importedVersion);
-        if (existingVer) {
-          const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
-          if (existingVer.integrity !== importedIntegrity) {
-            throw conflict(
-              "integrity_mismatch",
-              "This version already exists with different content. Use the force option to replace.",
-            );
-          }
+        if (replacedVersion) {
+          throw conflict(
+            "integrity_mismatch",
+            `This version already exists with different content. ${remedy}`,
+            { packageId, version: replacedVersion },
+          );
         }
       }
     }
@@ -2595,6 +2600,7 @@ export function createPackagesRouter() {
         homeSpaceId: c.get("spaceId"),
         draftManifest: manifest as Record<string, unknown>,
         lockVersion: force ? undefined : existing?.lockVersion,
+        replaceExistingVersion: force,
       });
     } catch (err) {
       if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
@@ -2619,26 +2625,7 @@ export function createPackagesRouter() {
       );
     }
 
-    // Force import: replace existing version content if integrity differs
-    const importedVersionForReplace = (manifest as Record<string, unknown>).version as
-      string | undefined;
-    if (existing && force && importedVersionForReplace) {
-      const existingVer = await getVersionForDownload(packageId, importedVersionForReplace);
-      if (existingVer) {
-        const importedIntegrity = computeIntegrity(new Uint8Array(artifact));
-        if (existingVer.integrity !== importedIntegrity) {
-          await replaceVersionContent({
-            packageId,
-            version: importedVersionForReplace,
-            zipBuffer: artifact,
-            manifest: manifest as Record<string, unknown>,
-          });
-        }
-      }
-    }
-
     logger.info("Package imported", { packageId, type: packageType, orgId });
-    const importedVersion = (manifest as Record<string, unknown>).version as string | undefined;
     await recordAuditFromContext(c, {
       action: existing ? "package.updated" : "package.created",
       resourceType: "package",

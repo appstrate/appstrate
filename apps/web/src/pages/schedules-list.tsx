@@ -19,7 +19,7 @@ export function SchedulesListPage() {
   const { data: agents } = useAgents();
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState error={error} />;
 
   const getAgentName = (packageId: string) =>
     agents?.find((f) => f.id === packageId)?.display_name ?? packageId;
