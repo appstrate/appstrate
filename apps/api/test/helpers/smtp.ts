@@ -33,7 +33,8 @@
 
 import { beforeAll, afterAll } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { _rebuildAuthForTesting } from "@appstrate/db/auth";
+import type { Transporter } from "nodemailer";
+import { _rebuildAuthForTesting, withSmtpOverride } from "@appstrate/db/auth";
 
 const SMTP_TEST_VARS = {
   SMTP_HOST: "__test_json__",
@@ -63,4 +64,34 @@ export function enableSmtpForSuite(): void {
     _resetCacheForTesting();
     _rebuildAuthForTesting();
   });
+}
+
+interface CapturedMail {
+  to: string;
+  subject: string;
+  html: string;
+}
+
+/**
+ * Run `fn` and return every platform email Better Auth sent while it ran.
+ * Rides the per-request SMTP override — the same seam a tenant transport
+ * uses — so nothing in the auth layer is stubbed.
+ */
+export async function captureMails(fn: () => Promise<unknown>): Promise<CapturedMail[]> {
+  const mails: CapturedMail[] = [];
+  const transport = {
+    sendMail: async (mail: CapturedMail) => {
+      mails.push({ to: mail.to, subject: mail.subject, html: mail.html });
+      return {};
+    },
+  } as unknown as Transporter;
+  await withSmtpOverride({ transport, fromAddress: "capture@appstrate.test", fromName: null }, fn);
+  return mails;
+}
+
+/** The first link of an email body, HTML-unescaped. */
+export function firstLink(mail: CapturedMail): URL {
+  const href = /href="([^"]+)"/.exec(mail.html)?.[1];
+  if (!href) throw new Error(`no link in email "${mail.subject}"`);
+  return new URL(href.replaceAll("&amp;", "&"));
 }

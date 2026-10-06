@@ -13,6 +13,7 @@
  * behavior for requestPasswordReset).
  */
 
+import { MAGIC_LINK_TTL_SECONDS } from "@appstrate/db/auth";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedSpaceBranding } from "../services/branding.ts";
@@ -39,7 +40,7 @@ export function renderMagicLinkPage(props: MagicLinkPageProps): RawHtml {
         Si un compte est associé à <strong>${props.email ?? ""}</strong>, vous recevrez un email
         contenant un lien de connexion. Cliquez sur le lien pour vous connecter.
       </p>
-      <p class="muted">Le lien expire dans 7 jours.</p>
+      <p class="muted">Le lien expire dans ${String(MAGIC_LINK_TTL_SECONDS / 60)} minutes.</p>
       <div class="footer-links">
         <a href="${loginUrl}">Retour à la connexion</a>
       </div>

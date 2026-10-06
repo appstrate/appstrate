@@ -83,6 +83,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   password. Deleting a model or a proxy now also clears the per-space agent
   settings naming it; settings left dangling by earlier deletions are not
   rewritten.
+- **Changing a verified email address is approved from the current address
+  first** (#1673). With SMTP configured, `change-email` used to send its one
+  link to the new address. It now emails the current address; once approved
+  there, the verification link goes to the new one, and the address changes
+  when that second link is opened. An account whose current mailbox is no
+  longer reachable cannot change its address on its own any more.
+- **Three account e-mails are new** (#1673, SMTP only): a notice after every
+  password change or reset, a notice to the owner when a sign-up is attempted
+  on an address that already has an account (the sign-up screen announced an
+  e-mail that was never sent), and the approval e-mail above. The
+  verification, magic-link and password-reset e-mails state how long their
+  link stays valid (1 hour, 15 minutes, 1 hour). `@appstrate/module-ee` has no
+  branded version of the three new ones: they go out in the plain template.
+  On a hosted (OIDC) password reset the notice leaves through the space's own
+  SMTP transport, as does the verification e-mail re-sent at hosted sign-in.
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -232,6 +247,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deleted behind a confirmation and only by a caller holding
   `persistence:delete`; integer launch fields are numeric inputs and the
   duplicated error summary of the launch form is gone.
+- **The magic-link e-mail works on an instance that does not load the `oidc`
+  module** (#1673). Its link always pointed at the module's confirmation page
+  and answered 401 without it; it now points at a confirmation page of the
+  dashboard (`/magic-link/confirm`), whose button is what spends the one-time
+  link — a mail scanner that opens the link does not. A spent or expired link
+  returns to `/magic-link` with a message. The `allowedAttempts` option, which
+  the installed Better Auth ignores, is gone; the hosted "check your inbox"
+  page announced a 7-day validity for a link that lives 15 minutes.
+- **Sign-up from an invitation returns to the invitation after e-mail
+  verification** (#1673): the verification link carried `/`, and the invitee
+  landed on "create your organization"; the link re-sent when an unverified
+  account signs in from the invitation carries it too. Also in the built-in
+  sign-in pages:
+  signing in to an unverified account opens the "check your inbox" screen
+  instead of a raw `Email not verified`; a verification link that is invalid
+  or expired says so; `/verify-email` opened on its own redirects to
+  `/login`; and changing one's e-mail to an address already in use no longer
+  reports success. Signing in from an invitation reloads the invitation page
+  (Better Auth's client follows the `callbackURL` it is given).
 - **An `api_call`'s target, headers and body templates are checked the same
   way on the three paths** (#1660). The platform proxy, the sidecar and the
   local resolver of `appstrate run` each checked and substituted them in

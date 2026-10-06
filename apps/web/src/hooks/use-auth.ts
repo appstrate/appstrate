@@ -5,7 +5,8 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
-import { toUnlinkError } from "../lib/auth-errors";
+import { toLoginError, toUnlinkError } from "../lib/auth-errors";
+import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs } from "../stores/view-as-store";
@@ -186,20 +187,27 @@ export function useAuth() {
    * mode these forms never render (`HostedAuthGate` redirects first), so
    * there is no redirect variant here — the gate owns that path.
    */
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await authClient.signIn.email({ email, password });
-    if (result.error) throw new Error(result.error.message);
-    const profile = await fetchProfile();
-    if (result.data?.user) {
-      setAuthenticatedUser(result.data.user, profile);
-    }
-  }, []);
+  const login = useCallback(
+    // `callbackURL`: where the re-sent verification link of an unverified
+    // account lands; given one, the client also navigates there on success.
+    async (email: string, password: string, callbackURL?: string) => {
+      const result = await authClient.signIn.email({ email, password, callbackURL });
+      if (result.error) throw toLoginError(result.error);
+      const profile = await fetchProfile();
+      if (result.data?.user) {
+        setAuthenticatedUser(result.data.user, profile);
+      }
+    },
+    [],
+  );
 
   const signup = useCallback(
     async (
       email: string,
       password: string,
-      displayName?: string,
+      displayName: string | undefined,
+      // Where the verification link lands (e.g. the invitation that asked).
+      callbackURL: string,
     ): Promise<{ emailVerificationRequired: boolean }> => {
       // Native email/password signup (OSS). In OIDC mode the register form
       // never renders — `HostedAuthGate` redirects to the hosted register
@@ -208,6 +216,7 @@ export function useAuth() {
         email,
         password,
         name: displayName || email,
+        callbackURL,
       });
       if (result.error) throw new Error(result.error.message);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
@@ -292,8 +301,8 @@ export function useAuth() {
     if (result.error) throw toUnlinkError(result.error);
   }, []);
 
-  const resendVerificationEmail = useCallback(async (email: string) => {
-    const result = await authClient.sendVerificationEmail({ email });
+  const resendVerificationEmail = useCallback(async (email: string, callbackURL?: string) => {
+    const result = await authClient.sendVerificationEmail({ email, callbackURL });
     if (result.error) throw new Error(result.error.message);
   }, []);
 
@@ -320,7 +329,11 @@ export function useAuth() {
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
-    const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
+    const result = await authClient.signIn.magicLink({
+      email,
+      callbackURL: "/",
+      errorCallbackURL: "/magic-link",
+    });
     if (result.error) throw new Error(result.error.message);
   }, []);
 
@@ -330,12 +343,24 @@ export function useAuth() {
   // inside the dashboard — they are not unauthenticated entry points, so they
   // run natively in both modes. Routed through the seam only for the ban.
 
-  const changeEmail = useCallback(async (newEmail: string) => {
-    const result = await authClient.changeEmail({ newEmail });
-    if (result.error) {
-      throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
-    }
-  }, []);
+  const changeEmail = useCallback(
+    async (newEmail: string): Promise<"changed" | "confirmation_sent"> => {
+      const result = await authClient.changeEmail({
+        newEmail,
+        callbackURL: EMAIL_CHANGE_CALLBACK_URL,
+      });
+      if (result.error) {
+        throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
+      }
+      if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
+      await refreshAuth();
+      if (!emailWasChanged(newEmail, authStore.getState().user?.email)) {
+        throw new EmailChangeError(true, "");
+      }
+      return "changed";
+    },
+    [],
+  );
 
   const listLinkedAccounts = useCallback(async () => {
     const result = await authClient.listAccounts();

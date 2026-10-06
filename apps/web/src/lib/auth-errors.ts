@@ -20,3 +20,27 @@ export function toUnlinkError(error: { code?: string | null; message?: string | 
   }
   return new Error(message);
 }
+
+/** Thrown by `login()`: right credentials, unverified address. Better Auth has just re-sent the link. */
+export class EmailNotVerifiedError extends Error {}
+
+export function toLoginError(error: { code?: string | null; message?: string | null }): Error {
+  const message = error.message ?? "";
+  if (error.code === "EMAIL_NOT_VERIFIED") {
+    return new EmailNotVerifiedError(message);
+  }
+  return new Error(message);
+}
+
+/** Codes Better Auth appends (`?error=`) to a verification link's callback URL. */
+const VERIFICATION_LINK_ERRORS = new Set([
+  "INVALID_TOKEN",
+  "TOKEN_EXPIRED",
+  "USER_NOT_FOUND",
+  "INVALID_USER",
+]);
+
+export function hasVerificationLinkError(search: string): boolean {
+  const error = new URLSearchParams(search).get("error");
+  return error !== null && VERIFICATION_LINK_ERRORS.has(error);
+}

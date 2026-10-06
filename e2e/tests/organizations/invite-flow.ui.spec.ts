@@ -188,9 +188,11 @@ test.describe("Organization invitation flow", () => {
     await page.locator("#password").fill("TestPassword123!");
     await page.getByRole("button", { name: /Créer un compte/i }).click();
 
-    // The invited email is auto-verified (a pending invitation proves
-    // ownership), so signup establishes a session and the page re-renders
-    // into the authenticated branch with the explicit join button.
+    // This instance runs without SMTP, so nothing asks the invitee to verify
+    // the address: signup establishes a session and the page re-renders into
+    // the authenticated branch with the explicit join button. (A pending
+    // invitation never verifies an email by itself; with SMTP the invitee
+    // returns here through the verification link.)
     const joinButton = page.getByRole("button", { name: /Rejoindre/i });
     await expect(joinButton).toBeVisible({ timeout: 15_000 });
     await joinButton.click();
