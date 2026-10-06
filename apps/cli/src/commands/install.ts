@@ -184,7 +184,7 @@ function writeToTty(line: string): void {
  * account yet, so the first thing the operator needs is the signup form —
  * open `/register` directly instead of the bare root (which only bounces
  * there after an extra redirect). One carve-out: the **bootstrap token**
- * flow (unattended closed install) claims ownership at `/claim` by pasting
+ * flow (every closed install) claims ownership at `/claim` by pasting
  * the printed token, NOT at `/register`, so it keeps the root landing and
  * the follow-up note points the operator at `/claim`.
  *
@@ -198,8 +198,7 @@ export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOver
 }
 
 /**
- * Print the closed-mode follow-up note: claim ownership at `<appUrl>/claim`
- * with the printed single-use token, as the named owner when there is one.
+ * Print the closed-mode follow-up note: claim at `<appUrl>/claim` with the printed token.
  *
  * Renders nothing in true open mode (Tier 0 interactive). Called by
  * both Tier 0 and Docker-tier installers right before `outro()`.

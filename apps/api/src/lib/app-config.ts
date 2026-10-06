@@ -41,8 +41,7 @@ export function buildAppConfig(): AppConfig {
       smtp: isSmtpConfigured(),
       // Self-hosting closed mode (issue #228) — flag exposed so the SPA
       // can hide signup affordances when the platform is locked down (who
-      // may create an org is per user: `can_create_org` on the profile). The
-      // variables that name who may get in stay server-side.
+      // may create an org is per user: `can_create_org` on the profile). Who is named stays server-side.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,
       // Surface ONLY the boolean — the token value stays server-side,
       // gated by timing-safe compare in /api/auth/bootstrap/redeem.

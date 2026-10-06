@@ -222,8 +222,7 @@ export function _swapRealmResolverForTesting(resolver: RealmResolver | null): Re
   return previous;
 }
 
-// A magic link signs in an account of the realm its transaction resolves to. Asserted at
-// Better Auth's writes, which come after its own read of the account.
+// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
 async function assertMagicLinkAudience(
   userId: string,
   context: GenericEndpointContext | null,
@@ -244,12 +243,8 @@ async function assertMagicLinkAudience(
   if (account.realm === expected) return;
   logger.warn("auth: refused a magic link for an account outside its audience", { expected });
   const raw = query.errorCallbackURL ?? query.callbackURL;
-  const target = new URL(
-    typeof raw === "string" ? decodeURIComponent(raw) : "/",
-    context.context.baseURL,
-  );
-  target.searchParams.set("error", "signup_disabled");
-  throw context.redirect(target.toString());
+  const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
+  throw refusalRedirect(context, callback, "signup_disabled");
 }
 
 // ─── Magic-link issued hook (injected at boot by the OIDC module) ───
@@ -313,7 +308,6 @@ export interface SmtpOverride {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
-  /** A tenant's own transport: the realm of the accounts it may write to. */
   tenantRealm?: string;
 }
 
@@ -331,7 +325,7 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 
 const bootstrapTokenRedemptionStore = new AsyncLocalStorage<{ refusal?: string }>();
 
-/** Run `fn` under the bootstrap-token bypass; `refusal` is the code of a 403 the create hook threw. */
+/** Run `fn` under the bootstrap-token bypass; `refusal` is the code of a 403 the create hook threw, which Better Auth answers as a success under mail verification. */
 export async function withBootstrapTokenRedemption<T>(
   fn: () => Promise<T>,
 ): Promise<{ result: T; refusal: string | undefined }> {
@@ -340,7 +334,6 @@ export async function withBootstrapTokenRedemption<T>(
   return { result, refusal: redemption.refusal };
 }
 
-/** Record on the redemption a 403 the create hook throws: Better Auth answers it as a success. */
 function recordingRedemptionRefusal<A extends unknown[], R>(
   hook: (...args: A) => Promise<R>,
 ): (...args: A) => Promise<R> {
@@ -350,7 +343,7 @@ function recordingRedemptionRefusal<A extends unknown[], R>(
     } catch (err) {
       const redemption = bootstrapTokenRedemptionStore.getStore();
       if (redemption && isAPIError(err) && err.statusCode === 403) {
-        redemption.refusal = err.body?.code ?? "signup_refused";
+        redemption.refusal = err.body?.code ?? "bootstrap_signup_rejected";
       }
       throw err;
     }
@@ -522,23 +515,28 @@ export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): UR
   return url;
 }
 
-/**
- * True when `email` is an address the environment names (owner, platform
- * admins) that no account holds yet: no existing account may move onto it.
- */
+/** A named address (owner, platform admin) that no account holds yet. */
 async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
   if (!isOperatorNamedEmail(email)) return false;
   const [holder] = await db
     .select({ id: user.id })
     .from(user)
-    .where(eq(user.email, email))
+    .where(eq(user.email, normalizeEmail(email)))
     .limit(1);
-  if (holder) return false;
+  return !holder;
+}
+
+function warnReservedEmailRefused(): void {
   logger.warn(
     "auth: refused to move an account onto an address named in " +
       "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
   );
-  return true;
+}
+
+function refusalRedirect(context: GenericEndpointContext, callback: string, code: string) {
+  const target = new URL(callback, context.context.baseURL);
+  target.searchParams.set("error", code);
+  return context.redirect(target.toString());
 }
 
 /** An account of the tenant's realm, or an address with no account the environment does not name. */
@@ -859,7 +857,7 @@ function buildAuth(options: CreateAuthOptions) {
         expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
         sendVerificationEmail: async ({ user, url }) => {
           // An address with no account is the target of an e-mail change.
-          if (await isUnclaimedReservedEmail(user.email)) return;
+          if (await isUnclaimedReservedEmail(user.email)) return warnReservedEmailRefused();
           try {
             await sendAuthMail(
               env,
@@ -894,8 +892,7 @@ function buildAuth(options: CreateAuthOptions) {
     account: {
       accountLinking: {
         enabled: anySocialEnabled,
-        // No trusted provider: an identity is attached to an existing account
-        // only when its provider asserts the e-mail as verified.
+        // No trusted provider: linking takes the provider's assertion that the e-mail is verified.
         allowDifferentEmails: true,
       },
     },
@@ -959,9 +956,8 @@ function buildAuth(options: CreateAuthOptions) {
         // before anything is sent to the new one.
         ...(smtpTransport && {
           sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
-            // Answered like a taken address: Better Auth's neutral 200, and no
-            // e-mail, so no link ever leads to the `user.update.before` refusal.
-            if (await isUnclaimedReservedEmail(newEmail)) return;
+            // Answered like a taken address; `user.update.before` refuses a link issued earlier.
+            if (await isUnclaimedReservedEmail(newEmail)) return warnReservedEmailRefused();
             try {
               await sendAuthMail(
                 env,
@@ -1078,10 +1074,7 @@ function buildAuth(options: CreateAuthOptions) {
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
             const bootstrapTokenBypass = bootstrapTokenRedemptionStore.getStore() !== undefined;
-            // Proof for an account the environment names (owner, platform
-            // admins): the bootstrap token, or a row born verified (provider
-            // assertion, consumed magic link). The refusal mirrors what an
-            // unprivileged or taken address gets.
+            // A named account takes proof: the bootstrap token, or a row born verified.
             const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
             if (isOperatorNamedEmail(user.email) && !bootstrapTokenBypass && !bornVerified) {
               logger.warn(
@@ -1109,8 +1102,7 @@ function buildAuth(options: CreateAuthOptions) {
             // complete signup even when signup is locked down. It is matched on
             // EMAIL ALONE — the invitation token is not available at signup —
             // so it is NOT proof of inbox ownership (it only means an org admin
-            // typed this address) and must NEVER auto-verify the email. See the
-            // `emailVerified` decision below. The lookup is index-covered
+            // typed this address) and must NEVER verify the email. The lookup is index-covered
             // (`idx_org_invitations_email`); signups are infrequent, so the
             // unconditional query is negligible.
             const invited = await hasPendingInvitationByEmail(user.email);
@@ -1118,7 +1110,6 @@ function buildAuth(options: CreateAuthOptions) {
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
               if (bootstrapTokenBypass) {
-                // The named owner is exempt, as in `evaluateSignupPolicy`.
                 if (
                   envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 &&
                   !invited &&
@@ -1161,7 +1152,7 @@ function buildAuth(options: CreateAuthOptions) {
             if (_beforeSignupHook) {
               await _beforeSignupHook(user.email, signupHookCtx);
             }
-            // Merge realm resolution + email auto-verify into a single data
+            // The realm is the single data
             // patch returned to BA. The realm resolver falls back to
             // "platform" when no OIDC module is loaded (OSS mode).
             //
@@ -1229,18 +1220,15 @@ function buildAuth(options: CreateAuthOptions) {
           },
         },
         update: {
-          // No account moves onto an address the environment names (owner,
-          // platform admins); every Better Auth writer of `user.email` passes here.
+          // No account moves onto a named address; every writer of `user.email` passes here.
           before: async (data, context) => {
             const next = (data as { email?: unknown }).email;
             if (typeof next !== "string") return;
             if (!(await isUnclaimedReservedEmail(next))) return;
-            // On an e-mailed link the refusal lands in the app with its code,
-            // as Better Auth does for a spent or expired link.
+            warnReservedEmailRefused();
             const callbackURL: unknown = context?.query?.callbackURL;
             if (context?.path === "/verify-email" && typeof callbackURL === "string") {
-              const separator = callbackURL.includes("?") ? "&" : "?";
-              throw context.redirect(`${callbackURL}${separator}error=email_change_refused`);
+              throw refusalRedirect(context, callbackURL, "email_change_refused");
             }
             throw new APIError("FORBIDDEN", {
               message: "email_change_refused",
@@ -1306,7 +1294,7 @@ export function createAuth(options: CreateAuthOptions): void {
 /**
  * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
  * tests flip SMTP / social / cookie-domain flags at runtime and verify the
- * resulting behavior (email-verification flow, social auto-verify hook,
+ * resulting behavior (email-verification flow, social provider config,
  * …). The plugin factory passed to `createAuth()` is re-invoked so modules
  * don't need to re-register — and so the rebuild gets plugin instances of
  * its own rather than re-initializing the ones the previous build already

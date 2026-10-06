@@ -46,8 +46,7 @@
  *      re-mints an authoritative `oidc_pending_client` cookie header from
  *      the validated authorize query (`headersWithAuthoritativePendingClient`)
  *      before calling BA in-process — the browser never gets a chance to
- *      strip it, and marks those headers as its own. The cookie is read
- *      only under that mark (`hasAuthoritativePendingClient`).
+ *      strip it, and marks those headers: the cookie is read only under that mark.
  *
  * Consumers (`oidcRealmResolver`, `oidcBeforeSignupGuard`,
  * `oidcAfterSignupHandler`) treat the result as:
@@ -148,7 +147,6 @@ export async function resolvePendingClientBinding(
     return { kind: "none" };
   }
 
-  // ── 3. Cookie, only under the mark of the server-driven register path. ──
   const cookieClientId = authoritativePendingClient(ctx.headers);
   if (cookieClientId) return { kind: "bound", clientId: cookieClientId, source: "cookie" };
   return { kind: "none" };

@@ -47,7 +47,6 @@ interface SmtpSender {
   fromName: string | null;
 }
 
-/** A per-space transport always names the realm whose accounts it may write to. */
 export type ResolvedSmtpConfig =
   | (SmtpSender & { source: "per-space"; tenantRealm: string })
   | (SmtpSender & { source: "instance" });

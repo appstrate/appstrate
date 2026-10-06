@@ -62,8 +62,7 @@ function base64urlPassword24(): string {
 
 /**
  * 32 random bytes → base64url (43 chars, URL-safe). One-shot redemption
- * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` by every fresh closed
- * install, named owner or not.
+ * token written to `.env` as `AUTH_BOOTSTRAP_TOKEN` by every fresh closed install.
  *
  * 256 bits of entropy — brute-force exclu. Generated client-side at
  * install time; the platform reads it at boot, holds it in memory, and
@@ -93,8 +92,8 @@ interface PortOverrides {
  * Optional self-hosting closed-mode bootstrap (issue #228). When set,
  * the install writes the AUTH_DISABLE_SIGNUP / AUTH_DISABLE_ORG_CREATION
  * pair plus AUTH_BOOTSTRAP_OWNER_EMAIL into the generated `.env`, so
- * claiming the instance as that email creates the root organization and
- * the rest of the world is locked out by default.
+ * claiming the instance as that email creates the root
+ * organization and the rest of the world is locked out by default.
  *
  * Drives both the interactive prompt path (`appstrate install` ⇒
  * "Configure invitation-only mode now?") and the non-interactive path
@@ -136,8 +135,6 @@ export interface BootstrapOverrides {
   /** Org name shown in the dashboard. Defaults to "Default" when unset. */
   bootstrapOrgName?: string;
   /**
-   * One-shot redemption token, set on every fresh closed install.
-   *
    * When this field is set the install writes:
    *   AUTH_DISABLE_SIGNUP=true
    *   AUTH_DISABLE_ORG_CREATION=true

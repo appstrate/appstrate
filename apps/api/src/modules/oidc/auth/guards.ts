@@ -305,11 +305,6 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
   return named[0]!;
 }
 
-/**
- * Build the guards plugin. Returned as an unknown-shaped object at this
- * layer to keep `@better-auth/core` types out of the module's public
- * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
- */
 /** Whether verifying `token` would create an account; an unreadable token is Better Auth's. */
 async function wouldCreateAccount(internalAdapter: unknown, token: string): Promise<boolean> {
   const adapter = internalAdapter as
@@ -331,6 +326,11 @@ async function wouldCreateAccount(internalAdapter: unknown, token: string): Prom
   return !(await adapter.findUserByEmail(email))?.user;
 }
 
+/**
+ * Build the guards plugin. Returned as an unknown-shaped object at this
+ * layer to keep `@better-auth/core` types out of the module's public
+ * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
+ */
 /**
  * Pre-empt `/magic-link/verify` when the bound OAuth client is gone, or has a closed
  * signup policy AND the token would create a new user. Produces the same
@@ -411,7 +411,6 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
     throw ctx.redirect(safe.toString());
   }
 
-  // Better Auth's own default for a link that names no callback.
   const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL ?? "/";
 
   // `decodeURIComponent` throws `URIError` on malformed percent-escapes

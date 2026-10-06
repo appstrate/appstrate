@@ -41,6 +41,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getAuth, withBootstrapTokenRedemption } from "@appstrate/db/auth";
+import { isBootstrapOwner } from "@appstrate/db/auth-policy";
 import { createBootstrapOrg } from "@appstrate/db/bootstrap-org";
 import { db, reservePgConnection } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -193,8 +194,7 @@ export function createAuthBootstrapRouter(): Hono {
       }
 
       // After the token check, so only the operator learns the named address.
-      const namedOwner = getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL;
-      if (namedOwner && data.email !== namedOwner) {
+      if (getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL && !isBootstrapOwner(data.email)) {
         throw new ApiError({
           status: 403,
           code: "bootstrap_owner_email_mismatch",
@@ -233,22 +233,8 @@ export function createAuthBootstrapRouter(): Hono {
         if (msg.includes("already exists") || msg.includes("duplicate")) {
           throw bootstrapUserExists();
         }
-        // Domain allowlist rejection (#344 hardening — bootstrap-token
-        // bypass does NOT skip AUTH_ALLOWED_SIGNUP_DOMAINS). Surface
-        // the structured reason so the operator knows to use an
-        // allowlisted email.
-        if (msg.includes("signup_domain_not_allowed")) {
-          throw new ApiError({
-            status: 403,
-            code: "signup_domain_not_allowed",
-            title: "Forbidden",
-            detail:
-              "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
-              "Use an allowlisted email for the bootstrap owner.",
-          });
-        }
-        // The two branches above are diagnoses the code is confident of, and
-        // both are logged with `msg` already. This one is the fall-through —
+        // The branch above is a diagnosis the code is confident of, and it is
+        // logged with `msg` already. This one is the fall-through —
         // "something in Better Auth's signup threw" — so it is the branch that
         // needs the original attached: the error handler renders the chain
         // against this request's id, which the WARN line above cannot do.
@@ -358,7 +344,6 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
-      // Step 5: mark consumed (clears in-flight + sets durable consumed flag)
       markBootstrapTokenConsumed();
       inFlight = false;
 

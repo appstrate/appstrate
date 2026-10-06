@@ -872,9 +872,7 @@ export const envSchema = z
       ),
     // AUTH_PLATFORM_ADMIN_EMAILS — comma-separated email allowlist of
     // platform-level admins. Bypass AUTH_DISABLE_SIGNUP and may call
-    // POST /api/orgs even when AUTH_DISABLE_ORG_CREATION=true. The account
-    // of a listed address is created only on proof of ownership (bootstrap
-    // token, provider-verified social sign-in, magic link).
+    // POST /api/orgs even when AUTH_DISABLE_ORG_CREATION=true.
     // Declarative on purpose: no UI, no migration, IaC-friendly. Comparison
     // is case-insensitive against the user's normalized email.
     AUTH_PLATFORM_ADMIN_EMAILS: z
@@ -891,8 +889,7 @@ export const envSchema = z
       }),
     // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
     // self-hosted instances in closed mode. An organization is auto-created
-    // with this account as owner when it is created, which takes proof of
-    // ownership (AUTH_MODES.md). Idempotent if the user already owns an org.
+    // with this account as owner when the account is, on proof of ownership.
     //
     // Empty is allowed (open mode); anything else must look like an email
     // so a typo (`AUTH_BOOTSTRAP_OWNER_EMAIL=admin`) is caught at boot
@@ -923,8 +920,7 @@ export const envSchema = z
     // logout, cross-device revocation, freshness gate, realm guard):
     // `apps/api/test/integration/auth/session-cookie-cache.test.ts`.
     AUTH_SESSION_COOKIE_CACHE_SECONDS: z.coerce.number().int().min(0).default(0),
-    // AUTH_BOOTSTRAP_TOKEN — one-shot token that creates the owner account
-    // (the one AUTH_BOOTSTRAP_OWNER_EMAIL names, when set).
+    // AUTH_BOOTSTRAP_TOKEN — one-shot token that creates the owner account.
     // The CLI generates a 256-bit token at install time, writes it into
     // .env, and prints a banner with the redemption URL. The platform
     // reads it at boot, holds it in memory, and lets the first POST to

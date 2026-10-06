@@ -23,7 +23,7 @@
 // proof rule (it gets no organization): the "no proof" rows run over both
 // kinds of named address.
 
-import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -34,10 +34,9 @@ import {
   setBeforeSignupHook,
   setPostBootstrapOrgHook,
   setRealmResolver,
-  _swapRealmResolverForTesting,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
-import { createTestContext } from "../helpers/auth.ts";
+import { createTestContext, restoreRealmResolverAfterSuite } from "../helpers/auth.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { flushRedis } from "../helpers/redis.ts";
 import { seedInvitation } from "../helpers/seed.ts";
@@ -171,14 +170,7 @@ async function expectRootOrgOwnedBy(email: string, slug: string) {
   expect(membership).toMatchObject({ role: "owner", orgId: orgs[0]!.id });
 }
 
-// The realm resolver is process-wide: hand the installed one back to the suites that follow.
-let installedRealmResolver: ReturnType<typeof _swapRealmResolverForTesting>;
-beforeAll(() => {
-  installedRealmResolver = _swapRealmResolverForTesting(null);
-});
-afterAll(() => {
-  _swapRealmResolverForTesting(installedRealmResolver);
-});
+restoreRealmResolverAfterSuite();
 
 describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   beforeEach(async () => {
@@ -377,7 +369,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
         try {
           await expectRefusedWithNothingCreated(await redeem("ops@acme.com"), {
             status: 403,
-            code: "signup_refused",
+            code: "bootstrap_signup_rejected",
           });
         } finally {
           setBeforeSignupHook(() => {});

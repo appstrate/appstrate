@@ -249,7 +249,7 @@ export const authPaths = {
         "401": { description: "Invalid bootstrap token", content: problemContent },
         "403": {
           description:
-            "Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (`signup_domain_not_allowed`) — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL.",
+            "Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or account creation refused it, with the refusal's own code — `signup_domain_not_allowed` when AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP; the allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL), a module's sign-up refusal code, or `bootstrap_signup_rejected` when the refusal carries none.",
           content: problemContent,
         },
         "409": {

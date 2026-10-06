@@ -8,11 +8,7 @@
  *   bun apps/api/scripts/bootstrap-org.ts \
  *     --owner=admin@acme.com [--name="Acme"] [--slug=acme]
  *
- * Idempotent. The owner user MUST already exist: the script creates no
- * account. An address the environment names (`AUTH_BOOTSTRAP_OWNER_EMAIL`,
- * `AUTH_PLATFORM_ADMIN_EMAILS`) gets its account by a magic link or a
- * verified social sign-in, any other by the sign-up form or an invitation.
- * The script:
+ * Idempotent. The owner user MUST already exist: the script creates no account. The script:
  *
  *   1. Looks up the user by email — exits 2 if absent.
  *   2. If they already own an org → exits 0 (idempotent no-op, prints orgId).
