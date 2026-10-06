@@ -311,6 +311,43 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
  * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
  */
 /**
+ * Whether a magic link bound to `policy`'s client may be verified: the account
+ * it would sign in is of the realm that client serves, or it would create one
+ * and the client allows sign-up. A token this cannot read is left to Better Auth.
+ */
+async function linkServesClient(
+  policy: NonNullable<Awaited<ReturnType<typeof loadClientSignupPolicy>>>,
+  internalAdapter: unknown,
+  token: string,
+): Promise<boolean> {
+  const adapter = internalAdapter as
+    | {
+        findVerificationValue: (key: string) => Promise<{ value: string } | null>;
+        findUserByEmail: (email: string) => Promise<{ user: { realm?: string } } | null>;
+      }
+    | undefined;
+  if (!adapter) return true;
+  const row = await adapter.findVerificationValue(token);
+  if (!row) return true;
+  let email: unknown;
+  try {
+    email = (JSON.parse(row.value) as { email?: unknown }).email;
+  } catch {
+    return true;
+  }
+  if (typeof email !== "string" || !email) return true;
+
+  const existing = await adapter.findUserByEmail(email);
+  if (!existing?.user) return policy.allowSignup;
+  // The account may have been created, in another realm, after the link was
+  // issued for a then-free address.
+  return (
+    existing.user.realm ===
+    expectedRealmForClient({ level: policy.level, referencedSpaceId: policy.spaceId ?? undefined })
+  );
+}
+
+/**
  * Pre-empt `/magic-link/verify` when the pending OAuth client has a closed
  * signup policy AND the token would create a new user. Produces the same
  * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
@@ -355,41 +392,11 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   if (binding.kind !== "bound") return;
   const pendingClientId = binding.clientId;
 
+  // Once a link is bound to a client, that client decides: one that no longer
+  // resolves (deleted, disabled) serves nobody. Every refusal carries the
+  // same code, so the link's holder cannot tell an account exists.
   const policy = await loadClientSignupPolicy(pendingClientId);
-  if (!policy) return;
-
-  const adapter = ctx.context.internalAdapter as
-    | {
-        findVerificationValue: (key: string) => Promise<{ value: string; expiresAt: Date } | null>;
-        findUserByEmail: (email: string) => Promise<{ user: { realm?: string } } | null>;
-      }
-    | undefined;
-  if (!adapter) return;
-
-  const row = await adapter.findVerificationValue(token);
-  if (!row) return;
-  let email: string | undefined;
-  try {
-    const parsed = JSON.parse(row.value) as { email?: unknown };
-    if (typeof parsed.email === "string") email = parsed.email;
-  } catch {
-    return;
-  }
-  if (!email) return;
-
-  // A link signs in an account of the audience its client serves, and no
-  // other: the account may have been created, in another realm, after the
-  // link was issued for a then-free address.
-  const existing = await adapter.findUserByEmail(email);
-  const wrongRealm =
-    !!existing?.user &&
-    existing.user.realm !==
-      expectedRealmForClient({
-        level: policy.level,
-        referencedSpaceId: policy.spaceId ?? undefined,
-      });
-  if (existing?.user ? !wrongRealm : policy.allowSignup) return;
-  const errorCode = wrongRealm ? "account_realm_mismatch" : "signup_disabled";
+  if (policy && (await linkServesClient(policy, ctx.context.internalAdapter, token))) return;
 
   const baseURL = new URL(ctx.context.baseURL);
 
@@ -415,17 +422,12 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
       ...logFields,
     });
     const safe = new URL(baseURL);
-    safe.searchParams.set("error", errorCode);
+    safe.searchParams.set("error", "signup_disabled");
     throw ctx.redirect(safe.toString());
   }
 
-  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
-  if (!rawErrorCallback) {
-    // A closed sign-up without a callback is left to the create hook; a
-    // wrong-realm sign-in has no later guard.
-    if (!wrongRealm) return;
-    redirectToSafeDefault("oidc.magic_link.error_callback.missing", {});
-  }
+  // Better Auth's own default for a link that names no callback.
+  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL ?? "/";
 
   // `decodeURIComponent` throws `URIError` on malformed percent-escapes
   // (`%ZZ`, lone `%`); `new URL` throws `TypeError` on syntactically
@@ -479,7 +481,7 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
       baseOrigin: baseURL.origin,
     });
   }
-  target.searchParams.set("error", errorCode);
+  target.searchParams.set("error", "signup_disabled");
   throw ctx.redirect(target.toString());
 }
 

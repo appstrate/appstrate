@@ -263,14 +263,16 @@ export function createAuthBootstrapRouter(): Hono {
 
       // Read off the create hook, not the response: with mail verification on,
       // Better Auth answers the hook's refusal as a created account.
-      if (refusal === "signup_domain_not_allowed") {
+      if (refusal) {
         throw new ApiError({
           status: 403,
-          code: "signup_domain_not_allowed",
+          code: refusal,
           title: "Forbidden",
           detail:
-            "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
-            "Use an allowlisted email for the bootstrap owner.",
+            refusal === "signup_domain_not_allowed"
+              ? "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
+                "Use an allowlisted email for the bootstrap owner."
+              : `The account could not be created (${refusal}).`,
         });
       }
 

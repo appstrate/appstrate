@@ -16,7 +16,12 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
-import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
+import {
+  createClient,
+  deleteClient,
+  updateClient,
+  _resetClientCache,
+} from "../../../services/oauth-admin.ts";
 import {
   upsertSmtpConfig,
   _clearSmtpCacheForTesting,
@@ -28,7 +33,7 @@ import oidcModule from "../../../index.ts";
 const app = getTestApp({ modules: [oidcModule] });
 
 /** A space whose admin runs the mail server, and a client of that space. */
-async function spaceWithOwnSmtp(): Promise<{ spaceId: string; qs: string }> {
+async function spaceWithOwnSmtp(): Promise<{ spaceId: string; clientId: string; qs: string }> {
   const ctx = await createTestContext({ orgSlug: `tenant-${crypto.randomUUID().slice(0, 8)}` });
   const spaceId = prefixedId("spc");
   await db.insert(spaces).values({
@@ -52,7 +57,11 @@ async function spaceWithOwnSmtp(): Promise<{ spaceId: string; qs: string }> {
     fromAddress: `no-reply@${spaceId}.test`,
     fromName: "Tenant",
   });
-  return { spaceId, qs: `?client_id=${encodeURIComponent(client.clientId)}&state=s` };
+  return {
+    spaceId,
+    clientId: client.clientId,
+    qs: `?client_id=${encodeURIComponent(client.clientId)}&state=s`,
+  };
 }
 
 async function submitEmail(path: string, qs: string, email: string): Promise<Response> {
@@ -125,21 +134,39 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
     );
   });
 
-  it("a link issued for a free address does not sign in the platform account created since", async () => {
-    const { qs } = await spaceWithOwnSmtp();
-    const email = `later-${crypto.randomUUID()}@acme.test`;
-    await submitEmail("/api/oauth/magic-link", qs, email);
-    const link = new URL(/href="([^"]+)"/.exec(mails[0]!.html)![1]!.replaceAll("&amp;", "&"));
-    const account = await createTestUser({ email, emailVerified: true });
+  describe("a link issued for a free address, opened once a platform account holds it", () => {
+    async function openLinkAfter(change: (clientId: string) => Promise<unknown>) {
+      const { clientId, qs } = await spaceWithOwnSmtp();
+      const email = `later-${crypto.randomUUID()}@acme.test`;
+      await submitEmail("/api/oauth/magic-link", qs, email);
+      const link = new URL(/href="([^"]+)"/.exec(mails[0]!.html)![1]!.replaceAll("&amp;", "&"));
+      const account = await createTestUser({ email, emailVerified: true });
+      await change(clientId);
 
-    const res = await app.request(`/api/auth/magic-link/verify${link.search}`);
+      const res = await app.request(`/api/auth/magic-link/verify${link.search}`);
 
-    expect(res.status).toBe(302);
-    expect(new URL(res.headers.get("location")!).searchParams.get("error")).toBeTruthy();
-    expect(res.headers.getSetCookie().join(";")).not.toContain("session_token");
-    expect(
-      await db.select().from(sessionTable).where(eq(sessionTable.userId, account.id)),
-    ).toHaveLength(1);
+      // Refused as a closed sign-up is, so the link's holder learns nothing.
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location")!).searchParams.get("error")).toBe(
+        "signup_disabled",
+      );
+      expect(res.headers.getSetCookie().join(";")).not.toContain("session_token");
+      expect(
+        await db.select().from(sessionTable).where(eq(sessionTable.userId, account.id)),
+      ).toHaveLength(1);
+    }
+
+    it("does not sign that account in", async () => {
+      await openLinkAfter(async () => {});
+    });
+
+    it("nor after the client was deleted", async () => {
+      await openLinkAfter((clientId) => deleteClient(clientId));
+    });
+
+    it("nor after the client was disabled", async () => {
+      await openLinkAfter((clientId) => updateClient(clientId, { disabled: true }));
+    });
   });
 
   it("still sends one to an end-user of that space, and to a new address", async () => {

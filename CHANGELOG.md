@@ -494,13 +494,16 @@ could not be resolved`) instead of failing for good on the first. Without
   signed in whichever account held the address when it was opened. The
   verify guard that already bound a link to its client for sign-up
   (`enforceMagicLinkSignupPolicy`) now covers an existing account too: one
-  of another realm is refused with a redirect to the sign-in page and no
-  session.
-- **`/claim` answers `403 signup_domain_not_allowed` with SMTP configured
+  of another realm is refused, and so is any link whose client no longer
+  resolves (deleted or disabled). Every refusal is the redirect a closed
+  sign-up already gets (`error=signup_disabled`), with no session.
+- **`/claim` answers the account-creation refusal with SMTP configured
   too.** Under mail verification Better Auth answers a refused account
   creation as a created one, so claiming an address outside
-  `AUTH_ALLOWED_SIGNUP_DOMAINS` ended in `500 bootstrap_user_lookup_failed`.
-  The token stays redeemable.
+  `AUTH_ALLOWED_SIGNUP_DOMAINS`, or one a module's sign-up hook refuses,
+  ended in `500 bootstrap_user_lookup_failed`. It is now a `403` carrying
+  the refusal's own code (`signup_domain_not_allowed`, …). The token stays
+  redeemable.
 - **An `api_call` reaches an internal host only when the manifest and the
   operator both allow it** (#1657). The three paths disagreed: a run's
   sidecar skipped the SSRF gate for any host `authorized_uris` named

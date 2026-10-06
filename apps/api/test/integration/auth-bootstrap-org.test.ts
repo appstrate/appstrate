@@ -25,11 +25,13 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
+import { APIError } from "better-auth/api";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import {
   _rebuildAuthForTesting,
   getAuth,
+  setBeforeSignupHook,
   setPostBootstrapOrgHook,
   setRealmResolver,
 } from "@appstrate/db/auth";
@@ -354,6 +356,22 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           status: 403,
           code: "signup_domain_not_allowed",
         });
+        expect(isBootstrapTokenPending()).toBe(true);
+      });
+
+      it("any other refusal of the create hook is answered with its own code", async () => {
+        setEnv({ AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN });
+        setBeforeSignupHook(() => {
+          throw new APIError("FORBIDDEN", { message: "module_refused", code: "module_refused" });
+        });
+        try {
+          await expectRefusedWithNothingCreated(await redeem("ops@acme.com"), {
+            status: 403,
+            code: "module_refused",
+          });
+        } finally {
+          setBeforeSignupHook(() => {});
+        }
         expect(isBootstrapTokenPending()).toBe(true);
       });
     });

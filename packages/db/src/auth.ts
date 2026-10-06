@@ -311,6 +311,21 @@ export async function withBootstrapTokenRedemption<T>(
   return { result, refusal: redemption.refusal };
 }
 
+/** Wrap the create hook so a refusal it throws during a redemption is recorded on it. */
+function recordingRedemptionRefusal<A extends unknown[], R>(
+  hook: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  return async (...args) => {
+    try {
+      return await hook(...args);
+    } catch (err) {
+      const redemption = bootstrapTokenRedemptionStore.getStore();
+      if (redemption && err instanceof APIError) redemption.refusal = err.body?.code;
+      throw err;
+    }
+  };
+}
+
 /** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
 export function withSmtpOverride<T>(
   override: SmtpOverride | null,
@@ -998,7 +1013,7 @@ function buildAuth(options: CreateAuthOptions) {
     databaseHooks: {
       user: {
         create: {
-          before: async (user, context) => {
+          before: recordingRedemptionRefusal(async (user, context) => {
             const ctx = context as
               | {
                   headers?: Headers;
@@ -1037,8 +1052,7 @@ function buildAuth(options: CreateAuthOptions) {
             // named as owner. A pending invitation also overrides
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
-            const redemption = bootstrapTokenRedemptionStore.getStore();
-            const bootstrapTokenBypass = redemption !== undefined;
+            const bootstrapTokenBypass = bootstrapTokenRedemptionStore.getStore() !== undefined;
             // Proof for an account the environment names (owner, platform
             // admins): the bootstrap token, or a row born verified (provider
             // assertion, consumed magic link). The refusal mirrors what an
@@ -1089,7 +1103,6 @@ function buildAuth(options: CreateAuthOptions) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
                     });
-                    redemption.refusal = "signup_domain_not_allowed";
                     throw new APIError("FORBIDDEN", {
                       message: "signup_domain_not_allowed",
                       code: "signup_domain_not_allowed",
@@ -1143,7 +1156,7 @@ function buildAuth(options: CreateAuthOptions) {
                   })
                 : "platform";
             return { data: { realm } };
-          },
+          }),
           after: async (user, context) => {
             await db.insert(profiles).values({
               id: user.id,

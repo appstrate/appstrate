@@ -162,6 +162,11 @@ magic-link paths are for an instance configured without a token.
   ordinary address does not. With SMTP the request is answered like any
   other and no e-mail is sent: the refusal is only in the server log.
   Confirming the address does not let anyone create its account.
+- **A space that runs its own SMTP server can tell whether an address is
+  its own or free.** A sign-in e-mail requested on that space's hosted
+  pages reaches its server only for one of the space's accounts or for an
+  address nobody holds; for any other address nothing arrives, which the
+  server's owner can observe. No link is delivered in that case.
 - **An account that already holds a named address is not re-examined.**
   The rule is on creation. Whoever holds the account of an address in
   `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` has its
