@@ -99,11 +99,7 @@ export function clearPendingClientCookie(c: Context<AppEnv>): void {
   deleteCookie(c, COOKIE_NAME, { path: "/" });
 }
 
-/**
- * Marks headers whose pending-client cookie was minted by
- * `headersWithAuthoritativePendingClient`, as opposed to carried by a browser.
- * Its value is a secret of this process, so a caller cannot send it.
- */
+/** Mark of headers minted by `headersWithAuthoritativePendingClient`: a per-process secret. */
 export const AUTHORITATIVE_PENDING_CLIENT_HEADER = "x-appstrate-pending-client-authority";
 const AUTHORITY_PROOF = crypto.randomUUID();
 

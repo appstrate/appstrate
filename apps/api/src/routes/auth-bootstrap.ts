@@ -261,8 +261,7 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
-      // Read off the create hook, not the response: with mail verification on,
-      // Better Auth answers the hook's refusal as a created account.
+      // Under mail verification Better Auth answers the hook's 403 as a created account.
       if (refusal) {
         throw new ApiError({
           status: 403,

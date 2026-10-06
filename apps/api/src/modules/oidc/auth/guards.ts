@@ -310,12 +310,7 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
  * layer to keep `@better-auth/core` types out of the module's public
  * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
  */
-/**
- * Whether verifying `token` would create an account. A token this cannot read
- * is left to Better Auth, and so is an existing account: the realm of the
- * account a link signs in is asserted where Better Auth writes
- * (`assertMagicLinkAudience`, `@appstrate/db/auth`), after its own read.
- */
+/** Whether verifying `token` would create an account; an unreadable token is Better Auth's. */
 async function wouldCreateAccount(internalAdapter: unknown, token: string): Promise<boolean> {
   const adapter = internalAdapter as
     | {
@@ -337,9 +332,8 @@ async function wouldCreateAccount(internalAdapter: unknown, token: string): Prom
 }
 
 /**
- * Pre-empt `/magic-link/verify` when the client the link is bound to no
- * longer resolves, or has a closed signup policy AND the token would create
- * a new user. Produces the same
+ * Pre-empt `/magic-link/verify` when the bound OAuth client is gone, or has a closed
+ * signup policy AND the token would create a new user. Produces the same
  * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
  * its own signup-gating (`disableSignUp` in magic-link, social callback
  * via `oauth2/link-account.mjs` → `callback.mjs:158`), so the OIDC login
@@ -382,8 +376,6 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   if (binding.kind !== "bound") return;
   const pendingClientId = binding.clientId;
 
-  // Once a link is bound to a client, that client decides: one that no longer
-  // resolves (deleted, disabled) serves nobody.
   const policy = await loadClientSignupPolicy(pendingClientId);
   if (
     policy &&

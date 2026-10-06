@@ -168,9 +168,9 @@ export async function oidcAfterSignupHandler(input: {
 }): Promise<void> {
   // Best-effort transaction resolution. `create.after` hooks may run after
   // the BA transaction commits; if the request-scoped OAuth state is no
-  // longer readable there, no client is bound — benign, because the org
-  // auto-join is also performed at token-mint time by `buildOrgLevelClaims`
-  // (SELECT-first, idempotent).
+  // longer readable there, no client is bound here — benign,
+  // because the org auto-join is also performed at token-mint time by
+  // `buildOrgLevelClaims` (SELECT-first, idempotent).
   const binding = await resolvePendingClientBinding({
     headers: input.headers,
     path: input.path ?? null,

@@ -215,12 +215,8 @@ export function setRealmResolver(resolver: RealmResolver): void {
   _realmResolver = resolver;
 }
 
-/**
- * A magic link signs in an account of the realm its transaction resolves to:
- * the bound client's, else the platform's. Asserted at Better Auth's writes
- * (the first one it makes to an unproven account, and the session), which come
- * after its own read of the account, so nothing can change in between.
- */
+// A magic link signs in an account of the realm its transaction resolves to. Asserted at
+// Better Auth's writes, which come after its own read of the account.
 async function assertMagicLinkAudience(
   userId: string,
   context: GenericEndpointContext | null,
@@ -240,7 +236,6 @@ async function assertMagicLinkAudience(
   });
   if (account.realm === expected) return;
   logger.warn("auth: refused a magic link for an account outside its audience", { expected });
-  // The redirect a closed sign-up gets: the link's holder learns nothing more.
   const raw = query.errorCallbackURL ?? query.callbackURL;
   const target = new URL(
     typeof raw === "string" ? decodeURIComponent(raw) : "/",
@@ -311,11 +306,7 @@ export interface SmtpOverride {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
-  /**
-   * Set when the transport belongs to a tenant (a space's own SMTP server):
-   * the realm of that tenant's accounts. An auth mail is a credential, so it
-   * leaves through such a transport only for a recipient of that realm.
-   */
+  /** A tenant's own transport: the realm of the accounts it may write to. */
   tenantRealm?: string;
 }
 
@@ -333,12 +324,7 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 
 const bootstrapTokenRedemptionStore = new AsyncLocalStorage<{ refusal?: string }>();
 
-/**
- * Run `fn` with the bootstrap-token bypass active for any signup-gate eval
- * downstream. `refusal` is the code the create hook refused the account with,
- * if it did: under mail verification Better Auth answers that refusal as a
- * created account, so the response alone does not carry it.
- */
+/** Run `fn` under the bootstrap-token bypass; `refusal` is the code of a 403 the create hook threw. */
 export async function withBootstrapTokenRedemption<T>(
   fn: () => Promise<T>,
 ): Promise<{ result: T; refusal: string | undefined }> {
@@ -347,10 +333,7 @@ export async function withBootstrapTokenRedemption<T>(
   return { result, refusal: redemption.refusal };
 }
 
-/**
- * Wrap the create hook so a 403 it throws during a redemption is recorded on
- * it: the one status Better Auth answers as a created account.
- */
+/** Record on the redemption a 403 the create hook throws: Better Auth answers it as a success. */
 function recordingRedemptionRefusal<A extends unknown[], R>(
   hook: (...args: A) => Promise<R>,
 ): (...args: A) => Promise<R> {
@@ -551,11 +534,7 @@ async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
   return true;
 }
 
-/**
- * True when `email` may be written to by the tenant owning `tenantRealm`: an
- * account of that realm, or an address with no account that the environment
- * does not name.
- */
+/** An account of the tenant's realm, or an address with no account the environment does not name. */
 async function isTenantRecipient(email: string, tenantRealm: string): Promise<boolean> {
   const [holder] = await db
     .select({ realm: user.realm })

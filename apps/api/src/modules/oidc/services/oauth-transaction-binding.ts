@@ -46,9 +46,8 @@
  *      re-mints an authoritative `oidc_pending_client` cookie header from
  *      the validated authorize query (`headersWithAuthoritativePendingClient`)
  *      before calling BA in-process — the browser never gets a chance to
- *      strip it — and marks those headers as its own
- *      (`hasAuthoritativePendingClient`). The cookie is read only under
- *      that mark: one the browser carries on any other request binds nothing.
+ *      strip it, and marks those headers as its own. The cookie is read
+ *      only under that mark (`hasAuthoritativePendingClient`).
  *
  * Consumers (`oidcRealmResolver`, `oidcBeforeSignupGuard`,
  * `oidcAfterSignupHandler`) treat the result as:
@@ -104,7 +103,6 @@ type PendingClientBinding =
   | { kind: "invalid" }
   | { kind: "none" };
 
-/** The pending client of headers the server minted itself, never of a cookie a browser carries. */
 function authoritativePendingClient(headers: Headers | null): string | null {
   return hasAuthoritativePendingClient(headers)
     ? readPendingClientCookieFromHeaders(headers)
@@ -150,8 +148,7 @@ export async function resolvePendingClientBinding(
     return { kind: "none" };
   }
 
-  // ── 3. Cookie, when the server-driven register path re-minted it from the
-  //      validated authorize query. One a browser merely carries binds nothing.
+  // ── 3. Cookie, only under the mark of the server-driven register path. ──
   const cookieClientId = authoritativePendingClient(ctx.headers);
   if (cookieClientId) return { kind: "bound", clientId: cookieClientId, source: "cookie" };
   return { kind: "none" };
@@ -261,11 +258,9 @@ async function findMagicLinkClientBinding(token: string): Promise<string | null>
  * route re-mints an AUTHORITATIVE pending-client cookie header from the
  * validated authorize query (`headersWithAuthoritativePendingClient`), so
  * the binding is pinned to the client the server authorized, not to
- * browser-supplied state, and marks the headers as its own
- * (`hasAuthoritativePendingClient`). A direct (non-OIDC) call to BA's public
- * magic-link endpoint carries no such marker, whatever cookie the browser
- * still holds, and writes no binding — its eventual signup is a plain
- * platform signup under platform gates.
+ * browser-supplied state. A direct (non-OIDC) call to BA's public
+ * magic-link endpoint carries no such marker and writes no binding —
+ * its eventual signup is a plain platform signup under platform gates.
  *
  * FAIL CLOSED: a persistence failure rethrows, which aborts the email send
  * in `sendMagicLink`'s surrounding try/catch — better no email than an
