@@ -428,7 +428,7 @@ async function deleteSpaceInTx(
       "space_homes_packages",
       `Cannot delete this space: it is the home of ${homed.length} package(s) — ${homed
         .map((row) => row.id)
-        .join(", ")}. Move them to another space first.`,
+        .join(", ")}.`,
       { packages: homed.map((row) => row.id) },
     );
   }

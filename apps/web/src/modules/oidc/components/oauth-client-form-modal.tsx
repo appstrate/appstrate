@@ -39,8 +39,8 @@ import {
   type OAuthClient,
 } from "../hooks/use-oauth-clients";
 import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
+import { errorMessage } from "../../../lib/mutation-error";
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -236,7 +236,7 @@ function OAuthClientFormBody({
             handleClose();
           },
           onError: (err) => {
-            setError("root", { message: getErrorMessage(err) });
+            setError("root", { message: errorMessage(err) });
           },
         },
       );
@@ -256,7 +256,7 @@ function OAuthClientFormBody({
             setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
           },
           onError: (err) => {
-            setError("root", { message: getErrorMessage(err) });
+            setError("root", { message: errorMessage(err) });
           },
         },
       );

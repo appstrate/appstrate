@@ -15,7 +15,6 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { roleI18nKey } from "../hooks/use-permissions";
@@ -78,9 +77,9 @@ export function BillingManagersSection() {
   const [draft, setDraft] = useState<string[] | null>(null);
 
   if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
-  if (managersQuery.error) return <ErrorState message={getErrorMessage(managersQuery.error)} />;
+  if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
-  if (orgQuery.error) return <ErrorState message={getErrorMessage(orgQuery.error)} />;
+  if (orgQuery.error) return <ErrorState error={orgQuery.error} />;
 
   const saved = (managersQuery.data?.data ?? []).map((m) => m.userId);
   const selected = draft ?? saved;

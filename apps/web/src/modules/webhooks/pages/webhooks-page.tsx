@@ -11,7 +11,6 @@ import { useWebhooks } from "../hooks/use-webhooks";
 import { PageHeader } from "@/components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
@@ -28,7 +27,7 @@ export function WebhooksPage() {
   );
   const canCreate = createLevels.length > 0;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   return (
     <div className="p-6">

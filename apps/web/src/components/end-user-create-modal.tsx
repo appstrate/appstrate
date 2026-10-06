@@ -9,7 +9,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateEndUser } from "../hooks/use-end-users";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../lib/mutation-error";
 import { EndUserMetadataEditor } from "./end-user-metadata-editor";
 import { entriesToMetadata, type MetadataEntry } from "../lib/end-user-metadata";
 
@@ -59,7 +59,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
       {
         onSuccess: () => handleClose(),
         onError: (err) => {
-          setError("root", { message: getErrorMessage(err) });
+          setError("root", { message: errorMessage(err) });
         },
       },
     );

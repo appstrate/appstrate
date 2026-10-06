@@ -75,6 +75,12 @@ describe("ResourceErrorState", () => {
     expect(html).toContain("boom");
     expect(html).not.toContain(t("error.resourceUnavailable"));
   });
+
+  it("says the generic sentence once for a failure that carries no message", () => {
+    const html = render(<ResourceErrorState error={new Error("")} />);
+
+    expect(html.split(t("error.generic")).length - 1).toBe(1);
+  });
 });
 
 // The harness has no DOM renderer and `renderToStaticMarkup` cannot run an

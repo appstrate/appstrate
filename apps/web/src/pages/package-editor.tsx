@@ -11,7 +11,7 @@ import { useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
-import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
+import { skillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorState } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
@@ -401,7 +401,6 @@ function PackageEditorInner({
       }
       return null;
     },
-    translateError: (err) => translateSkillFrontmatterError(err, t),
   });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);

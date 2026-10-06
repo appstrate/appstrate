@@ -8,7 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 
 function formatRelativeTime(
   dateStr: string,
@@ -51,7 +51,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
 
   if (isLoading) return <LoadingState />;
   // Once rows are on screen, a failed page (next or refetch) must not hide them.
-  if (error && !data) return <ErrorState message={getErrorMessage(error)} />;
+  if (error && !data) return <ErrorState error={error} />;
 
   if (deliveries.length === 0) {
     return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;
@@ -79,7 +79,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
       })}
       {error && (
         <p className="text-destructive mt-2 text-sm">
-          {t("common:error.generic")} {getErrorMessage(error)}
+          {t("common:error.generic")} {errorMessage(error)}
         </p>
       )}
       {hasNextPage && (

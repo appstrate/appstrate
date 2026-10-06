@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "b
 import { toast } from "sonner";
 import { ApiError } from "../../api/errors.ts";
 import { queryClient, shouldRetryQuery } from "../query-client.ts";
-import { i18nReady } from "../../i18n.ts";
+import i18n, { i18nReady } from "../../i18n.ts";
 
 await i18nReady;
 
@@ -57,7 +57,10 @@ describe("failed mutations", () => {
     await fail();
 
     expect(toastError).toHaveBeenCalledTimes(1);
-    expect(String(toastError.mock.calls[0]![0])).toContain("URL is blocked");
+    // The refusal's translated sentence, not the server's English detail.
+    expect(toastError.mock.calls[0]![0]).toBe(
+      i18n.t("common:apiError.blocked_url", { message: "URL is blocked" }),
+    );
   });
 
   // An `onError` rolls a cache back or invalidates far more often than it
@@ -83,6 +86,10 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).toHaveBeenCalledTimes(1);
+    // Translated lead, and the permission the server named kept after it.
+    expect(toastError.mock.calls[0]![0]).toBe(
+      "Action refusée : Insufficient permissions: members:invite required",
+    );
   });
 
   it("keeps the opt-out for a 403 with another code", async () => {

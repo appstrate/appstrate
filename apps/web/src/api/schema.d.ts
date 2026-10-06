@@ -8641,7 +8641,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15734,6 +15734,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -15946,6 +15947,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when one of `model_ids` is outside the provider's catalog offer. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -16068,6 +16070,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -17206,6 +17209,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description Forbidden. `code` is `org_creation_disabled` when the instance sets `AUTH_DISABLE_ORG_CREATION` and the caller is not a platform admin. */
             403: components["responses"]["Forbidden"];
         };
     };
@@ -17793,7 +17797,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18269,7 +18273,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18280,7 +18284,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18418,7 +18422,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18429,7 +18433,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18526,7 +18530,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19512,7 +19516,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -20126,7 +20130,7 @@ export interface operations {
                     "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Already owned, name collision, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type), `name_collision` or `validation_failed` (`errors[].field` names the manifest key). */
+            /** @description Already owned, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `validation_failed` (`errors[].field` names the manifest key). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20139,6 +20143,15 @@ export interface operations {
             /** @description Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A package with the fork's name already exists in the organization (`code: name_collision`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The SOURCE package's published artifact cannot be read: it expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`), or the source's latest published version exists but its archive is gone from storage (`version_artifact_unavailable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
             422: {
                 headers: {
@@ -22763,7 +22776,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24445,6 +24458,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24592,6 +24606,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

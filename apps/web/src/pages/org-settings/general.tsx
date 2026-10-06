@@ -7,10 +7,9 @@ import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { canLeaveOrg } from "@appstrate/shared-types";
-import { $api, ApiError } from "../../api/client";
+import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -26,6 +25,7 @@ import { McpClientConnect } from "../../components/org-settings/mcp-client-conne
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
+import { toastError } from "../../lib/mutation-error";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -96,11 +96,7 @@ export function OrgSettingsGeneralPage() {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
     onError: (err) => {
       // The server is the real guard (owners may have changed meanwhile).
-      toast.error(
-        err instanceof ApiError && err.code === "last_owner"
-          ? t("orgSettings.leaveLastOwner")
-          : t("error.prefix", { message: getErrorMessage(err) }),
-      );
+      toastError(err);
     },
   });
 

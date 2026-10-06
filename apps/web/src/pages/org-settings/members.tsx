@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -85,7 +84,7 @@ export function OrgSettingsMembersPage() {
   });
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;

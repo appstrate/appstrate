@@ -29,8 +29,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { toastError } from "../lib/mutation-error";
 import { useQueryClient } from "@tanstack/react-query";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
@@ -146,9 +146,7 @@ export function OAuthPairingBody({
         registeredRef.current = true;
       }
     } catch (err) {
-      toast.error(
-        err instanceof Error ? getErrorMessage(err) : t("credentials.oauth.pairingCreateFailed"),
-      );
+      toastError(err);
     }
   }
 

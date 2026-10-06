@@ -14,6 +14,7 @@ import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
 import { EmailNotVerifiedError } from "../lib/auth-errors";
+import { errorMessage } from "../lib/mutation-error";
 
 type LoginFormData = {
   email: string;
@@ -64,9 +65,7 @@ export function LoginForm({
         navigate("/verify-email", { state: { email, callbackURL } });
         return;
       }
-      setError("root", {
-        message: err instanceof Error ? err.message : t("login.error"),
-      });
+      setError("root", { message: errorMessage(err) });
     }
   };
 

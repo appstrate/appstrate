@@ -180,6 +180,8 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
+  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
   "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
@@ -201,6 +203,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
+  "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
 

@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { runFileDirection, type RunFileDirection } from "../lib/files";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
@@ -230,7 +229,7 @@ export function FileListPanel({
       {isLoading ? (
         <LoadingState />
       ) : error ? (
-        <ErrorState message={getErrorMessage(error)} />
+        <ErrorState error={error} />
       ) : shown.length === 0 ? (
         <EmptyState
           message={empty.message}

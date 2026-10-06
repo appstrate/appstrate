@@ -47,8 +47,13 @@ export const i18nReady = i18n
   });
 
 // Persist language choice to localStorage for next visit (best-effort — a
-// blocked store must not throw out of the languageChanged handler).
+// blocked store must not throw out of the languageChanged handler), and keep
+// `<html lang>` on the language actually rendered: screen readers and the
+// browser's translate/hyphenation features read it. Fired by `init()` too.
 i18n.on("languageChanged", (lng) => {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = i18n.resolvedLanguage ?? lng;
+  }
   try {
     localStorage.setItem("i18nextLng", lng);
   } catch {

@@ -10,6 +10,12 @@
  * implementation and one place to evolve.
  */
 
+/** Unit names per tier. French counts in octets; every other language keeps the IEC-less English spelling. */
+const BYTE_UNITS = {
+  en: ["B", "KB", "MB", "GB"],
+  fr: ["o", "Ko", "Mo", "Go"],
+} as const;
+
 /**
  * Format a byte count as a compact human string (B / KB / MB / GB).
  *
@@ -21,20 +27,27 @@
  * (matches CLI prior art the audit consolidated): values ≥ 10 in their
  * tier are rounded to an integer (e.g. `12 KB`); values < 10 carry one
  * decimal (e.g. `2.0 KB`, `5.2 MB`).
+ *
+ * `locale` (a BCP 47 tag, e.g. the UI language) localises the unit names and
+ * the decimal separator: `fr` renders `2,0 Ko`. Omitted — the CLI, logs, the
+ * prompt builder — the output is the English form, byte for byte as before.
  */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} B`;
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return formatTier(kb, "KB");
-  const mb = kb / 1024;
-  if (mb < 1024) return formatTier(mb, "MB");
-  const gb = mb / 1024;
-  return formatTier(gb, "GB");
-}
-
-function formatTier(value: number, unit: string): string {
-  return value >= 10 ? `${Math.round(value)} ${unit}` : `${value.toFixed(1)} ${unit}`;
+export function formatBytes(bytes: number, locale?: string): string {
+  const units = locale?.toLowerCase().startsWith("fr") ? BYTE_UNITS.fr : BYTE_UNITS.en;
+  if (!Number.isFinite(bytes) || bytes < 0 || bytes < 1024) return `${bytes} ${units[0]}`;
+  let value = bytes / 1024;
+  let tier = 1;
+  while (value >= 1024 && tier < units.length - 1) {
+    value /= 1024;
+    tier++;
+  }
+  const digits = value >= 10 ? 0 : 1;
+  const amount = new Intl.NumberFormat(locale ?? "en", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    useGrouping: false,
+  }).format(value);
+  return `${amount} ${units[tier]}`;
 }
 
 /**

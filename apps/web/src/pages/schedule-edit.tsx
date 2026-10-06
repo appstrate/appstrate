@@ -50,7 +50,7 @@ export function ScheduleEditPage() {
   // on every save). `key={schedule.id}` gives no remount to repair it. When
   // that query FAILS (deleted agent, revoked permission) the detail never
   // lands, so waiting is waiting forever — say so instead.
-  if (depsError) return <ErrorState message={depsError.message} />;
+  if (depsError) return <ErrorState error={depsError} />;
   if (denied) return <NoAccessState />;
   if (!deps) return <LoadingState />;
 

@@ -23,7 +23,6 @@ import {
   useTestProxy,
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -50,7 +49,7 @@ export function OrgSettingsProxiesPage() {
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
 
   const onCreate = () => {
     setEditProxy(null);

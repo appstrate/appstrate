@@ -51,6 +51,13 @@ export function companionDisplayFile(type: PackageType): DisplayFile | undefined
   return primary.source === "content" ? primary : undefined;
 }
 
+/** The three path refusals of a draft-tree write: the one sentence of each code, here and in `errorMessage`. */
+export const PACKAGE_PATH_ERROR_KEYS = {
+  invalid_path: "files.errorInvalidPath",
+  reserved_entry: "files.errorReserved",
+  path_conflict: "files.errorConflictPath",
+} as const;
+
 /**
  * The message an author reads when a draft-tree write is refused, keyed by the
  * route's machine-readable `code` rather than by its status or its English
@@ -76,11 +83,9 @@ export function packageFilesErrorKey(error: unknown): string | null {
     case "precondition_failed":
       return "files.errorConflict";
     case "invalid_path":
-      return "files.errorInvalidPath";
     case "reserved_entry":
-      return "files.errorReserved";
     case "path_conflict":
-      return "files.errorConflictPath";
+      return PACKAGE_PATH_ERROR_KEYS[error.code];
     // `payload_too_large` is the GLOBAL body-limit middleware, which answers
     // before the route runs: several near-1 MiB files in one import inflate
     // ~1.37x as base64 and cross `API_BODY_LIMIT_BYTES` while every individual

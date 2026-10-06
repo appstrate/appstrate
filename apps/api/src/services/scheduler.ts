@@ -31,7 +31,7 @@ import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
-import { ApiError, conflict, internalError, invalidRequest } from "../lib/errors.ts";
+import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, actorMatch, type Actor } from "../lib/actor.ts";
@@ -178,7 +178,13 @@ export async function assertScheduleActorValid(
   spaceId: string,
 ): Promise<void> {
   if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
-    throw invalidRequest(`Schedule refused: ${invalidScheduleActorReason(actor)}`, "actor");
+    throw new ApiError({
+      status: 400,
+      code: "schedule_actor_invalid",
+      title: "Invalid Request",
+      detail: `Schedule refused: ${invalidScheduleActorReason(actor)}`,
+      param: "actor",
+    });
   }
 }
 

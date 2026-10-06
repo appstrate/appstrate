@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { authClient } from "../lib/auth-client";
 import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
-import { toLoginError, toUnlinkError } from "../lib/auth-errors";
+import { toAuthError, toLoginError, toUnlinkError } from "../lib/auth-errors";
 import { EMAIL_CHANGE_CALLBACK_URL, emailWasChanged } from "../lib/auth-flow";
 import { clearSession } from "../lib/clear-session";
 import { readSession, rememberSignedIn, sessionExpected } from "../lib/session-read";
@@ -109,16 +109,13 @@ export class AuthRefreshError extends Error {
 }
 
 /**
- * Thrown by `changeEmail()` so the caller can distinguish a 409 address
- * collision (a dedicated "email already in use" message) from any other
- * failure without reaching into the raw Better Auth result shape — the
- * seam is the only place that touches `authClient`.
+ * Thrown by `changeEmail()` on a 409 address collision, so the caller can show
+ * its dedicated "email already in use" message without reaching into the raw
+ * Better Auth result shape — the seam is the only place that touches
+ * `authClient`. Any other failure is thrown as a coded `ApiError`.
  */
 export class EmailChangeError extends Error {
-  constructor(
-    public conflict: boolean,
-    message: string,
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = "EmailChangeError";
   }
@@ -191,7 +188,7 @@ export function useAuth() {
         name: displayName || email,
         callbackURL,
       });
-      if (result.error) throw new Error(result.error.message);
+      if (result.error) throw toAuthError(result.error);
       const smtpEnabled = window.__APP_CONFIG__?.features?.smtp ?? false;
       if (!result.data?.user || (smtpEnabled && !result.data.user.emailVerified)) {
         return { emailVerificationRequired: true };
@@ -234,7 +231,7 @@ export function useAuth() {
       currentPassword,
       newPassword,
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const signInWithSocial = useCallback(
@@ -278,7 +275,7 @@ export function useAuth() {
 
   const resendVerificationEmail = useCallback(async (email: string, callbackURL?: string) => {
     const result = await authClient.sendVerificationEmail({ email, callbackURL });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   // ─── Password recovery / passwordless (OSS-only at runtime) ─────────────
@@ -295,12 +292,12 @@ export function useAuth() {
       email,
       redirectTo: "/reset-password",
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const resetPassword = useCallback(async (token: string, newPassword: string) => {
     const result = await authClient.resetPassword({ newPassword, token });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   const startMagicLink = useCallback(async (email: string) => {
@@ -310,7 +307,7 @@ export function useAuth() {
       callbackURL: "/",
       errorCallbackURL: "/magic-link",
     });
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
   }, []);
 
   // ─── Authenticated account management (no OIDC entry redirect) ───────────
@@ -325,13 +322,13 @@ export function useAuth() {
         newEmail,
         callbackURL: EMAIL_CHANGE_CALLBACK_URL,
       });
-      if (result.error) {
-        throw new EmailChangeError(result.error.status === 409, result.error.message ?? "");
-      }
+      if (result.error?.status === 409) throw new EmailChangeError(result.error.message ?? "");
+      if (result.error) throw toAuthError(result.error);
       if (window.__APP_CONFIG__?.features?.smtp) return "confirmation_sent";
       await refreshAuth();
+      // Without SMTP the change is immediate: an address that did not move was taken.
       if (!emailWasChanged(newEmail, authStore.getState().user?.email)) {
-        throw new EmailChangeError(true, "");
+        throw new EmailChangeError("");
       }
       return "changed";
     },
@@ -340,7 +337,7 @@ export function useAuth() {
 
   const listLinkedAccounts = useCallback(async () => {
     const result = await authClient.listAccounts();
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) throw toAuthError(result.error);
     return result.data ?? [];
   }, []);
 

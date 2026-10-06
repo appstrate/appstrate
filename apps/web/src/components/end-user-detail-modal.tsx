@@ -15,6 +15,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
 import { EndUserMetadataEditor } from "./end-user-metadata-editor";
 import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
+import { errorMessage } from "../lib/mutation-error";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 interface Props {
@@ -172,11 +173,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
             <EndUserMetadataEditor entries={editMetadata} onChange={setEditMetadata} />
 
             {updateMutation.error && (
-              <p className="text-destructive text-sm">
-                {updateMutation.error instanceof Error
-                  ? updateMutation.error.message
-                  : String(updateMutation.error)}
-              </p>
+              <p className="text-destructive text-sm">{errorMessage(updateMutation.error)}</p>
             )}
           </form>
         </Modal>

@@ -149,7 +149,11 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
@@ -265,7 +269,11 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when one of `model_ids` is outside the provider's catalog offer.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -521,7 +529,11 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

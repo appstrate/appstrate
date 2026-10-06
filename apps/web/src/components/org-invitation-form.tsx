@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -25,6 +24,7 @@ import {
 } from "../lib/space-assignments";
 import { SpaceAssignmentsField } from "./space-assignments-field";
 import { Spinner } from "./spinner";
+import { errorMessage } from "../lib/mutation-error";
 
 /** Rising reach first, then the exception: standard user, admin, guest. */
 const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["member", "admin", "guest"];
@@ -90,7 +90,7 @@ export function OrgInvitationForm({
     form.reset();
     onSuccess?.();
   };
-  const onError = (error: unknown) => form.setError("root", { message: getErrorMessage(error) });
+  const onError = (error: unknown) => form.setError("root", { message: errorMessage(error) });
   const invite = $api.useMutation("post", "/api/orgs/{orgId}/members", {
     meta: { errorHandledByCaller: true },
     onSuccess: (_result, request) => {

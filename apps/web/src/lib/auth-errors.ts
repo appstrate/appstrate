@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { ApiError } from "../api/errors";
+
 /**
  * Thrown by `unlinkAccount()` (and any other fresh-gated action) when Better
  * Auth rejects the request with `SESSION_NOT_FRESH`. Callers catch this
@@ -9,27 +11,39 @@
  */
 export class SessionNotFreshError extends Error {}
 
+interface BetterAuthError {
+  code?: string | null;
+  message?: string | null;
+  status?: number;
+}
+
+/**
+ * A Better Auth failure as the SPA's `ApiError`, so its `code` is translated like any other
+ * refusal (`errorMessage`) instead of its English `message` reaching the form.
+ */
+export function toAuthError(error: BetterAuthError): ApiError {
+  return new ApiError(error.code ?? "", error.message ?? "", error.status ?? 0);
+}
+
 /**
  * Map a raw Better Auth error into the SPA error type. Isolated as a pure
  * function so the mapping is unit-testable without a rendering harness.
  */
-export function toUnlinkError(error: { code?: string | null; message?: string | null }): Error {
-  const message = error.message ?? "";
+export function toUnlinkError(error: BetterAuthError): Error {
   if (error.code === "SESSION_NOT_FRESH") {
-    return new SessionNotFreshError(message);
+    return new SessionNotFreshError(error.message ?? "");
   }
-  return new Error(message);
+  return toAuthError(error);
 }
 
 /** Thrown by `login()`: right credentials, unverified address. Better Auth has just re-sent the link. */
 export class EmailNotVerifiedError extends Error {}
 
-export function toLoginError(error: { code?: string | null; message?: string | null }): Error {
-  const message = error.message ?? "";
+export function toLoginError(error: BetterAuthError): Error {
   if (error.code === "EMAIL_NOT_VERIFIED") {
-    return new EmailNotVerifiedError(message);
+    return new EmailNotVerifiedError(error.message ?? "");
   }
-  return new Error(message);
+  return toAuthError(error);
 }
 
 /** Codes Better Auth appends (`?error=`) to a verification link's callback URL. */

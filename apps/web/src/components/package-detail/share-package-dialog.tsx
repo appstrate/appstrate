@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   Select,
   SelectContent,
@@ -40,6 +39,7 @@ import {
   useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
+import { toastError } from "../../lib/mutation-error";
 
 /** The subject of one offer, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
@@ -186,7 +186,7 @@ export function SharePackageDialog({
             toast.error(t("packages.shareTargetIsHome"));
             return;
           }
-          toast.error(getErrorMessage(error));
+          toastError(error);
         },
       },
     );
@@ -209,7 +209,7 @@ export function SharePackageDialog({
     } catch (error) {
       // An incomplete draft is refused at publish (empty callable selections,
       // a manifest the freeze point rejects): the server's own words say which.
-      toast.error(getErrorMessage(error));
+      toastError(error);
     }
   };
 
@@ -458,7 +458,7 @@ function CoeditTab({
             toast.error(t("packages.coeditMemberExists"));
             return;
           }
-          toast.error(getErrorMessage(error));
+          toastError(error);
         },
       },
     );

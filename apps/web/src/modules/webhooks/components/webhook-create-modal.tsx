@@ -12,7 +12,7 @@ import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useCreateWebhook } from "../hooks/use-webhooks";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import type { WebhookInfo } from "../hooks/use-webhooks";
 
@@ -83,7 +83,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
           setCreatedSecret(result.secret);
         },
         onError: (err) => {
-          setError("root", { message: getErrorMessage(err) });
+          setError("root", { message: errorMessage(err) });
         },
       },
     );

@@ -20,6 +20,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
   can: () => true,
+  formatBytes: String,
 };
 
 const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });

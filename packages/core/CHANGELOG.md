@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
+  locale localises the unit names and the decimal separator (`fr` →
+  `2,0 Ko`). Without it the output is unchanged.
+
 ## [14.0.0] — 2026-10-05
 
 ### Added

@@ -10,7 +10,6 @@ import { RunRow } from "./run-row";
 import { EmptyState, ErrorState } from "./page-states";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { inlineRunDisplayName } from "../lib/run-title";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 interface RunListProps {
   packageId?: string;
@@ -148,7 +147,7 @@ export function RunList({
   const showLoading = isLoading && page === 0;
 
   // A refused or failed listing is not "no runs".
-  if (error && !data) return <ErrorState message={getErrorMessage(error)} />;
+  if (error && !data) return <ErrorState error={error} />;
 
   if (showLoading || runs.length === 0) {
     return (

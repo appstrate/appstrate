@@ -4,7 +4,7 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
-import { formatBytes as formatSize } from "@appstrate/core/format";
+import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button, LABEL_CLASS } from "./primitives.tsx";
 import { cn } from "../cn.ts";
@@ -46,6 +46,10 @@ export interface FileWidgetLabels {
   formats?: (formats: string) => string;
   extError?: (name: string, accept: string) => string;
   sizeError?: (name: string, size: string) => string;
+  /** Renders a byte count; the sizes handed to `maxSize` / `sizeError` come from it. */
+  formatSize?: (bytes: number) => string;
+  /** The sentence for a failed upload. */
+  uploadError?: (err: unknown) => string;
 }
 
 const DEFAULT_LABELS: Required<FileWidgetLabels> = {
@@ -58,6 +62,8 @@ const DEFAULT_LABELS: Required<FileWidgetLabels> = {
   formats: (formats) => `Formats: ${formats}`,
   extError: (name, accept) => `${name} is not a supported format (${accept})`,
   sizeError: (name, size) => `${name} exceeds the ${size} size limit`,
+  formatSize: formatBytes,
+  uploadError: getErrorMessage,
 };
 
 /**
@@ -147,7 +153,7 @@ export function FileWidget(props: WidgetProps) {
           return;
         }
         if (maxSize && f.size > maxSize) {
-          setError(labels.sizeError(f.name, formatSize(maxSize)));
+          setError(labels.sizeError(f.name, labels.formatSize(maxSize)));
           return;
         }
       }
@@ -176,7 +182,7 @@ export function FileWidget(props: WidgetProps) {
         // force the user to re-add everything. Single-file mode keeps only one
         // file, so there is nothing partial to salvage there.
         if (multiple && uploaded.length > 0) commit([...attachments, ...uploaded]);
-        setError(getErrorMessage(e));
+        setError(labels.uploadError(e));
       } finally {
         setUploading(false);
         if (abortRef.current === ctrl) abortRef.current = null;
@@ -239,7 +245,9 @@ export function FileWidget(props: WidgetProps) {
         >
           {uploading ? labels.uploading : labels.dragDrop}
           {accept && <span className="mt-1 text-xs">{labels.formats(accept)}</span>}
-          {maxSize && <span className="mt-1 text-xs">{labels.maxSize(formatSize(maxSize))}</span>}
+          {maxSize && (
+            <span className="mt-1 text-xs">{labels.maxSize(labels.formatSize(maxSize))}</span>
+          )}
         </div>
       ) : (
         <>
@@ -251,7 +259,9 @@ export function FileWidget(props: WidgetProps) {
               >
                 <span className="truncate font-medium">{a.name}</span>
                 {a.size > 0 && (
-                  <span className="text-muted-foreground ml-2 shrink-0">{formatSize(a.size)}</span>
+                  <span className="text-muted-foreground ml-2 shrink-0">
+                    {labels.formatSize(a.size)}
+                  </span>
                 )}
                 <Button
                   type="button"

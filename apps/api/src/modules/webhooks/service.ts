@@ -162,7 +162,13 @@ function validateWebhookUrl(url: string): void {
   }
 
   if (isBlockedUrl(url)) {
-    throw invalidRequest("URL resolves to a private or reserved network address", "url");
+    throw new ApiError({
+      status: 400,
+      code: "blocked_url",
+      title: "Invalid Request",
+      detail: "URL resolves to a private or reserved network address",
+      param: "url",
+    });
   }
 }
 

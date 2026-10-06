@@ -155,7 +155,12 @@ router.post("/", async (c) => {
   // create new organizations. The OrgGate webapp branch surfaces a
   // "waiting for invitation" page to non-admin users with no org.
   if (!mayCreateOrganization(user.email)) {
-    throw forbidden("Organization creation is disabled on this instance");
+    throw new ApiError({
+      status: 403,
+      code: "org_creation_disabled",
+      title: "Forbidden",
+      detail: "Organization creation is disabled on this instance",
+    });
   }
   const data = await readJsonBody(c, createOrgSchema);
 

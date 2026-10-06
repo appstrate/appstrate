@@ -489,7 +489,9 @@ describe("Models API", () => {
         body: JSON.stringify({ label: "Unknown", modelId: "no-such-catalog-model", credentialId }),
       });
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { detail?: string }).detail).toContain("not offered");
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("model_not_offered");
+      expect(body.detail).toContain("not offered");
     });
 
     it("accepts a lone maxTokens for a gateway model unknown to the catalog (nothing to compare)", async () => {

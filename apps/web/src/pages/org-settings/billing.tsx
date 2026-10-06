@@ -3,8 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "@appstrate/core/format";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { formatBytes } from "../../lib/format-bytes";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -63,7 +62,7 @@ export function OrgSettingsBillingPage() {
   const canManageBilling = can("billing:manage");
 
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }

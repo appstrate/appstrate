@@ -18,6 +18,7 @@ import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
+import { formatBytes } from "../../lib/format-bytes";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
@@ -137,6 +138,7 @@ export function ChatModulePage() {
           uploadFile={uploadFile}
           t={translate}
           can={can}
+          formatBytes={formatBytes}
         />
       </div>
       <ConversationSidebar

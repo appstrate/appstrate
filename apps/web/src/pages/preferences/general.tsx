@@ -12,6 +12,7 @@ import { useAuth, EmailChangeError } from "../../hooks/use-auth";
 import { emailChangeLanding } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+import { errorMessage } from "../../lib/mutation-error";
 
 function EmailVerificationBadge() {
   const { t } = useTranslation(["settings", "common"]);
@@ -104,11 +105,10 @@ function EmailChangeForm() {
         setSuccess(t("preferences.emailChanged"));
       }
     } catch (err) {
-      if (err instanceof EmailChangeError && err.conflict) {
+      if (err instanceof EmailChangeError) {
         setError("root", { message: t("preferences.emailConflict") });
       } else {
-        const message = err instanceof Error && err.message ? err.message : t("login.error");
-        setError("root", { message });
+        setError("root", { message: errorMessage(err) });
       }
     }
   };

@@ -7,9 +7,8 @@ import { Modal } from "./modal";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
-import { toast } from "sonner";
 import { ApiError } from "../api/errors";
-import i18n from "../i18n";
+import { errorMessage, onMutationError } from "../lib/mutation-error";
 
 interface ImportModalProps {
   open: boolean;
@@ -121,7 +120,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
               setConfirmIntegrity({ version: err.details?.version as string });
               return;
             }
-            toast.error(i18n.t("error.prefix", { message: err.message }));
+            onMutationError(err);
           },
         },
       );
@@ -131,7 +130,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
           resetAndClose();
         },
         onError: (err) => {
-          setError("root", { message: err.message });
+          setError("root", { message: errorMessage(err) });
         },
       });
     }
@@ -157,7 +156,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         ? t("import.forceIntegrity")
         : t("import.submit");
 
-  const errorMessage = errors.root?.message;
+  const rootError = errors.root?.message;
 
   return (
     <Modal
@@ -240,7 +239,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       </div>
 
       {/* --- Errors & confirmations --- */}
-      {errorMessage && <p className="text-destructive mt-3 text-sm">{errorMessage}</p>}
+      {rootError && <p className="text-destructive mt-3 text-sm">{rootError}</p>}
       {confirmOverwrite && (
         <p className="text-destructive mt-3 text-sm">
           {confirmOverwrite.activeVersion
