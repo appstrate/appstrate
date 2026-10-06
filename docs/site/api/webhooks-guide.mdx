@@ -118,7 +118,7 @@ export function verify(secret, headers, rawBody) {
 }
 ```
 
-Verify against the **raw request body**, before any JSON parsing. The official Standard Webhooks libraries can verify these requests too, with the full `whsec_...` secret.
+Verify against the **raw request body**, before any JSON parsing. The secret is base64url-encoded, not standard base64, so decode it as shown above.
 
 ## Delivery and retries
 
@@ -126,7 +126,7 @@ Verify against the **raw request body**, before any JSON parsing. The official S
 - Up to **8 attempts** in total. After a failed attempt the next one waits, in order: 30 seconds, 5 minutes, 30 minutes, 1 hour, 2 hours, 3 hours, 4 hours.
 - A timeout, a network error, a `5xx`, a `408`, a `429`, or a redirect is retried. Redirects are never followed: a signed payload is not re-sent to another address.
 - Any other `4xx` is treated as permanent and **not retried**. If your endpoint is wrong, fix it and use the test ping.
-- A hostname that does not resolve is retried only on the first three attempts, then abandoned.
+- A hostname that does not resolve is attempted at most three times: a miss on the third attempt is final.
 - The target is resolved and checked again on every delivery. An address that now resolves to a private or reserved range is refused permanently.
 - Events are delivered at least once and are not strictly ordered. Deduplicate on `webhook-id`.
 

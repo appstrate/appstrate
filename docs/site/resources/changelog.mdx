@@ -25,7 +25,7 @@ Read every version between yours and your target, not only the last one. The upg
 | What                                          | Scheme                                                                 | Where it is published                 |
 | --------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
 | The platform (API, dashboard, runtime images) | `v1.0.0-beta.N` git tags                                               | GitHub releases, GHCR images          |
-| The `appstrate` CLI                           | `cli@1.0.0-beta.N` tags, released in step with the platform            | GitHub releases, npm (`appstrate`)    |
+| The `appstrate` CLI                           | `cli@1.0.0-beta.N` tags, numbered in the same sequence as the platform | GitHub releases, npm (`appstrate`)    |
 | `@appstrate/core`                             | `core@MAJOR.MINOR.PATCH`                                               | npm                                   |
 | `@appstrate/afps-shared`                      | `afps-shared@0.MINOR.PATCH`                                            | npm                                   |
 | The HTTP API                                  | Date version in the `Appstrate-Version` header, currently `2026-03-21` | [API Reference](/docs/api#versioning) |
@@ -34,7 +34,7 @@ The API date version is separate from the platform version and has not moved yet
 
 ## Milestones
 
-A selection of changes that altered how you use Appstrate. Each is a git tag you can find in `CHANGELOG.md`.
+A selection of changes that altered how you use Appstrate. Each is a git tag. `CHANGELOG.md` has sections from `1.0.0-beta.52` onward, so for earlier tags read the GitHub release.
 
 | Version          | Date       | Change                                                                                                                    |
 | ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |

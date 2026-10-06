@@ -62,7 +62,7 @@ This is the shape of the shipped Stripe integration, with your own scope:
 
 - `credentials.schema` is a JSON Schema that drives the hosted form the user fills in.
 - `delivery.http` says where the sidecar puts the credential. `{$credential.<field>}` is the only template expression the platform evaluates.
-- `_meta["dev.appstrate/api"]` opts the auth into the `api_call` tool. Without it the integration exposes no `api_call`.
+- `_meta["dev.appstrate/api"]` opts the auth into the `api_call` tool. Without it the integration exposes no `api_call`, and the import refuses a manifest whose `default_tools` names `api_call` anyway.
 - `default_tools` is what an agent gets when it does not select tools itself.
 
 ## OAuth 2.0
@@ -79,6 +79,7 @@ Add the endpoints and the scope catalogue. The Slack integration, trimmed:
     "default_scopes": ["channels:read", "users:read"],
     "scope_catalog": [
       { "value": "channels:read", "label": "View channels" },
+      { "value": "users:read", "label": "View users" },
       { "value": "chat:write", "label": "Send messages" }
     ],
     "authorized_uris": ["https://slack.com/api/**"],
@@ -180,7 +181,7 @@ appstrate api POST /api/packages/import -F file=@../my-integration.afps
 
 The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` is evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
 
-You can also edit a package as a local folder with `appstrate packages pull`, `status`, `push` and `publish`, which writes to the package's draft and publishes a version as a separate step. Name your package under your organization's scope (`@appstrate` is the scope of the system packages). Forking a system integration (`POST /api/packages/@appstrate/{name}/fork`) gives you an editable copy under your scope.
+You can also edit a package as a local folder with `appstrate packages pull`, `status`, `push` and `publish`, which writes to the package's draft and publishes a version as a separate step. Use a scope of your own: `@appstrate` ids belong to the system packages and cannot be created. Forking a system integration (`POST /api/packages/@appstrate/{name}/fork`) gives you an editable copy under your scope.
 
 Activate the integration in a space, register an OAuth client if it needs one, then reference it from an agent as any other integration:
 

@@ -35,15 +35,15 @@ A `local` integration needs an isolating run adapter (`docker` or `firecracker`)
 
 Each integration declares one or more entries under `auths`, each with a `type`.
 
-| `type`    | How the user connects                                                                                     | Example                     |
-| --------- | --------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `oauth2`  | OAuth 2.0 authorization code flow with PKCE, endpoint discovery and automatic token refresh               | Gmail, Slack, Notion        |
-| `api_key` | The user pastes a key on a hosted form                                                                    | Stripe, Firecrawl, Brevo    |
-| `basic`   | Username and password                                                                                     |                             |
-| `mtls`    | Client certificate and key, mounted as files for the runner                                               |                             |
-| `custom`  | A free-form set of fields defined by the integration, optionally with a declarative login or a login tool | WordPress, WooCommerce, SSH |
+| `type`    | How the user connects                                                                                                          | Example                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `oauth2`  | OAuth 2.0 authorization code flow (with PKCE when the integration declares it), endpoint discovery and automatic token refresh | Gmail, Slack, Notion        |
+| `api_key` | The user pastes a key on a hosted form                                                                                         | Stripe, Firecrawl, Brevo    |
+| `basic`   | Username and password                                                                                                          |                             |
+| `mtls`    | Client certificate and key, mounted as files for the runner                                                                    |                             |
+| `custom`  | A free-form set of fields defined by the integration, optionally with a declarative login or a login tool                      | WordPress, WooCommerce, SSH |
 
-An integration may declare several auths (the GitHub MCP integration accepts OAuth or a personal access token). OAuth 1.0a is not supported.
+An integration may declare several auths (the GitHub MCP integration accepts OAuth or a personal access token). OAuth 1.0a is not a built-in auth type.
 
 ## Credential isolation
 
@@ -100,7 +100,7 @@ appstrate api POST /api/integrations/@appstrate/stripe/auths/primary/connect/ses
 # { "connect_url": "https://.../api/integrations/connect/start?token=...", "expiresAt": "..." }
 ```
 
-List your own connections with `GET /api/me/connections` and delete one with `DELETE /api/me/connections/{connectionId}` (destructive: it also drops the pins and schedule overrides that named it).
+List your own connections with `GET /api/me/connections` and delete one with `DELETE /api/me/connections/{connectionId}` (destructive: it removes the connection everywhere and drops your own member pins and schedule overrides that named it; it is refused with `409 connection_pinned` while an admin pin or an organization default names it).
 
 ## Scopes
 

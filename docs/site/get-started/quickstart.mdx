@@ -34,7 +34,7 @@ To skip the prompts, add `--yes`: `curl -fsSL https://get.appstrate.dev | bash -
 Open `http://localhost:3000` and sign up (or claim the instance). The onboarding flow guides you through:
 
 1. **Create your organization.** A default space and a `hello-world` demo agent are created with it.
-2. **Add an AI model.** Agents and the chat need at least one. Choose a provider (Anthropic, OpenAI, OpenRouter, Mistral, Groq and others, or any OpenAI-compatible or Anthropic-compatible endpoint), paste an API key and save. The provider's featured models are added for you.
+2. **Add an AI model.** Agents and the chat need at least one. Choose a provider (Anthropic, OpenAI, OpenRouter, Mistral, Groq and others, or any OpenAI-compatible or Anthropic-compatible endpoint), paste an API key, pick one or more of the models it lists and save.
 3. **Invite users** (optional).
 
 You can skip the model step and add one later under **Organization settings → Models**.
@@ -84,7 +84,7 @@ claude plugin marketplace add appstrate/claude-plugins
 claude plugin install appstrate@appstrate
 ```
 
-Then, in a new Claude Code session, run `/mcp` and authenticate the `appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/docs/using-appstrate/skill).
+Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/docs/using-appstrate/skill).
 
 </Tab>
 

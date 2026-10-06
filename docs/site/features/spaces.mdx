@@ -5,7 +5,7 @@ description: The workspace inside an organization that owns agents, runs, schedu
 
 A **space** is the working area of an organization. Agents run in a space, and runs, schedules, files, end-users, API keys, notifications and integration connections belong to one. The organization is the membership and billing boundary, the space is the **scoping and access** boundary inside it.
 
-Spaces were called _applications_ in earlier versions. The concept widened (a space also decides who can see what) and the resource, header and id prefix were renamed: `spaces`, `X-Space-Id`, `spc_`. Anything you wrote against `/api/applications`, `X-App-Id` or `app_` ids must be updated. The CLI verb is `appstrate space`.
+Spaces were called _applications_ in earlier versions. The concept widened (a space also decides who can see what) and the resource, header and id prefix were renamed: `spaces`, `X-Space-Id`, `spc_`. Anything you wrote against `/api/applications`, `X-Application-Id` or `app_` ids must be updated. The CLI verb is `appstrate space`.
 
 ## What is in a space
 

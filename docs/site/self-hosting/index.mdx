@@ -53,9 +53,11 @@ Appstrate ships in **open mode** by default: anyone who can reach the instance c
 For a private deployment, use **closed mode**: signup is disabled, organizations are created by invitation or by an operator, and the first owner claims the instance with a single-use bootstrap token.
 
 - If you enter an owner email at the interactive prompt, or set `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` for a non-interactive install, the installer writes closed-mode settings and a fresh `AUTH_BOOTSTRAP_TOKEN` into `.env`.
-- An unattended install with `--yes` and no owner email is closed by default too. It generates a token, disables signup and prints a banner with the claim URL.
+- An unattended install with `--yes` and no owner email is closed by default too on the Docker tiers (1 to 3). It generates a token, disables signup and prints a banner with the claim URL. Tier 0 stays in open mode unless you set `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`.
 - Open `<APP_URL>/claim`, paste the token and choose the owner email and password. The root organization is created in the same step.
 - Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is claimed.
+
+The token only works if the container receives it. At the time of writing, the shipped Compose templates do not forward `AUTH_BOOTSTRAP_TOKEN` (see [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)), so add a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment` and restart before you open `/claim`.
 
 The full matrix of flags, recipes, known limits and recovery procedures is in [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). The variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
 

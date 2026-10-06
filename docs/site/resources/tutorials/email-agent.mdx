@@ -76,9 +76,7 @@ return emailCount 0.
 
 **Schemas**: under **Input**, click **+ Add field**. Set **key** to `channel`, **default** to `daily-digest`, and a **description** such as _Slack channel to post in_. The output schema comes in step 6.
 
-**Runtime tools**: enable **Output** (it is required for an output schema) and, if you like, **Log**, which lets the agent report progress in real time.
-
-**Integrations**: tick **Gmail (API)** and **Slack (API)**. For each, tick **Generic API call (api_call)**, which lets the agent call the vendor's HTTP API with the credential injected for it. For Slack, also open **Advanced: pin extra scopes** and pin **Send messages** (`chat:write`): the integration's default scopes only read channels and users. Gmail needs nothing extra, because its default scopes already include read access (its consent screen also lists permission to send mail, which this agent never uses).
+**Integrations**: at the top of this tab, the **Runtime tools** group lists the platform tools by id. Tick `output` (it is required for an output schema) and, if you like, `log`, which lets the agent report progress in real time. Below it, tick **Gmail (API)** and **Slack (API)**. For each, tick **Generic API call (api_call)**, which lets the agent call the vendor's HTTP API with the credential injected for it. For Slack, also open **Advanced: pin extra scopes** and pin **Send messages** (`chat:write`): the integration's default scopes only read channels and users. Gmail needs nothing extra, because its default scopes already include read access (its consent screen also lists permission to send mail, which this agent never uses).
 
 Click **Create** to save the agent. If the editor reports that the initial version could not be published, fix what it names and publish from the agent page with **Create version**.
 
@@ -113,7 +111,7 @@ On the agent page, click **Run**. The parameters dialog shows the `channel` inpu
 - **Execution** shows the logs live: each tool call, with its arguments and result.
 - **Outcome** shows the structured output and any files.
 
-The run executes in its own sandbox with its own sidecar (a container, or a microVM on the Firecracker backend; a plain host subprocess on a Tier 0 install), and that sandbox is torn down when the run ends. If a connection is missing or lacks a scope, **Run** opens a dialog that names it and lets you fix it, then re-run.
+The run executes in its own sandbox with its own sidecar (a container, or a microVM on the Firecracker backend; a plain host subprocess on the default `process` backend), and that sandbox is torn down when the run ends. If a connection is missing or lacks a scope, **Run** opens a dialog that names it and lets you fix it, then re-run.
 
 From the API, replace `@your-org` with your organization's scope:
 
@@ -138,7 +136,7 @@ curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
 
 ### Add an output schema
 
-An output schema makes the result structured and validated. Open the editor's **JSON** tab, add an `output` member to the `manifest` object, and click **Apply to form**:
+An output schema makes the result structured and validated. Open the editor's **JSON** tab, add an `output` member at the top level of the manifest, and click **Apply to form**:
 
 ```json
 "output": {
@@ -166,7 +164,7 @@ An output schema makes the result structured and validated. Open the editor's **
 }
 ```
 
-The agent returns it through the **Output** runtime tool. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in the **Outcome** tab. Publish a new version after changing the agent.
+The agent returns it through the `output` runtime tool. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in the **Outcome** tab. Publish a new version after changing the agent.
 
 </Step>
 

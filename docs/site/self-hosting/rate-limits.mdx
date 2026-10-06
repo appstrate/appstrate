@@ -117,12 +117,12 @@ RateLimit-Policy: 20;w=60
 }
 ```
 
-`RateLimit` and `RateLimit-Policy` are also sent on successful responses from rate-limited routes, so clients can back off before they hit the limit. Respect `Retry-After` (seconds), and use exponential backoff for repeated `429` responses. The organization-wide run limits answer with the codes `org_run_rate_limited` and `org_run_concurrency_exceeded` shown above.
+`RateLimit` and `RateLimit-Policy` are also sent on successful responses from the user-facing rate-limited routes (not the run-bound `/internal/*` routes), so clients can back off before they hit the limit. Respect `Retry-After` (seconds), and use exponential backoff for repeated `429` responses. The organization-wide run limits answer with the codes `org_run_rate_limited` and `org_run_concurrency_exceeded` shown above.
 
 ## Specifics
 
 - **Realtime (SSE).** `/api/realtime/*` has no per-message limit. The stream fans events out as they arrive.
-- **Outbound webhook deliveries** run in a background worker, outside the HTTP pipeline, so these limits do not apply to them. Size your receiver for burst retries. See [Webhooks](/docs/features/webhooks#retry-policy).
+- **Outbound webhook deliveries** run in a background worker, outside the HTTP pipeline, so these limits do not apply to them. Size your receiver for burst retries. See [Webhooks](/docs/features/webhooks#delivery-and-retries).
 - **`Idempotency-Key`.** The rate limiter runs before the idempotency check, so a replayed request still consumes a point.
 
 ## Monitoring

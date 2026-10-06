@@ -65,21 +65,21 @@ Dependencies declared in an agent (`dependencies.skills`, `integrations`, `mcp_s
 ## Importing
 
 ```bash
-# A ZIP, .afps, or .afps-bundle
+# A ZIP or .afps archive
 curl -X POST https://your-instance/api/packages/import \
   -H "Authorization: Bearer apst_your_key" \
   -F "file=@my-agent.afps"
 
-# A bundle exported from another instance
+# A bundle exported from another instance (also accepts .afps and .zip)
 curl -X POST https://your-instance/api/packages/import-bundle \
   -H "Authorization: Bearer apst_your_key" \
   -F "file=@my-agent.afps-bundle"
 
-# A public GitHub directory holding a manifest.json
+# A public GitHub directory holding a manifest.json (branch and path are part of the URL)
 curl -X POST https://your-instance/api/packages/import-github \
   -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
-  -d '{ "url": "https://github.com/acme/my-agent", "ref": "main" }'
+  -d '{ "url": "https://github.com/acme/my-agent/tree/main" }'
 ```
 
 - An import writes the draft **and** cuts a version from the archive. The package is owned by your organization and stays editable, whatever its scope name.

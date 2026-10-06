@@ -43,7 +43,7 @@ curl -N -b cookies.txt \
 
 Visibility follows [roles and permissions](/docs/features/roles-and-permissions). The single-run and per-agent streams need `runs:read` or `runs:read-all` in the space and answer `403` otherwise. Run frames only concern runs you may see: your own with `runs:read`, the whole space with `runs:read-all`. `debug` log lines are sent only to callers who hold `runs:delete`.
 
-On `/api/realtime/runs` you receive the channels you are allowed to read: `run_update`, `run_log` and `run_metric` need a run read, `connection_update` needs `integrations:read`, `chat_session_update` needs `chat:read`.
+On `/api/realtime/runs` you receive the channels you are allowed to read: `run_update`, `run_log` and `run_metric` need a run read, `connection_update` is held back from an API key that lacks the `integrations:read` scope, `chat_session_update` needs `chat:read`.
 
 ## Events
 

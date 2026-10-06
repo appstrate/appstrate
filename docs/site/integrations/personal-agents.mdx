@@ -1,22 +1,22 @@
 ---
 title: Personal Agents
-description: Use Appstrate as the execution backend for OpenClaw, Hermes, or any personal agent, over the REST API or MCP.
+description: Use Appstrate as the execution backend for a personal agent, over the REST API or MCP.
 ---
 
-Personal agents such as [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes](https://github.com/NousResearch/hermes-agent) were designed for one developer on one laptop. When the same developer needs to act on behalf of 50 employees, run 100 agents in parallel, or hide credentials from the LLM, the laptop becomes the bottleneck.
+A personal agent is an assistant that runs on your own machine and acts for you. When you need it to act on behalf of many users, run many agents in parallel, or keep credentials away from the LLM, you can delegate the work to Appstrate.
 
 The pattern: let the personal agent **reason** locally, and delegate **execution** to Appstrate. Brain local, arms remote. Appstrate does not ship an SDK for this: it is a usage pattern over the [REST API](/docs/api/introduction) and the platform's [MCP endpoint](#over-mcp).
 
 ## Why this pattern
 
-- **Parallel runs.** Appstrate schedules concurrent runs on your infrastructure. The default caps are 50 concurrent runs and 200 launches per minute per organization, tunable with `PLATFORM_RUN_LIMITS` (see [Environment Variables](/docs/self-hosting/environment-variables)). A personal agent is limited to what its host machine can fork.
+- **Parallel runs.** Appstrate schedules concurrent runs on your infrastructure. The default caps are 50 concurrent runs and 200 launches per minute per organization, tunable with `PLATFORM_RUN_LIMITS` (see [Environment Variables](/docs/self-hosting/environment-variables)).
 - **Multi-user execution.** The `Appstrate-User` header lets one backend launch runs on behalf of distinct [end-users](/docs/features/end-users), each with their own connected accounts and an audit trail.
 - **Credentials hidden from the LLM.** The sidecar injects credentials at request time. The model driving the run never sees a token, and neither does the personal agent that launched it. See [How integrations work](/docs/integrations/how-integrations-work#credential-isolation).
-- **Sandbox.** With the `docker` or `firecracker` run adapter, every run gets its own container (or microVM) and its own network. A personal agent runs in the same process tree as its host.
+- **Sandbox.** With the `docker` or `firecracker` run adapter, every run gets its own container (or microVM) and its own network.
 
 ## Wire-up
 
-Create an API key in the dashboard (Space Settings, API Keys) with the permissions the personal agent needs, for example `agents:run` and `runs:read`. Keys start with `apst_`, are bound to one organization and one space, and the secret is shown once. See [Authentication](/docs/api/authentication#api-keys).
+Create an API key in the dashboard (Settings > Space > API keys) with the permissions the personal agent needs, for example `agents:run` and `runs:read`. Keys start with `apst_`, are bound to one organization and one space, and the secret is shown once. See [Authentication](/docs/api/authentication#api-keys).
 
 ```bash
 export APPSTRATE_KEY=apst_your_key

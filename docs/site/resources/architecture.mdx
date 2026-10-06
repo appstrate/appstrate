@@ -77,7 +77,7 @@ Platform: persists the run → LISTEN/NOTIFY → SSE streams, webhooks, notifica
 - **The sidecar is the security boundary.** The agent talks to the sidecar over MCP and never holds a credential. The platform hands the run its sidecar address and token over stdin, not through the environment, and the agent process cannot dump its own memory. The sidecar injects credentials into outbound calls, checks every target against the integration's allowed URIs and against SSRF rules, and proxies model calls so the provider key stays out of the sandbox. Details: [SIDECAR.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SIDECAR.md).
 - **Everything the agent can do comes from MCP tools.** The agent sees the integration tools it was given, a few first-party tools (`run_history`, `recall_memory`), and the runtime tools its manifest enables (`output`, `log`, `note`, `pin`, `publish_file`).
 - **Runs report back through signed events.** The runner posts HMAC-signed events to the platform, which persists them, finalizes the run once, and then emits the status change that drives realtime streams, webhooks, and notifications. Liveness is watched in two phases, boot and execution, so a stuck run is failed with a specific error.
-- The platform image, `appstrate-pi` (the agent), and `appstrate-sidecar` speak a versioned protocol and must be deployed at one version. Boot fails when they disagree.
+- The platform image, `appstrate-pi` (the agent), and `appstrate-sidecar` speak a versioned protocol and must be deployed at one version. Boot fails when the configured image tags differ, and logs a warning when the two images carry different build revisions.
 
 ## Integrations
 
@@ -105,7 +105,7 @@ See [Progressive infrastructure](/docs/self-hosting/progressive-infrastructure) 
 
 ## Modules
 
-Optional features are modules loaded at boot from the `MODULES` environment variable. A module contributes routes, permissions, OpenAPI paths, auth strategies, hooks, or an execution backend, and owns no database tables: its tables live in the core schema. Removing a module from `MODULES` leaves no routes, workers, or permissions behind.
+Optional features are modules loaded at boot from the `MODULES` environment variable. A module contributes routes, permissions, OpenAPI paths, auth strategies, hooks, or an execution backend, and, for the Apache 2.0 modules, owns no database tables: they live in the core schema. Removing a module from `MODULES` leaves no routes, workers, or permissions behind, and its data stays in the database.
 
 | Module                                                     | In the default set | Provides                                                                            |
 | ---------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------- |

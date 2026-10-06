@@ -5,6 +5,8 @@ description: Resolve common boot, run, network and configuration problems when s
 
 Start with `docker compose logs appstrate --tail 200` (or `appstrate logs` for an installer install) and `curl http://localhost:3000/health`. Boot errors name the variable at fault.
 
+A stack written by `appstrate install` runs under a derived Compose project name. For it, use `appstrate logs` and `appstrate status`, or add `--project-name "$(jq -r .projectName .appstrate/project.json)"` to the `docker compose` commands on this page.
+
 ## The container will not start
 
 Five secrets are required and validated at boot:
@@ -150,7 +152,7 @@ Change the host side of the port mapping, or set `PORT` in `.env` (the Compose f
 LOG_LEVEL=debug
 ```
 
-Debug logs include one access line per request (method, route pattern, status, duration and `Request-Id`) and details about adapter selection and container creation. Return to `info` once the incident is understood.
+Debug logs include one access line per request (method, route pattern, status, duration and `Request-Id`). Return to `info` once the incident is understood.
 
 ## Orphaned containers
 

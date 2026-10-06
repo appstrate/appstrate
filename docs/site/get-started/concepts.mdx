@@ -45,7 +45,7 @@ An agent package declares:
 
 An agent also gets persistence across runs:
 
-- **Memory.** The `note` tool saves a memory that the `recall_memory` tool can search in later runs. The `pin` tool keeps an item (optionally under a named key) that is shown to the agent at the start of every run. Memory belongs to a space and is partitioned by who the run acts for: a member, an end-user, or shared.
+- **Memory.** The `note` tool saves a memory that the `recall_memory` tool can search in later runs. The `pin` tool keeps an item under a named key that is shown to the agent at the start of every run. Memory belongs to a space and is partitioned by who the run acts for: a member, an end-user, or shared.
 - **Files.** Runs read uploaded files and publish deliverables with `publish_file`. Every file has a stable `appfile://` URI, so the output of one run can be the input of another.
 
 Deep-dive: [Features / Agents](/docs/features/agents) and [Features / Memory](/docs/features/memory).

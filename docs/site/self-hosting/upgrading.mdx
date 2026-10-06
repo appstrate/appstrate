@@ -34,7 +34,7 @@ docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc appstrate
   > appstrate-$(date +%Y%m%d-%H%M%S).dump
 ```
 
-The service is named `appstrate-postgres` in the repository's root `docker-compose.yml`. For an installer install, add `--project-name "$(jq -r .projectName .appstrate/project.json)"` if you run Compose from another directory.
+The service is named `appstrate-postgres` in the repository's root `docker-compose.yml`. An installer install runs under a derived Compose project name, so add `--project-name "$(jq -r .projectName .appstrate/project.json)"` to every `docker compose` command, even from the install directory.
 
 **PGlite** (Tier 0). Stop the instance first: copying a live PGlite directory can corrupt the backup.
 
@@ -46,7 +46,7 @@ The path is `PGLITE_DATA_DIR`, relative to the directory the process runs in.
 
 **Files.** Snapshot the `storagedata` volume or `FS_STORAGE_PATH` (filesystem storage), the `miniodata` volume (bundled MinIO), or your bucket (versioning or replication). Stored files and packages live here, outside the database dump.
 
-**Secrets.** Keep `.env` and, above all, `CONNECTION_ENCRYPTION_KEY`. A restored database is useless without the key that encrypted its credentials. The installer also keeps one `.backup` copy of `.env` and `docker-compose.yml` when it upgrades.
+**Secrets.** Keep `.env` and, above all, `CONNECTION_ENCRYPTION_KEY`. A restored database is useless without the key that encrypted its credentials. When the installer upgrades, it copies `.env` and `docker-compose.yml` to `.backup` files and deletes them once the stack is healthy, so they remain only after a failed upgrade. Keep your own copies.
 
 **Redis** holds queued jobs (scheduled runs, webhook deliveries). It persists on a volume in the shipped Compose files. Snapshot it if losing queued work matters.
 
@@ -63,10 +63,10 @@ appstrate self-update
 appstrate install --dir ~/appstrate
 ```
 
-Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To pin a version, set `APPSTRATE_VERSION` for the one-liner:
+Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To pin a version, set `APPSTRATE_VERSION` on the `bash` side of the pipe. It is a release tag here, so it keeps the `v` prefix that image tags and the `.env` value drop:
 
 ```bash
-APPSTRATE_VERSION=1.0.0-beta.64 curl -fsSL https://get.appstrate.dev | bash -s -- --yes
+curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=v1.0.0-beta.64 bash -s -- --yes
 ```
 
 If you installed the CLI through Bun, use `bun update -g appstrate` instead of `self-update`. The upgrade matrix between install channels is in [the CLI upgrade notes](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).

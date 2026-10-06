@@ -29,7 +29,7 @@ Pinned slots cost prompt tokens on every run. Keep them small and put long mater
 
 At most **100 archive memories** are kept per agent, space and scope. When the cap is reached, further notes are dropped. There is no automatic pruning and no expiry: delete old entries to make room.
 
-A third form, the **pinned memory** (a memory shown in the prompt under **Memory**), exists in the store. It is not written by agent tools.
+A third form, a keyless pinned memo (shown in the prompt under **Memory**), exists in the store. No agent tool writes one: `pin` always takes a key.
 
 ## Scope: private or shared
 
@@ -59,8 +59,4 @@ curl "https://your-instance/api/agents/@acme/support-triage/persistence?kind=mem
 
 Without admin rights you see your own scope plus shared rows. An admin inspecting an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/docs/features/roles-and-permissions).
 
-There is no endpoint that writes memory directly. Memory only changes when an agent run calls the tools, or when someone deletes it.
-
-## Pluggable backends
-
-Memory lives in the platform database. Routing memory to an external store is not available today.
+There is no endpoint that writes memory directly. Memory only changes when an agent run calls the tools, or when someone deletes it. It lives in the platform database.

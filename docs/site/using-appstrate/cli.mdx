@@ -287,17 +287,17 @@ appstrate --profile prod whoami
 APPSTRATE_PROFILE=prod appstrate api GET /api/agents
 ```
 
-Profiles live in `~/.config/appstrate/config.toml` (or under `$XDG_CONFIG_HOME`). Tokens are stored in the OS keyring (macOS Keychain, libsecret, Windows Credential Manager) under the profile's name. If no keyring is available, for example in a headless container, the CLI falls back to a `0600` file `~/.config/appstrate/credentials.json` and warns you.
+Profiles live in `~/.config/appstrate/config.toml` (or under `$XDG_CONFIG_HOME`). Tokens are stored in the OS keyring (macOS Keychain, libsecret, Windows Credential Manager) under the profile's name. If no keyring backend exists at all, for example in a headless Linux container, the CLI falls back to a `0600` file `~/.config/appstrate/credentials.json`. If a keyring exists but refuses access (locked), the CLI stops unless you set `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1`. On Windows there is no file fallback.
 
 ## Troubleshooting
 
-| Message                                            | Fix                                                                                                                           |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `Unauthorized: your session may have been revoked` | Run `appstrate login` again                                                                                                   |
-| `Space context required`                           | No space is pinned. Run `appstrate space switch`                                                                              |
-| `Space '<id>' not found in this organization`      | The pinned space belongs to another organization. Run `appstrate space switch`                                                |
-| `pins the retired key "applicationId"`             | The profile predates the rename of applications to spaces. Delete that line from `config.toml`, then `appstrate space switch` |
-| `Docker is required for this tier`                 | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                                           |
+| Message                                       | Fix                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `your session may have been revoked`          | Run `appstrate login` again                                                                                                   |
+| `Space context required`                      | No space is pinned. Run `appstrate space switch`                                                                              |
+| `Space '<id>' not found in this organization` | The pinned space belongs to another organization. Run `appstrate space switch`                                                |
+| `pins the retired key "applicationId"`        | The profile predates the rename of applications to spaces. Delete that line from `config.toml`, then `appstrate space switch` |
+| `Docker is required for this tier`            | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                                           |
 
 More entries are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#troubleshooting).
 

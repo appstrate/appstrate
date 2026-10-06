@@ -30,7 +30,7 @@ The providers available on your instance depend on the `MODULES` setting (see [E
 
 The two **custom endpoint** providers are the escape hatch: give them a `base_url_override` to reach a self-hosted or third-party server (Ollama, vLLM, LiteLLM and similar). The API-key providers all use one of the four wire formats the platform's LLM proxy serves, so inference reaches the vendor through the same sidecar path whichever one you pick.
 
-Earlier versions of this page listed Google, Vertex, Azure OpenAI and AWS Bedrock as native providers. They are not in the current catalogue. Reach such a model through a gateway that exposes an OpenAI or Anthropic compatible API, using a custom endpoint provider.
+Google, Vertex, Azure OpenAI and AWS Bedrock are not native providers. To use a model served by one of them, put a gateway that exposes an OpenAI or Anthropic compatible API in front of it and connect that gateway through a custom endpoint provider.
 
 ### Subscription providers (opt-in modules)
 
@@ -41,9 +41,9 @@ Two modules let an organization run agents on a personal subscription instead of
 | `claude-code` | `@appstrate/module-claude-code` | Claude Pro, Max or Team       |
 | `codex`       | `@appstrate/module-codex`       | ChatGPT Plus, Pro or Business |
 
-These use OAuth, not a pasted key, and the login runs on the user's own machine: the dashboard mints a short-lived pairing token (valid for five minutes) and shows an `npx @appstrate/connect-helper <token>` command. The helper runs the browser login against the provider and sends the resulting credentials back to Appstrate. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`).
+These use OAuth, not a pasted key, and the login runs on the user's own machine: the dashboard mints a short-lived pairing token (valid for five minutes) and shows an `npx @appstrate/connect-helper@<version> <token>` command. The helper runs the browser login against the provider and sends the resulting credentials back to Appstrate. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`).
 
-Using a personal subscription to power a product is a policy question that belongs to the operator. Vendor terms have changed several times, and Anthropic documents that third-party products offering claude.ai login need prior approval. For production and team automation, use an API key. The code-level guarantees and what is deliberately not claimed are in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
+Using a personal subscription to power a product is a policy question that belongs to the operator, and vendor terms can change. For production and team automation, use an API key. The code-level guarantees and what is deliberately not claimed are in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md).
 
 ## Adding a provider and a model
 

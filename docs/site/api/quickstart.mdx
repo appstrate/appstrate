@@ -20,7 +20,7 @@ export APPSTRATE_URL=http://localhost:3000
 
 ### Create an API key
 
-In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults, and copy the key. It starts with `apst_` and is shown **once**.
+In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
 export APPSTRATE_KEY=apst_your_key_here
@@ -137,7 +137,7 @@ curl "$APPSTRATE_URL/api/runs/$RUN_ID/logs" \
 
 ### Stream a run instead
 
-Server-Sent Events push status changes, log entries, and cost updates as they happen. Browsers cannot set headers on `EventSource`, so the key goes in a query parameter on these routes only. Open the stream before you launch a run, or right after:
+Server-Sent Events push status changes, log entries, and cost updates as they happen. Browsers cannot set headers on `EventSource`, so the key goes in a query parameter on these routes only. Open it right after you launch the run:
 
 ```bash
 curl -N "$APPSTRATE_URL/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
@@ -160,7 +160,7 @@ curl -X POST "$APPSTRATE_URL/api/agents/@acme/summarizer/run" \
   -d '{ "input": { "text": "..." } }'
 ```
 
-The body is validated against the agent's input schema, and unknown fields are rejected. You get `201` and the run resource, like an inline run. The agent must be active in the key's space and have a published version, and every integration it needs must be connected for the caller.
+The request body is strict, so an unknown top-level field is rejected, and `input` is validated against the agent's input schema. You get `201` and the run resource, like an inline run. The agent must be active in the key's space and have a published version, and every integration it needs must be connected for the caller.
 
 </Step>
 

@@ -51,7 +51,7 @@ CONNECTION_ENCRYPTION_KEY=$(openssl rand -base64 32)
 EOF
 ```
 
-`CONNECTION_ENCRYPTION_KEY` must be 32 bytes, base64-encoded. `UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET` and `CONNECT_SESSION_SECRET` must be at least 16 characters. Keep a copy of `CONNECTION_ENCRYPTION_KEY`: losing it makes every stored credential unreadable. The tier templates need only `POSTGRES_PASSWORD` and the five application secrets (`POSTGRES_USER` defaults to `appstrate`, and Tier 1 and 2 have no MinIO).
+`CONNECTION_ENCRYPTION_KEY` must be 32 bytes, base64-encoded. `UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET` and `CONNECT_SESSION_SECRET` must be at least 16 characters. Keep a copy of `CONNECTION_ENCRYPTION_KEY`: losing it makes every stored credential unreadable. The tier templates need only `POSTGRES_PASSWORD` and the five application secrets, plus `MINIO_ROOT_PASSWORD` on Tier 3 (`POSTGRES_USER` defaults to `appstrate`, and Tier 1 and 2 have no MinIO).
 
 All other variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
 
@@ -85,7 +85,7 @@ You also need at least one LLM provider. Set `SYSTEM_PROVIDER_KEYS` (a JSON arra
 docker compose up -d
 ```
 
-The first start pulls the platform, the agent runtime, the sidecar and the five MCP runner images. Compose gates the platform on those pulls, so a slow first start is normal. The tier templates also run a one-shot `migrate` service before the platform. The root file migrates at boot only.
+The first start pulls the platform, the agent runtime, the sidecar and the five MCP runner images. Compose gates the platform on the agent runtime and sidecar pulls (the tier templates gate it on all seven pulls), so a slow first start is normal. The tier templates also run a one-shot `migrate` service before the platform. The root file migrates at boot only.
 
 </Step>
 
@@ -142,7 +142,7 @@ docker compose exec -T appstrate-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc
   > appstrate-$(date +%F).dump
 ```
 
-Use `postgres` as the service name with a tier template. Back up file storage by snapshotting the volume (`storagedata`, or `miniodata` on Tier 3) or the bucket, and see [Upgrading](/docs/self-hosting/upgrading) for the full list. If MinIO crash-loops after a volume restore, the repair is in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#data-persistence).
+Use `postgres` as the service name with a tier template. A stack written by `appstrate install` runs under a derived Compose project name, so add `--project-name "$(jq -r .projectName .appstrate/project.json)"` to every `docker compose` command, even from the install directory. Back up file storage by snapshotting the volume (`storagedata`, or `miniodata` on Tier 3) or the bucket, and see [Upgrading](/docs/self-hosting/upgrading) for the full list. If MinIO crash-loops after a volume restore, the repair is in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#data-persistence).
 
 ```bash
 # DESTRUCTIVE: removes containers and all volumes

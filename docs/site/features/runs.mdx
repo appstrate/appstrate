@@ -98,7 +98,7 @@ The body takes `manifest` and `prompt` (required), `input`, `context_files` (exi
 
 Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
 
-`POST /api/runs/inline/validate` runs the same preflight (manifest, input, integration readiness) without creating anything. It shares the rate-limit bucket of inline runs.
+`POST /api/runs/inline/validate` runs the same preflight (manifest, input, integration readiness) without creating anything. It has the same per-minute cap as inline runs, counted separately.
 
 ### Remote runs
 
@@ -140,14 +140,14 @@ Visibility follows [roles and permissions](/docs/features/roles-and-permissions)
 
 ## Who launched it
 
-Every run records its trigger. Exactly one of these is set:
+Every run records the identity it ran as, and how it was triggered. A run has an actor, either `userId` or `endUserId`, and may also carry the key or schedule that triggered it:
 
-| Field        | Trigger                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `userId`     | A member launched it (dashboard, CLI, MCP, chat).             |
-| `endUserId`  | It ran on behalf of an [end-user](/docs/features/end-users).  |
-| `apiKeyId`   | A server-side [API key](/docs/features/api-keys) launched it. |
-| `scheduleId` | A [schedule](/docs/features/scheduling) fired.                |
+| Field        | Meaning                                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `userId`     | The member the run executed as (dashboard, CLI, MCP, chat). For a run started with an API key, the member who created the key. |
+| `endUserId`  | The [end-user](/docs/features/end-users) the run executed as, instead of a member.                                             |
+| `apiKeyId`   | Set in addition to the actor when a server-side [API key](/docs/features/api-keys) launched it.                                |
+| `scheduleId` | Set in addition to the actor (the schedule's actor) when a [schedule](/docs/features/scheduling) fired.                        |
 
 The response adds readable names (`user_name`, `end_user_name`, `api_key_name`, `schedule_name`), plus `runner_name` and `runner_kind` for remote runs. `model_label`, `model_source` and `proxy_label` freeze which model and proxy the run used.
 

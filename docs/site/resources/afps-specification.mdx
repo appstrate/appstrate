@@ -7,7 +7,7 @@ description: The open package format Appstrate uses for agents, skills, MCP serv
 
 ## Why a separate format
 
-MCP defines how tools are called. Anthropic's Agent Skills define portable instructions. Neither says how to **package, version, and install** an agent together with its skills, tool servers, and service connections, or what an agent is allowed to reach once installed. AFPS fills that gap: a package is a ZIP with a `manifest.json` that declares its type, its version, and its dependencies, so a runtime can resolve, verify, and run it.
+AFPS builds on MCP (how tools are called) and on Anthropic's Agent Skills (portable instructions). It adds the layer for **packaging, versioning, and installing** an agent together with its skills, tool servers, and service connections, and for declaring what an agent may reach once installed. A package is a ZIP with a `manifest.json` that declares its type, its version, and its dependencies, so a runtime can resolve, verify, and run it.
 
 ## Where the spec lives
 

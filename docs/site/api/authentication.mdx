@@ -35,11 +35,13 @@ API keys are the credential for servers and automation. A key is `apst_` followe
 
 ### Create a key
 
-In the dashboard: **Space Settings**, **API Keys**, **New API key**. Over the API, from a session or another key that holds `api-keys:create`:
+In the dashboard: **Space Settings**, **API Keys**, **New API key**. Over the API, from a session that holds `api-keys:create`. An API key cannot mint another key, because `api-keys:*` is not a grantable scope:
 
 ```bash
 curl -X POST http://localhost:3000/api/api-keys \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "X-Space-Id: $SPACE_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "production backend",
@@ -59,7 +61,7 @@ curl -X POST http://localhost:3000/api/api-keys \
 
 The full `key` is returned **once**. Store it immediately.
 
-With a session cookie, add `X-Org-Id` and `X-Space-Id` so the key is created in the space you mean. A personal space takes no API keys (`409 personal_space_takes_no_keys`): create the key in a team space.
+The `X-Org-Id` and `X-Space-Id` headers choose the space the key is created in (see [Session cookies](#session-cookies) for the sign-in that produces `cookies.txt`). A personal space takes no API keys (`409 personal_space_takes_no_keys`): create the key in a team space.
 
 ### What a key can do
 
@@ -71,7 +73,7 @@ effective permissions = key scopes  ∩  what the key's creator currently holds 
 
 - The scopes are a ceiling, not a grant. The key never has more than its creator, and it follows the creator: if they lose a role or leave the organization, their keys lose that authority, and leaving the organization revokes them.
 - Scopes you request but your own role does not hold are silently dropped from the new key. A scope no key can carry at all is `400 invalid_request`.
-- If you omit `scopes`, the key receives every grantable scope you hold. Prefer an explicit list.
+- If you omit `scopes`, the key receives every grantable scope you hold, `credential-proxy:call` and `llm-proxy:call` included. Prefer an explicit list.
 - `expiresAt` is an ISO 8601 date in the future, or `null` for no expiry. There is no rotation: create a new key, switch over, then revoke the old one with `DELETE /api/api-keys/{id}`. Revocation is immediate.
 
 ### Scopes

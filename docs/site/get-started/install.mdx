@@ -57,7 +57,7 @@ For a manual Docker Compose setup (CI, Kubernetes preparation, custom orchestrat
 
 </Tabs>
 
-Whatever the route, the installer writes a `.env` with generated secrets (and, for Docker tiers, a `docker-compose.yml`) into the install directory, `~/appstrate` by default. It then waits for the healthcheck (up to 120 seconds on Docker tiers) and opens `http://localhost:3000`. The default port is 3000 (`--port` or `APPSTRATE_PORT` changes it). If it is taken, an unattended install picks the next free one and an attended install stops and asks you to free it or pick another.
+Whatever the route, the installer writes a `.env` with generated secrets (and, for Docker tiers, a `docker-compose.yml`) into the install directory, `~/appstrate` by default. It then waits for the healthcheck (up to 120 seconds on Docker tiers) and tries to open `http://localhost:3000` in your browser. The default port is 3000 (`--port` or `APPSTRATE_PORT` changes it). If it is taken, an install run with `--yes` picks the next free port, an install run with `--tier` but not `--yes` stops with an error, and an interactive install asks you for another port.
 
 ### Who can sign up
 

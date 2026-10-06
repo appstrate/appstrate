@@ -15,7 +15,7 @@ effective = what the creator can do now in the key's space  ∩  the key's scope
 
 - If the creator is demoted or removed from the space, the key loses the same rights immediately.
 - If the creator leaves or is removed from the organization, their keys in it are revoked.
-- A key cannot grant itself anything its creator lacks: requested scopes are checked against the creator's own permissions when you mint it.
+- A key cannot grant itself anything its creator lacks: when you mint it, requested scopes the creator does not hold are dropped from the key, and a scope that no key can carry is a `400`.
 - Some permissions can never be put on a key, such as `share`, `integrations:configure`, member and role management. A key cannot create spaces or organizations either. See [Roles and permissions](/docs/features/roles-and-permissions).
 
 Only people holding `api-keys:create` in the space (the `admin` space role, so owners and admins) can mint keys. A personal space takes no keys (`409 personal_space_takes_no_keys`).
@@ -47,7 +47,7 @@ The response is `{ id, key, keyPrefix, scopes }` and the only time `key` is retu
 
 The key format is `apst_` followed by 30 random characters and a 6 character checksum, so a leaked key can be recognised by secret scanners. `keyPrefix` (`apst_` plus 8 characters) identifies a key in lists without exposing it.
 
-`GET /api/api-keys/available-scopes` returns the scopes you can grant in the current space, and `GET /api/api-keys` lists the keys of the space with `id`, `name`, `keyPrefix`, `scopes`, `created_by`, `expiresAt`, `lastUsedAt`, `revokedAt` and `createdAt`.
+`GET /api/api-keys/available-scopes` returns the scopes you can grant in the current space, and `GET /api/api-keys` lists the active (not revoked) keys of the space with `id`, `name`, `keyPrefix`, `scopes`, `created_by`, `expiresAt`, `lastUsedAt`, `revokedAt` and `createdAt`.
 
 ## Using a key
 

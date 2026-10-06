@@ -35,7 +35,7 @@ Open **Agents** in the sidebar and create a new agent. The editor lets you write
 
 ### Through the API
 
-Create the draft, then publish a version. Writes to a draft are guarded by optimistic concurrency: `PATCH` requires the `ETag` of the draft in `If-Match`.
+Creating an agent writes its draft and cuts its first version, and activates it in your space. Later you edit the draft and publish more versions. Writes to a draft are guarded by optimistic concurrency: `PATCH` requires the `ETag` of the draft in `If-Match`.
 
 ```bash
 # 1. Create the agent (draft + initial version)
@@ -151,7 +151,7 @@ Values resolve in this order, last one wins:
 3. the value frozen on a [schedule](/docs/features/scheduling);
 4. the caller's input at launch.
 
-A space admin can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
+A member who holds `agents:configure` in the space (the `admin` and `builder` roles) can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
 
 ```bash
 curl -X PUT https://your-instance/api/agents/@acme/support-triage/input-settings \
@@ -200,7 +200,7 @@ Each space can pin a model, a proxy and generation settings (temperature, reason
 curl -X PATCH https://your-instance/api/agents/@acme/support-triage/model \
   -H "Authorization: Bearer apst_your_key" \
   -H "Content-Type: application/json" \
-  -d '{ "modelId": "mod_xxx", "generation": { "temperature": 0.2, "reasoning_level": "medium" } }'
+  -d '{ "modelId": "<model id>", "generation": { "temperature": 0.2, "reasoning_level": "medium" } }'
 ```
 
 Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/docs/integrations/llm-models). The proxy cascade is in [Proxies](/docs/features/proxies).

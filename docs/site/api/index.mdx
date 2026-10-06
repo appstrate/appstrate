@@ -91,7 +91,7 @@ Some also return `total` or `limit`. The style depends on the resource, and the 
 | Cursor   | `limit`, `startingAfter` (and `endingBefore` for end-users) | `/api/end-users`, `/api/files`, `/api/notifications`, `/api/webhooks/{id}/deliveries`, `/api/chat/sessions` |
 | Sequence | `since`, `limit`                                            | `/api/runs/{id}/logs`                                                                                       |
 
-`limit` defaults to 20 and is capped at 100 on most lists (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.
+`limit` defaults to 20 on most lists (50 for an agent's runs, 100 for integrations, 1000 for run logs) and is capped at 100 (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.
 
 When another page follows, the response carries an RFC 8288 `Link` header with `rel="next"`, and `rel="prev"`, `first`, `last` where they apply. A generic client can follow `next` until it disappears, whatever the body shape. Cursor values are resource ids: pass the `id` of the last item you received.
 
@@ -134,7 +134,7 @@ Event names, as `event:` lines in the stream:
 | `run_metric`          | Running total of cost and token usage for a run                                                |
 | `connection_update`   | One of your own integration connections changed                                                |
 | `chat_session_update` | A change signal for one of your chat sessions, when the chat module is loaded. Needs a session |
-| `ping`                | Keep-alive, immediately on connect and every 30 seconds                                        |
+| `ping`                | Keep-alive, immediately on connect and after every 30 seconds without another event            |
 
 Parameters: `channels=run_update,run_log` limits the stream to those events (unknown names are ignored, and an empty result falls back to everything). `verbose=true` includes full payloads, such as log `data`. Leave it off for safer consumption.
 

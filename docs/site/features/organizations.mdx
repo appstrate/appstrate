@@ -80,7 +80,7 @@ curl -X DELETE https://your-instance/api/orgs/<org id>/members/<user id> -H "Coo
 curl -X POST https://your-instance/api/orgs/<org id>/leave -H "Cookie: ..."
 ```
 
-`GET /api/orgs/{orgId}` returns the organization with its members and pending invitations. There is no separate member list endpoint.
+`GET /api/orgs/{orgId}` returns the organization, its members (with `members:read`) and its pending invitations (with `members:invite`). There is no separate member list endpoint.
 
 A member who leaves or is removed loses their explicit space roles and notifications in the organization, their schedules there are disabled, their API keys there are revoked, and their personal space enters a 30-day offboarding window. The last owner cannot leave (`409 last_owner`): promote someone else first or delete the organization. A JWT access token is not revocable and stays valid until it expires, but every request is checked against live membership.
 
@@ -98,7 +98,7 @@ In the web app, **Settings > Members** manages members and invitations, and **Se
 
 ## Deleting an organization
 
-`DELETE /api/orgs/{orgId}` is owner-only and deletes the organization with its spaces, packages, runs, files, webhooks and keys. While a deletion is reserved, new runs and chat turns are refused with `409 org_deleting`.
+`DELETE /api/orgs/{orgId}` is owner-only and deletes the organization with its spaces, packages, runs, files, webhooks and keys. It is refused with a `400 delete_failed` while a run is in progress. While a deletion is reserved, new runs and chat turns are refused with `409 org_deleting`.
 
 ## Selecting an organization
 
