@@ -162,7 +162,7 @@ could not be resolved`) instead of failing for good on the first. Without
   - A model or proxy connection test that is refused at the TCP level
     answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
 
-- **One process reads the Pi model registry: the API** (#PRNUM). It hands every
+- **One process reads the Pi model registry: the API** (#1706). It hands every
   model builder the record's _dialect_ (`name`, `thinkingLevelMap`, `compat`)
   next to the limits, modalities, reasoning and price it already resolved. The
   agent container reads it from `MODEL_DIALECT`, the sidecar from

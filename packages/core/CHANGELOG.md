@@ -12,14 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PiModelDialect`** and **`isPiModelDialect`**
   (`@appstrate/core/sidecar-types`): what of a Pi registry record shapes a
   request beyond the resolved values, as the platform hands it to a model
-  builder (`name`, `thinkingLevelMap?`, `compat?`), and its shape check.
+  builder (`name`, `thinkingLevelMap?`, `compat?`), and its shape check. (#1706)
 
 ### Changed
 
 - **`ModelSwapBacking.dialect` is required** (`PiModelDialect | null`): the
   sidecar builds the backing from it and no longer reads a record by
   `providerId`. A producer of `ModelSwap` descriptors must set it, `null`
-  when Pi keeps no record of the backing.
+  when Pi keeps no record of the backing. (#1706)
 - **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
   locale localises the unit names and the decimal separator (`fr` →
   `2,0 Ko`). Without it the output is unchanged.
