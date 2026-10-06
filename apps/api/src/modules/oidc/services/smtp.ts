@@ -41,14 +41,16 @@ import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface ResolvedSmtpConfig {
+interface SmtpSender {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
-  source: "per-space" | "instance";
-  /** Per-space only: the realm whose accounts this transport may write to. */
-  tenantRealm?: string;
 }
+
+/** A per-space transport always names the realm whose accounts it may write to. */
+export type ResolvedSmtpConfig =
+  | (SmtpSender & { source: "per-space"; tenantRealm: string })
+  | (SmtpSender & { source: "instance" });
 
 interface UpsertSmtpConfigInput {
   host: string;

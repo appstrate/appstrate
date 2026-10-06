@@ -11,7 +11,7 @@ import { prefixedId } from "@appstrate/db/ids";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { user as userTable, spaces } from "@appstrate/db/schema";
+import { user as userTable, session as sessionTable, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -123,6 +123,23 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
     expect(await db.select().from(userTable).where(eq(userTable.email, "ops@acme.test"))).toEqual(
       [],
     );
+  });
+
+  it("a link issued for a free address does not sign in the platform account created since", async () => {
+    const { qs } = await spaceWithOwnSmtp();
+    const email = `later-${crypto.randomUUID()}@acme.test`;
+    await submitEmail("/api/oauth/magic-link", qs, email);
+    const link = new URL(/href="([^"]+)"/.exec(mails[0]!.html)![1]!.replaceAll("&amp;", "&"));
+    const account = await createTestUser({ email, emailVerified: true });
+
+    const res = await app.request(`/api/auth/magic-link/verify${link.search}`);
+
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get("location")!).searchParams.get("error")).toBeTruthy();
+    expect(res.headers.getSetCookie().join(";")).not.toContain("session_token");
+    expect(
+      await db.select().from(sessionTable).where(eq(sessionTable.userId, account.id)),
+    ).toHaveLength(1);
   });
 
   it("still sends one to an end-user of that space, and to a new address", async () => {

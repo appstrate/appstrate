@@ -357,12 +357,11 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
 
   const policy = await loadClientSignupPolicy(pendingClientId);
   if (!policy) return;
-  if (policy.allowSignup) return;
 
   const adapter = ctx.context.internalAdapter as
     | {
         findVerificationValue: (key: string) => Promise<{ value: string; expiresAt: Date } | null>;
-        findUserByEmail: (email: string) => Promise<{ user: unknown } | null>;
+        findUserByEmail: (email: string) => Promise<{ user: { realm?: string } } | null>;
       }
     | undefined;
   if (!adapter) return;
@@ -378,11 +377,20 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   }
   if (!email) return;
 
+  // A link signs in an account of the audience its client serves, and no
+  // other: the account may have been created, in another realm, after the
+  // link was issued for a then-free address.
   const existing = await adapter.findUserByEmail(email);
-  if (existing?.user) return;
+  const wrongRealm =
+    !!existing?.user &&
+    existing.user.realm !==
+      expectedRealmForClient({
+        level: policy.level,
+        referencedSpaceId: policy.spaceId ?? undefined,
+      });
+  if (existing?.user ? !wrongRealm : policy.allowSignup) return;
+  const errorCode = wrongRealm ? "account_realm_mismatch" : "signup_disabled";
 
-  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
-  if (!rawErrorCallback) return;
   const baseURL = new URL(ctx.context.baseURL);
 
   // Shared fallback — used both for off-origin URLs (attack path:
@@ -407,8 +415,16 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
       ...logFields,
     });
     const safe = new URL(baseURL);
-    safe.searchParams.set("error", "signup_disabled");
+    safe.searchParams.set("error", errorCode);
     throw ctx.redirect(safe.toString());
+  }
+
+  const rawErrorCallback = query.errorCallbackURL ?? query.callbackURL;
+  if (!rawErrorCallback) {
+    // A closed sign-up without a callback is left to the create hook; a
+    // wrong-realm sign-in has no later guard.
+    if (!wrongRealm) return;
+    redirectToSafeDefault("oidc.magic_link.error_callback.missing", {});
   }
 
   // `decodeURIComponent` throws `URIError` on malformed percent-escapes
@@ -463,7 +479,7 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
       baseOrigin: baseURL.origin,
     });
   }
-  target.searchParams.set("error", "signup_disabled");
+  target.searchParams.set("error", errorCode);
   throw ctx.redirect(target.toString());
 }
 

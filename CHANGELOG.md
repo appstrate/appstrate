@@ -479,6 +479,28 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **A space's own SMTP server carries auth e-mails only to that space's
+  accounts.** The hosted sign-in pages of a space-level OAuth client send
+  Better Auth's e-mails through the space's transport, whatever address is
+  typed, and a magic link or a reset link is a credential. One rule now
+  lives where the transport is chosen (`sendAuthMail`): a tenant transport
+  writes to an account of that tenant's realm, or to an address with no
+  account that `AUTH_BOOTSTRAP_OWNER_EMAIL` / `AUTH_PLATFORM_ADMIN_EMAILS`
+  do not name. Anything else is withheld, the page answers as before, and
+  the server logs it. A per-space transport cannot be built without its
+  realm.
+- **A magic link signs in an account of the audience its client serves.**
+  A link issued through an OAuth client for an address that had no account
+  signed in whichever account held the address when it was opened. The
+  verify guard that already bound a link to its client for sign-up
+  (`enforceMagicLinkSignupPolicy`) now covers an existing account too: one
+  of another realm is refused with a redirect to the sign-in page and no
+  session.
+- **`/claim` answers `403 signup_domain_not_allowed` with SMTP configured
+  too.** Under mail verification Better Auth answers a refused account
+  creation as a created one, so claiming an address outside
+  `AUTH_ALLOWED_SIGNUP_DOMAINS` ended in `500 bootstrap_user_lookup_failed`.
+  The token stays redeemable.
 - **An `api_call` reaches an internal host only when the manifest and the
   operator both allow it** (#1657). The three paths disagreed: a run's
   sidecar skipped the SSRF gate for any host `authorized_uris` named
