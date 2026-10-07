@@ -66,7 +66,7 @@ const ALIAS_LEVELS = {
 } as const;
 
 function backedBy(providerId: string, apiShape: ModelApiShape, modelId: string): OrgModelInfo {
-  const entry = lookupCatalogModel({ providerId, apiShape }, modelId)!;
+  const entry = lookupCatalogModel({ providerId, apiShape, authMode: "api_key" }, modelId)!;
   return { ...base, aliased: true, modelId, generation: entry.generation };
 }
 

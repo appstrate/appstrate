@@ -49,6 +49,7 @@ import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initPersonalSpaceSweeperWorker } from "../services/personal-space-sweeper.ts";
 import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
+import { startModelCatalogSync } from "../services/model-catalog-sync.ts";
 import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
@@ -254,6 +255,9 @@ export async function bootBackground(): Promise<void> {
       error: getErrorMessage(err),
     });
   });
+
+  // Read in the background: boot never waits on the channel.
+  startModelCatalogSync();
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([

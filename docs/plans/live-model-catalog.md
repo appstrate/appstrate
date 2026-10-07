@@ -79,6 +79,10 @@ This step is worth merging alone: one resolver instead of four.
 
 ## Step 2: the instance reads a signed catalog
 
+`apps/api/src/services/model-catalog-overlay.ts` accepts a file and holds the
+accepted one in memory, with no database and no network behind it;
+`model-catalog-sync.ts` reads the channel.
+
 ### The file
 
 `${MODEL_CATALOG_URL}/pi-<PI_SDK_VERSION>.json` plus a detached `.sig`. Keyed by
@@ -99,60 +103,87 @@ no other.
       "name": "…",
       "reasoning": true,
       "input": ["text", "image"],
-      "cost": {},
-      "context_window": 0,
-      "max_tokens": 0,
-      "thinking_level_map": {},
+      "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+      "contextWindow": 0,
+      "maxTokens": 0,
+      "thinkingLevelMap": {},
       "compat": {}
     }
   ]
 }
 ```
 
-Records carry the eight fields `buildPiModel` reads and nothing else. Never a
-`baseUrl`, never `headers`: a hostile record must not be able to redirect an
+The envelope is ours. A record is a fragment of a Pi registry record, in Pi's
+own spelling: the provider key, the API shape, the id and the eight fields a
+model is built from, copied as they are. Nothing else is allowed in: never a
+`baseUrl`, never `headers`. A hostile record must not be able to redirect an
 authenticated request.
 
 ### Acceptance, on the instance
 
 A file is applied only when all of these hold, checked again on every load:
 
-1. Ed25519 signature over the exact bytes, against a public key in the source.
-   Same shape as `apps/api/src/modules/firecracker/runner/artifacts.ts`.
-2. `sdk_version` equals `PI_SDK_VERSION`.
-3. `serial` is not lower than the stored one (no rollback).
-4. Strict Zod parse.
-5. Per record, the **vocabulary gate**: the provider is a Pi provider wired by a
-   registered definition on that API shape, and every `compat` key and every
-   thinking level already appears in a bundled record of the same API shape.
-6. **Additive only**: a record whose `(provider, api, id)` the bundled registry
-   has is ignored.
+1. Ed25519 signature (base64, raw 64 bytes) over the exact bytes,
+   against `MODEL_CATALOG_PUBLIC_KEY`, a constant in the source.
+2. Strict Zod parse: an unknown field anywhere refuses the file.
+3. `sdk_version` equals `PI_SDK_VERSION`.
+4. Per record, the **vocabulary gate**: some bundled record of the same Pi
+   provider speaks its API shape; every thinking level is one the platform
+   knows, mapped to an effort word a bundled record of that API shape uses;
+   every `compat` key is used by a bundled record of that API shape, and so is
+   every non-boolean `compat` value (a string value is a branch in Pi's code).
+   The vocabulary is the API shape's, not the provider's: a dialect is read by
+   the code of the API it is spoken over. The keys `PLATFORM_MODEL_COMPAT`
+   overrides are not weighed: their value is never read.
+5. **Additive only**: a record whose `(provider, id)` the bundled registry has
+   is skipped.
 
-A record that fails 5 or 6 is skipped and logged. A file that fails 1 to 4 is
-refused whole and the last good one stays.
+A record that fails 4 or 5 is skipped and logged. A file that fails 1 to 3 is
+refused whole and the one held stays.
+
+A file replaces the one a process holds only with a higher `serial`: a lower
+one is a rollback, the same one is the file already held.
+
+What the signature does not settle, on purpose:
+
+- **The channel can withhold.** Whoever serves the file can keep serving an old
+  one, or none: a withdrawal reaches an instance only if the channel delivers
+  it. A signed expiry would close that, at the price of every instance dropping
+  its models whenever the producer stops for a few days. Not taken.
+- **A process that just started has no floor.** It holds no file, so it
+  accepts any file ever published for its Pi version.
 
 ### Wiring
 
-- **Storage:** one row in a new core table `model_catalog_overlays`
-  (`sdk_version` PK, `serial`, `payload`, `signature`, `fetched_at`). Rows of
-  another SDK version are deleted on write. Replicas agree, and a restart
-  without network keeps the offer. Hand-written migration, snapshot,
-  `schema-catalog.txt`.
-- **Fetch:** a worker on `infra/queue` (cron, like
-  `model-providers/pairing-cleanup-worker.ts`), every six hours and once at
-  boot. `If-None-Match`, 10 s timeout, 2 MB cap. Any failure keeps the last
-  good row. A 404 is the normal state before the first publication.
-- **Replicas:** the writer clears a named cache through `lib/cache-bus.ts`; the
-  others reload from the row.
+- **No storage.** Each API process holds the accepted file in memory. A table
+  would serve the file before the scheduler starts and keep the rollback floor
+  across restarts. Not worth one: the bundled registry is always there, so all
+  it would protect is the models the catalog adds, for the second a restarted
+  process needs to read the channel.
+- **Sync:** `startModelCatalogSync`, one timer per process. A read of the
+  channel at start, in the background, and one every hour: two GETs (the file,
+  then its `.sig`), redirects refused, 10 s timeout, 2 MB cap. The two GETs are
+  not atomic; a publication between them fails the signature and the next read
+  gets a consistent pair. A 404 means no file for this Pi version. Replicas
+  read on their own and agree within the hour.
 - **Merge point:** `apps/api/src/services/model-catalog.ts` only.
-  `listCatalogModels`, `lookupCatalogModel` and `describeKnownModel` answer
-  from bundled plus overlay, so `restrictsToOffer` follows with no change at
-  its three call sites.
-- **Unchanged:** `validateCatalogReferences` (featured ids) and
-  `model-registry.ts` (system models) read the bundled registry only. The offer
+  `listCatalogModels`, `lookupCatalogModel` and `lookupCatalogDialect` take a
+  scope, `all` (default: bundled plus overlay) or `bundled`, so
+  `restrictsToOffer` follows with no change at its call sites.
+- **Who reads `bundled`:** the boot rules (featured ids, the inference-probe
+  check, `SYSTEM_PROVIDER_KEYS` models), `verify:system-models`, and a system
+  model's price, limits and dialect at run time. OpenRouter takes any id as a
+  system model, so one could name an id only the overlay records: the platform
+  pays for it, and remote data prices nothing the platform pays for. The offer
   snapshot test stays bundled-only and deterministic.
-- **Env:** `MODEL_CATALOG_URL` in `@appstrate/env`, `docs/ENV.md`,
-  `.env.example`. Empty disables the fetch.
+- **Subscription providers** (`authMode: "oauth2"`) are offered no overlay
+  record with a price tier one request can reach, the rule
+  `verify:system-models` holds the bundled registry to (#1552).
+- **Env:** `MODEL_CATALOG_URL` (`http`/`https`). Empty starts nothing.
+- **A model whose record is absent** — withdrawn, channel switched off, a Pi
+  bump whose file is not published yet, or a process that restarted and has
+  not read the channel — keeps its `org_models` row and runs without catalog
+  defaults or dialect, unpriced: the same state as an id a Pi bump drops.
 
 ## Step 3: CI produces the file
 
@@ -181,15 +212,18 @@ sharing the concurrency group of `publish-installer.yml`. The job summary lists
 what was added and what the gate or the proof dropped. `release.yml` dispatches
 it for a new tag so the file exists at deploy time.
 
-An empty set is still published with a higher serial. That is also the kill
-switch: publish an empty file and every instance drops its overlay.
+A file is published for every Pi version in use even when it lists nothing, so
+a 404 stays an anomaly and an instance that just moved to a new Pi version
+finds its file. `serial` only ever grows, across key rotations too: the
+publication time in seconds. An empty file with a higher serial is also the
+kill switch: every instance the channel reaches drops its overlay.
 
 ## Order
 
 | PR  | Content                                                                                 | Effect alone                   |
 | --- | --------------------------------------------------------------------------------------- | ------------------------------ |
 | 1   | Step 1                                                                                  | none visible; one resolver     |
-| 2   | Step 2 (table, env, reader)                                                             | inert: the file does not exist |
+| 2   | Step 2 (env, reader)                                                                    | inert: the file does not exist |
 | 3   | Step 3, signing key, `docs/architecture/MODEL_CATALOG.md`, `SUPPLY_CHAIN.md`, CHANGELOG | live after the next release    |
 
 Each PR carries the `integration` and `e2e` labels. #1705 merges first.
@@ -211,7 +245,7 @@ Each PR carries the `integration` and `e2e` labels. #1705 merges first.
 ## Decisions
 
 1. **`MODEL_CATALOG_URL` is on by default**, pointing at `get.appstrate.dev`,
-   for every instance: one anonymous GET of a static file. Empty disables it.
+   for every instance: anonymous GETs of two static files. Empty disables it.
 2. **An overlay model carries Pi's price.** Unpriced until the bump would make
    its usage free wherever usage is billed from the ledger.
 3. **A CLI that receives a Pi provider and no dialect refuses** ("too old for

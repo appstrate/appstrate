@@ -5,6 +5,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import {
+  type CatalogScope,
   listCatalogModels,
   lookupCatalogDialect,
   lookupCatalogModel,
@@ -286,17 +287,17 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
       ...resolveModelMetadata(
         def,
         def.modelId,
-        resolveCatalogDefaults(def.providerId, def.modelId),
+        resolveCatalogDefaults(def.providerId, def.modelId, "bundled"),
       ),
       generation: generationOf(
-        resolveCatalogDefaults(def.providerId, def.modelId),
+        resolveCatalogDefaults(def.providerId, def.modelId, "bundled"),
         def.aliased === true,
       ),
       apiShape: def.apiShape,
       providerId: def.providerId,
       provider_name: getModelProvider(def.providerId)?.displayName ?? null,
       pi_provider: resolvePiProvider(def.providerId),
-      pi_dialect: resolvePiDialect(def.providerId, def.modelId),
+      pi_dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
       base_url: def.baseUrl,
       modelId: def.modelId,
       enabled: def.enabled !== false,
@@ -819,9 +820,13 @@ export interface CatalogDefaults {
   generation?: ModelGenerationCapabilities;
 }
 
-export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+export function resolveCatalogDefaults(
+  providerId: string,
+  modelId: string,
+  scope: CatalogScope = "all",
+): CatalogDefaults {
   const provider = getModelProvider(providerId);
-  const entry = provider ? lookupCatalogModel(provider, modelId) : null;
+  const entry = provider ? lookupCatalogModel(provider, modelId, scope) : null;
   if (!entry) return {};
   return {
     label: entry.label,
@@ -846,18 +851,23 @@ function resolvePiProvider(providerId: string): string | null {
 }
 
 /** The Pi dialect of the provider's record of `modelId` — what every model builder is handed. */
-function resolvePiDialect(providerId: string, modelId: string): PiModelDialect | null {
+function resolvePiDialect(
+  providerId: string,
+  modelId: string,
+  scope: CatalogScope = "all",
+): PiModelDialect | null {
   const def = getModelProvider(providerId);
-  return def ? lookupCatalogDialect(def, modelId) : null;
+  return def ? lookupCatalogDialect(def, modelId, scope) : null;
 }
 
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
-  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+  // The bundled registry alone: the platform pays for a system model.
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId, "bundled");
   return {
     providerId: def.providerId,
     piProvider: resolvePiProvider(def.providerId),
-    dialect: resolvePiDialect(def.providerId, def.modelId),
+    dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,

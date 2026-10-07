@@ -108,6 +108,10 @@ const EXEMPT: Record<string, string> = {
   "packages/runner-pi/src/pi-runner.ts::function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {|prepareAnthropicThinkingBudgets":
     "same as `preserveRequestedThinkingLevel` — a spread-through transformer of " +
     "a record built elsewhere, not a construction site.",
+  "apps/api/src/services/model-catalog-overlay.ts::function toModel(record: CatalogRecord): Model<Api> {|catalogRecordRefusal":
+    "a REGISTRY record of the live catalog, read exactly like one of Pi's own " +
+    "(`model-catalog.ts`) and never handed to Pi: a model built from it goes " +
+    "through `buildPiModel`, which is where the platform compat lands.",
 };
 
 /**

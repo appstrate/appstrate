@@ -10,6 +10,9 @@
  * (`catalogProviderId ?? providerId`) served over its `apiShape`. A
  * definition naming no Pi provider (the user-described gateways) offers
  * nothing — its ids are free-form.
+ *
+ * The live catalog (`model-catalog-overlay.ts`) adds the records a later Pi
+ * registry holds and the pinned code can serve, never replacing a bundled one.
  */
 
 import type { CatalogModelEntry } from "@appstrate/shared-types";
@@ -30,15 +33,25 @@ import {
   piReasoningLevels,
   usableRecordMaxTokens,
 } from "@appstrate/runner-pi/pi-model";
+import { findOverlayModelsById, listOverlayModels } from "./model-catalog-overlay.ts";
 import { hasLiveModelSearch } from "./model-search.ts";
 
 type CatalogProvider = Pick<
   ModelProviderDefinition,
-  "providerId" | "catalogProviderId" | "apiShape"
+  "providerId" | "catalogProviderId" | "apiShape" | "authMode"
 >;
 
+/**
+ * The bundled registry alone, or it and the live catalog. Boot rules and
+ * system models read `bundled`: remote data decides neither whether an
+ * instance starts nor what a model the platform pays for costs.
+ */
+export type CatalogScope = "bundled" | "all";
+
 /** The Pi builtin provider a definition resolves against, or null for a gateway. */
-export function piProviderOf(def: Omit<CatalogProvider, "apiShape">): string | null {
+export function piProviderOf(
+  def: Pick<CatalogProvider, "providerId" | "catalogProviderId">,
+): string | null {
   const key = def.catalogProviderId ?? def.providerId;
   return isPiProvider(key) ? key : null;
 }
@@ -51,28 +64,66 @@ export function restrictsToOffer(def: CatalogProvider): boolean {
   return piProviderOf(def) !== null && !hasLiveModelSearch(def.providerId);
 }
 
-export function listCatalogModels(def: CatalogProvider): Array<CatalogModelEntry & { id: string }> {
+/**
+ * The price tiers one request can cross. A subscription (`oauth2`) model is
+ * priced from usage summed over requests, where a tier cannot apply (#1552).
+ */
+export function reachablePriceTiers<T extends { inputTokensAbove: number }>(
+  tiers: readonly T[] | undefined,
+  contextWindow: number,
+): T[] {
+  return (tiers ?? []).filter((tier) => tier.inputTokensAbove < contextWindow);
+}
+
+function overlayRecords(def: CatalogProvider, provider: string): Model<Api>[] {
+  const records = listOverlayModels(provider, def.apiShape);
+  if (def.authMode !== "oauth2") return records;
+  // `verify:system-models` holds the bundled registry to the same rule at release time.
+  return records.filter(
+    (record) => reachablePriceTiers(record.cost.tiers, record.contextWindow).length === 0,
+  );
+}
+
+function catalogRecord(
+  def: CatalogProvider,
+  modelId: string,
+  scope: CatalogScope,
+): Model<Api> | undefined {
+  const provider = piProviderOf(def);
+  if (!provider) return undefined;
+  const bundled = getPiModel(provider, modelId, def.apiShape);
+  if (bundled || scope === "bundled") return bundled;
+  return overlayRecords(def, provider).find((record) => record.id === modelId);
+}
+
+export function listCatalogModels(
+  def: CatalogProvider,
+  scope: CatalogScope = "all",
+): Array<CatalogModelEntry & { id: string }> {
   const provider = piProviderOf(def);
   if (!provider) return [];
-  return listPiModels(provider, def.apiShape).map((record) => ({
-    id: record.id,
-    ...toCatalogEntry(record),
-  }));
+  return [
+    ...listPiModels(provider, def.apiShape),
+    ...(scope === "all" ? overlayRecords(def, provider) : []),
+  ].map((record) => ({ id: record.id, ...toCatalogEntry(record) }));
 }
 
 export function lookupCatalogModel(
   def: CatalogProvider,
   modelId: string,
+  scope: CatalogScope = "all",
 ): CatalogModelEntry | null {
-  const provider = piProviderOf(def);
-  const record = provider ? getPiModel(provider, modelId, def.apiShape) : undefined;
+  const record = catalogRecord(def, modelId, scope);
   return record ? toCatalogEntry(record) : null;
 }
 
 /** The dialect of the provider's record of `modelId`, or null without one. */
-export function lookupCatalogDialect(def: CatalogProvider, modelId: string): PiModelDialect | null {
-  const provider = piProviderOf(def);
-  const record = provider ? getPiModel(provider, modelId, def.apiShape) : undefined;
+export function lookupCatalogDialect(
+  def: CatalogProvider,
+  modelId: string,
+  scope: CatalogScope = "all",
+): PiModelDialect | null {
+  const record = catalogRecord(def, modelId, scope);
   return record ? piModelDialect(record) : null;
 }
 
@@ -81,7 +132,7 @@ export function lookupCatalogDialect(def: CatalogProvider, modelId: string): PiM
  * serving a vendor's id is not billed at the vendor's rate.
  */
 export function describeKnownModel(modelId: string): Omit<CatalogModelEntry, "cost"> | null {
-  const record = findPiModelsById(modelId)[0];
+  const record = findPiModelsById(modelId)[0] ?? findOverlayModelsById(modelId)[0];
   if (!record) return null;
   const { cost: _cost, ...described } = toCatalogEntry(record);
   return described;

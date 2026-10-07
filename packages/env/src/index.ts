@@ -284,6 +284,10 @@ export const envSchema = z
       .pipe(z.record(z.string(), z.string())),
     SYSTEM_PROXIES: jsonEnv<unknown[]>("[]"),
     SYSTEM_PROVIDER_KEYS: jsonEnv<unknown[]>("[]"),
+    // The live model catalog's channel (`docs/ENV.md`). Empty disables the read.
+    MODEL_CATALOG_URL: z
+      .union([z.literal(""), z.url({ protocol: /^https?$/ })])
+      .default("https://get.appstrate.dev/model-catalog"),
     // System-level integrations offered by the deployment out of the box.
     // Membership = the "auto-active" policy (on by default until an org opts
     // out). Each entry MAY ship one or more shared OAuth clients
