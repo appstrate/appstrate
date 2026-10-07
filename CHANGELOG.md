@@ -16,13 +16,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sign in to the account of every named address: an existing one is not
   re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **The API reads a live model catalog from `get.appstrate.dev`** (#1717,
-  #1732). A new variable, `MODEL_CATALOG_URL` (default
+  #1732, #1735). A new variable, `MODEL_CATALOG_URL` (default
   `https://get.appstrate.dev/model-catalog`), names a signed file listing the
   models a later Pi registry records and this build can serve, so a new model
   becomes selectable without a release. Each API process reads it in the
   background when it starts and every hour (two anonymous GETs) and holds it in
   memory; nothing about the instance is sent, nothing is stored and boot never
-  waits on it. Set the variable empty to run on the bundled registry alone.
+  waits on it. Set the variable to `off` to run on the bundled registry alone;
+  an empty value is the default channel, not a switch.
+  On a Docker install the variable reaches the container only when the
+  `appstrate` service lists it under `environment:`. The shipped compose files
+  now do; an install that keeps an older compose file adds
+  `- MODEL_CATALOG_URL` there before setting it.
   Until a file is published for a Pi version the read answers 404 and nothing
   changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
 - **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
