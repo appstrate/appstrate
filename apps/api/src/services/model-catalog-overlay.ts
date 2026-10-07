@@ -60,8 +60,6 @@ type CatalogRecord = z.infer<typeof recordSchema>;
 export class ModelCatalogRefused extends Error {}
 
 export interface AcceptedCatalog {
-  /** Canonical base64: what names this exact file. */
-  signature: string;
   serial: number;
   sourceVersion: string;
   models: Model<Api>[];
@@ -163,12 +161,7 @@ export async function readModelCatalog(
   signature: string,
   publicKey: string = MODEL_CATALOG_PUBLIC_KEY,
 ): Promise<AcceptedCatalog> {
-  const signatureBytes = Buffer.from(signature, "base64");
-  // One spelling per signature: it is what tells one stored file from another.
-  if (signatureBytes.toString("base64") !== signature) {
-    throw new ModelCatalogRefused("signature is not canonical base64");
-  }
-  if (!(await verifySignature(payload, signatureBytes, publicKey))) {
+  if (!(await verifySignature(payload, Buffer.from(signature, "base64"), publicKey))) {
     throw new ModelCatalogRefused("signature does not verify");
   }
   let json: unknown;
@@ -200,20 +193,14 @@ export async function readModelCatalog(
     else models.push(toModel(record));
     seen.add(key);
   }
-  return {
-    signature,
-    serial: file.serial,
-    sourceVersion: file.source_version,
-    models,
-    skipped,
-  };
+  return { serial: file.serial, sourceVersion: file.source_version, models, skipped };
 }
 
-let applied: { signature: string; byProvider: Map<string, Model<Api>[]> } | null = null;
+let applied: { serial: number; byProvider: Map<string, Model<Api>[]> } | null = null;
 
-/** The signature of the file this process serves, or null. */
-export function appliedModelCatalog(): string | null {
-  return applied?.signature ?? null;
+/** The serial of the file this process serves, or null on the bundled registry alone. */
+export function heldModelCatalogSerial(): number | null {
+  return applied?.serial ?? null;
 }
 
 /** Replace the applied overlay; `null` goes back to the bundled registry alone. */
@@ -226,7 +213,7 @@ export function applyModelCatalog(catalog: AcceptedCatalog | null): void {
   for (const model of catalog.models) {
     byProvider.set(model.provider, [...(byProvider.get(model.provider) ?? []), model]);
   }
-  applied = { signature: catalog.signature, byProvider };
+  applied = { serial: catalog.serial, byProvider };
 }
 
 export function listOverlayModels(piProvider: string, api: string): Model<Api>[] {

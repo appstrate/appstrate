@@ -62,8 +62,6 @@ const CORE_TABLES = [
   "files",
   // Standalone outbox table (no FKs) — deletion jobs must not leak between tests.
   "storage_deletion_jobs",
-  // Standalone (no FKs): the accepted live model catalog must not leak between tests.
-  "model_catalog_overlays",
   // Leaf tables (no dependents)
   "notifications",
   "audit_events",

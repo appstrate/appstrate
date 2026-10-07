@@ -17,6 +17,7 @@ import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core
 import type { TestResult } from "@appstrate/shared-types";
 import { fetchModelListing, statusFailure, validateKeyByInference } from "../org-models.ts";
 import { getModelProvider } from "./registry.ts";
+import { readBodyUnder } from "../../lib/capped-body.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Upper bound on models taken from a listing, across all of its pages. */
@@ -219,38 +220,21 @@ async function fetchListingPage(
   return { ok: true, body: parsed.body, status: res.status };
 }
 
-/**
- * Read a response body as JSON under {@link MAX_LISTING_BODY_BYTES}, cancelling
- * the stream the moment it crosses. The budget is spent on the stream, not on a
- * declared `content-length` — an untrusted endpoint's header is not a bound.
- */
+/** Read a response body as JSON under {@link MAX_LISTING_BODY_BYTES}. */
 async function readBoundedJson(
   res: Response,
 ): Promise<{ ok: true; body: unknown } | { ok: false; message: string }> {
-  if (res.body === null) return { ok: false, message: "Model listing is not JSON" };
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  let bytes: Uint8Array | null;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_LISTING_BODY_BYTES) {
-        await reader.cancel();
-        return {
-          ok: false,
-          message: `Model listing exceeds ${MAX_LISTING_BODY_BYTES} bytes`,
-        };
-      }
-      chunks.push(value);
-    }
+    bytes = await readBodyUnder(res, MAX_LISTING_BODY_BYTES);
   } catch {
     return { ok: false, message: "Model listing request failed" };
   }
-
+  if (bytes === null) {
+    return { ok: false, message: `Model listing exceeds ${MAX_LISTING_BODY_BYTES} bytes` };
+  }
   try {
-    return { ok: true, body: await new Response(new Blob(chunks)).json() };
+    return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
   } catch {
     return { ok: false, message: "Model listing is not JSON" };
   }
