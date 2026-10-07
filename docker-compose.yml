@@ -336,6 +336,8 @@ services:
       # every deployment silently saw an empty list.
       - SYSTEM_INTEGRATIONS
       - PROXY_URL=${PROXY_URL:-}
+      # Comma-separated hostnames trusted on a private address (SSRF allowlist).
+      - EGRESS_ALLOW_INTERNAL_HOSTS
       - OIDC_INSTANCE_CLIENTS
       # ── Social login (optional) ──
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
@@ -358,6 +360,9 @@ services:
       - AUTH_ALLOWED_SIGNUP_DOMAINS
       - AUTH_BOOTSTRAP_OWNER_EMAIL
       - AUTH_BOOTSTRAP_ORG_NAME
+      # One-shot token the installer writes to `.env`; the first owner redeems it
+      # at /claim. Empty/unset = no pending token (normal signup flow).
+      - AUTH_BOOTSTRAP_TOKEN
       # ── Auth secret rotation (optional) ──
       - BETTER_AUTH_ACTIVE_KID
       # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
