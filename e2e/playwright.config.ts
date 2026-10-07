@@ -33,7 +33,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "cd .. && bun --hot apps/api/src/index.ts",
+    // No `--hot`: the suite edits no source, and a crash of Bun's hot-reload
+    // runtime mid-suite fails every later test (#1710).
+    command: "cd .. && bun apps/api/src/index.ts",
     url: E2E_BASE_URL,
     // Reuse an already-listening server ONLY in CI.
     //

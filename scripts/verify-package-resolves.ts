@@ -64,29 +64,49 @@
  *                       injects globals into the consumer's whole program. Every
  *                       legitimate consumer already has it.
  *
+ * WORKSPACE DEPENDENCIES NOT ON NPM YET
+ * -------------------------------------
+ * By default every dependency comes from the registry, so a consumer whose range
+ * names a leaf version npm does not have (`@appstrate/core` → `@appstrate/afps-shared`)
+ * fails. That is the release-order guarantee, and the publish workflows rely on it.
+ *
+ * `--pack-unpublished-workspace-deps` (PR and `main` CI only) relaxes exactly one
+ * case: a `dependencies` entry naming a workspace package whose range floor IS that
+ * workspace's version, and that version is not on npm. That leaf is installed from
+ * an `npm pack` of the workspace instead, and the log says so. It lets the PR that
+ * bumps a leaf and its consumer's floor together go green; the leaf is tagged after
+ * merge, and the consumer's publish still refuses it until it is on npm.
+ *
  * USAGE
  *   bun scripts/verify-package-resolves.ts packages/core
+ *   bun scripts/verify-package-resolves.ts packages/core --pack-unpublished-workspace-deps
  *   bun scripts/verify-package-resolves.ts packages/afps-shared --keep
  *
  * `--keep` leaves the probe project on disk for manual poking.
  */
 
-import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { overrideFloor as rangeFloor } from "./verify-overrides.ts";
 
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 
 const { values, positionals } = parseArgs({
   args: Bun.argv.slice(2),
-  options: { keep: { type: "boolean", default: false } },
+  options: {
+    keep: { type: "boolean", default: false },
+    "pack-unpublished-workspace-deps": { type: "boolean", default: false },
+  },
   allowPositionals: true,
 });
 
 const packageDirArg = positionals[0];
 if (!packageDirArg) {
-  console.error("Usage: bun scripts/verify-package-resolves.ts <packageDir> [--keep]");
+  console.error(
+    "Usage: bun scripts/verify-package-resolves.ts <packageDir> [--pack-unpublished-workspace-deps] [--keep]",
+  );
   console.error("  e.g. bun scripts/verify-package-resolves.ts packages/core");
   process.exit(2);
 }
@@ -96,6 +116,7 @@ interface PackageJson {
   name: string;
   version: string;
   exports?: Record<string, unknown>;
+  dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
 }
 
@@ -125,6 +146,29 @@ const subpaths = subpathsOf(pkg);
 if (subpaths.length === 0) {
   console.error(`❌ ${pkg.name} declares no importable subpath in its exports map`);
   process.exit(2);
+}
+
+/** Every workspace package of the root `workspaces` globs, by name. */
+async function workspacePackages(): Promise<Map<string, { dir: string; version: string }>> {
+  const root = (await Bun.file(join(ROOT, "package.json")).json()) as { workspaces?: string[] };
+  const byName = new Map<string, { dir: string; version: string }>();
+  for (const pattern of root.workspaces ?? []) {
+    for (const path of new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: ROOT })) {
+      const ws = (await Bun.file(join(ROOT, path)).json()) as PackageJson;
+      byName.set(ws.name, { dir: dirname(join(ROOT, path)), version: ws.version });
+    }
+  }
+  return byName;
+}
+
+/** Whether `name@version` is on the npm registry; anything but 200/404 is an error. */
+async function isOnNpm(name: string, version: string): Promise<boolean> {
+  const res = await fetch(`https://registry.npmjs.org/${name}/${version}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (res.status === 200) return true;
+  if (res.status === 404) return false;
+  throw new Error(`npm registry answered ${res.status} for ${name}@${version}`);
 }
 
 function run(
@@ -194,6 +238,37 @@ try {
     fail("npm pack produced no tarball", packed.stdout + packed.stderr, probeDir);
   }
 
+  // 1b. Opt-in: a workspace leaf whose version the floor names but npm lacks
+  //     comes from a pack of the workspace (see the header). Never in publish.
+  const workspaceDepTarballs: string[] = [];
+  if (values["pack-unpublished-workspace-deps"]) {
+    const workspaces = await workspacePackages();
+    const depsDir = join(probeDir, "workspace-deps");
+    await mkdir(depsDir);
+    for (const [name, range] of Object.entries(pkg.dependencies ?? {})) {
+      const ws = workspaces.get(name);
+      if (!ws || rangeFloor(range) !== ws.version || (await isOnNpm(name, ws.version))) continue;
+      console.log(
+        `▸ ${name}@${ws.version} is not on npm yet: installing it from a pack of the ` +
+          `workspace (--pack-unpublished-workspace-deps). Publishing ${pkg.name} still ` +
+          `requires it on npm — tag the leaf once this merges.`,
+      );
+      const leafPacked = run(
+        ["npm", "pack", "--ignore-scripts", "--silent", "--json", "--pack-destination", depsDir],
+        ws.dir,
+      );
+      if (!leafPacked.ok) {
+        fail(
+          `npm pack of workspace ${name} failed`,
+          leafPacked.stderr || leafPacked.stdout,
+          probeDir,
+        );
+      }
+      const [{ filename }] = JSON.parse(leafPacked.stdout) as [{ filename: string }];
+      workspaceDepTarballs.push(`./workspace-deps/${filename}`);
+    }
+  }
+
   // 2. Throwaway consumer project — no workspaces, outside the monorepo.
   await writeFile(
     join(probeDir, "package.json"),
@@ -220,6 +295,9 @@ try {
   };
   const installTargets = [
     `./${tarball}`,
+    // npm dedupes the target's edge onto these top-level installs, so the
+    // registry is never asked for a version it does not have.
+    ...workspaceDepTarballs,
     // A declared peer range wins over the baseline default for the same name.
     ...Object.entries({ ...baseline, ...declaredPeers }).map(([n, r]) => `${n}@${r}`),
   ];

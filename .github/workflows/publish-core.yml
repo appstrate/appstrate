@@ -131,7 +131,8 @@ jobs:
       # a clean npm project outside the monorepo (~5 s, installs from npm).
       # It also enforces the leaf-first release order: a bumped
       # @appstrate/afps-shared range that is not on npm yet fails here rather than
-      # for the first consumer to run `npm install`.
+      # for the first consumer to run `npm install`. Registry only, so never
+      # `--pack-unpublished-workspace-deps` (that is check.yml's PR/main mode).
       - name: Verify the published artifact resolves for consumers
         working-directory: .
         run: bun scripts/verify-package-resolves.ts packages/core
