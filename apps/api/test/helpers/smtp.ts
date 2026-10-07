@@ -31,10 +31,9 @@
  *   });
  */
 
-import { beforeAll, afterAll } from "bun:test";
-import { _resetCacheForTesting } from "@appstrate/env";
 import type { Transporter } from "nodemailer";
-import { _rebuildAuthForTesting, withSmtpOverride } from "@appstrate/db/auth";
+import { withSmtpOverride } from "@appstrate/db/auth";
+import { useAuthEnv } from "./auth-env.ts";
 
 const SMTP_TEST_VARS = {
   SMTP_HOST: "__test_json__",
@@ -45,25 +44,7 @@ const SMTP_TEST_VARS = {
 } as const;
 
 export function enableSmtpForSuite(): void {
-  const saved: Record<string, string | undefined> = {};
-
-  beforeAll(() => {
-    for (const [key, value] of Object.entries(SMTP_TEST_VARS)) {
-      saved[key] = process.env[key];
-      process.env[key] = value;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
-
-  afterAll(() => {
-    for (const [key, original] of Object.entries(saved)) {
-      if (original === undefined) delete process.env[key];
-      else process.env[key] = original;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
+  useAuthEnv(SMTP_TEST_VARS);
 }
 
 interface CapturedMail {

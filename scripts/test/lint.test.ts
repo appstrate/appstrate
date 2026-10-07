@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// @run-tests exclusive — rewrites the tracked `eslint.config.mjs` and restores
+// it, so `scripts/run-tests.ts` keeps it away from processes that read it.
+
 /**
  * `bun run lint` must not be able to report success over files ESLint never
  * had a rule for.

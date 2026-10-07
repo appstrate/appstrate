@@ -7,28 +7,14 @@
  * OAuth2 server to drive `/callback/:id` itself.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { handleOAuthUserInfo } from "better-auth/oauth2";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { _rebuildAuthForTesting, getAuth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { account, session } from "@appstrate/db/schema";
 import { createTestUser } from "../../helpers/auth.ts";
+import { useAuthEnv } from "../../helpers/auth-env.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-
-const SAVED = {
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-};
-
-function setGoogle(vars: Record<string, string | undefined>) {
-  for (const [key, value] of Object.entries(vars)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-}
 
 /** The provider's answer for `email`, as the callback would pass it on. */
 async function signInWithGoogle(email: string, emailVerified: boolean) {
@@ -47,13 +33,7 @@ const linkedAccounts = (userId: string) =>
   db.select().from(account).where(eq(account.userId, userId));
 
 describe("attaching a social identity to an existing account", () => {
-  beforeAll(() => {
-    setGoogle({ GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret" });
-  });
-
-  afterAll(() => {
-    setGoogle(SAVED);
-  });
+  useAuthEnv({ GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret" });
 
   beforeEach(async () => {
     await truncateAll();

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// @run-tests exclusive — rewrites the tracked `scripts/check-consumer-versions.ts` and restores
+// it, so `scripts/run-tests.ts` keeps it away from processes that read it.
+
 /**
  * Severity table for the `@appstrate/core` lockstep gate. This decision gates
  * an irreversible `npm publish`, so every branch is pinned here — including the

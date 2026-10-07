@@ -269,7 +269,7 @@ export interface IntegrationAgentResolution {
   member_pinned_connection_ids: string[];
   /**
    * Org-wide default connection set for this integration (all agents),
-   * empty when unset. `orgDefaultEnforced` distinguishes a hard lock
+   * empty when unset. `org_default_enforced` distinguishes a hard lock
    * (members can't override — surfaced like an admin pin) from a soft
    * default the member can still override with their own pick.
    */

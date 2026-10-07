@@ -33,14 +33,56 @@ describe("deal", () => {
   });
 });
 
-describe("--partition over the real file list", () => {
-  it("covers every collected test file exactly once across the CI slices", async () => {
-    const files = await collectFiles(parseArgs([]));
-    expect(files.length).toBeGreaterThan(100);
-    const size = (file: string) => Bun.file(join(REPO_ROOT, file)).size;
-    const slices = deal(files, 3, size);
-    expect(slices.every((slice) => slice.length > 0)).toBe(true);
-    expect(slices.flat().sort()).toEqual(files);
+/**
+ * Files no `scripts/run-tests.ts` job of `test.yml` runs, and the step that does:
+ * `apps/cli` from its own workspace (the `unit` job's CLI step), the lint test in
+ * `check.yml`.
+ */
+const RUN_ELSEWHERE = ["apps/cli/", "scripts/test/lint.test.ts"];
+
+/** The `run-tests.ts` arguments a `test.yml` job passes, partition set to 1. */
+async function workflowArgs(job: string): Promise<string[]> {
+  const workflow = Bun.YAML.parse(
+    await Bun.file(join(REPO_ROOT, ".github/workflows/test.yml")).text(),
+  ) as { jobs: Record<string, { steps: { run?: string }[] }> };
+  const runs = workflow.jobs[job]!.steps.map((step) => step.run ?? "");
+  const invocations = runs.filter((run) => run.includes("scripts/run-tests.ts"));
+  expect(invocations).toHaveLength(1);
+  const joined = invocations[0]!.replaceAll("\\\n", " ");
+  const command = joined.replaceAll("${{ matrix.partition }}", "1");
+  // The shell strips the quotes around a glob (`--path-ignore-patterns='**/x/**'`).
+  const words = command
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.replaceAll("'", ""));
+  const args = words.slice(words.indexOf("scripts/run-tests.ts") + 1);
+  // A path filter is read against the working directory, which CI sets to the root.
+  return args.map((arg) => (arg.startsWith("-") ? arg : join(REPO_ROOT, arg)));
+}
+
+describe("the CI jobs over the real file list", () => {
+  it("run every collected test file exactly once between them", async () => {
+    const all = await collectFiles(parseArgs([]));
+    expect(all.length).toBeGreaterThan(100);
+    const unit = new Set(await collectFiles(parseArgs(await workflowArgs("unit"))));
+    const integration = new Set(await collectFiles(parseArgs(await workflowArgs("integration"))));
+    expect(unit.size).toBeGreaterThan(0);
+    expect(integration.size).toBeGreaterThan(0);
+
+    const unrun: string[] = [];
+    const twice: string[] = [];
+    for (const file of all) {
+      const runs = [
+        unit.has(file),
+        integration.has(file),
+        RUN_ELSEWHERE.some((path) => file.startsWith(path)),
+      ].filter(Boolean).length;
+      if (runs === 0) unrun.push(file);
+      if (runs > 1) twice.push(file);
+    }
+    expect(unrun).toEqual([]);
+    expect(twice).toEqual([]);
+    expect([...unit, ...integration].filter((file) => !all.includes(file))).toEqual([]);
   });
 });
 
