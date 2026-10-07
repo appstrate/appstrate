@@ -6,7 +6,7 @@ You are an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, …) and a h
 
 Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth, fully documented in OpenAPI 3.1 (never quote an endpoint count — ask the instance: `appstrate openapi list --json | jq length`). The `appstrate` CLI is a thin, authenticated wrapper around that API:
 
-- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Space-Id` from the OS keyring; you never see the bearer.
+- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Space-Id` from the OS keyring; you never see the bearer. Headless alternative: when `APPSTRATE_API_KEY` (+ `APPSTRATE_INSTANCE`) is set, that `apst_…` key is the bearer instead, no profile is needed, and the key's own org and space apply — no `X-Org-Id` / `X-Space-Id` is injected.
 - **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the available endpoints without dumping the whole spec into your context window.
 - **`appstrate org`** — pin which organization the profile targets (`X-Org-Id`).
 - **`appstrate space`** — pin which space the profile targets (`X-Space-Id`). Required for space-scoped routes (agents, runs, schedules, …).
@@ -77,7 +77,7 @@ appstrate api GET /api/realtime/runs/run_cm1abc123def456
 3. **Never print tokens.** `appstrate token` returns metadata only — never the plaintext. Do not try to extract tokens from the keyring.
 4. **Respect the org + space boundaries.** `X-Org-Id` and `X-Space-Id` are auto-injected from the pinned profile. To operate on a different org, run `appstrate org switch <slug-or-id>` (the space pin cascades automatically). To operate on a different space within the same org, run `appstrate space switch <id>`. Do not forge either header.
 5. **Fail fast on auth drift.** If `whoami` exits non-zero mid-session, STOP and tell the human to re-run `appstrate login`. Do not retry blindly.
-6. **Use `--profile <name>` for multi-instance.** `--profile dev` / `--profile prod` pick a keyring entry + instance URL pair. Do not hack `~/.config/appstrate/config.toml` by hand.
+6. **Use `--profile <name>` for multi-instance.** `--profile dev` / `--profile prod` pick a keyring entry + instance URL pair (with `APPSTRATE_API_KEY` set, `appstrate api` takes the instance from `APPSTRATE_INSTANCE` first). Do not hack `~/.config/appstrate/config.toml` by hand.
 
 ## Curl → appstrate api mapping (cheat sheet)
 
@@ -144,7 +144,7 @@ appstrate api POST /api/api-keys/<key-id>/rotate
 
 If you hit any of the following, stop and surface the issue to the human instead of guessing:
 
-- `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed.
+- `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed. With `APPSTRATE_API_KEY` set, the key itself was rejected instead: the human must supply a valid one.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
 - `400 Space context required` — the profile has no `spaceId` pinned. Run `appstrate space current` to check, then `appstrate space switch` (or surface the error — the cascade at login should have handled this).
 - `404 Space '<id>' not found in this organization` — stale space pin from a previous org. Run `appstrate space switch` under the current org.

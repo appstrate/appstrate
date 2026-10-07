@@ -137,6 +137,44 @@ describe("buildResolverInputs — remote", () => {
       )) as RemoteResolverInputs;
       expect(inputs.bearerToken).toBe("ask_from_flag");
     });
+
+    it('rejects --api-key "" instead of falling back to the env key or the profile', async () => {
+      process.env.APPSTRATE_API_KEY = "ask_from_env";
+      await seedPinnedProfile("default");
+
+      await expect(
+        _buildResolverInputsForTesting("remote", bundleOpts({ apiKey: "" })),
+      ).rejects.toMatchObject({
+        name: "ResolverConfigError",
+        message: "--api-key is empty",
+      });
+    });
+
+    it("rejects a malformed key without echoing it", async () => {
+      process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+      process.env.APPSTRATE_SPACE_ID = "spc_ci";
+
+      const err = await _buildResolverInputsForTesting(
+        "remote",
+        bundleOpts({ apiKey: "ask_SE\nCRET" }),
+      ).catch((e: unknown) => e as Error);
+      expect(err).toMatchObject({ name: "ResolverConfigError" });
+      expect((err as Error).message).not.toMatch(/ask_SE|CRET/);
+    });
+
+    it("treats an empty APPSTRATE_INSTANCE / _SPACE_ID as unset and uses the profile's", async () => {
+      process.env.APPSTRATE_API_KEY = "ask_headless_3";
+      process.env.APPSTRATE_INSTANCE = "";
+      process.env.APPSTRATE_SPACE_ID = "";
+      await seedPinnedProfile("default");
+
+      const inputs = (await _buildResolverInputsForTesting(
+        "remote",
+        bundleOpts(),
+      )) as RemoteResolverInputs;
+      expect(inputs.instance).toBe("https://app.example.com");
+      expect(inputs.spaceId).toBe("spc_1");
+    });
   });
 
   describe("interactive path (keyring JWT)", () => {
