@@ -135,6 +135,20 @@ export async function executeCalls(input: ExecuteCallsInput): Promise<CallOutcom
   const startedAt = Date.now();
   const outcomes: CallOutcome[] = new Array(calls.length);
 
+  // The cap holds on what the envelope SENDS: base64 and JSON escaping can grow an upstream body
+  // several times (a control byte becomes `\u0001`), so the per-call byte cap alone is not enough.
+  let encodedBytes = 0;
+  const withinBudget = (outcome: CallOutcome): CallOutcome => {
+    const size = Buffer.byteLength(JSON.stringify(outcome.result));
+    if (encodedBytes + size <= input.maxResponseBytes) {
+      encodedBytes += size;
+      return outcome;
+    }
+    const result = { ...outcome.result, body: null, truncated: true as const };
+    encodedBytes += Buffer.byteLength(JSON.stringify(result));
+    return { ...outcome, result };
+  };
+
   const run = async (index: number, firstCall: boolean): Promise<void> => {
     const call = calls[index]!;
     const id = call.id ?? String(index);
@@ -152,11 +166,10 @@ export async function executeCalls(input: ExecuteCallsInput): Promise<CallOutcom
       return;
     }
     try {
-      outcomes[index] = await runCall(id, call, common, perCallCap, proxy);
+      outcomes[index] = withinBudget(await runCall(id, call, common, perCallCap, proxy));
     } catch (err) {
-      if (firstCall && isEnvelopeLevel(err)) {
-        throw err instanceof ProxyCallError ? proxyProblem(err.code, err.message) : err;
-      }
+      // Rethrown as-is: the route maps it like `/proxy`, auditing a connection already used.
+      if (firstCall && isEnvelopeLevel(err)) throw err;
       outcomes[index] = refusal(id, err, common.integrationId);
     }
   };

@@ -380,7 +380,9 @@ const callsOperation = {
     "reached the upstream; safe to retry). Otherwise `status`, `headers` and `body` are the " +
     "upstream's. Calls run with bounded concurrency and no call starts after 25 s, so the " +
     "request stays under a 60 s idle cut; the response size budget (`max_response_bytes`) is " +
-    "split equally between the calls, an over-cap body is cut and flagged `truncated`.\n\n" +
+    "split equally between the calls, an over-cap body is cut and flagged `truncated`, and it " +
+    "also bounds the encoded envelope: a result that would push it over comes back with " +
+    "`body: null` and `truncated: true`.\n\n" +
     "A failure about the connection or the integration rather than one call's target (no " +
     "reachable connection, several to choose from, integration inactive, unusable credential) " +
     "fails the whole envelope once, with the same problem `/proxy` answers " +

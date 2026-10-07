@@ -71,7 +71,11 @@ import {
   PROXY_CONTROL_HEADERS,
   CALLER_RESPONSE_SKIP_HEADERS,
 } from "../services/credential-proxy/headers.ts";
-import { callsRequestSchema, executeCalls } from "../services/credential-proxy/calls.ts";
+import {
+  callsRequestSchema,
+  executeCalls,
+  type CallOutcome,
+} from "../services/credential-proxy/calls.ts";
 import { runBoundSelection } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -412,21 +416,54 @@ export function createCredentialProxyRouter() {
       const run = runId ? runBoundSelection({ orgId, spaceId, runId, integrationId, actor }) : null;
 
       const started = Date.now();
-      const outcomes = await executeCalls({
-        calls,
-        common: {
-          orgId,
-          spaceId,
-          actor,
-          integrationId,
-          ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
-          ...(run ? { run } : {}),
-          cookieJar: await getCookieJarStore(),
-          jarSessionId: sessionId,
-          cookieJarTtlSeconds: limits.session_ttl_seconds,
-        },
-        maxResponseBytes: limits.max_response_bytes,
-      });
+      let outcomes: CallOutcome[];
+      try {
+        outcomes = await executeCalls({
+          calls,
+          common: {
+            orgId,
+            spaceId,
+            actor,
+            integrationId,
+            ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+            ...(run ? { run } : {}),
+            cookieJar: await getCookieJarStore(),
+            jarSessionId: sessionId,
+            cookieJarTtlSeconds: limits.session_ttl_seconds,
+          },
+          maxResponseBytes: limits.max_response_bytes,
+        });
+      } catch (err) {
+        // A failure about the connection or the integration, raised by the first call: the
+        // envelope answers it the way `/proxy` answers a single call, audit included.
+        if (err instanceof ProxyCallError) {
+          if (err.connectionId) {
+            void trackAudit(
+              auditForeignConnectionUse(c, {
+                actor,
+                connectionId: err.connectionId,
+                integrationId,
+                sessionId,
+                runId,
+                sessionTtlSeconds: limits.session_ttl_seconds,
+              }),
+            );
+          }
+          logger.warn("credential-proxy: envelope refused", {
+            code: err.code,
+            requestId: c.get("requestId"),
+            authMethod,
+            apiKeyId,
+            userId,
+            spaceId,
+            integrationId,
+            connectionId: err.connectionId,
+            calls: calls.length,
+          });
+          throw proxyProblem(err.code, err.message);
+        }
+        throw err;
+      }
       const durationMs = Date.now() - started;
 
       // The same trail `/proxy` leaves, one line per call, and one audit per connection used.
