@@ -67,14 +67,28 @@ function installFetch(responder: (call: FetchCall) => Promise<Response> | Respon
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
+// `apiCommand` reads both — an ambient value (a developer shell, a CI job)
+// must not flip the profile-path suites into key mode.
+const HEADLESS_ENV = ["APPSTRATE_API_KEY", "APPSTRATE_INSTANCE"] as const;
+let savedEnv: Record<string, string | undefined>;
+
 beforeEach(async () => {
   await configHome.setup();
   keyring = installFakeKeyring();
   fetchCalls = [];
+  savedEnv = {};
+  for (const k of HEADLESS_ENV) {
+    savedEnv[k] = process.env[k];
+    delete process.env[k];
+  }
 });
 afterEach(async () => {
   keyring.restore();
   globalThis.fetch = originalFetch;
+  for (const k of HEADLESS_ENV) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
   await configHome.teardown();
 });
 
@@ -135,6 +149,7 @@ async function runCommand(
 ): Promise<void> {
   const full: ApiCommandOptions = {
     profile: opts.profile,
+    apiKey: opts.apiKey,
     method: opts.method,
     path: opts.path,
     header: opts.header ?? [],
@@ -1483,5 +1498,190 @@ describe("apiCommand — --data-urlencode", () => {
     await runCommand({ path: "/p", uploadFile: f, dataUrlencode: ["a=b"] }, io);
     expect(exitCode.value).toBe(2);
     expect(fetchCalls).toHaveLength(0);
+  });
+});
+
+// ─── Headless API key (--api-key / APPSTRATE_API_KEY) ───────────────
+
+describe("apiCommand — explicit API key", () => {
+  /** A logged-in profile pinned to an org AND a space the key must not inherit. */
+  function seedPinnedProfile(tokens?: { expiresAt: number }): Promise<void> {
+    return seedLoggedInProfile("default", {
+      orgId: "org_profile",
+      spaceId: "spc_profile",
+      tokens: {
+        accessToken: "access-1",
+        expiresAt: tokens?.expiresAt ?? Date.now() + 5 * 60 * 1000,
+        refreshToken: "refresh-1",
+      },
+    });
+  }
+
+  it("env key → Bearer <key>, no X-Org-Id / X-Space-Id despite a pinned profile", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_from_env";
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, { ok: true }));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ method: "GET", path: "/api/agents" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]!.url).toBe("https://ci.example.com/api/agents");
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_from_env");
+    expect(fetchCalls[0]!.headers["X-Org-Id"]).toBeUndefined();
+    expect(fetchCalls[0]!.headers["X-Space-Id"]).toBeUndefined();
+  });
+
+  it("--api-key wins over APPSTRATE_API_KEY", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_from_env";
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_from_flag" }, io);
+
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_from_flag");
+  });
+
+  it("never touches the profile credential: no refresh, keyring left as-is", async () => {
+    // An EXPIRED access token: the profile path would POST the refresh
+    // token to /api/auth/cli/token before the real request.
+    await seedPinnedProfile({ expiresAt: Date.now() - 60_000 });
+    const keyringBefore = new Map(keyring.store);
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls.map((c) => c.url)).toEqual(["https://app.example.com/api/x"]);
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
+    expect(new Map(keyring.store)).toEqual(keyringBefore);
+  });
+
+  it("works for a profile that has no stored credentials at all", async () => {
+    await setProfile("default", {
+      instance: "https://app.example.com",
+      userId: "u_1",
+      email: "a@example.com",
+    });
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
+  });
+
+  it("no profile + APPSTRATE_INSTANCE → request goes out (trailing slash normalized)", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_k";
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com/";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/api/x" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.url).toBe("https://ci.example.com/api/x");
+  });
+
+  it("no profile and no APPSTRATE_INSTANCE → exit 1 with the hint, no fetch", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_k";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ path: "/api/x" }, io);
+
+    expect(exitCode.value).toBe(1);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("APPSTRATE_INSTANCE");
+    expect(stdoutText(stderr)).not.toContain("apst_k");
+  });
+
+  it("instance falls back to the profile's when APPSTRATE_INSTANCE is unset", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_k";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io } = makeIO();
+    await runCommand({ path: "/api/x" }, io);
+
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/x");
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
+    expect(fetchCalls[0]!.headers["X-Org-Id"]).toBeUndefined();
+    expect(fetchCalls[0]!.headers["X-Space-Id"]).toBeUndefined();
+  });
+
+  it("empty APPSTRATE_API_KEY falls through to the profile path", async () => {
+    process.env.APPSTRATE_API_KEY = "";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io } = makeIO();
+    await runCommand({ path: "/api/x" }, io);
+
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer access-1");
+    expect(fetchCalls[0]!.headers["X-Org-Id"]).toBe("org_profile");
+    expect(fetchCalls[0]!.headers["X-Space-Id"]).toBe("spc_profile");
+  });
+
+  it("the user's own -H X-Space-Id still passes through", async () => {
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io } = makeIO();
+    await runCommand(
+      { path: "/api/x", apiKey: "apst_k", header: ["X-Space-Id: spc_explicit"] },
+      io,
+    );
+
+    expect(fetchCalls[0]!.headers["X-Space-Id"]).toBe("spc_explicit");
+    expect(fetchCalls[0]!.headers["X-Org-Id"]).toBeUndefined();
+  });
+
+  it("refuses a cross-origin URL against the ENV instance, not the profile's (exit 2)", async () => {
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode, stderr } = makeIO();
+    // The profile's own origin — foreign once the env names the instance.
+    await runCommand({ path: "https://app.example.com/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("https://ci.example.com");
+  });
+
+  it("-v never prints the key and does not claim a keyring-backed profile", async () => {
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, stderr, stdout } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_secret_value", verbose: true }, io);
+
+    const trace = stdoutText(stderr);
+    expect(trace).toContain("> Authorization: Bearer [REDACTED]");
+    expect(trace).not.toContain("apst_secret_value");
+    expect(stdoutText(stdout)).not.toContain("apst_secret_value");
+    expect(trace).not.toContain("keyring");
+    expect(trace).not.toContain("* Profile:");
+  });
+
+  it("401 hint names the key, not `appstrate login`", async () => {
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    installFetch(() => new Response("unauthorized", { status: 401 }));
+
+    const { io, stderr, exitCode } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(stdoutText(stderr)).toContain("APPSTRATE_API_KEY");
+    expect(stdoutText(stderr)).not.toContain("appstrate login");
+    expect(stdoutText(stderr)).not.toContain("apst_k");
   });
 });

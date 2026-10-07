@@ -1,13 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate api` — curl-like authenticated HTTP pass-through to the
- * active profile's Appstrate instance.
+ * `appstrate api` — curl-like authenticated HTTP pass-through to an
+ * Appstrate instance.
  *
  * Purpose: let local coding agents (Claude Code, Cursor, Aider, …) make
  * authenticated API calls without ever seeing the raw bearer token. The
- * agent shells out, the CLI injects `Authorization` + `X-Org-Id` from
- * the keyring-backed profile, everything else is a transparent pipe.
+ * agent shells out, the CLI injects `Authorization` + `X-Org-Id` +
+ * `X-Space-Id` from the keyring-backed profile, everything else is a
+ * transparent pipe.
+ *
+ * Headless alternative: an explicit `apst_…` API key (`--api-key` /
+ * `APPSTRATE_API_KEY`) replaces the profile credential entirely — no
+ * keyring read, no refresh, no profile required (`APPSTRATE_INSTANCE`
+ * names the instance, falling back to the profile's). The key pins its
+ * own org and space server-side, so neither header is injected. The
+ * "caller never sees the bearer" property does not hold on this path:
+ * whoever launches the command supplied the key.
  *
  *   METHOD / path are positional.
  *   -H / -F / -q repeatable (Commander's `collect` default).
@@ -44,7 +53,13 @@
  */
 
 import { readConfig, resolveProfileName } from "../lib/config.ts";
-import { resolveAuthContext, AuthError, ApiError } from "../lib/api.ts";
+import {
+  resolveAuthContext,
+  resolveApiKeyAuthContext,
+  explicitApiKey,
+  AuthError,
+  ApiError,
+} from "../lib/api.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
@@ -141,13 +156,21 @@ export async function apiCommand(
     return exit(code);
   };
 
-  // 1. Resolve auth profile + fresh access token.
-  const config = await readConfig();
-  const profileName = resolveProfileName(opts.profile, config);
-
+  // 1. Resolve the credential: an explicit API key overrides the
+  //    profile credential entirely (the keyring is never read; the
+  //    profile only lends its instance when `APPSTRATE_INSTANCE` is
+  //    unset); otherwise the profile + a fresh access token.
+  //    `profileName` stays undefined in key mode.
+  const apiKey = explicitApiKey(opts.apiKey);
+  let profileName: string | undefined;
   let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
   try {
-    auth = await resolveAuthContext(profileName);
+    if (apiKey) {
+      auth = await resolveApiKeyAuthContext(apiKey, opts.profile);
+    } else {
+      profileName = resolveProfileName(opts.profile, await readConfig());
+      auth = await resolveAuthContext(profileName);
+    }
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
       writeError(`${err.message}\n`);
@@ -368,7 +391,11 @@ export async function apiCommand(
     //    Silenced by `-s`; `-sS` doesn't restore it (it's a UX hint,
     //    not an error message — curl's `-S` is narrower than that).
     if (res.status === 401 && !opts.silent) {
-      io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
+      io.stderr.write(
+        profileName === undefined
+          ? "API key rejected — check --api-key / APPSTRATE_API_KEY (revoked, expired, or for another instance)\n"
+          : `Session may be expired — run: appstrate login --profile ${profileName}\n`,
+      );
     }
 
     // 9. Soft UX hint when a 3xx is surfaced un-followed. `redirect:
