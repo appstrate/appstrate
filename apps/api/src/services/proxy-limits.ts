@@ -46,6 +46,10 @@ const credentialProxyLimitsSchema = z
       .positive()
       .default(50 * 1024 * 1024),
     session_ttl_seconds: z.number().int().positive().default(3600),
+    /** Max calls in one `/api/credential-proxy/calls` envelope. */
+    max_calls: z.number().int().positive().default(50),
+    /** Calls per minute and identity through `/calls` (each call weighs one point). */
+    calls_per_min: z.number().int().positive().default(600),
   })
   .strict();
 

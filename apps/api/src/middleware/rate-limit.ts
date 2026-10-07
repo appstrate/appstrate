@@ -148,14 +148,39 @@ function createRateLimitMiddleware(config: RateLimiterConfig) {
  */
 export const rateLimit = createRateLimitMiddleware({
   category: "auth",
-  extractKey: (c) => {
-    const user = c.get("user");
-    const apiKeyId = c.get("apiKeyId");
-    const identity = apiKeyId ? `apikey:${apiKeyId}` : user.id;
-    return `${c.req.method}:${limiterPath(c)}:${identity}`;
-  },
+  extractKey: (c) => `${c.req.method}:${limiterPath(c)}:${authIdentity(c)}`,
   emitHeaders: true,
 });
+
+function authIdentity(c: Context<AppEnv>): string {
+  const apiKeyId = c.get("apiKeyId");
+  return apiKeyId ? `apikey:${apiKeyId}` : c.get("user").id;
+}
+
+/**
+ * Charge `points` at once against a per-identity budget of `maxPoints` per
+ * minute, for a request that carries several units of work (one point per
+ * unit). The budget is keyed on `category` + identity, not on the route, so it
+ * is the same pool whichever endpoint spends it. Throws the usual 429.
+ */
+export async function consumeRateLimitPoints(
+  c: Context<AppEnv>,
+  category: string,
+  maxPoints: number,
+  points: number,
+): Promise<void> {
+  const cacheKey = `weighted:${category}:${maxPoints}`;
+  let limiter = limiters.get(cacheKey);
+  if (!limiter) {
+    limiter = await createLimiter(maxPoints, 60, `rl:weighted:${category}:`);
+    limiters.set(cacheKey, limiter);
+  }
+  try {
+    await limiter.consume(authIdentity(c), points);
+  } catch (rej) {
+    throwRateLimited(maxPoints, 60, extractRetryAfter(rej));
+  }
+}
 
 /**
  * Rate limiter for the inbound MCP server (`/api/mcp/o/:org`).

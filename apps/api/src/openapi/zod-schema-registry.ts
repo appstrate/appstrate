@@ -113,6 +113,7 @@ import { createUploadSchema } from "../routes/uploads.ts";
 
 // --- Member integration-pin schema (routes/me.ts) ---
 import { upsertMemberPinSchema } from "../routes/me.ts";
+import { callsRequestSchema } from "../services/credential-proxy/calls.ts";
 
 // --- Model-provider OAuth pairing schemas (routes/model-providers-oauth.ts) ---
 import { createPairingBody, importBody } from "../routes/model-providers-oauth.ts";
@@ -168,6 +169,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/end-users/{id}",
     jsonSchema: toJsonSchema(updateEndUserSchema),
     description: "Update end-user",
+  },
+
+  // ─── Credential proxy ───────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/credential-proxy/calls",
+    jsonSchema: toJsonSchema(callsRequestSchema),
+    description: "Run several independent proxy calls",
   },
 
   // ─── Models ─────────────────────────────────────────────────────────────

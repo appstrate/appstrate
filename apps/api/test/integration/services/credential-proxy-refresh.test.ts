@@ -242,6 +242,45 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(refreshBody.get("refresh_token")).toBe("rt_valid");
   });
 
+  it("replays the request body on the retry after a 401 refresh", async () => {
+    const packageId = "@cprefreshorg/gmail-body";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({
+      access_token: "fresh_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+
+    const sent: Array<{ authorization: string | null; body: string }> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      sent.push({
+        authorization: new Headers(init.headers).get("authorization"),
+        body: new TextDecoder().decode(init.body as Uint8Array),
+      });
+      return new Response(sent.length === 1 ? "expired" : "{}", {
+        status: sent.length === 1 ? 401 : 200,
+      });
+    }) as unknown as typeof fetch;
+
+    const payload = JSON.stringify({ addLabelIds: ["STARRED"] });
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "POST",
+      target: "https://gmail.googleapis.com/gmail/v1/users/me/messages/m1/modify",
+      headers: { "Content-Type": "application/json" },
+      body: new TextEncoder().encode(payload),
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(200);
+    expect(sent.map((r) => r.authorization)).toEqual(["Bearer stale_token", "Bearer fresh_token"]);
+    expect(sent.map((r) => r.body)).toEqual([payload, payload]);
+  });
+
   it("refreshes the connection the call used, even when a fresh selection would now be ambiguous", async () => {
     const packageId = "@cprefreshorg/gmail-second";
     await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });

@@ -353,6 +353,128 @@ function makeProxyOperation(verb: ProxyVerb) {
   return op;
 }
 
+const callsParameterNames = new Set([
+  "X-Space-Id",
+  "X-Integration-Id",
+  "X-Session-Id",
+  "X-Connection-Id",
+  "X-Run-Id",
+]);
+
+const callsOperation = {
+  operationId: "credentialProxyCalls",
+  tags: ["Credential Proxy"],
+  summary: "Run several independent proxy calls in one request",
+  description:
+    "Runs up to `CREDENTIAL_PROXY_LIMITS.max_calls` independent upstream calls of ONE integration " +
+    "in one request. Not a provider batch protocol: each call goes through exactly the " +
+    "`/proxy` pipeline (same `authorized_uris` allowlist, same credential injection, same egress " +
+    "guard, same 401 refresh-and-retry), so a call refused on `/proxy` is refused here and the " +
+    "other calls are unaffected. The caller's `Authorization` header in a call is never " +
+    "forwarded.\n\n" +
+    "Integration, connection selection (`X-Connection-Id`, `X-Run-Id`) and session " +
+    "(`X-Session-Id`) are set once on the envelope. Results come back in request order. " +
+    "A result with `error` is a call the platform answered itself, with the `status` and `code` " +
+    "`/proxy` would have answered (`unauthorized_target`, `upstream_timeout`, …), or " +
+    "`503 not_attempted` for a call left unsent because the envelope ran out of time (nothing " +
+    "reached the upstream; safe to retry). Otherwise `status`, `headers` and `body` are the " +
+    "upstream's. Calls run with bounded concurrency and no call starts after 25 s, so the " +
+    "request stays under a 60 s idle cut; the response size budget (`max_response_bytes`) is " +
+    "split equally between the calls, an over-cap body is cut and flagged `truncated`.\n\n" +
+    "A failure about the connection or the integration rather than one call's target (no " +
+    "reachable connection, several to choose from, integration inactive, unusable credential) " +
+    "fails the whole envelope once, with the same problem `/proxy` answers " +
+    "(`candidate_connections` included), before any other call is sent.\n\n" +
+    "Rate limit: the envelope costs one point of the route budget " +
+    "(`rate_per_min`) and one point per call of the per-identity `calls_per_min` budget. " +
+    "Same bearer-only authentication as `/proxy`.",
+  security: [{ bearerApiKey: [] }, { bearerJwt: [] }],
+  parameters: proxyParameters.filter((p) => callsParameterNames.has(p.name)),
+  requestBody: {
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["calls"],
+          additionalProperties: false,
+          properties: {
+            calls: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                required: ["method", "target"],
+                additionalProperties: false,
+                properties: {
+                  id: {
+                    type: "string",
+                    pattern: "^[\\w.:-]{1,64}$",
+                    description: "Label echoed in the result; defaults to the call's index.",
+                  },
+                  method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                  target: {
+                    type: "string",
+                    description: "Same meaning as `X-Target` on `/proxy`.",
+                  },
+                  headers: { type: "object", additionalProperties: { type: "string" } },
+                  body: {
+                    type: "string",
+                    description: "UTF-8 request body. POST, PUT and PATCH only.",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  responses: {
+    "200": {
+      description: "One result per call, in request order.",
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            required: ["results"],
+            properties: {
+              results: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["id", "status"],
+                  properties: {
+                    id: { type: "string" },
+                    status: { type: "integer" },
+                    headers: { type: "object", additionalProperties: { type: "string" } },
+                    body: { type: ["string", "null"] },
+                    body_encoding: { type: "string", enum: ["utf8", "base64"] },
+                    truncated: { type: "boolean", enum: [true] },
+                    error: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: { code: { type: "string" }, message: { type: "string" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "400": proxyResponses["400"],
+    "401": { $ref: "#/components/responses/Unauthorized" },
+    "403": proxyResponses["403"],
+    "404": proxyResponses["404"],
+    "409": proxyResponses["409"],
+    "413": proxyResponses["413"],
+    "429": proxyResponses["429"],
+    "500": proxyResponses["500"],
+  },
+} as const;
+
 export const credentialProxyPaths = {
   "/api/credential-proxy/proxy": {
     get: makeProxyOperation("get"),
@@ -360,5 +482,8 @@ export const credentialProxyPaths = {
     put: makeProxyOperation("put"),
     patch: makeProxyOperation("patch"),
     delete: makeProxyOperation("delete"),
+  },
+  "/api/credential-proxy/calls": {
+    post: callsOperation,
   },
 } as const;

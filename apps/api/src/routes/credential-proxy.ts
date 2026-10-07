@@ -48,10 +48,11 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { rateLimit } from "../middleware/rate-limit.ts";
+import { rateLimit, consumeRateLimitPoints } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
@@ -66,6 +67,11 @@ import { bodyReadError, proxyCall, ProxyCallError } from "../services/credential
 import { auditForeignConnectionUse } from "../services/credential-proxy/connection-audit.ts";
 import { trackAudit } from "../services/audit.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
+import {
+  PROXY_CONTROL_HEADERS,
+  CALLER_RESPONSE_SKIP_HEADERS,
+} from "../services/credential-proxy/headers.ts";
+import { callsRequestSchema, executeCalls } from "../services/credential-proxy/calls.ts";
 import { runBoundSelection } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -106,16 +112,7 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it.
       const runIdHeader = c.req.header("X-Run-Id");
       const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
-      // X-Connection-Id is optional; the selector binds it to `X-Integration-Id`, so it can never
-      // inject another integration's credentials under this integration's manifest.
-      const explicitConnectionHeader = c.req.header("X-Connection-Id");
-      const explicitConnectionId =
-        explicitConnectionHeader && explicitConnectionHeader.length > 0
-          ? explicitConnectionHeader
-          : null;
-      if (explicitConnectionId && !isUuid(explicitConnectionId)) {
-        throw invalidRequest("X-Connection-Id must be a connection uuid", "X-Connection-Id");
-      }
+      const explicitConnectionId = readConnectionIdHeader(c);
 
       if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
       if (!target) throw invalidRequest("Missing X-Target header");
@@ -124,23 +121,7 @@ export function createCredentialProxyRouter() {
         throw invalidRequest("X-Session-Id must be a UUID v4");
       }
 
-      const spaceIdEarly = c.get("spaceId");
-      const apiKeyIdEarly = c.get("apiKeyId");
-      const userIdEarly = c.get("user").id;
-      // Namespaced principal id — keeps JWT-user and API-key buckets
-      // disjoint even when the underlying UUIDs happen to match.
-      const principalId = apiKeyIdEarly ? `apikey:${apiKeyIdEarly}` : `user:${userIdEarly}`;
-      const binding = await bindOrCheckSession(sessionId, principalId, limits.session_ttl_seconds);
-      if (binding.kind === "mismatch") {
-        logger.warn("credential-proxy: session reuse across principals", {
-          sessionId,
-          principalId,
-          boundTo: binding.boundTo,
-          authMethod,
-          spaceId: spaceIdEarly,
-        });
-        throw forbidden("X-Session-Id is bound to a different principal");
-      }
+      await bindSessionOrThrow(c, sessionId, limits.session_ttl_seconds);
 
       // The request's own framing: the body cap, and what a streamed upload is sent upstream with
       // (absent = chunked).
@@ -386,7 +367,151 @@ export function createCredentialProxyRouter() {
     },
   );
 
+  // N independent calls in one request — see services/credential-proxy/calls.ts. Every call runs
+  // through `proxyCall`, so the allowlist and credential rules are the `/proxy` ones, per call.
+  router.post(
+    "/calls",
+    rateLimit(limits.rate_per_min),
+    requirePermission("credential-proxy", "call"),
+    async (c: Context<AppEnv>) => {
+      const authMethod = c.get("authMethod");
+      assertBearerOnly(authMethod, "Credential proxy", {
+        firstPartyLoopback: c.get("firstPartyLoopback"),
+      });
+
+      const integrationId = c.req.header("X-Integration-Id");
+      const sessionId = c.req.header("X-Session-Id");
+      const runId = c.req.header("X-Run-Id") || null;
+      const explicitConnectionId = readConnectionIdHeader(c);
+      if (!integrationId) throw invalidRequest("Missing X-Integration-Id header");
+      if (!sessionId) throw invalidRequest("Missing X-Session-Id header");
+      if (!isValidSessionId(sessionId)) throw invalidRequest("X-Session-Id must be a UUID v4");
+
+      await bindSessionOrThrow(c, sessionId, limits.session_ttl_seconds);
+
+      const contentLength = c.req.header("content-length") ?? "";
+      if (/^\d+$/.test(contentLength) && Number(contentLength) > limits.max_request_bytes) {
+        throw invalidRequest(
+          `Request body exceeds CREDENTIAL_PROXY_LIMITS.max_request_bytes (${limits.max_request_bytes})`,
+        );
+      }
+      const { calls } = await readJsonBody(c, callsRequestSchema);
+      if (calls.length > limits.max_calls) {
+        throw invalidRequest(
+          `Too many calls: ${calls.length} (CREDENTIAL_PROXY_LIMITS.max_calls is ${limits.max_calls})`,
+          "calls",
+        );
+      }
+      await consumeRateLimitPoints(c, "credential-proxy-calls", limits.calls_per_min, calls.length);
+
+      const orgId = c.get("orgId");
+      const spaceId = c.get("spaceId");
+      const apiKeyId = c.get("apiKeyId");
+      const userId = c.get("user").id;
+      const actor = getActor(c);
+      const run = runId ? runBoundSelection({ orgId, spaceId, runId, integrationId, actor }) : null;
+
+      const started = Date.now();
+      const outcomes = await executeCalls({
+        calls,
+        common: {
+          orgId,
+          spaceId,
+          actor,
+          integrationId,
+          ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          ...(run ? { run } : {}),
+          cookieJar: await getCookieJarStore(),
+          jarSessionId: sessionId,
+          cookieJarTtlSeconds: limits.session_ttl_seconds,
+        },
+        maxResponseBytes: limits.max_response_bytes,
+      });
+      const durationMs = Date.now() - started;
+
+      // The same trail `/proxy` leaves, one line per call, and one audit per connection used.
+      const audited = new Set<string>();
+      outcomes.forEach(({ result, connectionId }, i) => {
+        const line = {
+          requestId: c.get("requestId"),
+          authMethod,
+          apiKeyId,
+          userId,
+          endUserId: c.get("endUser")?.id,
+          spaceId,
+          integrationId,
+          connectionId,
+          method: calls[i]!.method,
+          target: calls[i]!.target,
+          status: result.status,
+          runId,
+          durationMs,
+          envelope: true,
+        };
+        if ("error" in result && result.status === 403) {
+          logger.warn("credential-proxy: call refused", { ...line, code: result.error.code });
+        } else {
+          logger.info("credential-proxy call", line);
+        }
+        if (connectionId && !audited.has(connectionId)) {
+          audited.add(connectionId);
+          void trackAudit(
+            auditForeignConnectionUse(c, {
+              actor,
+              connectionId,
+              integrationId,
+              sessionId,
+              runId,
+              sessionTtlSeconds: limits.session_ttl_seconds,
+            }),
+          );
+        }
+      });
+
+      c.header("Cache-Control", "no-store");
+      return c.json({ results: outcomes.map((o) => o.result) });
+    },
+  );
+
   return router;
+}
+
+/**
+ * Pin `X-Session-Id` to the calling principal. The principal id is namespaced
+ * (`apikey:<id>` / `user:<id>`) so a JWT-user and an API-key bucket stay
+ * disjoint even when the underlying UUIDs happen to match.
+ */
+async function bindSessionOrThrow(
+  c: Context<AppEnv>,
+  sessionId: string,
+  ttlSeconds: number,
+): Promise<void> {
+  const apiKeyId = c.get("apiKeyId");
+  const principalId = apiKeyId ? `apikey:${apiKeyId}` : `user:${c.get("user").id}`;
+  const binding = await bindOrCheckSession(sessionId, principalId, ttlSeconds);
+  if (binding.kind === "mismatch") {
+    logger.warn("credential-proxy: session reuse across principals", {
+      sessionId,
+      principalId,
+      boundTo: binding.boundTo,
+      authMethod: c.get("authMethod"),
+      spaceId: c.get("spaceId"),
+    });
+    throw forbidden("X-Session-Id is bound to a different principal");
+  }
+}
+
+/**
+ * Optional `X-Connection-Id`; the selector binds it to `X-Integration-Id`, so it can never
+ * inject another integration's credentials under this integration's manifest.
+ */
+function readConnectionIdHeader(c: Context<AppEnv>): string | null {
+  const value = c.req.header("X-Connection-Id");
+  if (!value) return null;
+  if (!isUuid(value)) {
+    throw invalidRequest("X-Connection-Id must be a connection uuid", "X-Connection-Id");
+  }
+  return value;
 }
 
 /** Boolean control headers: `1` / `0`, absent = `0`, anything else a 400. */
@@ -396,38 +521,6 @@ function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
   if (value === "1") return true;
   throw invalidRequest(`${name} must be "1" or "0" (got "${value.slice(0, 32)}")`);
 }
-
-const PROXY_CONTROL_HEADERS = new Set([
-  "x-integration-id",
-  "x-target",
-  "x-session-id",
-  "x-substitute-body",
-  "x-run-id",
-  "x-org-id",
-  "x-space-id",
-  "x-connection-id",
-  // Streaming transport hints — consumed by this route, must not reach upstream.
-  "x-stream-request",
-  "x-stream-response",
-  "x-max-response-size",
-  "authorization",
-  "appstrate-user",
-  "appstrate-version",
-  // Strip the caller's `accept-encoding` so Bun's upstream fetch picks
-  // its own default and auto-decodes transparently — otherwise the
-  // caller's list (e.g. `gzip, br, zstd`) can leak through to Gmail,
-  // which returns an encoded body that the public route can't safely
-  // forward (re-encoding would require rebuffering the whole stream).
-  "accept-encoding",
-]);
-
-/** Not relayed to the caller: transport hints, and Set-Cookie (a cookie can be the credential). */
-const CALLER_RESPONSE_SKIP_HEADERS = new Set([
-  "x-stream-request",
-  "x-stream-response",
-  "set-cookie",
-  "set-cookie2",
-]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */
 interface StreamCapLogCtx {

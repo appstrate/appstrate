@@ -1151,6 +1151,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/credential-proxy/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run several independent proxy calls in one request
+         * @description Runs up to `CREDENTIAL_PROXY_LIMITS.max_calls` independent upstream calls of ONE integration in one request. Not a provider batch protocol: each call goes through exactly the `/proxy` pipeline (same `authorized_uris` allowlist, same credential injection, same egress guard, same 401 refresh-and-retry), so a call refused on `/proxy` is refused here and the other calls are unaffected. The caller's `Authorization` header in a call is never forwarded.
+         *
+         *     Integration, connection selection (`X-Connection-Id`, `X-Run-Id`) and session (`X-Session-Id`) are set once on the envelope. Results come back in request order. A result with `error` is a call the platform answered itself, with the `status` and `code` `/proxy` would have answered (`unauthorized_target`, `upstream_timeout`, …), or `503 not_attempted` for a call left unsent because the envelope ran out of time (nothing reached the upstream; safe to retry). Otherwise `status`, `headers` and `body` are the upstream's. Calls run with bounded concurrency and no call starts after 25 s, so the request stays under a 60 s idle cut; the response size budget (`max_response_bytes`) is split equally between the calls, an over-cap body is cut and flagged `truncated`.
+         *
+         *     A failure about the connection or the integration rather than one call's target (no reachable connection, several to choose from, integration inactive, unusable credential) fails the whole envelope once, with the same problem `/proxy` answers (`candidate_connections` included), before any other call is sent.
+         *
+         *     Rate limit: the envelope costs one point of the route budget (`rate_per_min`) and one point per call of the per-identity `calls_per_min` budget. Same bearer-only authentication as `/proxy`.
+         */
+        post: operations["credentialProxyCalls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/credential-proxy/proxy": {
         parameters: {
             query?: never;
@@ -10674,6 +10700,130 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
             429: components["responses"]["RateLimited"];
+        };
+    };
+    credentialProxyCalls: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
+                /** @description Scoped integration package name (e.g. `@afps/gmail`). */
+                "X-Integration-Id": string;
+                /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
+                "X-Session-Id": string;
+                /** @description Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it (`appstrate run --report`). Must name an in-flight run of the calling actor in this space: an unknown id or one of another space is a `404`, another actor's run a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call reaches ONLY the connections the run's kickoff bound to the integration (every layer applied, agent-level ones included — admin pins, enforced defaults, launch overrides, member pins): one bound connection is used; several require `X-Connection-Id` naming one of them (`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names another); none is a `404`, and so is a bound one no longer reachable (deleted or unshared); a bound one that needs reconnecting is a `409 needs_reconnection`. Without it no agent is in play, so the admin and member pins (set per agent) cannot apply — only the space-level rules described under `X-Connection-Id` do. */
+                "X-Run-Id"?: string;
+                /** @description Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run bound (see `X-Run-Id`). Without it, the space-level rules apply in this order: (1) an ENFORCED org default of the integration binds its set — a named id must be a member (`400 connection_not_in_org_default` otherwise); (2) the named connection, after validating it is one of the caller's own (user or end-user) or a connection another member shared in the request's space, of the requested integration; (3) a SOFT org default binds its set; (4) the caller's own connections: exactly one is used, none with some shared by other members is a `409 must_choose_connection` (a shared connection is never used unless named or set as a default), none at all a `404`, several a `409 must_choose_connection`. A default set of one is used, several are a `409 must_choose_connection` over the set, and a member the caller cannot reach is a `409 pinned_connection_unavailable`, and a bound connection whose credentials need reconnecting (a default's member included) a `409 needs_reconnection`. A non-uuid value is a `400`; mismatched or unknown ids surface as `404 — no credentials`. */
+                "X-Connection-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    calls: {
+                        /** @description Label echoed in the result; defaults to the call's index. */
+                        id?: string;
+                        /** @enum {string} */
+                        method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+                        /** @description Same meaning as `X-Target` on `/proxy`. */
+                        target: string;
+                        headers?: {
+                            [key: string]: string;
+                        };
+                        /** @description UTF-8 request body. POST, PUT and PATCH only. */
+                        body?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description One result per call, in request order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        results: {
+                            id: string;
+                            status: number;
+                            headers?: {
+                                [key: string]: string;
+                            };
+                            body?: string | null;
+                            /** @enum {string} */
+                            body_encoding?: "utf8" | "base64";
+                            /** @enum {boolean} */
+                            truncated?: true;
+                            error?: {
+                                code: string;
+                                message: string;
+                            };
+                        }[];
+                    };
+                };
+            };
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
+            400: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            403: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
+            404: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
+            409: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
+            413: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     credentialProxyGet: {
