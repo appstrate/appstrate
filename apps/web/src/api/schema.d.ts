@@ -14727,6 +14727,14 @@ export interface operations {
                             /** @description Organization slug. */
                             slug?: string | null;
                         };
+                        /** @description The space this request resolved to (`X-Space-Id`, else the API key's space, else the org default). Every list in this payload is scoped to it. An empty list means this space holds nothing of that kind, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        space: {
+                            id: string;
+                            /** @description Human-readable space name. */
+                            name: string;
+                            /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
+                            personal: boolean;
+                        };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
                             packageId: string;

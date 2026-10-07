@@ -561,6 +561,7 @@ export const mePaths = {
                 required: [
                   "user",
                   "org",
+                  "space",
                   "connections",
                   "recent_runs",
                   "agents",
@@ -594,6 +595,26 @@ export const mePaths = {
                         description: "Human-readable organization name.",
                       },
                       slug: { type: ["string", "null"], description: "Organization slug." },
+                    },
+                  },
+                  space: {
+                    type: "object",
+                    description:
+                      "The space this request resolved to (`X-Space-Id`, else the API key's " +
+                      "space, else the org default). Every list in this payload is scoped to " +
+                      "it. An empty list means this space holds nothing of that kind, this is " +
+                      "not the space you meant, or the caller's permissions do not cover that " +
+                      "list.",
+                    required: ["id", "name", "personal"],
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: "string", description: "Human-readable space name." },
+                      personal: {
+                        type: "boolean",
+                        description:
+                          "Whether this space is one member's personal space (always " +
+                          "`private`, no other members) rather than a team space.",
+                      },
                     },
                   },
                   recent_runs: {

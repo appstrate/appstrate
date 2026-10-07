@@ -1478,6 +1478,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
     name: "get_me",
     description:
       "Return the caller's working context: identity (name, email), role in this organization, " +
+      "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent " +
       "(their own or org-shared). Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +

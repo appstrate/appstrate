@@ -24,6 +24,7 @@ import {
 export interface SpaceContextRow {
   id: string;
   orgId: string;
+  name: string;
   isDefault: boolean;
   visibility: import("@appstrate/core/permissions").SpaceVisibility;
   defaultRole: import("@appstrate/core/permissions").SpaceRolePreset;
@@ -34,9 +35,10 @@ export interface SpaceContextRow {
 }
 
 /** Projection behind {@link SpaceContextRow} — declared once so its readers cannot drift. */
-const SPACE_CONTEXT_COLUMNS = {
+export const SPACE_CONTEXT_COLUMNS = {
   id: spaces.id,
   orgId: spaces.orgId,
+  name: spaces.name,
   isDefault: spaces.isDefault,
   visibility: spaces.visibility,
   defaultRole: spaces.defaultRole,
