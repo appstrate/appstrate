@@ -6,7 +6,7 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Governance Model
 
-Appstrate follows a **corporate-backed open-source model** (similar to Supabase). The Appstrate team retains final authority over the project roadmap, architecture, and releases. Community input is welcomed and encouraged through GitHub Issues, Discussions, and the RFC process described below.
+Appstrate follows a **corporate-backed open-source model** (similar to Supabase). The Appstrate team retains final authority over the project roadmap, architecture, and releases. Community input is welcomed and encouraged through GitHub Issues, Discord, and the RFC process described below.
 
 The core platform is licensed under [Apache 2.0](./LICENSE). Commercial extensions live in this same repository under a different licence: `packages/module-ee` (billing, credit quotas, usage metering) is source-available under [its own LICENSE](./packages/module-ee/LICENSE) — readable and contributable like the rest of the tree, but not licensed for production use without an agreement. Everything outside that directory is Apache 2.0, and `bun run verify:license-boundary` enforces the split file by file.
 
@@ -38,14 +38,14 @@ Significant features, API changes, new dependencies, or architectural shifts req
 
 Any change that breaks backward compatibility requires:
 
-1. An RFC via GitHub Discussions with a 2-week discussion period
+1. An RFC, opened as a GitHub Issue, with a 2-week discussion period
 2. A `CHANGELOG.md` entry describing the change
 3. A migration guide for affected users
 4. Maintainer consensus before merging
 
 ## RFC Process
 
-1. **Open a Discussion** — Create a new GitHub Discussion using the RFC category. Title it `RFC: <short description>`. Include motivation, proposed design, alternatives considered, and migration impact.
+1. **Open an Issue** — Create a new GitHub Issue with the [feature request template](https://github.com/appstrate/appstrate/issues/new?template=feature_request.yml). Title it `RFC: <short description>`. Include motivation, proposed design, alternatives considered, and migration impact.
 2. **Discussion Period** — The RFC remains open for a minimum of **2 weeks**. Community members and maintainers provide feedback, raise concerns, and suggest alternatives.
 3. **Maintainer Review** — After the discussion period, maintainers review the RFC and reach consensus. The RFC is either accepted, rejected, or sent back for revision.
 4. **Implementation** — Accepted RFCs are tracked as GitHub Issues. The RFC author or any contributor may submit a pull request implementing the proposal.

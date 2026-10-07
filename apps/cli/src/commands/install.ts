@@ -122,7 +122,7 @@ export interface InstallOptions {
   force?: boolean;
   /**
    * Skip every interactive prompt and accept the smart defaults:
-   *   - tier: Docker-aware default (3 when Docker is reachable, else 0)
+   *   - tier: Docker-aware default (2 when Docker is reachable, else 0)
    *   - dir: `defaultInstallDir()` (~/appstrate)
    *   - port: 3000 (or --port / APPSTRATE_PORT)
    *   - upgrade confirm: proceed

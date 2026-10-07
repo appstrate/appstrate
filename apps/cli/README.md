@@ -14,7 +14,7 @@ Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platf
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
+Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `~/.local/bin/appstrate` (rootless default; override with `APPSTRATE_BIN_DIR`), and immediately execs `appstrate install`.
 
 Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx appstrate install` natively if you already have Bun on Windows.
 
@@ -80,12 +80,12 @@ appstrate install --tier 0 --dir ~/demo-appstrate
 
 **Tiers**
 
-| Tier | Runtime deps | Services                   | Storage    | Notes                                                  |
-| ---- | ------------ | -------------------------- | ---------- | ------------------------------------------------------ |
-| 0    | Bun          | None (PGlite in-process)   | Filesystem | Hobby / evaluation. CLI auto-installs Bun if missing.  |
-| 1    | Docker       | PostgreSQL                 | Filesystem | Low-traffic single-node. In-memory scheduler / pubsub. |
-| 2    | Docker       | PostgreSQL + Redis         | Filesystem | Adds Redis (BullMQ, distributed rate-limiter).         |
-| 3    | Docker       | PostgreSQL + Redis + MinIO | S3         | Full production stack (default self-host target).      |
+| Tier | Runtime deps | Services                   | Storage    | Notes                                                   |
+| ---- | ------------ | -------------------------- | ---------- | ------------------------------------------------------- |
+| 0    | Bun          | None (PGlite in-process)   | Filesystem | Hobby / evaluation. CLI auto-installs Bun if missing.   |
+| 1    | Docker       | PostgreSQL                 | Filesystem | Low-traffic single-node. In-memory scheduler / pubsub.  |
+| 2    | Docker       | PostgreSQL + Redis         | Filesystem | Recommended default. Adds Redis (BullMQ, rate-limiter). |
+| 3    | Docker       | PostgreSQL + Redis + MinIO | S3         | Advanced: Tier 2 plus bundled MinIO object storage.     |
 
 **Tier 0 specifics**: `git clone`s the `appstrate/appstrate` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
 
@@ -229,7 +229,7 @@ appstrate self-update --force         # bypass version-equality short-circuit
 | `-f`, `--force`   | —       | Re-install even if already on target version. |
 
 - **curl channel** — resolves the newest release from the signed channel manifest (`https://get.appstrate.dev/channels/latest.json` + `.minisig`, verified with minisign before it is read; any failure is fatal — `--release` skips it), downloads the new binary, verifies minisign + SHA-256, and atomically replaces `~/.local/bin/appstrate`.
-- **bun channel** — refuses to overwrite, prints the matching `bun update -g @appstrate/cli` invocation.
+- **bun channel** — refuses to overwrite, prints the matching `bun update -g appstrate` invocation.
 - **unknown channel** — emits diagnostic instructions.
 
 Channel matrix and recipes: [`docs/cli/upgrades.md`](../../docs/cli/upgrades.md).
@@ -561,7 +561,7 @@ Two cases need you to run the sync yourself: you do not use Claude Code at all, 
 A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
 
 ```cron
-*/15 * * * * /usr/local/bin/appstrate code sync --target codex >/dev/null 2>&1
+*/15 * * * * $HOME/.local/bin/appstrate code sync --target codex >/dev/null 2>&1
 ```
 
 On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).

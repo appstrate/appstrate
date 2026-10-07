@@ -98,8 +98,7 @@ Want to decide at install time which address owns the instance? Pre-set
 the bootstrap email:
 
 ```bash
-APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com \
-  curl -fsSL https://get.appstrate.dev | bash -s -- --yes
+curl -fsSL https://get.appstrate.dev | APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com bash -s -- --yes
 ```
 
 The token then claims that address and no other — see
