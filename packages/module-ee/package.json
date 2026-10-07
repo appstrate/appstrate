@@ -21,7 +21,7 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/emails": "workspace:*",
     "drizzle-orm": "^0.45.3",
-    "hono": "^4.13.9",
+    "hono": "^4.13.13",
     "ioredis": "^6.0.0",
     "postgres": "^3.4.9",
     "stripe": "^22.6.2",
