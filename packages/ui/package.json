@@ -78,12 +78,12 @@
   "devDependencies": {
     "@appstrate/core": "workspace:*",
     "@types/bun": "^1.4.2",
-    "@rjsf/core": "^6.10.1",
-    "@rjsf/utils": "^6.10.1",
-    "@rjsf/validator-ajv8": "^6.10.1",
+    "@rjsf/core": "^6.11.0",
+    "@rjsf/utils": "^6.11.0",
+    "@rjsf/validator-ajv8": "^6.11.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "lucide-react": "^1.48.0",
+    "lucide-react": "^1.52.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-select": "^5.10.2"

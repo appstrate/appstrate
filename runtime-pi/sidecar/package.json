@@ -16,7 +16,7 @@
     "@earendil-works/pi-ai": "1.0.4",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "fflate": "^0.8.3",
-    "hono": "^4.13.9",
+    "hono": "^4.13.13",
     "p-limit": "^7.3.3"
   }
 }
