@@ -446,6 +446,44 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
     expect(await versionsOf(PKG)).toEqual(["1.0.0"]);
   });
 
+  it("a dependency owned by another org at a higher version is a 409 — never a 'reused' warning naming that version", async () => {
+    await handleImportBundle(agentAfps("2.0.0"), scopeA, ctxA.user.id, noAuthorize, noShare);
+
+    // Org B's bundle carries A's package at a LOWER version as a dependency of
+    // its own root. `importBundle` is called directly: the preflight is skipped,
+    // as when A's package appears between the preflight and the import.
+    const dep = await readOrBuildBundle(agentAfps("1.0.0"), scopeB);
+    const root = await readOrBuildBundle(
+      buildRawAfps(
+        {
+          schema_version: "0.2",
+          name: "@raceorgb/root",
+          type: "agent",
+          version: "1.0.0",
+          display_name: "Root",
+          description: "root agent",
+        },
+        "Root prompt.",
+      ),
+      scopeB,
+    );
+    const bundle: Bundle = {
+      bundleFormatVersion: "1.0",
+      root: root.root,
+      packages: new Map([...dep.packages, ...root.packages]),
+      integrity: "sha256-abc",
+    };
+
+    const err = await importBundle(bundle, scopeB, ctxB.user.id, noShare).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("bundle_conflict");
+    expect((err as ApiError).message).not.toContain("2.0.0");
+
+    expect(await packageOwner(PKG)).toBe(ctxA.orgId);
+    expect(await versionsOf(PKG)).toEqual(["2.0.0"]);
+  });
+
   // Real concurrency needs two independent DB sessions holding the advisory
   // lock — external PostgreSQL only (PGlite is single-connection).
   describeRequiresPostgres("concurrent imports (advisory-locked claim)", () => {

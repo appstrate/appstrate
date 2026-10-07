@@ -16,9 +16,15 @@
  *
  * Organizations, memberships, and spaces are seeded directly in the DB.
  */
-import { afterAll, beforeAll } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
-import { getAuth, _swapRealmResolverForTesting } from "@appstrate/db/auth";
+import {
+  getAuth,
+  _swapBeforeSignupHookForTesting,
+  _swapMagicLinkIssuedHookForTesting,
+  _swapPostBootstrapOrgHookForTesting,
+  _swapRealmResolverForTesting,
+} from "@appstrate/db/auth";
 import { db } from "./db.ts";
 import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
@@ -30,7 +36,6 @@ import {
   session as sessionTable,
   account as accountTable,
   profiles,
-  verification as verificationTable,
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
@@ -333,21 +338,50 @@ export function restoreRealmResolverAfterSuite(): void {
   });
 }
 
-/**
- * Better Auth stores an issued magic link under `magic-link:<token>` (the
- * purpose prefix of GHSA-965c-763c-88jm, 1.7.7): the emailed token is the
- * suffix, never the stored identifier itself.
- */
-const MAGIC_LINK_IDENTIFIER_PREFIX = "magic-link:";
+/** For a suite that sets the post-bootstrap-org hook: start from none, hand the installed one back. */
+export function restorePostBootstrapOrgHookAfterSuite(): void {
+  let installed: ReturnType<typeof _swapPostBootstrapOrgHookForTesting>;
+  beforeAll(() => {
+    installed = _swapPostBootstrapOrgHookForTesting(null);
+  });
+  afterAll(() => {
+    _swapPostBootstrapOrgHookForTesting(installed);
+  });
+}
 
-/** The token of the magic link last issued (for `email`, when given). */
-export async function issuedMagicLinkToken(email?: string): Promise<string> {
-  const rows = await db.select().from(verificationTable);
-  const link = rows.find(
-    (row) =>
-      row.identifier.startsWith(MAGIC_LINK_IDENTIFIER_PREFIX) &&
-      (email === undefined || row.value.includes(`"email":"${email}"`)),
-  );
-  if (!link) throw new Error(`no magic link issued${email ? ` for ${email}` : ""}`);
-  return link.identifier.slice(MAGIC_LINK_IDENTIFIER_PREFIX.length);
+/** For a suite that sets the before-signup hook: start from none, hand the installed one back. */
+export function restoreBeforeSignupHookAfterSuite(): void {
+  let installed: ReturnType<typeof _swapBeforeSignupHookForTesting>;
+  beforeAll(() => {
+    installed = _swapBeforeSignupHookForTesting(null);
+  });
+  afterAll(() => {
+    _swapBeforeSignupHookForTesting(installed);
+  });
+}
+
+/**
+ * Records, per recipient, the token of the last magic link issued in each test,
+ * whether its mail goes out or is withheld. The hook already installed still runs.
+ */
+export function captureIssuedMagicLinks(): { tokenFor(email: string): string } {
+  const tokens = new Map<string, string>();
+  let installed: ReturnType<typeof _swapMagicLinkIssuedHookForTesting> = null;
+  beforeEach(() => {
+    tokens.clear();
+    installed = _swapMagicLinkIssuedHookForTesting(async (info) => {
+      tokens.set(info.email, info.token);
+      return installed ? installed(info) : info.url;
+    });
+  });
+  afterEach(() => {
+    _swapMagicLinkIssuedHookForTesting(installed);
+  });
+  return {
+    tokenFor(email) {
+      const token = tokens.get(email.toLowerCase().trim());
+      if (!token) throw new Error(`no magic link issued for ${email}`);
+      return token;
+    },
+  };
 }

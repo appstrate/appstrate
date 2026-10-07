@@ -29,7 +29,9 @@
  * 1 when any connection is refused, in both modes: its owner must fix the URL in the connection.
  */
 
-import { SQL } from "bun";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { integrationConnections } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
 import { decryptCredentials, encryptCredentialEnvelope } from "@appstrate/connect";
 
@@ -46,73 +48,100 @@ const HOST_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 type Envelope = { v: 2; outputs: Record<string, unknown>; inputs?: Record<string, unknown> };
 class DryRunRollback extends Error {}
 
-const apply = process.argv.includes("--apply");
-const out = (line: string) => process.stdout.write(`${line}\n`);
-const url = process.env.DATABASE_URL;
-if (!url) {
-  out("DATABASE_URL is required — the platform database to rewrite");
-  process.exit(2);
-}
+/** @returns the exit status: 1 when any connection is refused. */
+export async function runIntegrationUrlAllowlists(options: {
+  apply: boolean;
+  out: (line: string) => void;
+}): Promise<0 | 1> {
+  const { apply, out } = options;
+  // Imported here, not at the top: `@appstrate/db/client` opens its database on import, and the
+  // entry point refuses the embedded one before that.
+  const { db, toRows } = await import("@appstrate/db/client");
+  let refused = 0;
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL lock_timeout = '5s'");
+      await tx.execute("SET LOCAL statement_timeout = '120s'");
+      const [target] = toRows<{ name: string }>(
+        await tx.execute("SELECT current_database() AS name"),
+      );
+      out(`0034 — ${apply ? "APPLY" : "DRY RUN"} on database ${target!.name}`);
+      const rows = await tx
+        .select({
+          id: integrationConnections.id,
+          pkg: integrationConnections.integrationId,
+          credentialsEncrypted: integrationConnections.credentialsEncrypted,
+        })
+        .from(integrationConnections)
+        .where(
+          and(
+            inArray(integrationConnections.integrationId, Object.keys(URL_AUTHS)),
+            eq(integrationConnections.authKey, "primary"),
+          ),
+        )
+        .orderBy(asc(integrationConnections.integrationId), asc(integrationConnections.id))
+        .for("update");
 
-const sql = new SQL(url, { max: 1 });
-let refused = 0;
-let failed = false;
-try {
-  await sql.begin(async (tx: SQL) => {
-    await tx`SET LOCAL lock_timeout = '5s'`;
-    await tx`SET LOCAL statement_timeout = '120s'`;
-    const [db] = await tx`SELECT current_database() AS name`;
-    out(`0034 — ${apply ? "APPLY" : "DRY RUN"} on database ${db.name}`);
-    const rows: { id: string; pkg: string; credentials_encrypted: string }[] = await tx`
-      SELECT id, integration_package_id AS pkg, credentials_encrypted FROM integration_connections
-       WHERE integration_package_id IN ${tx(Object.keys(URL_AUTHS))} AND auth_key = 'primary'
-       ORDER BY integration_package_id, id
-         FOR UPDATE`;
-
-    let rewritten = 0;
-    for (const row of rows) {
-      const envelope = decryptCredentials<Envelope>(row.credentials_encrypted);
-      if (envelope?.v !== 2 || typeof envelope.outputs !== "object") {
-        throw new Error(`connection ${row.id}: credentials are not a v2 envelope`);
-      }
-      let outputs = envelope.outputs;
-
-      if (row.pkg === ACTIVECAMPAIGN && !outputs.api_url) {
-        const account = outputs.account_name;
-        if (typeof account === "string" && HOST_LABEL.test(account)) {
-          outputs = { ...outputs, api_url: `https://${account}.api-us1.com` };
-          const ciphertext = encryptCredentialEnvelope({ outputs, inputs: envelope.inputs });
-          await tx`
-            UPDATE integration_connections
-               SET credentials_encrypted = ${ciphertext}, updated_at = now()
-             WHERE id = ${row.id}`;
-          rewritten += 1;
-          out(`  rewrite ${row.pkg} ${row.id}: api_url from account_name`);
-        } else {
-          out(`  skip    ${row.pkg} ${row.id}: account_name missing or not a hostname label`);
+      let rewritten = 0;
+      for (const row of rows) {
+        const envelope = decryptCredentials<Envelope>(row.credentialsEncrypted);
+        if (envelope?.v !== 2 || typeof envelope.outputs !== "object") {
+          throw new Error(`connection ${row.id}: credentials are not a v2 envelope`);
         }
+        let outputs = envelope.outputs;
+
+        if (row.pkg === ACTIVECAMPAIGN && !outputs.api_url) {
+          const account = outputs.account_name;
+          if (typeof account === "string" && HOST_LABEL.test(account)) {
+            outputs = { ...outputs, api_url: `https://${account}.api-us1.com` };
+            const ciphertext = encryptCredentialEnvelope({ outputs, inputs: envelope.inputs });
+            await tx
+              .update(integrationConnections)
+              .set({ credentialsEncrypted: ciphertext, updatedAt: sql`now()` })
+              .where(eq(integrationConnections.id, row.id));
+            rewritten += 1;
+            out(`  rewrite ${row.pkg} ${row.id}: api_url from account_name`);
+          } else {
+            out(`  skip    ${row.pkg} ${row.id}: account_name missing or not a hostname label`);
+          }
+        }
+
+        const [bad] = unrenderableAuthorizedUriFields(URL_AUTHS[row.pkg]!, outputs);
+        if (!bad) continue;
+        refused += 1;
+        const value = outputs[bad.field];
+        const why =
+          typeof value === "string" && value !== "" ? `must be ${bad.expected}` : "missing";
+        out(`  REFUSED ${row.pkg} ${row.id}: ${bad.field} ${why}`);
       }
 
-      const [bad] = unrenderableAuthorizedUriFields(URL_AUTHS[row.pkg]!, outputs);
-      if (!bad) continue;
-      refused += 1;
-      const value = outputs[bad.field];
-      const why = typeof value === "string" && value !== "" ? `must be ${bad.expected}` : "missing";
-      out(`  REFUSED ${row.pkg} ${row.id}: ${bad.field} ${why}`);
-    }
-
-    out(`${rows.length} connection(s) scanned, ${rewritten} rewritten, ${refused} refused`);
-    if (!apply) throw new DryRunRollback();
-  });
-  out("0034: APPLIED — committed.");
-} catch (error) {
-  if (error instanceof DryRunRollback) {
+      out(`${rows.length} connection(s) scanned, ${rewritten} rewritten, ${refused} refused`);
+      if (!apply) throw new DryRunRollback();
+    });
+    out("0034: APPLIED — committed.");
+  } catch (error) {
+    if (!(error instanceof DryRunRollback)) throw error;
     out("0034: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
-  } else {
-    out(`0034: FAILED, nothing committed — ${error instanceof Error ? error.message : error}`);
-    failed = true;
   }
-} finally {
-  await sql.close();
+  return refused > 0 ? 1 : 0;
 }
-process.exit(failed || refused > 0 ? 1 : 0);
+
+if (import.meta.main) {
+  const apply = process.argv.includes("--apply");
+  const out = (line: string) => process.stdout.write(`${line}\n`);
+  // An empty DATABASE_URL makes `@appstrate/db/client` open ./data/pglite instead.
+  if (!process.env.DATABASE_URL) {
+    out("DATABASE_URL is required — the platform database to rewrite");
+    process.exit(2);
+  }
+  const { closeDb } = await import("@appstrate/db/client");
+  let code = 1;
+  try {
+    code = await runIntegrationUrlAllowlists({ apply, out });
+  } catch (error) {
+    out(`0034: FAILED, nothing committed — ${getErrorMessage(error)}`);
+  } finally {
+    await closeDb();
+  }
+  process.exit(code);
+}

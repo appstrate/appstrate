@@ -603,7 +603,7 @@ export default tseslint.config(
     // Supply-chain guard: the single-vendor Pi SDK (the whole
     // `@earendil-works/pi-*` family: pi-ai, pi-coding-agent, and siblings
     // pi-agent-core / pi-tui) may only be imported through each package's
-    // `pi-sdk.ts` barrel (and runner-pi's `pi-model.ts`), so swapping or
+    // `pi-sdk.ts` barrel (and runner-pi's `pi-model.ts` / `pi-payload.ts`), so swapping or
     // forking it touches a short, known list of files.
     // Barrels are exempt via `ignores`. `packages/afps-runtime/src` is
     // SDK-agnostic and imports zero pi-* symbols today, so it has no barrel —
@@ -620,6 +620,9 @@ export default tseslint.config(
       // Imports Pi's registry (`providers/all`, ~14 ms to import) and the root
       // pi-ai `calculateCost` / `getSupportedThinkingLevels` off the barrel.
       "packages/runner-pi/src/pi-model.ts",
+      // Captures Pi's wire payload (`pi-ai/compat` `streamSimple`) for the
+      // model-catalog build and the tests; nothing on the run path imports it.
+      "packages/runner-pi/src/pi-payload.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
       // Tests may reach the vendor directly: the guard protects the PRODUCTION

@@ -885,12 +885,11 @@ async function forwardInnerRequest(
   // request at an arbitrary host and exfiltrate the secret off-target. A
   // request outside those URIs is never substituted (any `{{...}}` literal it
   // carries stays a literal — a placeholder name, never the secret value).
+  // A request inside them that a secret would be substituted into is refused
+  // when an entry leaves the host to the caller: the injection rule
+  // (`buildAction` below) binds a login secret too.
   const active = credentials.activeInputs?.() ?? null;
-  if (
-    active &&
-    !active.authorizedUris.some(isHostUnboundedUriPattern) &&
-    targetWithinAuthorizedUris(targetUrl, active.authorizedUris)
-  ) {
+  if (active && targetWithinAuthorizedUris(targetUrl, active.authorizedUris)) {
     const inboundHeaders: Record<string, string> = {};
     req.headers.forEach((v, k) => {
       inboundHeaders[k] = v;
@@ -903,6 +902,16 @@ async function forwardInnerRequest(
     if ("failed" in result) {
       emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
+    }
+    const substituted =
+      result.url !== targetUrl ||
+      result.bodyText !== bodyText ||
+      Object.entries(result.headers).some(([k, v]) => v !== inboundHeaders[k]);
+    if (substituted && active.authorizedUris.some(isHostUnboundedUriPattern)) {
+      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
+      return new Response("MITM listener: credential allowlist leaves the host open", {
+        status: 403,
+      });
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");

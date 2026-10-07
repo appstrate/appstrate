@@ -2620,6 +2620,12 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "409": {
+          description: "A package with this name already exists (`code: name_collision`).",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "415": { $ref: "#/components/responses/UnsupportedMediaType" },

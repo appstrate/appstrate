@@ -7,7 +7,7 @@ import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
 
 const DIALECT = { name: "DeepSeek V4 Flash", compat: { thinkingFormat: "deepseek" } };
 
-function containerModel(opts: { aliased: boolean; dialect?: typeof DIALECT }) {
+function containerModel(opts: { aliased: boolean; dialect: typeof DIALECT | null }) {
   const env = buildRuntimePiEnv({
     model: {
       api: "openai-completions",
@@ -51,7 +51,7 @@ describe("buildPiModelFromEnv — the platform's dialect", () => {
   });
 
   it("reads no registry of its own: a recorded id the platform sends no dialect for gets none", () => {
-    const { env, model } = containerModel({ aliased: false });
+    const { env, model } = containerModel({ aliased: false, dialect: null });
     expect(env.MODEL_PROVIDER).toBe("opencode-go");
     expect(env.MODEL_DIALECT).toBe("null");
     expect(model.name).toBe("deepseek-v4-flash");
@@ -59,7 +59,10 @@ describe("buildPiModelFromEnv — the platform's dialect", () => {
   });
 
   it("refuses to boot when a Pi provider comes without a word on the dialect", () => {
-    const { MODEL_DIALECT: _absent, ...env } = containerModel({ aliased: false }).env;
+    const { MODEL_DIALECT: _absent, ...env } = containerModel({
+      aliased: false,
+      dialect: null,
+    }).env;
     expect(() => parseRuntimeEnv(env)).toThrow(/MODEL_DIALECT: required with MODEL_PROVIDER/);
   });
 

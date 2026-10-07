@@ -283,6 +283,14 @@ export function bundleImportAuditRecords(
   });
 }
 
+/** The refusal for a bundle package whose row belongs to another org. */
+function foreignOwnerConflict(identity: string) {
+  return conflict(
+    "bundle_conflict",
+    `Bundle conflicts with existing packages: ${identity} is owned by another org`,
+  );
+}
+
 interface BundleImportPreflight {
   bundle: Bundle;
   conflicts: BundleConflict[];
@@ -370,13 +378,22 @@ export async function importBundle(
       .limit(1);
     if (existingVer) {
       if (existingVer.ownerOrgId !== scope.orgId) {
-        throw conflict(
-          "bundle_conflict",
-          `Bundle conflicts with existing packages: ${identity} is owned by another org`,
-        );
+        throw foreignOwnerConflict(identity);
       }
       imported.push({ identity, status: "reused", version_id: existingVer.id });
       continue;
+    }
+
+    // The forward-only check below reads another org's versions too, so the
+    // owner is re-read first: a foreign package created after the preflight
+    // is a 409, not a "reused" dependency naming that org's highest version.
+    const [owner] = await db
+      .select({ orgId: packages.orgId })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .limit(1);
+    if (owner && owner.orgId !== scope.orgId) {
+      throw foreignOwnerConflict(identity);
     }
 
     // A version below the highest published one cannot be created. A
@@ -484,10 +501,7 @@ export async function importBundle(
         );
       }
       if (survivor.orgId !== scope.orgId) {
-        throw conflict(
-          "bundle_conflict",
-          `Bundle conflicts with existing packages: ${identity} is owned by another org`,
-        );
+        throw foreignOwnerConflict(identity);
       }
       return false;
     });

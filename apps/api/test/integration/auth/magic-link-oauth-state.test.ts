@@ -10,41 +10,21 @@
  * This replays the attack through the real routes.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { _rebuildAuthForTesting } from "@appstrate/db/auth";
 import { session } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
+import { useAuthEnv } from "../../helpers/auth-env.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite } from "../../helpers/smtp.ts";
 
 const app = getTestApp();
 
-const SAVED = {
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-};
-
-function setEnv(vars: Record<string, string | undefined>) {
-  for (const [key, value] of Object.entries(vars)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-}
-
 describe("an OAuth sign-in state is not a magic link", () => {
   // Registered before `enableSmtpForSuite`, so its rebuild sees both.
-  beforeAll(() => {
-    setEnv({ GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret" });
-  });
+  useAuthEnv({ GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret" });
   enableSmtpForSuite();
-  afterAll(() => {
-    setEnv(SAVED);
-  });
 
   beforeEach(async () => {
     await truncateAll();

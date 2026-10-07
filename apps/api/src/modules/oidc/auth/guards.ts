@@ -62,8 +62,9 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 
 // The categories below have no upstream rule, so they stay local. They answer
-// the RFC 6749 `{ error, error_description }` + `Retry-After` shape the
-// Better Auth limiter's refusals are restated in (`oauthRateLimitResponse`).
+// `{ error: "rate_limited", error_description }` + `Retry-After`; Better Auth's
+// own 429 on `/api/auth/oauth2/*` is rewritten to `temporarily_unavailable`
+// instead (`oauthRateLimitResponse`).
 //
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;
@@ -327,11 +328,6 @@ async function wouldCreateAccount(internalAdapter: unknown, token: string): Prom
 }
 
 /**
- * Build the guards plugin. Returned as an unknown-shaped object at this
- * layer to keep `@better-auth/core` types out of the module's public
- * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
- */
-/**
  * Pre-empt `/magic-link/verify` when the bound OAuth client is gone, or has a closed
  * signup policy AND the token would create a new user. Produces the same
  * `errorCallbackURL?error=<code>` redirect Better Auth uses natively for
@@ -419,11 +415,11 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   // Neither is a security regression on its own — we never hand session
   // material to an attacker-controlled origin — but letting the throw
   // escape converts the intended `?error=signup_disabled` redirect into
-  // an opaque 500, which is both ugly UX and a weak oracle for an
-  // attacker who can plant a pending-client cookie and trigger this
-  // path. Convert to the same safe in-origin redirect as the off-origin
-  // branch below. Truncate the raw value in the log field so we don't
-  // pipe unbounded attacker-controlled payloads through the log pipeline.
+  // an opaque 500, which is both ugly UX and a weak oracle for anyone
+  // holding a client-bound link, whose query they can edit. Convert to the
+  // same safe in-origin redirect as the off-origin branch below. Truncate the
+  // raw value in the log field so we don't pipe unbounded attacker-controlled
+  // payloads through the log pipeline.
   let target: URL;
   try {
     target = new URL(decodeURIComponent(rawErrorCallback), baseURL);
@@ -448,10 +444,13 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   // `https://evil/x` and be passed to `ctx.redirect()`, producing an
   // authenticated open-redirect (attacker-controlled domain receiving
   // a navigation that originates from the magic-link click flow,
-  // useful for branded phishing). The exploit window is narrow — only
-  // triggers when a pending OAuth client cookie is present AND its
-  // signup policy is closed AND the email is new — but the cost of
-  // closing it is one origin comparison.
+  // useful for branded phishing). The exploit window is narrow — it
+  // triggers only for a link bound to an OAuth client at issuance (the
+  // token → client binding of `oauth-transaction-binding.ts`; the
+  // pending-client cookie is read only under the authority mark, never on
+  // this leg) whose client is deleted, or whose signup policy is closed
+  // AND whose email is new — but the cost of closing it is one origin
+  // comparison.
   //
   // Fail-closed: any URL that resolves outside `baseURL.origin` is
   // dropped and we redirect to a safe in-origin default. Logged at
@@ -686,6 +685,11 @@ async function defaultRegistrationToNativeClient(ctx: {
   };
 }
 
+/**
+ * Build the guards plugin. Returned as an unknown-shaped object at this
+ * layer to keep `@better-auth/core` types out of the module's public
+ * surface — `oidcBetterAuthPlugins()` merges it into the plugin list.
+ */
 export function oidcGuardsPlugin() {
   return {
     id: "oidc-guards",

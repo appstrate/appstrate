@@ -14,7 +14,8 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildPiModel, listPiModels } from "@appstrate/runner-pi/pi-model";
-import { captureRequest, recordSpec } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { recordSpec } from "../../../../packages/runner-pi/src/pi-payload.ts";
+import { captureRequest } from "../../../../packages/runner-pi/test/pi-payload.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";

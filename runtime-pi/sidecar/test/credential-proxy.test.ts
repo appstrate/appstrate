@@ -1232,8 +1232,8 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
    * target. A compromised or misconfigured upstream that 302s into
    * cloud-metadata / loopback / RFC1918 would have been silently
    * followed before #475 — the per-hop SSRF guard refuses regardless
-   * of `allowAllUris` so finalUrl can never become an internal-network
-   * oracle.
+   * of `allowAllUris` so a redirect can never make the proxy an
+   * internal-network oracle.
    */
   // One per representative family in isBlockedHost (IPv4 numeric,
   // hostname, IPv6); the rest is covered by the ssrf.ts unit tests.
@@ -1410,21 +1410,19 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
   });
 });
 
-describe("executeApiCall — finalUrl: redirect terminus", () => {
+describe("executeApiCall — redirect terminus", () => {
   /**
-   * `finalUrl` is INTERNAL to the credential proxy, and an OUTPUT only: it
-   * is where the redirect follower stopped, and what the diagnostic
-   * envelope reports as `host` / `redirected`. Nothing re-issues against
-   * it — the 401 replay re-issues against the resolved target URL and
-   * re-follows the chain, overwriting this value. These cases pin that
-   * terminus across the paths that can produce it: no redirect, a
-   * followed chain, and a chain that dies without a `location`.
-   *
-   * It is NOT an agent-visible field: the agent cannot see a redirect's
-   * `location` at all, so nothing here asserts anything about `_meta`.
+   * The result is the response of the hop where `fetchApiCall`'s follower
+   * stopped: no redirect, a followed chain, a chain that dies without a
+   * `location`, and the 401 replay, which re-issues against the resolved
+   * target and re-follows the chain. The agent never sees a redirect's
+   * `location`, so nothing here asserts anything about `_meta`.
    */
-  it("returns the resolved target URL when no redirect happens", async () => {
-    const deps = makeDeps();
+  const fetched = (fetchFn: { mock: { calls: unknown[][] } }) =>
+    fetchFn.mock.calls.map(([url]) => String(url));
+
+  it("answers from the resolved target when no redirect happens", async () => {
+    const fetchFn = mock(async () => new Response("ok", { status: 200 }));
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -1434,13 +1432,14 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
         callerHeaders: {},
         body: { kind: "none" },
       },
-      deps,
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
     );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/messages");
+    if (result.ok) expect(result.response.status).toBe(200);
+    expect(fetched(fetchFn)).toEqual(["https://api.example.com/messages"]);
   });
 
-  it("returns the terminal hop URL after a 302 chain ending on 200", async () => {
+  it("answers from the terminal hop after a 302 chain ending on 200", async () => {
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.endsWith("/authorize")) {
@@ -1470,16 +1469,18 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
       deps,
     );
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      // The OAuth use case: extract ?code= from the terminal URL.
-      expect(result.finalUrl).toBe("https://api.example.com/callback?code=ABC123");
-    }
+    if (result.ok) expect(result.response.status).toBe(200);
+    expect(fetched(fetchFn)).toEqual([
+      "https://api.example.com/authorize",
+      "https://api.example.com/login?ReturnUrl=/callback",
+      "https://api.example.com/callback?code=ABC123",
+    ]);
   });
 
-  it("returns the no-location 30x hop URL (chain terminates mid-flight)", async () => {
+  it("answers from a 30x hop without location (chain terminates mid-flight)", async () => {
     // 302 without Location is malformed but RFC-permitted — the
-    // follower must stop and surface the URL the response was served
-    // from rather than the next hop (which doesn't exist).
+    // follower must stop and surface that hop's response rather than
+    // look for a next hop (which doesn't exist).
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.endsWith("/a")) {
@@ -1504,12 +1505,11 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
       deps,
     );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.finalUrl).toBe("https://api.example.com/b");
+    if (result.ok) expect(result.response.status).toBe(302);
+    expect(fetched(fetchFn)).toEqual(["https://api.example.com/a", "https://api.example.com/b"]);
   });
 
-  it("returns the post-refresh URL after a 401 retry that followed redirects", async () => {
-    // 401 retry path must update finalUrl from the replayed call —
-    // not stick with the pre-retry value.
+  it("re-follows the chain from the resolved target on a 401 retry", async () => {
     let call = 0;
     const fetchFn = mock(async (url: string | URL) => {
       call += 1;
@@ -1548,10 +1548,12 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
       deps,
     );
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.response.status).toBe(200);
-      expect(result.finalUrl).toBe("https://api.example.com/retry-target?ok=1");
-    }
+    if (result.ok) expect(result.response.status).toBe(200);
+    expect(fetched(fetchFn)).toEqual([
+      "https://api.example.com/x",
+      "https://api.example.com/x",
+      "https://api.example.com/retry-target?ok=1",
+    ]);
   });
 });
 
@@ -1817,7 +1819,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
       makeDeps({ fetchFn, fetchCredentials: allowAllWithAllowlist() }),
     );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.finalUrl).toBe("https://elsewhere.example.net/c");
+    if (result.ok) expect(result.response.status).toBe(200);
     expect(calls.map((c) => c.url)).toEqual([
       "https://api.example.com/start",
       "https://elsewhere.example.net/c",
