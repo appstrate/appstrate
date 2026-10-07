@@ -29,8 +29,8 @@ import {
   apiFetchRaw,
   explicitApiKey,
   resolveApiKeyTarget,
-  resolveApiKeyAuthContext,
   AuthError,
+  EmptyApiKeyFlagError,
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
 } from "../src/lib/api.ts";
@@ -522,30 +522,40 @@ describe("_awaitRefreshQuiesce (PR #191 review)", () => {
 });
 
 describe("explicit API key helpers", () => {
-  const ENV = ["APPSTRATE_API_KEY", "APPSTRATE_INSTANCE"] as const;
-  let saved: Record<string, string | undefined>;
-
-  beforeEach(() => {
-    saved = {};
-    for (const k of ENV) {
-      saved[k] = process.env[k];
-      delete process.env[k];
-    }
-  });
+  // The preload starts every file without them.
   afterEach(() => {
-    for (const k of ENV) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
-    }
+    delete process.env.APPSTRATE_API_KEY;
+    delete process.env.APPSTRATE_INSTANCE;
   });
 
-  it("explicitApiKey: flag, else env, and empty means not set", () => {
+  it("explicitApiKey: flag, else env; an empty ENV value means not set", () => {
     expect(explicitApiKey(undefined)).toBeUndefined();
     process.env.APPSTRATE_API_KEY = "";
     expect(explicitApiKey(undefined)).toBeUndefined();
     process.env.APPSTRATE_API_KEY = "apst_env";
     expect(explicitApiKey(undefined)).toBe("apst_env");
     expect(explicitApiKey("apst_flag")).toBe("apst_flag");
+  });
+
+  it("explicitApiKey: an empty flag throws even when the env var holds a key", () => {
+    process.env.APPSTRATE_API_KEY = "apst_env";
+    expect(() => explicitApiKey("")).toThrow(EmptyApiKeyFlagError);
+  });
+
+  it("explicitApiKey: a key that is not visible ASCII throws without quoting it", () => {
+    for (const bad of ["apst_a\nb", "apst_a b", "\u201capst_ab\u201d", "apst_\u00e9"]) {
+      let thrown: unknown;
+      try {
+        explicitApiKey(bad);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AuthError);
+      expect((thrown as Error).message).not.toContain(bad);
+      expect((thrown as Error).message).not.toContain("apst_");
+    }
+    process.env.APPSTRATE_API_KEY = "apst_a\tb";
+    expect(() => explicitApiKey(undefined)).toThrow(AuthError);
   });
 
   it("resolveApiKeyTarget: env instance wins, the profile is still returned", async () => {
@@ -562,22 +572,5 @@ describe("explicit API key helpers", () => {
       instance: undefined,
       profile: undefined,
     });
-  });
-
-  it("resolveApiKeyAuthContext: profile instance, key as bearer, no org / space", async () => {
-    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
-
-    const ctx = await resolveApiKeyAuthContext("apst_k", undefined);
-    expect(ctx).toEqual({ instance: "https://app.example.com", accessToken: "apst_k" });
-    expect(ctx.orgId).toBeUndefined();
-    expect(ctx.spaceId).toBeUndefined();
-    expect(fetchCalls).toHaveLength(0);
-  });
-
-  it("resolveApiKeyAuthContext: no instance anywhere → AuthError naming the env var", async () => {
-    await expect(resolveApiKeyAuthContext("apst_k", undefined)).rejects.toThrow(AuthError);
-    await expect(resolveApiKeyAuthContext("apst_k", undefined)).rejects.toThrow(
-      /APPSTRATE_INSTANCE/,
-    );
   });
 });

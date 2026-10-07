@@ -103,6 +103,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`appstrate api` uses an API key when one is set** (#1720): `--api-key`
+  or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
+  `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
+  behaviour for a shell that already exports `APPSTRATE_API_KEY` for
+  `appstrate run`**: every `appstrate api` call there now goes out as the
+  key instead of the logged-in user — another principal, no `X-Org-Id` /
+  `X-Space-Id` (the key's own org and space apply), and the instance
+  `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The
+  keyring is not read and no profile is required. `--api-key ""` and a key
+  with whitespace or non-ASCII characters are refused, for `run` as well,
+  and `run` now treats an empty `APPSTRATE_INSTANCE` as unset.
 - **In a run, `api_call` forwards a header named like a credential proxy
   control header instead of refusing the call** (#1670). `X-Integration-Id`,
   `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,
@@ -317,12 +328,6 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Added
 
-- **`appstrate api` accepts an API key** (#1720): `--api-key` or
-  `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
-  `APPSTRATE_INSTANCE` (else the profile's instance). The key replaces the
-  profile credential entirely — no keyring read, no profile required — and
-  no `X-Org-Id` / `X-Space-Id` is injected: the key's own org and space
-  apply.
 - **Live model catalog, read side** (#1717): an instance accepts a file only
   on its Ed25519 signature (public key in the source), its exact Pi SDK
   version and a strict shape, stores it only when its `serial` follows the

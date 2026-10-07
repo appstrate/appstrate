@@ -67,28 +67,17 @@ function installFetch(responder: (call: FetchCall) => Promise<Response> | Respon
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-// `apiCommand` reads both — an ambient value (a developer shell, a CI job)
-// must not flip the profile-path suites into key mode.
-const HEADLESS_ENV = ["APPSTRATE_API_KEY", "APPSTRATE_INSTANCE"] as const;
-let savedEnv: Record<string, string | undefined>;
-
 beforeEach(async () => {
   await configHome.setup();
   keyring = installFakeKeyring();
   fetchCalls = [];
-  savedEnv = {};
-  for (const k of HEADLESS_ENV) {
-    savedEnv[k] = process.env[k];
-    delete process.env[k];
-  }
 });
 afterEach(async () => {
   keyring.restore();
   globalThis.fetch = originalFetch;
-  for (const k of HEADLESS_ENV) {
-    if (savedEnv[k] === undefined) delete process.env[k];
-    else process.env[k] = savedEnv[k];
-  }
+  // The preload starts every file without them; the key-mode tests set them.
+  delete process.env.APPSTRATE_API_KEY;
+  delete process.env.APPSTRATE_INSTANCE;
   await configHome.teardown();
 });
 
@@ -1613,6 +1602,69 @@ describe("apiCommand — explicit API key", () => {
     expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
     expect(fetchCalls[0]!.headers["X-Org-Id"]).toBeUndefined();
     expect(fetchCalls[0]!.headers["X-Space-Id"]).toBeUndefined();
+  });
+
+  it("a malformed key → exit 1, no fetch, and the key is never echoed", async () => {
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode, stderr, stdout } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_SE\nCRET" }, io);
+
+    expect(exitCode.value).toBe(1);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("API key");
+    expect(stdoutText(stderr) + stdoutText(stdout)).not.toMatch(/apst_SE|CRET/);
+  });
+
+  it('--api-key "" is a usage error (exit 2), never a fallback to the profile', async () => {
+    process.env.APPSTRATE_API_KEY = "apst_from_env";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "" }, io);
+
+    expect(exitCode.value).toBe(2);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("--api-key is empty");
+  });
+
+  it("empty APPSTRATE_INSTANCE falls back to the profile's instance", async () => {
+    process.env.APPSTRATE_INSTANCE = "";
+    await seedPinnedProfile();
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(0);
+    expect(fetchCalls[0]!.url).toBe("https://app.example.com/api/x");
+  });
+
+  it("an http:// non-loopback APPSTRATE_INSTANCE is refused through io (exit 1)", async () => {
+    process.env.APPSTRATE_INSTANCE = "http://ci.example.com";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode, stderr } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k" }, io);
+
+    expect(exitCode.value).toBe(1);
+    expect(fetchCalls).toHaveLength(0);
+    expect(stdoutText(stderr)).toContain("non-HTTPS");
+    expect(stdoutText(stderr)).not.toContain("apst_k");
+  });
+
+  it("--profile picks the profile whose instance is the fallback", async () => {
+    await seedPinnedProfile();
+    await seedLoggedInProfile("ci", { instance: "https://other.example.com" });
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io } = makeIO();
+    await runCommand({ path: "/api/x", apiKey: "apst_k", profile: "ci" }, io);
+
+    expect(fetchCalls[0]!.url).toBe("https://other.example.com/api/x");
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
   });
 
   it("empty APPSTRATE_API_KEY falls through to the profile path", async () => {

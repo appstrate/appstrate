@@ -144,6 +144,14 @@ export class AuthError extends Error {
   }
 }
 
+/** `--api-key` was passed with an empty value — a usage error, not "unset". */
+export class EmptyApiKeyFlagError extends AuthError {
+  constructor() {
+    super("--api-key is empty");
+    this.name = "EmptyApiKeyFlagError";
+  }
+}
+
 async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   const profile = await getProfile(profileName);
   if (!profile) {
@@ -185,13 +193,26 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
 
 /**
  * The explicit `apst_…` API key of a headless invocation: the `--api-key`
- * flag, else `APPSTRATE_API_KEY`. An empty value counts as "not set".
+ * flag, else `APPSTRATE_API_KEY`. An empty ENV value counts as "not set";
+ * an empty flag and a malformed key throw.
  * When this returns a key it overrides the profile credential ENTIRELY —
  * there is no ambiguity about which principal the platform audit log
  * records.
  */
 export function explicitApiKey(flag: string | undefined): string | undefined {
-  return (flag ?? process.env.APPSTRATE_API_KEY) || undefined;
+  // An explicitly passed empty flag (`--api-key "$UNSET_VAR"`) must not
+  // degrade to the profile's full-authority credential.
+  if (flag === "") throw new EmptyApiKeyFlagError();
+  const key = flag ?? process.env.APPSTRATE_API_KEY;
+  if (!key) return undefined;
+  // Visible ASCII only. `fetch` rejects any other header value with a
+  // message that quotes it — the key would land on stderr. Never echo it.
+  if (!/^[\x21-\x7e]+$/.test(key)) {
+    throw new AuthError(
+      "The API key contains whitespace, a line break or a non-ASCII character. Check --api-key / APPSTRATE_API_KEY.",
+    );
+  }
+  return key;
 }
 
 /**
@@ -205,12 +226,13 @@ export async function resolveApiKeyTarget(
   profileFlag: string | undefined,
 ): Promise<{ instance: string | undefined; profile: Profile | undefined }> {
   const profile = (await resolveActiveProfileOrNull(profileFlag))?.profile;
-  return { instance: process.env.APPSTRATE_INSTANCE ?? profile?.instance, profile };
+  return { instance: process.env.APPSTRATE_INSTANCE || profile?.instance, profile };
 }
 
 /**
  * `resolveAuthContext` for an explicit API key. Never touches the keyring
- * and never refreshes anything. `orgId` / `spaceId` are deliberately
+ * and never refreshes anything. Every failure, a malformed or insecure
+ * instance URL included, is an `AuthError`. `orgId` / `spaceId` are deliberately
  * absent: the key pins its own org and space server-side, and the
  * platform answers 403 to an `X-Org-Id` / `X-Space-Id` that disagrees —
  * forwarding the profile's pins would turn a valid key into a 403.
@@ -225,7 +247,11 @@ export async function resolveApiKeyAuthContext(
       "No Appstrate instance URL for the API key. Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile.",
     );
   }
-  return { instance: normalizeInstance(instance), accessToken: apiKey };
+  try {
+    return { instance: normalizeInstance(instance), accessToken: apiKey };
+  } catch (err) {
+    throw new AuthError(err instanceof Error ? err.message : String(err));
+  }
 }
 
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {

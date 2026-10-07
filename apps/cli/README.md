@@ -684,6 +684,9 @@ appstrate api GET /api/agents
 
 - **The key replaces the profile credential entirely.** The keyring is not read, nothing is refreshed, and no profile needs to exist. An empty `APPSTRATE_API_KEY` counts as unset.
 - **The key's own org and space apply.** A key is pinned to one org and one space server-side, so the CLI injects neither `X-Org-Id` nor `X-Space-Id` (the platform answers 403 to a header that disagrees with the key). Your own `-H` headers still pass through.
+- **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If the variable is already set for `appstrate run`, `api` stops using your login in that shell: another principal, no org / space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to the profile.
+- **Prefer the environment variable to `--api-key`.** A command-line argument is visible to other local users through `ps`. An empty `--api-key ""` is refused (exit 2) rather than falling back to your login.
+- **Only `api` and `run` read the key.** `appstrate openapi` and the other commands still use the profile, so with `APPSTRATE_INSTANCE` set they may describe a different instance than the one `api` calls.
 - **The key is visible to whatever launches the command.** "The agent never sees the bearer" holds for the profile path only: an environment variable or a flag is readable by the process that sets it. Give an agent a key scoped to what it may do, not a login.
 
 #### curl → appstrate api mapping

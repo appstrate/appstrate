@@ -874,7 +874,18 @@ async function buildResolverInputs(
   // Mixing the two is rejected — an explicit env-var API key overrides
   // the profile credential entirely so there's no ambiguity about which
   // principal the platform audit log will record.
-  const headlessApiKey = explicitApiKey(opts.apiKey);
+  let headlessApiKey: string | undefined;
+  try {
+    headlessApiKey = explicitApiKey(opts.apiKey);
+  } catch (err) {
+    if (err instanceof AuthError) {
+      throw new ResolverConfigError(
+        err.message,
+        "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
+      );
+    }
+    throw err;
+  }
   if (headlessApiKey) {
     return buildHeadlessRemoteInputs(headlessApiKey, opts);
   }

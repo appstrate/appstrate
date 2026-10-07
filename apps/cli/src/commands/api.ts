@@ -58,6 +58,7 @@ import {
   resolveApiKeyAuthContext,
   explicitApiKey,
   AuthError,
+  EmptyApiKeyFlagError,
   ApiError,
 } from "../lib/api.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
@@ -161,10 +162,10 @@ export async function apiCommand(
   //    profile only lends its instance when `APPSTRATE_INSTANCE` is
   //    unset); otherwise the profile + a fresh access token.
   //    `profileName` stays undefined in key mode.
-  const apiKey = explicitApiKey(opts.apiKey);
   let profileName: string | undefined;
   let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
   try {
+    const apiKey = explicitApiKey(opts.apiKey);
     if (apiKey) {
       auth = await resolveApiKeyAuthContext(apiKey, opts.profile);
     } else {
@@ -174,7 +175,7 @@ export async function apiCommand(
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
       writeError(`${err.message}\n`);
-      return exit(1);
+      return exit(err instanceof EmptyApiKeyFlagError ? 2 : 1);
     }
     throw err;
   }
@@ -418,7 +419,7 @@ export async function apiCommand(
           location ? ` (Location: ${location})` : ""
         }.\n` +
           `Re-run with -L to follow it. Cross-origin hops drop Authorization/Cookie, ` +
-          `but your -H headers and X-Org-Id/X-Space-Id are forwarded to that host.\n`,
+          `but your -H headers and any X-Org-Id/X-Space-Id are forwarded to that host.\n`,
       );
     }
 
