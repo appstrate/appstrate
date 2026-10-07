@@ -34,7 +34,7 @@ import {
   piReasoningLevels,
 } from "../packages/runner-pi/src/pi-model.ts";
 import { PI_SDK_VERSION } from "../packages/runner-pi/src/provider-map.ts";
-import { capturePayload, recordSpec } from "../packages/runner-pi/test/pi-payload.ts";
+import { capturePayload, recordSpec } from "../packages/runner-pi/src/pi-payload.ts";
 import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";

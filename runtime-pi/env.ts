@@ -60,8 +60,8 @@ interface RuntimeEnv {
    * behind the sidecar. Absent for an alias or gateway.
    */
   modelProvider?: string;
-  /** The model's Pi dialect (`MODEL_DIALECT`); absent for an alias or a model Pi keeps no record of. */
-  modelDialect?: PiModelDialect;
+  /** The model's Pi dialect (`MODEL_DIALECT`); null for an alias or a model Pi keeps no record of. */
+  modelDialect: PiModelDialect | null;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<ModelInputModality>;
   /**
@@ -213,22 +213,22 @@ function parseModelInput(
   return out.length > 0 ? out : ["text"];
 }
 
-/** `null` is the platform saying Pi keeps no record of the model. */
-function parseModelDialect(raw: string | undefined, issues: string[]): PiModelDialect | undefined {
-  if (!raw) return undefined;
+/** `null`: Pi keeps no record of the model, or an aliased run, which is sent none. */
+function parseModelDialect(raw: string | undefined, issues: string[]): PiModelDialect | null {
+  if (!raw) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
     issues.push(`MODEL_DIALECT: malformed JSON — ${getErrorMessage(err)}`);
-    return undefined;
+    return null;
   }
-  if (parsed === null) return undefined;
+  if (parsed === null) return null;
   if (!isPiModelDialect(parsed)) {
     issues.push(
       "MODEL_DIALECT: must be null or a Pi dialect (`name`, optional `thinkingLevelMap` and `compat`)",
     );
-    return undefined;
+    return null;
   }
   return parsed;
 }
@@ -456,7 +456,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
-    ...(modelDialect ? { modelDialect } : {}),
+    modelDialect,
     modelInput,
     ...(modelCost !== undefined ? { modelCost } : {}),
     ...(modelContextWindow > 0 ? { modelContextWindow } : {}),

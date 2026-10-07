@@ -31,8 +31,8 @@ export interface PiModelSpec {
   apiShape: string;
   /** Pi builtin provider key; null for a gateway. */
   piProvider?: string | null;
-  /** The record's dialect; null or absent for a model Pi keeps no record of. */
-  dialect?: PiModelDialect | null;
+  /** The record's dialect; null for a model Pi keeps no record of, or the alias client. */
+  dialect: PiModelDialect | null;
   baseUrl: string;
   reasoning?: boolean | null;
   input?: readonly ModelInputModality[] | null;

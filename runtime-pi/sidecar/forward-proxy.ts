@@ -25,6 +25,7 @@ import {
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
+import { redactUrlForLog } from "./redact.ts";
 import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
@@ -217,7 +218,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         proxyReq.destroy();
       });
       proxyReq.on("error", (err) => {
-        logger.error("Forward proxy HTTP error", { target: targetUrl, error: err.message });
+        logger.error("Forward proxy HTTP error", {
+          target: redactUrlForLog(targetUrl),
+          error: err.message,
+        });
         if (!res.headersSent) res.writeHead(502);
         res.end("Proxy error");
       });
@@ -392,7 +396,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
     void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
       if (ok) return handleRequest(req, res);
-      refusePeer("request-refused", req.url ?? "", req.socket);
+      // The absolute target may carry a secret in its query: origin + path only.
+      refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
       res.writeHead(403);
       res.end("Blocked: peer not allowed");
     });
