@@ -197,6 +197,33 @@ describe("Me API (/api/me)", () => {
       expect(byId.has("@ctx/other-space")).toBe(false);
     });
 
+    it("names the space it resolved, following X-Space-Id rather than the default", async () => {
+      const read = async (spaceId: string) => {
+        const res = await app.request("/api/me/context", {
+          headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { space: unknown }).space;
+      };
+
+      expect(await read(ctx.defaultSpaceId)).toEqual({
+        id: ctx.defaultSpaceId,
+        name: "Default",
+        personal: false,
+      });
+
+      const team = await seedSpace({ orgId: ctx.orgId, name: "Sales" });
+      expect(await read(team.id)).toEqual({ id: team.id, name: "Sales", personal: false });
+
+      const mine = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Mine",
+        ownerUserId: ctx.user.id,
+        visibility: "private",
+      });
+      expect(await read(mine.id)).toEqual({ id: mine.id, name: "Mine", personal: true });
+    });
+
     it("lists runnable agents (enabled only) with invokable id and input flag", async () => {
       // Enabled installed agent → appears, takes_input from its input schema.
       await seedPackage({

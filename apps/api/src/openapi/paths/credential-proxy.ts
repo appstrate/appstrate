@@ -22,10 +22,10 @@ const proxySharedDescription =
   "upstream API after injecting the stored credentials server-side. Credentials never " +
   "leave Appstrate.\n\n" +
   "Authentication: bearer only — either an API key with the `credential-proxy:call` " +
-  "scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token " +
-  "for the interactive CLI, dashboard access token for second-party apps). Cookie " +
-  "sessions are rejected. Session binding pins the `X-Session-Id` to the first " +
-  "principal (API key or JWT user) that used it.\n\n" +
+  "scope (carried by a key created with `scopes` omitted or empty when its creator holds " +
+  "it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard " +
+  "access token for second-party apps). Cookie sessions are rejected. Session binding " +
+  "pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\n" +
   "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
   "(API-key auth only).\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +

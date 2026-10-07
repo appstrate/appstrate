@@ -32,6 +32,7 @@ const TRACKED = [
   "MODEL_COMPACTION_ENABLED",
   "TOOL_RESULT_BYTE_LIMIT",
   "AFPS_SIGNATURE_POLICY",
+  "MODEL_CATALOG_URL",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -145,6 +146,18 @@ describe("empty string is universally treated as unset (compose `${VAR:-}` patte
   it('NODE_ENV: empty string falls back to default `"development"`', () => {
     process.env.NODE_ENV = "";
     expect(getEnv().NODE_ENV).toBe("development");
+  });
+
+  // An empty value cannot switch the catalog read off: it is the default channel.
+  it("MODEL_CATALOG_URL: empty string is the default channel, `off` is the switch", () => {
+    process.env.MODEL_CATALOG_URL = "";
+    expect(getEnv().MODEL_CATALOG_URL).toBe("https://get.appstrate.dev/model-catalog");
+    _resetCacheForTesting();
+    process.env.MODEL_CATALOG_URL = "off";
+    expect(getEnv().MODEL_CATALOG_URL).toBe("off");
+    _resetCacheForTesting();
+    process.env.MODEL_CATALOG_URL = "ftp://example.test/catalog";
+    expect(() => getEnv()).toThrow(/MODEL_CATALOG_URL/);
   });
 });
 

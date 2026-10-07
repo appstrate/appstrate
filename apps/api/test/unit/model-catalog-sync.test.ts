@@ -7,6 +7,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { ModelProviderDefinition } from "@appstrate/core/module";
+import { _resetCacheForTesting } from "@appstrate/env";
 import { PI_SDK_VERSION } from "@appstrate/runner-pi/provider-map";
 import coreProvidersModule from "../../src/modules/core-providers/index.ts";
 import { lookupCatalogModel } from "../../src/services/model-catalog.ts";
@@ -124,7 +125,20 @@ describe("live model catalog — the channel", () => {
   });
 
   it("reads the channel in the background at start, once, and not at all when switched off", async () => {
-    startModelCatalogSync(options({ url: "" }));
+    // Switched off as an operator does it: through the environment, no `url` passed.
+    const before = process.env.MODEL_CATALOG_URL;
+    process.env.MODEL_CATALOG_URL = "off";
+    _resetCacheForTesting();
+    try {
+      startModelCatalogSync({ publicKey: signer.publicKey, fetch: channel.fetch });
+    } finally {
+      if (before === undefined) delete process.env.MODEL_CATALOG_URL;
+      else process.env.MODEL_CATALOG_URL = before;
+      _resetCacheForTesting();
+    }
+    await Bun.sleep(20);
+    expect(channel.state.requests).toHaveLength(0);
+
     startModelCatalogSync(options());
     startModelCatalogSync(options());
     stopModelCatalogSync();

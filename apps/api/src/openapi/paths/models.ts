@@ -113,7 +113,7 @@ export const modelsPaths = {
                 cost: {
                   type: "object",
                   description:
-                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
@@ -336,7 +336,7 @@ export const modelsPaths = {
                         cost: {
                           type: ["object", "null"],
                           description:
-                            "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                            "Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
                           properties: {
                             input: { type: "number" },
                             output: { type: "number" },
@@ -493,7 +493,7 @@ export const modelsPaths = {
                 cost: {
                   type: ["object", "null"],
                   description:
-                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },

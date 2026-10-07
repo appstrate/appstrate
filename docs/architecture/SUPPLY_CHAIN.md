@@ -138,7 +138,7 @@ price is the part no human reads before it is offered.
 
 The published file is signed with a key dedicated to that workflow
 (`MODEL_CATALOG_SIGNING_KEY`), whose public half is a constant in the source.
-An instance that must not read it sets `MODEL_CATALOG_URL` empty.
+An instance that must not read it sets `MODEL_CATALOG_URL=off`.
 
 ## 3. Swap-cost estimate
 

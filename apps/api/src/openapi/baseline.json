@@ -3643,7 +3643,7 @@
                   "cost": {
                     "type": "number",
                     "minimum": 0,
-                    "description": "Authoritative terminal run cost written to the `runs` row."
+                    "description": "Authoritative terminal run cost in USD, written to the `runs` row."
                   },
                   "artifacts": {
                     "type": "object",
@@ -9124,7 +9124,7 @@
                   },
                   "cost": {
                     "type": "object",
-                    "description": "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                     "properties": {
                       "input": {
                         "type": "number"
@@ -9439,7 +9439,7 @@
                           },
                           "cost": {
                             "type": ["object", "null"],
-                            "description": "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                            "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
                             "properties": {
                               "input": {
                                 "type": "number"
@@ -9669,7 +9669,7 @@
                   },
                   "cost": {
                     "type": ["object", "null"],
-                    "description": "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                     "properties": {
                       "input": {
                         "type": "number"
@@ -11592,7 +11592,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Validated scopes granted to the key. Empty = full role access."
+                      "description": "Validated scopes granted to the key."
                     }
                   }
                 },
@@ -13572,7 +13572,7 @@
         "operationId": "getMyContext",
         "tags": ["Profile"],
         "summary": "The caller's working context for an AI agent",
-        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13599,6 +13599,7 @@
                   "required": [
                     "user",
                     "org",
+                    "space",
                     "connections",
                     "recent_runs",
                     "agents",
@@ -13642,6 +13643,24 @@
                         "slug": {
                           "type": ["string", "null"],
                           "description": "Organization slug."
+                        }
+                      }
+                    },
+                    "space": {
+                      "type": "object",
+                      "description": "The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
+                      "required": ["id", "name", "personal"],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Human-readable space name."
+                        },
+                        "personal": {
+                          "type": "boolean",
+                          "description": "Whether this space is one member's personal space (always `private`, no other members) rather than a team space."
                         }
                       }
                     },
@@ -13828,6 +13847,11 @@
                     "role": "member",
                     "name": "Acme",
                     "slug": "acme"
+                  },
+                  "space": {
+                    "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                    "name": "Sales",
+                    "personal": false
                   },
                   "connections": [
                     {
@@ -23431,7 +23455,7 @@
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a GET request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -23755,7 +23779,7 @@
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a POST request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -24086,7 +24110,7 @@
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PUT request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -24417,7 +24441,7 @@
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PATCH request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -24748,7 +24772,7 @@
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a DELETE request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -29051,7 +29075,7 @@
           },
           "cost": {
             "type": ["number", "null"],
-            "description": "Run cost in dollars"
+            "description": "Run cost in USD"
           },
           "cost_pricing_status": {
             "type": ["string", "null"],
@@ -29874,7 +29898,7 @@
           },
           "cost": {
             "type": ["object", "null"],
-            "description": "Cost per million tokens",
+            "description": "Cost in USD per million tokens",
             "properties": {
               "input": {
                 "type": "number"

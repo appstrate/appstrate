@@ -11,7 +11,7 @@ name: Publish Model Catalog
 #
 # Not in the `publish-installer` concurrency group on purpose: a run queued
 # behind a release there would cancel any other pending one. The two workflows
-# write disjoint paths, and the push below rebases when it loses a race.
+# write disjoint paths, and each rebases its push when it loses a race.
 on:
   schedule:
     - cron: "17 */6 * * *"
