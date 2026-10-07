@@ -17,7 +17,7 @@ import { findPiModelsById, listPiModels, listPiModelsOfApi } from "@appstrate/ru
 import { PI_SDK_VERSION } from "@appstrate/runner-pi/provider-map";
 
 /** Base64 raw Ed25519 public key of the catalog's signing key: in source, never fetched. */
-export const MODEL_CATALOG_PUBLIC_KEY = "v1EMfhY2dWAgX24Dbjx/v3LsBLeIA/EDDE3KMUunVcE=";
+export const MODEL_CATALOG_PUBLIC_KEY = "n3KXgZf7stG61CHFwHC8XrOIo2e2KYXe/L+1Ur1CyY0=";
 
 const rateSchema = {
   input: z.number(),

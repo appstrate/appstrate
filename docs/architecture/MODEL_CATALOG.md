@@ -17,9 +17,7 @@ npm: pi-ai@latest (JSON data only)
 scripts/build-model-catalog.ts ── gate + proof + Ed25519 signature
         ▼
 get.appstrate.dev/model-catalog/pi-<version>.json (+ .sig)
-        │  model-catalog-sync.ts, per instance
-        ▼
-model_catalog_overlays (one row per Pi version) ── every replica, every minute
+        │  model-catalog-sync.ts, each API process, at start and every hour
         ▼
 model-catalog-overlay.ts (in memory) ── merged by model-catalog.ts
 ```
@@ -62,9 +60,9 @@ time in seconds and only ever grows.
 
 ## What an instance accepts
 
-`model-catalog-overlay.ts`, on every load, the stored row included:
+`model-catalog-overlay.ts`, on every read of the channel:
 
-1. Ed25519 signature (canonical base64, raw 64 bytes) over the exact bytes,
+1. Ed25519 signature (base64, raw 64 bytes) over the exact bytes,
    against `MODEL_CATALOG_PUBLIC_KEY`, a constant in the source.
 2. Strict parse: an unknown field anywhere refuses the file.
 3. `sdk_version` equals `PI_SDK_VERSION`.
@@ -78,10 +76,8 @@ time in seconds and only ever grows.
    is skipped.
 
 A record that fails 4 or 5 is skipped and logged. A file that fails 1 to 3 is
-refused whole and the stored one stays.
-
-At the write, in SQL so that concurrent replicas cannot undo it: a file
-replaces the stored one only with a higher `serial`, or as the very same file.
+refused whole and the one held stays. A file replaces the one a process holds
+only with a higher `serial`.
 
 ## Who reads it
 
@@ -98,17 +94,22 @@ Catalog lookups take a scope, `all` (bundled plus live) or `bundled`.
 
 ## Sync
 
-`model-catalog-sync.ts`. One timer per API process, every minute: serve the
-stored row when its signature is not the one already served, and ask the
-channel when the row's last confirmation is older than six hours or the process
-serves no file (then at most once an hour per process). Two GETs, redirects
-refused, 10 s, 2 MB. Boot serves the stored row before the scheduler starts and
-never waits on the network. A row of another Pi version is left alone, so the
-replicas of a rolling deploy across a Pi bump keep theirs, and deleted once
-nobody confirmed it for thirty days.
+`model-catalog-sync.ts`. Each API process reads the channel when it starts, in
+the background, and every hour: two GETs, redirects refused, 10 s, 2 MB. Boot
+never waits on the network. The accepted file lives in memory and nowhere
+else.
 
-`MODEL_CATALOG_URL` empty switches the read off: the instance runs on the
-bundled registry alone.
+Nothing is stored, on purpose. The bundled registry is always loaded, so a
+stored copy would only protect the models the catalog adds, for the second a
+restarted process needs to read the channel. That is not worth a table.
+
+It is not a `createCache` either (`apps/api/AGENTS.md`, "Caching"): that
+primitive is an asynchronous read-through of single rows, and the catalog is
+read synchronously by every lookup of a model. It is process state loaded at
+start, like the model-provider registry, refreshed on a timer.
+
+`MODEL_CATALOG_URL` empty starts nothing: the instance runs on the bundled
+registry alone.
 
 ## The producer
 
@@ -147,21 +148,19 @@ workflow warns and publishes nothing.
   `MODEL_CATALOG_SIGNING_KEY`; the public key is `MODEL_CATALOG_PUBLIC_KEY` in
   `model-catalog-overlay.ts`. Dedicated to this workflow, which runs
   unattended: never the release key.
-- **Rotating it** is a release: new constant, new secret. Builds of the old
-  constant refuse the files of the new key and run on the bundled registry;
-  during a rolling deploy that includes the old replicas, until they are
-  replaced.
+- **Rotating it** is a release: new constant, new secret. A build of the old
+  constant refuses the files of the new key and keeps the file it holds.
 - **Kill switch.** Disable the workflow, then publish an empty file under a
   higher serial: run the script with `--source-version` set to the pinned
   version (a registry that is not later lists nothing) and push its output to
   `model-catalog/` on the `installer-pages` branch. Every instance the channel
-  reaches drops its live models within six hours. Editing the published JSON
+  reaches drops its live models within the hour. Editing the published JSON
   by hand does nothing: the signature covers the bytes. One model that Pi
   still lists cannot be withdrawn alone.
-- **A model whose record is gone** (withdrawn, channel switched off, a Pi bump
-  whose file is not read yet) keeps its `org_models` row and runs without
-  catalog defaults or dialect, unpriced: the same state as an id a Pi bump
-  drops.
+- **A model whose record is absent** (withdrawn, channel switched off, a Pi
+  bump whose file is not published yet, a process that restarted and has not
+  read the channel) keeps its `org_models` row and runs without catalog
+  defaults or dialect, unpriced: the same state as an id a Pi bump drops.
 
 ## What it does not do
 
@@ -176,7 +175,8 @@ workflow warns and publishes nothing.
 - **The channel can withhold.** Whoever serves the file can keep serving an old
   one, or none. A signed expiry would close that, at the price of every
   instance dropping its models whenever the producer stops for a few days.
-- **First contact has no floor.** An instance that stored nothing accepts any
-  file ever published for its Pi version.
+- **A process that just started has no floor.** It holds no file, so it
+  accepts any file ever published for its Pi version.
+- **Replicas agree within the hour**, not at once: each reads on its own.
 - **A compromised signing key** can add models with a wrong price or dialect.
   It cannot redirect traffic, alter an existing id, or touch a system model.

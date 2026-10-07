@@ -16,6 +16,7 @@
  * from `bun scripts/sign-firecracker-manifest.ts --generate`.
  */
 
+import { sign } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -34,10 +35,9 @@ import {
 } from "../packages/runner-pi/src/pi-model.ts";
 import { PI_SDK_VERSION } from "../packages/runner-pi/src/provider-map.ts";
 import { capturePayload, recordSpec } from "../packages/runner-pi/test/pi-payload.ts";
+import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";
-/** PKCS#8 DER prefix of an Ed25519 private key (RFC 8410); the raw seed follows. */
-const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 
 /** A record of a Pi data file, as Pi wrote it. */
 interface SourceRecord extends Record<string, unknown> {
@@ -182,20 +182,6 @@ function statedSerial(payload: string): number {
   }
 }
 
-async function sign(payload: string, seedBase64: string): Promise<string> {
-  const seed = Buffer.from(seedBase64.trim(), "base64");
-  if (seed.length !== 32) throw new Error(`${SECRET_ENV} must be a base64 raw 32-byte seed`);
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    Buffer.concat([PKCS8_ED25519_PREFIX, seed]),
-    "Ed25519",
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
-  return Buffer.from(signature).toString("base64");
-}
-
 interface BuildOptions {
   dataDir: string;
   sourceVersion: string;
@@ -238,7 +224,9 @@ export async function buildModelCatalog(options: BuildOptions): Promise<BuiltCat
   const now = Math.floor((options.now ?? Date.now)() / 1000);
   const serial = Math.max(now, previousSerial + 1);
   const payload = `${JSON.stringify(catalogFile(records, options.sourceVersion, serial), null, 2)}\n`;
-  const signature = await sign(payload, options.seed);
+  const signature = sign(null, Buffer.from(payload), privateKeyFromSeed(options.seed)).toString(
+    "base64",
+  );
   // Read back as an instance reads it: a seed that is not the pinned key's fails here.
   const accepted = await readModelCatalog(payload, signature, options.publicKey);
   if (accepted.skipped.length > 0 || accepted.models.length !== records.length) {

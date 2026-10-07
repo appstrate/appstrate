@@ -399,6 +399,14 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names.
 
 **Why**: written and read by the platform/`PI_IMAGE`/`SIDECAR_IMAGE` trio of one release, never by a third party. The HTTP endpoints the sidecar calls back (`/internal/*`) are wire and follow Zone 1: `/internal/integration-credentials/*` and `/internal/oauth-token/*` (4e table).
 
+#### Carve-out 4u — Live model catalog file
+
+**Files**: `apps/api/src/services/model-catalog-overlay.ts` (`fileSchema`, `recordSchema`), `scripts/build-model-catalog.ts`
+
+**Rule**: the envelope of `model-catalog/pi-<version>.json` is ours and snake_case (`schema`, `sdk_version`, `source_version`, `serial`, `records`). A record is a fragment of a Pi registry record and keeps Pi's spelling (`contextWindow`, `maxTokens`, `thinkingLevelMap`, `compat.*`, `cost.{cacheRead, cacheWrite, tiers[].inputTokensAbove}`).
+
+**Why**: a record is copied from Pi's data and handed to Pi's code, like `pi_dialect` (4e). Respelling it would add a translation table between two Pi versions for no reader.
+
 ---
 
 ### Zone 5 — Documented asymmetries (low-impact)
@@ -613,7 +621,7 @@ Rule of thumb: a field qualifies for the camelCase carve-out only if its literal
 9. **Is it on a module hook params interface?** → camelCase (TS function-arg convention).
 10. **Is it an internal TS variable, function arg, React prop, hook param?** → camelCase.
 11. **Is it a logger field, BullMQ job key, run event, webhook delivery payload, SSE frame key?** → camelCase.
-12. **Is it an agent tool argument, AFPS bundle container key, `ExecutionContext` key, runner-daemon or sidecar/container boot-config key?** → camelCase (4p–4t).
+12. **Is it an agent tool argument, AFPS bundle container key, `ExecutionContext` key, runner-daemon or sidecar/container boot-config key, or a record of the live model catalog file?** → camelCase (4p–4u).
 13. **Is it a key inside a JSONB column?** → returned verbatim and platform-written: snake_case; client/agent-supplied: opaque; never returned verbatim, or a `run_logs.data` event payload: producer casing (4g).
 14. **Is it an audit log `before`/`after` key?** → camelCase explicit keys (`AuditPayload` refuses anything else).
 15. **Otherwise** → wire = snake_case, internal = camelCase. When ambiguous, **wire is the safer default for any external-facing surface**.
