@@ -19,6 +19,7 @@ duplicating the detail.
 
 ## Models & providers
 
+- [**MODEL_CATALOG.md**](./MODEL_CATALOG.md) — Live model catalog: the signed file that adds a later Pi registry's models to a running instance, its producer and its limits.
 - [**MODEL_ALIASES.md**](./MODEL_ALIASES.md) — LLM-gateway model-alias pattern (masking real model ids across the two inference paths).
 - [**SUBSCRIPTION_COMPLIANCE.md**](./SUBSCRIPTION_COMPLIANCE.md) — Subscription credential compliance posture for the opt-in codex / claude-code provider modules.
 
