@@ -7,8 +7,7 @@ import type { ApiCommandIO } from "./types.ts";
  * curl does the same: `-sv` keeps the trace). Authorization is always
  * `[REDACTED]` — the whole point of this CLI is that the agent never
  * sees the raw bearer, and `-v` output is quoted in CI logs, issues,
- * Discord screenshots, etc. `profileName` is `undefined` when the
- * bearer is an explicit API key.
+ * Discord screenshots, etc.
  */
 export function writeVerboseRequest(
   io: ApiCommandIO,

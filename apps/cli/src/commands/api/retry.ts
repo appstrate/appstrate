@@ -99,7 +99,6 @@ interface RetryContext {
   firstBuild: BuiltBody;
   ac: AbortController;
   io: ApiCommandIO;
-  /** `undefined` when the bearer is an explicit API key, not a profile. */
   profileName: string | undefined;
   connectTimeoutRef: { current: ReturnType<typeof setTimeout> | undefined };
   maxAttempts: number;

@@ -144,11 +144,9 @@ export class AuthError extends Error {
   }
 }
 
-/** `--api-key` was passed with an empty value — a usage error, not "unset". */
 export class EmptyApiKeyFlagError extends AuthError {
   constructor() {
     super("--api-key is empty");
-    this.name = "EmptyApiKeyFlagError";
   }
 }
 
@@ -191,14 +189,7 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
   };
 }
 
-/**
- * The explicit `apst_…` API key of a headless invocation: the `--api-key`
- * flag, else `APPSTRATE_API_KEY`. An empty ENV value counts as "not set";
- * an empty flag and a malformed key throw.
- * When this returns a key it overrides the profile credential ENTIRELY —
- * there is no ambiguity about which principal the platform audit log
- * records.
- */
+/** The `--api-key` flag, else `APPSTRATE_API_KEY` (empty env = unset). */
 export function explicitApiKey(flag: string | undefined): string | undefined {
   // An explicitly passed empty flag (`--api-key "$UNSET_VAR"`) must not
   // degrade to the profile's full-authority credential.
@@ -215,13 +206,7 @@ export function explicitApiKey(flag: string | undefined): string | undefined {
   return key;
 }
 
-/**
- * Where an API-key invocation points: `APPSTRATE_INSTANCE`, else the
- * active / `--profile` profile's instance. The profile is optional here
- * (and returned for callers that read further fallbacks off it) — a key
- * needs neither a login nor a readable `config.toml`. `instance` is the
- * raw string; `undefined` when neither source has one.
- */
+/** `APPSTRATE_INSTANCE`, else the profile's instance; a key needs no profile. */
 export async function resolveApiKeyTarget(
   profileFlag: string | undefined,
 ): Promise<{ instance: string | undefined; profile: Profile | undefined }> {
@@ -230,12 +215,9 @@ export async function resolveApiKeyTarget(
 }
 
 /**
- * `resolveAuthContext` for an explicit API key. Never touches the keyring
- * and never refreshes anything. Every failure, a malformed or insecure
- * instance URL included, is an `AuthError`. `orgId` / `spaceId` are deliberately
- * absent: the key pins its own org and space server-side, and the
- * platform answers 403 to an `X-Org-Id` / `X-Space-Id` that disagrees —
- * forwarding the profile's pins would turn a valid key into a 403.
+ * `resolveAuthContext` for an explicit API key. No `orgId` / `spaceId`:
+ * the key pins both server-side and the platform answers 403 to a header
+ * that disagrees, so the profile's pins would break a valid key.
  */
 export async function resolveApiKeyAuthContext(
   apiKey: string,

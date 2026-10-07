@@ -878,13 +878,10 @@ async function buildResolverInputs(
   try {
     headlessApiKey = explicitApiKey(opts.apiKey);
   } catch (err) {
-    if (err instanceof AuthError) {
-      throw new ResolverConfigError(
-        err.message,
-        "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
-      );
-    }
-    throw err;
+    throw new ResolverConfigError(
+      (err as Error).message,
+      "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
+    );
   }
   if (headlessApiKey) {
     return buildHeadlessRemoteInputs(headlessApiKey, opts);

@@ -11,11 +11,6 @@ import { DEFAULT_IO as BASE_IO, type CommandIO } from "../../lib/io.ts";
 
 export interface ApiCommandOptions {
   profile?: string;
-  /**
-   * `--api-key <key>`: explicit `apst_…` API key. With it (or
-   * `APPSTRATE_API_KEY`) the profile credential is not used at all and
-   * no `X-Org-Id` / `X-Space-Id` is injected — the key pins both.
-   */
   apiKey?: string;
   /**
    * HTTP method. Optional — when omitted, inferred from flags:

@@ -1,22 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate api` — curl-like authenticated HTTP pass-through to an
- * Appstrate instance.
+ * `appstrate api` — curl-like authenticated HTTP pass-through to the
+ * active profile's Appstrate instance.
  *
  * Purpose: let local coding agents (Claude Code, Cursor, Aider, …) make
  * authenticated API calls without ever seeing the raw bearer token. The
- * agent shells out, the CLI injects `Authorization` + `X-Org-Id` +
- * `X-Space-Id` from the keyring-backed profile, everything else is a
- * transparent pipe.
- *
- * Headless alternative: an explicit `apst_…` API key (`--api-key` /
- * `APPSTRATE_API_KEY`) replaces the profile credential entirely — no
- * keyring read, no refresh, no profile required (`APPSTRATE_INSTANCE`
- * names the instance, falling back to the profile's). The key pins its
- * own org and space server-side, so neither header is injected. The
- * "caller never sees the bearer" property does not hold on this path:
- * whoever launches the command supplied the key.
+ * agent shells out, the CLI injects `Authorization` + `X-Org-Id` from
+ * the keyring-backed profile, everything else is a transparent pipe.
+ * An explicit API key (`--api-key` / `APPSTRATE_API_KEY`) replaces the
+ * profile credential — see `lib/api.ts::resolveApiKeyAuthContext`.
  *
  *   METHOD / path are positional.
  *   -H / -F / -q repeatable (Commander's `collect` default).
@@ -157,11 +150,8 @@ export async function apiCommand(
     return exit(code);
   };
 
-  // 1. Resolve the credential: an explicit API key overrides the
-  //    profile credential entirely (the keyring is never read; the
-  //    profile only lends its instance when `APPSTRATE_INSTANCE` is
-  //    unset); otherwise the profile + a fresh access token.
-  //    `profileName` stays undefined in key mode.
+  // 1. Resolve the credential: explicit API key (`profileName` stays
+  //    undefined), else auth profile + fresh access token.
   let profileName: string | undefined;
   let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
   try {
