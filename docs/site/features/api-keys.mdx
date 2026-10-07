@@ -37,11 +37,11 @@ curl -X POST https://your-instance/api/api-keys \
   }'
 ```
 
-| Field       | Notes                                                                                                                                                                         |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`      | Required, 1 to 100 characters.                                                                                                                                                |
-| `scopes`    | Optional list of `resource:action` strings. If omitted or empty, the key receives **every key-grantable permission its creator holds** in the space. Prefer an explicit list. |
-| `expiresAt` | Optional ISO 8601 time in the future. Omit or send `null` for a key that does not expire.                                                                                     |
+| Field       | Notes                                                                                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`      | Required, 1 to 100 characters.                                                                                                                                                                                                                                     |
+| `scopes`    | Optional list of `resource:action` strings. If omitted or empty, the key receives **every key-grantable permission its creator holds** in the space, `credential-proxy:call` and `llm-proxy:call` among them when the creator holds them. Prefer an explicit list. |
+| `expiresAt` | Optional ISO 8601 time in the future. Omit or send `null` for a key that does not expire.                                                                                                                                                                          |
 
 The response is `{ id, key, keyPrefix, scopes }` and the only time `key` is returned. Only a SHA-256 hash is stored, so a lost key cannot be recovered: create another and revoke the old one. Keys are never edited, only revoked.
 
@@ -83,5 +83,5 @@ curl -X DELETE https://your-instance/api/api-keys/<id> \
 - One key per integration or environment, with the narrowest scopes that work and an expiry.
 - Store keys in a secret manager. Never ship one to a browser or a mobile app. For an app used by your customers, keep the key on your backend and act for each customer with `Appstrate-User`.
 - Remember that a key follows its creator. If the person who minted a production key leaves the organization, the key is revoked, so mint production keys from an account that will stay.
-- Scopes such as `credential-proxy:call` (use the space's credentials from a remote runner) and `llm-proxy:call` (use the organization's models) are powerful. Add them deliberately.
+- Scopes such as `credential-proxy:call` (use the space's credentials from a remote runner) and `llm-proxy:call` (use the organization's models) are powerful. A key created without `scopes` already carries them when its creator holds them, so list the scopes you want to keep them off.
 - Creating and revoking a key are written to the platform's audit trail, an append-only `audit_events` table. It is not exposed through the API today.

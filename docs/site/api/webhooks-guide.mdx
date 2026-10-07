@@ -22,15 +22,15 @@ curl -X POST http://localhost:3000/api/webhooks \
   }'
 ```
 
-| Field         | Description                                                                                                                                                     |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `level`       | `space` or `org`. Required                                                                                                                                      |
-| `spaceId`     | Required when `level` is `space`. An API key can only create webhooks for its own space and cannot create org-level ones                                        |
-| `url`         | Your endpoint. `https` only (plain `http://localhost` is accepted on a development instance). Private, loopback, link-local, and reserved addresses are refused |
-| `events`      | At least one event type, see below                                                                                                                              |
-| `packageId`   | Optional. Only fire for runs of this agent                                                                                                                      |
-| `payloadMode` | `full` (default) or `summary`. Summary drops the run `input` and `result`                                                                                       |
-| `enabled`     | Optional, defaults to `true`                                                                                                                                    |
+| Field         | Description                                                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `level`       | `space` or `org`. Required                                                                                                                                            |
+| `spaceId`     | Required when `level` is `space`. An API key can only create webhooks for its own space and cannot create org-level ones                                              |
+| `url`         | Your endpoint. `https` only. Private, loopback (`localhost` and every `*.localhost` name included), link-local, and reserved addresses are refused with `blocked_url` |
+| `events`      | At least one event type, see below                                                                                                                                    |
+| `packageId`   | Optional. Only fire for runs of this agent                                                                                                                            |
+| `payloadMode` | `full` (default) or `summary`. Summary drops the run `input` and `result`                                                                                             |
+| `enabled`     | Optional, defaults to `true`                                                                                                                                          |
 
 The response includes the signing `secret` (`whsec_...`) **once**. Store it. There is a limit of 20 webhooks per space and 20 per organization. To manage webhooks you need `webhooks:*` in the space, or `org-webhooks:*` (organization owners and admins) for org-level ones. The same endpoints list, update (`PATCH`), and delete webhooks.
 

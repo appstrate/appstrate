@@ -97,7 +97,7 @@ appstrate api POST /api/models -d '{
 
 - `label` is optional on both calls. The platform derives one and avoids duplicates.
 - For a custom endpoint provider, add `"base_url_override": "https://llm.internal.example.com/v1"` to the credential.
-- A named provider only accepts model ids from its own offer (`model_not_offered` otherwise). Gateways (OpenAI-compatible, Anthropic-compatible) and OpenRouter accept any id.
+- A named provider only accepts model ids from its own offer (`model_not_offered` otherwise). The offer is the provider's records in the model registry bundled with your platform version, plus the newer ones the instance has read from the [live model catalog](#where-the-offer-comes-from). Gateways (OpenAI-compatible, Anthropic-compatible) and OpenRouter accept any id.
 - `POST /api/model-provider-credentials/test` and `POST /api/model-provider-credentials/{id}/test` check a key before or after saving. `POST /api/models/{id}/test` checks one model.
 - `POST /api/model-provider-credentials/discover` lists the models an endpoint serves.
 - `POST /api/models/seed` creates several models from the provider's offer for one credential in a single call.
@@ -107,6 +107,13 @@ appstrate api POST /api/models -d '{
 For a subscription provider, start from the dashboard so the pairing token and command are generated for you.
 
 The dashboard also seeds a provider's featured models the first time you connect it.
+
+### Where the offer comes from
+
+A provider's offer comes from the model registry that ships with your platform version, the one the agent engine (Pi) uses. Two things change what you see in it:
+
+- **A platform upgrade can change the offer.** A model the registry no longer records can no longer be added. A model you already added on it stays in your list with the values stored, but it loses the catalog defaults (label, limits, capabilities, price) and runs unpriced unless you set a `cost` on it. If the operator listed such a model in `SYSTEM_PROVIDER_KEYS`, the platform refuses to boot until it is removed, and `bun run verify:system-models` run before the deploy catches it. The release notes of each version say which providers lost models.
+- **A live catalog adds new models between releases.** Each API process reads a signed file from `get.appstrate.dev` when it starts and every hour, and holds it in memory. It lists models a newer registry records and your build can already serve, so a new vendor model becomes selectable without a platform release. It only adds: it never changes a model of the bundled registry, a system model or a featured model. The read sends nothing about your instance. Until a process has read the file (just after a restart, or while the channel is unreachable), a model added from it runs without its catalog defaults. An operator turns the read off with `MODEL_CATALOG_URL=off`, which leaves the bundled registry alone (see [Environment Variables](/docs/self-hosting/environment-variables)). The design is in [`MODEL_CATALOG.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
 
 ## System models and organization models
 
@@ -126,6 +133,8 @@ The first match wins:
 4. The system default (the system model flagged as default).
 
 If none is configured, the run cannot start.
+
+A disabled model cannot be the organization default, and a model whose credential needs reconnection cannot either: `PUT /api/models/default` answers `409` with `model_disabled` or `model_needs_reconnection`. Disabling the current default (`PATCH /api/models/{id}` with `enabled: false`) is refused the same way (`model_disabled`): move or clear the default first. Two requests that would do both at once cannot both succeed, one of them gets the `409`.
 
 ```bash
 # Organization default (send null to clear)
@@ -165,7 +174,7 @@ Each model declares which of these settings it supports. `GET /api/models` retur
 - Some models cannot combine a custom temperature with reasoning. For those, a temperature is not kept alongside a reasoning level other than `off`.
 - When you switch the model in the form, any value the new model refuses is cleared instead of being kept.
 
-The capabilities come from the model catalogue, so they follow catalogue updates. A model the catalogue does not describe has unknown support: its temperature stays available, but a reasoning level cannot be chosen.
+The capabilities come from the model catalogue, so they follow catalogue updates. A model the catalogue has no record of, such as a model on an OpenAI-compatible or Anthropic-compatible gateway, has unknown temperature support, so the temperature stays available. Its reasoning levels follow the **Reasoning** checkbox you set on the model: a model declared as reasoning takes `off`, `low`, `medium` and `high`, any other takes `off` only. `minimal`, `xhigh` and `max` stay refused on such a model, and the default level stays `medium`. On an OpenAI-compatible model, `off` sends no reasoning parameter at all, so the server keeps its own behaviour and some models still reason: the level control labels it "Not sent: the server decides" and says so in its hint. On an Anthropic-compatible model, `off` disables thinking.
 
 ### When a setting is refused
 
@@ -179,4 +188,4 @@ In the last case the run's log says so. For each dropped setting the run gets on
 
 ## Cost tracking
 
-Appstrate records token usage for every inference call in a ledger and prices it from the model's rate card: the model catalogue, OpenRouter's price list for OpenRouter models, or the `cost` you set on the model. A run's cost is the sum of its ledger rows. The mechanics are in [`RUN_COST.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md). Usage on a subscription provider goes through the same ledger.
+Appstrate records token usage for every inference call in a ledger and prices it from the model's rate card: the model catalogue, OpenRouter's price list for OpenRouter models, or the `cost` you set on the model. Prices are in US dollars per million tokens, and a run's cost is in USD, the sum of its ledger rows. The mechanics are in [`RUN_COST.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md). Usage on a subscription provider goes through the same ledger.

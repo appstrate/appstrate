@@ -58,7 +58,7 @@ With a browser session, add `X-Org-Id` (a key already carries its organization).
 
 #### Redirect URIs and logout URLs
 
-A redirect URI must be `https`, and its host must not be a private, loopback or link-local address. The one exception is a loopback address, which may use `http`: `localhost`, any `.localhost` name, `127.0.0.0/8` and `::1`. Anything else is refused with `400`. At authorization time Appstrate matches the requested redirect against the registered list, path included. For `localhost` and `127.0.0.1` the port may differ from the registered one, so `http://127.0.0.1/callback` also matches `http://127.0.0.1:63785/callback`. For a public host the port must match exactly.
+A redirect URI must be `https`, and its host must not be a private, loopback or link-local address. That includes `localhost` and every `.localhost` name: `https://localhost/...` and `https://tenant.localhost/...` are refused. The one exception is a loopback address, which may use `http`: `localhost`, any `.localhost` name, `127.0.0.0/8` and `::1`. Anything else is refused with `400`. At authorization time Appstrate matches the requested redirect against the registered list, path included. For `localhost` and `127.0.0.1` the port may differ from the registered one, so `http://127.0.0.1/callback` also matches `http://127.0.0.1:63785/callback`. For a public host the port must match exactly.
 
 Logout (see [below](#log-the-person-out)) only redirects to a URL registered in **Allowed logout URLs**. A registered redirect URI is accepted there too. Anything else sends the person to `/` on the Appstrate instance.
 
@@ -98,7 +98,7 @@ In the client list, each client has buttons for these actions:
 - **Disable** and **Enable** switch the client off without deleting it. A disabled client's hosted pages answer `404`.
 - **Delete** removes the client. Applications that use it stop working.
 
-Over the API these are `rotateOAuthClientSecret` (`POST /api/oauth/clients/{clientId}/rotate`), `updateOAuthClient` (`PATCH /api/oauth/clients/{clientId}`, with `disabled`) and `deleteOAuthClient`. Creating and updating need `oauth-clients:write`, deleting needs `oauth-clients:delete`, listing needs `oauth-clients:read`.
+Over the API these are `rotateOAuthClientSecret` (`POST /api/oauth/clients/{clientId}/rotate`), `updateOAuthClient` (`PATCH /api/oauth/clients/{clientId}`, with `disabled`) and `deleteOAuthClient`. Creating and updating need `oauth-clients:write`, deleting needs `oauth-clients:delete`, listing needs `oauth-clients:read`. These routes and the Organization and Space settings screens are the only way to manage a client: the client endpoints of Better Auth (`/api/auth/oauth2/create-client`, `update-client`, `delete-client`, `client/rotate-secret`, `get-client`, `get-clients`) answer `401` to every session, and a signed-in user cannot create or read a client through them.
 
 ### Organization level: Team SSO
 
@@ -171,7 +171,7 @@ curl -X POST https://your-instance/api/auth/oauth2/token \
   -d resource=https://your-instance
 ```
 
-The response holds `access_token`, `token_type`, `expires_in` and `expires_at`, plus `id_token` when `openid` was granted, and `refresh_token` when `offline_access` was granted. The access token is an ES256 JWT. For a space client its claims include `actor_type` (`end_user`), `org_id`, `space_id` and `end_user_id`, and `/api/auth/oauth2/userinfo` returns the same identifiers. To renew it, post `grant_type=refresh_token` and the `refresh_token` to the same endpoint, with the same Basic header, `client_id` and `resource`. The token endpoint is rate limited per IP address, to 20 requests per minute.
+The response holds `access_token`, `token_type`, `expires_in` and `expires_at`, plus `id_token` when `openid` was granted, and `refresh_token` when `offline_access` was granted. The access token is an ES256 JWT. For a space client its claims include `actor_type` (`end_user`), `org_id`, `space_id` and `end_user_id`, and `/api/auth/oauth2/userinfo` returns the same identifiers. To renew it, post `grant_type=refresh_token` and the `refresh_token` to the same endpoint, with the same Basic header, `client_id` and `resource`. The token endpoint is rate limited per IP address, to 20 requests per minute, and a call over the limit is a `429` with a `Retry-After` header and the body `{ "error": "temporarily_unavailable", ... }`.
 
 ### 3. Call the API as that person
 
@@ -210,15 +210,15 @@ The calls below need a signed-in session (an API key cannot carry `space-setting
 
 The space's SMTP server sends the verification, magic link and password reset emails of the space's sign-in pages. The sender is the configured **From address** and **From name**.
 
-| Form field        | API field      | Notes                                                                                                                                  |
-| ----------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Host**          | `host`         | Up to 253 characters. A private, internal or loopback host is refused with `400` on `host`.                                            |
-| **Port**          | `port`         | 1 to 65535. The form starts at 587.                                                                                                    |
-| **Username**      | `username`     | Required.                                                                                                                              |
-| **Password**      | `pass`         | Required on every save, because a save replaces the whole configuration. It is never returned.                                         |
-| **From address**  | `from_address` | A valid email address.                                                                                                                 |
-| **From name**     | `from_name`    | Optional. Quotes and line breaks are refused.                                                                                          |
-| **Security mode** | `secure_mode`  | `auto` (the form describes it as TLS on port 465, otherwise STARTTLS), `tls`, `starttls` or `none` (development only). Default `auto`. |
+| Form field        | API field      | Notes                                                                                                                                                                                   |
+| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Host**          | `host`         | Up to 253 characters. A private, internal or loopback host is refused with `400` on `host`.                                                                                             |
+| **Port**          | `port`         | 1 to 65535. The form starts at 587.                                                                                                                                                     |
+| **Username**      | `username`     | Required.                                                                                                                                                                               |
+| **Password**      | `pass`         | Required on every save, because a save replaces the whole configuration. It is never returned or displayed, so enter it again each time you save, even when only another field changed. |
+| **From address**  | `from_address` | A valid email address.                                                                                                                                                                  |
+| **From name**     | `from_name`    | Optional. Quotes and line breaks are refused.                                                                                                                                           |
+| **Security mode** | `secure_mode`  | `auto` (the form describes it as TLS on port 465, otherwise STARTTLS), `tls`, `starttls` or `none` (development only). Default `auto`.                                                  |
 
 ```bash
 curl -X PUT https://your-instance/api/spaces/spc_.../smtp-config \
@@ -249,11 +249,11 @@ Two behaviors worth knowing:
 
 For each provider, register an OAuth app with Google or GitHub, then enter its credentials in the matching section.
 
-| Form field        | API field       | Notes                                                                                         |
-| ----------------- | --------------- | --------------------------------------------------------------------------------------------- |
-| **Client ID**     | `client_id`     | Required.                                                                                     |
-| **Client Secret** | `client_secret` | Required on every save. It is never returned.                                                 |
-| **Scopes**        | `scopes`        | Optional, space-separated in the form, up to 32 entries. Empty means the provider's defaults. |
+| Form field        | API field       | Notes                                                                                                                                       |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Client ID**     | `client_id`     | Required.                                                                                                                                   |
+| **Client Secret** | `client_secret` | Required on every save, because a save replaces the stored secret. It is never returned or displayed, so enter it again each time you save. |
+| **Scopes**        | `scopes`        | Optional, space-separated in the form, up to 32 entries. Empty means the provider's defaults.                                               |
 
 Register this redirect URI at the provider, with your own `APP_URL`: `https://your-instance/api/auth/callback/google` or `https://your-instance/api/auth/callback/github`. It is the same URI for every space of the instance, so each tenant's app registers it.
 

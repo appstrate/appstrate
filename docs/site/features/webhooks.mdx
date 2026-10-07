@@ -34,15 +34,15 @@ curl -X POST https://your-instance/api/webhooks \
   }'
 ```
 
-| Field         | Notes                                                                                                                                     |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `level`       | `space` or `org`. Required.                                                                                                               |
-| `spaceId`     | Required for `level: "space"`.                                                                                                            |
-| `url`         | HTTPS. `http://localhost` is accepted only in development. A URL that points at a private or reserved address is refused (`blocked_url`). |
-| `events`      | At least one value from the list below. No wildcards.                                                                                     |
-| `packageId`   | Optional agent filter. `null` or absent means every agent in scope.                                                                       |
-| `payloadMode` | `full` (default) or `summary`.                                                                                                            |
-| `enabled`     | `true` by default.                                                                                                                        |
+| Field         | Notes                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `level`       | `space` or `org`. Required.                                                                                                                             |
+| `spaceId`     | Required for `level: "space"`.                                                                                                                          |
+| `url`         | HTTPS only. A URL that points at a private, loopback or reserved address is refused (`blocked_url`), `localhost` and every `*.localhost` name included. |
+| `events`      | At least one value from the list below. No wildcards.                                                                                                   |
+| `packageId`   | Optional agent filter. `null` or absent means every agent in scope.                                                                                     |
+| `payloadMode` | `full` (default) or `summary`.                                                                                                                          |
+| `enabled`     | `true` by default.                                                                                                                                      |
 
 The response is the stored webhook plus the signing `secret` (`whsec_...`), **returned only once**. Update a webhook with `PATCH /api/webhooks/{id}` (merge semantics). The secret and the level cannot be changed. Deleting a webhook deletes its delivery history. `GET /api/webhooks` lists the webhooks you may read: the org-level ones by default, `spaceId=` adds one space's, and `all=true` (needs `org-webhooks:read`) spans every space.
 
@@ -166,7 +166,7 @@ The response returns the new `secret`, the `secretPrevious` and `rotationWindowE
 
 ## Testing
 
-`POST /api/webhooks/{id}/test` queues a signed `test.ping` event and returns its `eventId` and `payload`. It is sent even if the webhook is disabled.
+`POST /api/webhooks/{id}/test` queues a signed `test.ping` event and returns its `eventId` and `payload`. The `200` confirms the delivery was queued, not that your endpoint received it: read the outcome in the delivery history. It is sent even if the webhook is disabled.
 
 ## Rate limits
 

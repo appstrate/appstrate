@@ -35,7 +35,7 @@ Other cross-field checks that stop the boot:
 
 Two common causes:
 
-- **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. See [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
+- **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. Even the current files do not list every variable (`LLM_PROXY_LIMITS` and `FILE_MAX_BYTES` are two that they do not), and a file from before 1.0.0-beta.65 lacks more. See [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
 - **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped without a warning. Compare the spelling with [Environment Variables](/docs/self-hosting/environment-variables) and the operator notes of the release.
 
 ## Database connection refused
@@ -93,8 +93,9 @@ Requests that belong to an organization need an `X-Org-Id` header, and space-sco
 ## Sign-in and first-owner problems
 
 - **Sign-up is closed (`signup_disabled`).** The instance runs in closed mode. Ask for an invitation, or see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
-- **`/claim` answers 410.** The bootstrap token is only redeemable while the instance has no organization. If you set `AUTH_BOOTSTRAP_TOKEN` and it does nothing, check that your Compose file forwards the variable to the container.
-- **The owner address cannot register.** An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` is not created by the plain sign-up form. Claim it at `/claim`, or use a magic link or a verified Google or GitHub sign-in. The server log states the reason.
+- **`/claim` answers 410.** The bootstrap token is only redeemable while the instance has no organization. If you set `AUTH_BOOTSTRAP_TOKEN` and it does nothing, check that your Compose file forwards the variable to the container (the files shipped before 1.0.0-beta.65 do not).
+- **The owner address cannot register.** An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` is not created by the plain sign-up form. Claim it at `/claim` while the instance has no organization (with `AUTH_BOOTSTRAP_OWNER_EMAIL` set, the claim accepts that address only), or use a magic link (SMTP required) or a Google or GitHub sign-in whose provider asserts the address as verified. The server log states the reason.
+- **A magic link or a Google or GitHub sign-in fails right after an upgrade.** Better Auth 1.7.7, shipped in 1.0.0-beta.65, changed how these in-flight values are stored. A link mailed before the restart is refused and a social sign-in started before it must be started again. Ask for a new link. See [Upgrading](/docs/self-hosting/upgrading#2-read-the-operator-notes-of-every-release-you-skip).
 - **Redeem rate-limited.** `/api/auth/bootstrap/redeem` allows 5 attempts per minute per IP. Behind a proxy, set `TRUST_PROXY`.
 
 ## OAuth callback fails
@@ -144,8 +145,7 @@ List the jobs with the platform-admin API:
 
 ```bash
 curl "https://your-instance/api/admin/storage-deletion-jobs?status=dead" \
-  -b cookies.txt \
-  -H "X-Org-Id: $ORG_ID"
+  -b cookies.txt
 ```
 
 | Query parameter | Values                                                                                                                   |
@@ -160,8 +160,7 @@ To retry a job without waiting for its next scheduled attempt:
 
 ```bash
 curl -X POST "https://your-instance/api/admin/storage-deletion-jobs/$JOB_ID/retry" \
-  -b cookies.txt \
-  -H "X-Org-Id: $ORG_ID"
+  -b cookies.txt
 ```
 
 It answers `{ "id": "...", "retried": true }` and makes the job due immediately, so the next worker pass picks it up. A job that is already completed, or an unknown id, answers `404`. Retrying does not reset the attempt count, so a dead letter stays one until it succeeds. The two calls are limited to 60 and 30 per minute. Fix the cause shown in `last_error` first (the storage backend, its credentials or its permissions), or the retry fails the same way.
@@ -172,7 +171,7 @@ Both calls answer `403 Platform admin access required` unless all of these hold:
 - The session belongs to the `platform` audience. A person who signed in as an end-user of a space is refused.
 - Your email address is in `AUTH_PLATFORM_ADMIN_EMAILS`, a comma-separated list compared without regard to case. With the variable empty, nobody qualifies. The account for a listed address is only created with proof that you own it, see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
 
-A session also needs `X-Org-Id`, set to an organization you belong to, like any other request made with a cookie (`400` without it, `403` if you are not a member).
+These two routes need no `X-Org-Id`, so an operator who belongs to no organization can call them. Before 1.0.0-beta.65 they answered `400` without that header.
 
 ## Rate limit hits (`429`)
 

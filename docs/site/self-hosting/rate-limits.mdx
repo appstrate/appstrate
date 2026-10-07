@@ -61,6 +61,8 @@ Two JSON variables, validated the same strict way, cap the platform's model and 
 - `LLM_PROXY_LIMITS` for `/api/llm-proxy/*`: `rate_per_min` (default 60) and `max_request_bytes` (10 MiB).
 - `CREDENTIAL_PROXY_LIMITS` for `/api/credential-proxy/proxy`: `rate_per_min` (100), `max_request_bytes` (10 MiB), `max_response_bytes` (50 MiB) and `session_ttl_seconds` (3600).
 
+No shipped Compose file forwards these two variables, so with Docker Compose add a bare `- LLM_PROXY_LIMITS` or `- CREDENTIAL_PROXY_LIMITS` line under `appstrate.environment` before setting them in `.env` (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+
 `API_BODY_LIMIT_BYTES` (default 10 MiB) caps request bodies globally. Durable files are capped separately by `FILE_MAX_BYTES` (default 100 MiB), and `ORG_STORAGE_QUOTA_BYTES` sets an optional per-organization storage quota. See [Environment Variables](/docs/self-hosting/environment-variables).
 
 ## Per-endpoint limits

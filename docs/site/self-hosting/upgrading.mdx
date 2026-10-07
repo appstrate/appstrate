@@ -7,7 +7,7 @@ An upgrade is more than an image swap. Migrations run at boot and cannot be roll
 
 ## 1. Check what you run and what is supported
 
-The running version is `APPSTRATE_VERSION` in your install directory's `.env`, and it is shown in the dashboard footer and on `/health`. Image tags are the release version without a leading `v`, for example `1.0.0-beta.64`.
+The running version is `APPSTRATE_VERSION` in your install directory's `.env`, and it is shown in the dashboard footer and on `/health`. Image tags are the release version without a leading `v`, for example `1.0.0-beta.65`.
 
 Security fixes cover the last 12 releases or 6 months. An upgrade from outside that window is not supported: reinstall instead of upgrading in place. See [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md).
 
@@ -17,7 +17,8 @@ Open [`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG
 
 - Pre-flight scripts to run before the deploy, from the matching release checkout, with your platform environment loaded (`DATABASE_URL`, and the encryption keys for scripts that decrypt). Each one is explained in [`scripts/migration/README.md`](https://github.com/appstrate/appstrate/blob/main/scripts/migration/README.md). A typical entry says to stop the app container, take a `pg_dump`, run a script in dry-run mode and then with `--apply`, and deploy.
 - Environment variables that are renamed, removed or newly required. Appstrate does not recognise a renamed variable: the old name is stripped as unknown and the setting silently falls back to its default.
-- Behavior changes that need an action first. Examples from recent releases: integrations calling an internal API now need their host in `EGRESS_ALLOW_INTERNAL_HOSTS`, accounts named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` are no longer created by the sign-up form, and the stored integration manifests must pass a pre-flight check.
+- Behavior changes that need an action first. Examples from recent releases: integrations calling an internal API now need their host in `EGRESS_ALLOW_INTERNAL_HOSTS`, accounts named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` are no longer created by the sign-up form, the stored integration manifests must pass a pre-flight check, and a model in `SYSTEM_PROVIDER_KEYS` that the bundled model registry no longer records refuses boot (1.0.0-beta.65 asks you to run `bun run verify:system-models` from the release checkout, with your platform environment loaded, before the deploy).
+- Sessions and links that do not survive the restart. Since 1.0.0-beta.65 (Better Auth 1.7.7), a magic link mailed before the upgrade is refused, and a Google or GitHub sign-in or account link started before it has to be started again. No data is rewritten. Upgrade every replica in the same cutover, and warn users with a pending link to request a new one.
 - Migrations that take an exclusive lock on a large table, so you can pick a quiet window.
 - Images that must move together. Deploy the platform and the runtime images (`appstrate-pi`, `appstrate-sidecar`, and the MCP runner images) at the same version. Boot refuses a mismatch.
 
@@ -66,7 +67,7 @@ appstrate install --dir ~/appstrate
 Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To pin a version, set `APPSTRATE_VERSION` on the `bash` side of the pipe. It is a release tag here, so it keeps the `v` prefix that image tags and the `.env` value drop:
 
 ```bash
-curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=v1.0.0-beta.64 bash -s -- --yes
+curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=v1.0.0-beta.65 bash -s -- --yes
 ```
 
 If you installed the CLI through Bun, use `bun update -g appstrate` instead of `self-update`. The upgrade matrix between install channels is in [the CLI upgrade notes](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
@@ -85,7 +86,7 @@ docker compose pull
 docker compose up -d
 ```
 
-If you track the repository's Compose file, diff it against yours before you replace it: a new release can add services, volumes or environment lines. A variable that your file does not forward never reaches the container.
+If you track the repository's Compose file, diff it against yours before you replace it: a new release can add services, volumes or environment lines. A variable that your file does not forward never reaches the container, and a file from before 1.0.0-beta.65 forwards fewer than the current ones (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
 
 </Tab>
 

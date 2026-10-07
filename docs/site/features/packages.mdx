@@ -83,8 +83,9 @@ curl -X POST https://your-instance/api/packages/import-github \
 ```
 
 - An import writes the draft **and** cuts a version from the archive. The package is owned by your organization and stays editable, whatever its scope name.
-- `POST /api/packages/import` answers `409` when the target has unpublished draft changes. Resend with `?force=true` to overwrite.
-- A bundle registers every embedded package, reusing byte-identical ones. A conflict (same identity, different bytes) is `409 bundle_conflict`. Integrations whose selection exposes no callable tool are refused.
+- `POST /api/packages/import` answers `409` when the target has unpublished draft changes (`draft_overwrite`) or already holds that version with other content (`integrity_mismatch`). Resend with `?force=true` to overwrite. Both problems carry the `packageId`, and say what the import would overwrite: `active_version` on `draft_overwrite`, `version` on `integrity_mismatch`. A GitHub import has no force option: publish or discard the draft, or bump the version in the source manifest.
+- An import whose version is new but **lower than the highest published one** is refused before anything is written, with `409 version_not_higher`. Forcing does not help: raise the version in the manifest. A taken identifier (a system package, or one owned by another organization) is always `409 name_collision`.
+- A bundle registers every embedded package, reusing byte-identical ones. A conflict (same identity, different bytes) is `409 bundle_conflict`, and so is a package that another organization owns, even one created while the import was running. A bundle whose root version is lower than the highest published one is refused with `409 version_not_higher` before any package is written. A dependency in that situation is left as your organization has it, with a warning in the response. Integrations whose selection exposes no callable tool are refused.
 - A ZIP containing only a `SKILL.md` imports as a skill.
 - Imports are limited to 10 per minute. The signature policy of the instance (`AFPS_SIGNATURE_POLICY`) can require signed bundles.
 

@@ -20,7 +20,7 @@ pending → running → success | failed | timeout | cancelled
 | `timeout`   | The run exceeded its timeout.                                                                                     |
 | `cancelled` | Someone cancelled it.                                                                                             |
 
-Terminal runs carry `completed_at`, `duration` (milliseconds), `cost` and `token_usage` (see [Run cost](/docs/features/run-cost)).
+Terminal runs carry `completed_at`, `duration` (milliseconds), `cost` (US dollars) and `token_usage` (see [Run cost](/docs/features/run-cost)).
 
 ## Launching a run
 
@@ -126,7 +126,7 @@ A remote run has no sandbox on the platform, so it reaches the organization's mo
 | LLM proxy        | `POST /api/llm-proxy/<api shape>/...`, four routes (below) | An API key carrying `llm-proxy:call`, or the access token of a user whose organization role holds it. The owner, admin, member and guest roles do.                                        |
 | Credential proxy | Any method on `/api/credential-proxy/proxy`                | An API key carrying `credential-proxy:call`, or the access token of a user who holds it in the space. The `admin` and `builder` space roles do, `operator`, `runner` and `viewer` do not. |
 
-Both accept bearer authentication only. A cookie session is refused with `403`. The "access token of a user" is the device-flow token of the CLI, or a dashboard access token. A key follows its creator and its scopes, as described in [API keys](/docs/features/api-keys), and neither scope should be given out lightly: the first spends the organization's model budget, the second reaches every provider the space has connected.
+Both accept bearer authentication only. A cookie session is refused with `403`. The "access token of a user" is the device-flow token of the CLI, or a dashboard access token. A key follows its creator and its scopes, as described in [API keys](/docs/features/api-keys), and neither scope should be given out lightly (a key created with `scopes` omitted or empty carries both when its creator holds them): the first spends the organization's model budget, the second reaches every provider the space has connected.
 
 **LLM proxy.** One route per protocol, each shaped like the vendor's own endpoint, so a vendor SDK works when its base URL points at the proxy:
 
@@ -167,7 +167,7 @@ curl -X GET https://your-instance/api/credential-proxy/proxy \
   -H "X-Session-Id: 3b241101-e2bb-4255-8caf-4136c566a962"
 ```
 
-The answer is the upstream's status, headers and body, with a `Proxy-Status` header that tells a relayed upstream answer from one the proxy produced itself. The credential-proxy route limits request and response size and the call rate, and the LLM proxy limits the request size and the call rate. The values are operator settings (`LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`) in [Environment Variables](/docs/self-hosting/environment-variables).
+The answer is the upstream's status, headers and body, with a `Proxy-Status` header that tells a relayed upstream answer from one the proxy produced itself. A call for an integration that is not active in the space, or with an `X-Run-Id` that names no run of the space, is a `404` `not_found`. A `404` `credential_not_found` means no connection of the integration is reachable for the caller. The credential-proxy route limits request and response size and the call rate, and the LLM proxy limits the request size and the call rate. The values are operator settings (`LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`) in [Environment Variables](/docs/self-hosting/environment-variables).
 
 **How `appstrate run` uses them.** A remote run started by the CLI sends every `{ns}__api_call` tool call of an integration to the credential proxy, with the integration as `X-Integration-Id`, one random `X-Session-Id` for the whole run and, when the run is reported, its id as `X-Run-Id`. With `--model-source preset` it lists the presets, picks one (`--model`, or the instance default) and points the model's base URL at the matching LLM-proxy route, sending the preset id as `model`. The CLI itself never sees a provider key or an integration credential. With `--model-source env` it calls your provider directly and the LLM proxy is not involved. The flags are in [CLI](/docs/using-appstrate/cli#headless-and-ci-runs).
 

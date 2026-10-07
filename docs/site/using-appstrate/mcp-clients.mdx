@@ -53,22 +53,22 @@ codex mcp login appstrate
 
 ## Which space it acts in
 
-The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/docs/using-appstrate/skill) sets this header to your pinned space for you.
+The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). `get_me` names the space a call resolved to, so an empty list can be told from a wrong space. For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/docs/using-appstrate/skill) sets this header to your pinned space for you.
 
 ## The tools
 
 The server does not declare one tool per API operation. It exposes a small set that lets the client find and call any operation, and the list you see depends on your permissions:
 
-| Tool                                           | What it does                                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `get_me`                                       | Who you are in this organization, your role, and the integrations you have connected. Call it first |
-| `search_operations`, `describe_operation`      | Find an API operation and read its input schema                                                     |
-| `invoke_operation`                             | Call an operation, validated and authorized like the equivalent REST call                           |
-| `run_and_wait`                                 | Launch an agent (or a one-off inline agent) and return when the run finishes                        |
-| `list_files`, `read_file`                      | List and read files, addressed by `appfile://` URIs                                                 |
-| `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                 |
-| `validate_package_file`, `import_package_file` | Check and import a package archive                                                                  |
-| `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                               |
+| Tool                                           | What it does                                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                                       | Who you are in this organization, your role, the space the request resolved to and the integrations you have connected there. Call it first |
+| `search_operations`, `describe_operation`      | Find an API operation and read its input schema                                                                                             |
+| `invoke_operation`                             | Call an operation, validated and authorized like the equivalent REST call                                                                   |
+| `run_and_wait`                                 | Launch an agent (or a one-off inline agent) and return when the run finishes                                                                |
+| `list_files`, `read_file`                      | List and read files, addressed by `appfile://` URIs                                                                                         |
+| `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                                                         |
+| `validate_package_file`, `import_package_file` | Check and import a package archive                                                                                                          |
+| `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                                                                       |
 
 `mcp:read` lets a client connect and use the read-only tools, except `list_files`, which needs `files:read`. `mcp:invoke` adds `invoke_operation`, and `run_and_wait` further needs `agents:run` and a run-read permission. `import_package_file` needs `mcp:invoke` plus a package write permission. An operation your role cannot perform is not shown, and every call is checked again when it runs, so a client can never do more than the same credentials could over REST. If your role changes or the platform is upgraded, re-list the tools in your client.
 

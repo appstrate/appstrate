@@ -83,7 +83,7 @@ A run starts from the dashboard, the chat, a [schedule](/docs/features/schedulin
 
 Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend, opt-in, gives each run its own microVM.
 
-Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced from the model's rate card. A model without a known price is recorded at a cost of 0.
+Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced in US dollars from the model's rate card. A model without a known price is recorded at a cost of 0.
 
 Deep-dive: [Features / Runs](/docs/features/runs) and [Features / Sandbox and Sidecar](/docs/features/sandbox-and-sidecar).
 

@@ -38,7 +38,7 @@ The two channels are independent. If both are installed, `appstrate doctor` list
 
 ## Driving the CLI from a coding agent
 
-The repository ships an operating manual written for a coding agent: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). It covers the zero-to-first-run recipe, the rules of engagement and a `curl` to `appstrate api` cheat sheet. The CLI injects the bearer token itself, so the agent never sees it. See also [Skills and coding agents](/docs/using-appstrate/skill).
+The repository ships an operating manual written for a coding agent: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). It covers the zero-to-first-run recipe, the rules of engagement and a `curl` to `appstrate api` cheat sheet. With a logged-in profile the CLI injects the bearer token itself, so the agent never sees it. An API key passed through the environment or `--api-key` is readable by the process that sets it, so give an agent a key scoped to what it may do. See also [Skills and coding agents](/docs/using-appstrate/skill).
 
 ## Commands
 
@@ -171,7 +171,7 @@ Switching organization re-pins that organization's default space, so space-scope
 
 <Accordion title="appstrate api">
 
-An authenticated, curl-compatible call to the instance's REST API. The CLI adds the bearer token, `X-Org-Id` and `X-Space-Id`, and prints the response.
+An authenticated, curl-compatible call to the instance's REST API. The CLI adds the bearer token, `X-Org-Id` and `X-Space-Id` of your profile, and prints the response. With an API key it calls as the key instead, see [Call the API with an API key](#call-the-api-with-an-api-key).
 
 ```bash
 appstrate api GET /api/agents
@@ -181,7 +181,7 @@ appstrate api POST /api/x -d @body.json
 appstrate api POST /api/x -F 'file=@pkg.zip'
 ```
 
-Most curl flags behave as in curl: `-H`, `-d`, `-F`, `-G`, `-i`, `-I`, `-o`, `-s`, `-f` and `--fail-with-body`, `-v` (the token stays redacted), `-w`, `--retry`, `--max-time`, `-L`. Three differences are deliberate. There is no `-u`, because you never handle the token. A URL on another origin than your profile's instance is refused. Cookie-jar files are refused. The curl-aligned exit codes (22 and 25 for HTTP errors, 28 for timeouts, and so on) are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-api).
+Most curl flags behave as in curl: `-H`, `-d`, `-F`, `-G`, `-i`, `-I`, `-o`, `-s`, `-f` and `--fail-with-body`, `-v` (the token stays redacted), `-w`, `--retry`, `--max-time`, `-L`. Three differences are deliberate. There is no `-u`, because you never handle the token. A URL on another origin than the instance (your profile's, or `APPSTRATE_INSTANCE` with an API key) is refused. Cookie-jar files are refused. The curl-aligned exit codes (22 and 25 for HTTP errors, 28 for timeouts, and so on) are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-api).
 
 An agent is addressed by its package id, in the URL `/api/agents/@scope/name/run`. The launch call returns `201` with the run resource and does not stream. Follow the run with `GET /api/runs/{id}`, or use `appstrate run`.
 
@@ -281,16 +281,18 @@ Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update
 
 ## Headless and CI runs
 
-`appstrate run` can authenticate without `appstrate login`: give it an API key, name the instance and the space, and it works on a CI runner or any machine with no profile. These variables are read by `appstrate run` only. The other commands (`api`, `openapi`, `whoami`) still need a profile.
+`appstrate run` can authenticate without `appstrate login`: give it an API key and the instance, and it works on a CI runner or any machine with no profile. `appstrate api` reads the same key and instance (see [Call the API with an API key](#call-the-api-with-an-api-key)). The other commands (`openapi`, `whoami`) still need a profile.
 
 | Variable             | Meaning                                                                                                                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `APPSTRATE_API_KEY`  | An `apst_` [API key](/docs/features/api-keys). Same as `--api-key`, and the flag wins when both are set. It replaces the profile's session entirely, so the run is made as the key. |
-| `APPSTRATE_INSTANCE` | Base URL of the instance.                                                                                                                                                           |
-| `APPSTRATE_SPACE_ID` | Id of the space to run in (`spc_...`).                                                                                                                                              |
+| `APPSTRATE_INSTANCE` | Base URL of the instance. When unset, the active profile's instance is used.                                                                                                        |
+| `APPSTRATE_SPACE_ID` | Id of the space (`spc_...`). Not needed for a platform run. A remote run with remote integrations (the default, see below) requires it, and the command stops without it.           |
 | `APPSTRATE_ORG_ID`   | Organization id. Not needed for a platform run. Required by `--model-source preset`, which refuses to start without it.                                                             |
 
-A variable that is unset falls back to the active profile when there is one. Without either, the command stops and names `APPSTRATE_INSTANCE` or `APPSTRATE_SPACE_ID`. The key needs a few scopes, depending on what you run:
+With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile: a key is pinned to one organization and one space, and a header that disagrees with the key is answered with `403`. Leave both unset for a platform run, and when you set them, set the ones the key is pinned to. An empty value counts as unset. Only the instance falls back to the profile. If you upgrade the CLI and a job used to rely on the profile's space, it now needs `APPSTRATE_SPACE_ID`, or stops with the message `No space id for a local run`.
+
+The key needs a few scopes, depending on what you run:
 
 | You run                                      | Scopes the key needs                                                                                                                                                                   |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -301,6 +303,22 @@ A variable that is unset falls back to the active profile when there is one. Wit
 | A remote run with `--model-source preset`    | `llm-proxy:call`                                                                                                                                                                       |
 
 The last two are described under [Remote runs](/docs/features/runs#remote-runs). Mint the key with the narrowest list that covers your case.
+
+### Call the API with an API key
+
+For a CI job or a script on a machine with no login, pass an `apst_` [API key](/docs/features/api-keys) instead of a session:
+
+```bash
+export APPSTRATE_API_KEY=apst_...
+export APPSTRATE_INSTANCE=https://appstrate.example.com   # optional when a profile exists
+appstrate api GET /api/agents
+```
+
+- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable. An empty `--api-key` is refused, and so is a key that contains whitespace or non-ASCII characters.
+- The instance is `APPSTRATE_INSTANCE`, else the profile's. With neither, the command stops.
+- No `X-Org-Id` or `X-Space-Id` is sent: a key is pinned to one organization and one space, and those apply. Your own `-H` headers still pass through.
+- **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If that variable is already set for `appstrate run`, `api` in the same shell stops using your login: another principal, no org or space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to your profile.
+- Only `api` and `run` read the key. `openapi`, `whoami` and the other commands still use the profile.
 
 ### Platform run or remote run
 
@@ -357,7 +375,6 @@ jobs:
         env:
           APPSTRATE_API_KEY: ${{ secrets.APPSTRATE_API_KEY }}
           APPSTRATE_INSTANCE: https://appstrate.example.com
-          APPSTRATE_SPACE_ID: spc_xxx
         run: |
           appstrate run @acme/triage \
             --input-file ./input.json \
@@ -365,7 +382,7 @@ jobs:
             --json --output result.json
 ```
 
-The key needs `agents:run` and `runs:read`. With `--json` the CLI prints events as JSON lines, starting with an `appstrate.remote.triggered` line that carries the run id, and the step ends with exit code `1` when the run did not succeed. If the CLI receives SIGINT, SIGTERM or SIGHUP while the run is in flight, it detaches and the run carries on on the instance.
+The key needs `agents:run` and `runs:read`. It names its own organization and space, so no `APPSTRATE_SPACE_ID` is set. With `--json` the CLI prints events as JSON lines, starting with an `appstrate.remote.triggered` line that carries the run id, and the step ends with exit code `1` when the run did not succeed. If the CLI receives SIGINT, SIGTERM or SIGHUP while the run is in flight, it detaches and the run carries on on the instance.
 
 The same job as a remote run on the runner itself, with your own model key:
 
@@ -383,7 +400,7 @@ The same job as a remote run on the runner itself, with your own model key:
       --output result.json
 ```
 
-This one needs `agents:read` and `agents:run` on the key, plus `skills:read` if the agent depends on a skill and `credential-proxy:call` if it uses integrations. The run is reported to the instance and appears there as a remote run. Do not rely on the exit code to detect a failed agent: read `status` in `result.json`.
+This one needs `APPSTRATE_SPACE_ID`, set to the space the key is pinned to, because a run on your host names the space when it registers itself and calls the credential proxy. The key needs `agents:read` and `agents:run`, plus `skills:read` if the agent depends on a skill and `credential-proxy:call` if it uses integrations. The run is reported to the instance and appears there as a remote run. Do not rely on the exit code to detect a failed agent: read `status` in `result.json`.
 
 ## Profiles
 
@@ -406,6 +423,7 @@ Profiles live in `~/.config/appstrate/config.toml` (or under `$XDG_CONFIG_HOME`)
 | `Space '<id>' not found in this organization` | The pinned space belongs to another organization. Run `appstrate space switch`                                                |
 | `pins the retired key "applicationId"`        | The profile predates the rename of applications to spaces. Delete that line from `config.toml`, then `appstrate space switch` |
 | `Docker is required for this tier`            | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                                           |
+| `No space id for a local run`                 | An API key run on your host needs `APPSTRATE_SPACE_ID`, the space the key is pinned to. A platform run does not               |
 
 More entries are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#troubleshooting).
 

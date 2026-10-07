@@ -45,6 +45,8 @@ The platform writes one JSON object per line to stdout. Fields passed with a mes
 
 Every response carries a `Request-Id` header of the form `req_<uuid>`, and error bodies repeat it as `request_id` (see [Errors](/docs/api/errors)). The error lines written by the error handler (`Request failed` and `Unhandled error`) carry the same `requestId`, so a request id from a customer leads to the server-side cause. When a request arrives with a valid W3C `traceparent` header, the platform echoes it back and attaches its trace id to the logs of that request.
 
+The live model catalog logs `model catalog applied` at `info` when a new file is accepted, and a `model catalog not refreshed` warning when the hourly read fails (see [Isolation and Security](/docs/self-hosting/isolation-and-security#live-model-catalog)).
+
 Log levels and messages change between releases. Before you build an alert on a log line, read the operator notes of the release in the [changelog](/docs/resources/changelog).
 
 ## OpenTelemetry traces and metrics

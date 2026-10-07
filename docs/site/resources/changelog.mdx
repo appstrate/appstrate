@@ -45,6 +45,9 @@ A selection of changes that altered how you use Appstrate. Each is a git tag. `C
 | `v1.0.0-beta.54` | 2026-08-28 | **Applications became spaces**: `spc_` ids, `X-Space-Id`, `/api/spaces`                                                   |
 | `v1.0.0-beta.62` | 2026-09-25 | API keys use the checksummed **`apst_`** format. Older `ask_` keys stop working                                           |
 | `v1.0.0-beta.64` | 2026-09-30 | An agent can use **several connections of one integration** in a single run                                               |
+| `v1.0.0-beta.65` | 2026-10-07 | A signed **live model catalog**, `appstrate api` with an API key, and a long list of operator pre-flights                 |
+
+Version `1.0.0-beta.65` has an `Operators` section with a new environment variable (`MODEL_CATALOG_URL`), pre-flight scripts and SQL checks to run before the deploy, and behavior changes that need an action. Read it in [`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG.md) before you upgrade from an earlier version.
 
 ## Upgrading
 

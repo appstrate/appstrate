@@ -73,7 +73,7 @@ effective permissions = key scopes  ∩  what the key's creator currently holds 
 
 - The scopes are a ceiling, not a grant. The key never has more than its creator, and it follows the creator: if they lose a role or leave the organization, their keys lose that authority, and leaving the organization revokes them.
 - Scopes you request but your own role does not hold are silently dropped from the new key. A scope no key can carry at all is `400 invalid_request`.
-- If you omit `scopes`, the key receives every grantable scope you hold, `credential-proxy:call` and `llm-proxy:call` included. Prefer an explicit list.
+- If you omit `scopes` or send an empty list, the key receives every grantable scope you hold, which includes `credential-proxy:call` and `llm-proxy:call` when you hold them. A non-empty `scopes` list mints a narrower key. Prefer an explicit list.
 - `expiresAt` is an ISO 8601 date in the future, or `null` for no expiry. There is no rotation: create a new key, switch over, then revoke the old one with `DELETE /api/api-keys/{id}`. Revocation is immediate.
 
 ### Scopes
@@ -121,7 +121,7 @@ curl http://localhost:3000/api/agents \
   -H "X-Space-Id: $SPACE_ID"
 ```
 
-A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
+Sign-in, sign-up and the other Better Auth routes are rate limited per client IP address; a refused call is a `429` with a JSON body. A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
 
 ## OIDC access tokens
 
@@ -144,6 +144,8 @@ Endpoints:
 | Signing keys                          | `GET /api/auth/jwks`                                                                        |
 | Device flow (RFC 8628)                | `POST /api/auth/device/code`                                                                |
 | Register and manage clients           | `POST /api/oauth/clients`, `GET /api/oauth/clients`, and siblings (needs `oauth-clients:*`) |
+
+OAuth clients are registered and managed only through the `/api/oauth/clients` routes, under the `oauth-clients:*` permissions and the confinement of their level. The client endpoints of the underlying library (`/api/auth/oauth2/create-client`, `get-client`, `get-clients`, `update-client`, `delete-client` and `client/rotate-secret`) answer `401` to every session, so a signed-in user cannot mint or read a client through them. Dynamic client registration, which needs no session, is unchanged. The authorize, token, introspect, revoke and registration endpoints are rate limited per IP address, and a call refused by that limit is a `429` with a `Retry-After` header and an RFC 6749 body (`{ "error": "temporarily_unavailable", "error_description": "..." }`), not a problem document.
 
 A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). To register clients, embed the flow and set up per-space SMTP and social sign-in, see [Embedded sign-in](/docs/features/embedded-sign-in). The module's internals are in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
 

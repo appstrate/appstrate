@@ -57,7 +57,12 @@ For a private deployment, use **closed mode**: signup is disabled, organizations
 - Open `<APP_URL>/claim`, paste the token and choose the owner email and password. The root organization is created in the same step.
 - Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is claimed.
 
-The token only works if the container receives it, and a Compose file forwards only the variables it lists (see [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). Releases before the one that lists `AUTH_BOOTSTRAP_TOKEN` in the shipped templates need a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment`, then a restart, before you open `/claim`.
+The token only works if the container receives it, and a Compose file forwards only the variables it lists. The Compose files shipped since 1.0.0-beta.65 list `AUTH_BOOTSTRAP_TOKEN`. A file that predates that release does not: add a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment` and restart before you open `/claim` (see [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+
+Two rules about the named accounts:
+
+- When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the claim accepts that address only. Any other address is refused with `403 bootstrap_owner_email_mismatch`.
+- The token works only while the instance has no organization. Once one exists, `/claim` answers `410`. An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` that has no account yet is not created by the sign-up form: it gets its account from a magic link (SMTP required) or from a Google or GitHub sign-in whose provider asserts the address as verified. The claim itself creates one account, the owner's.
 
 The full matrix of flags, recipes, known limits and recovery procedures is in [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). The variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
 

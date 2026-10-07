@@ -50,7 +50,7 @@ An integration may declare several auths (the GitHub MCP integration accepts OAu
 The agent runs in one container and the credentials live in another, the **sidecar**. Three rules hold for every integration:
 
 1. **The agent never sees a credential.** For `api_call`, the sidecar validates the target against the connection's `authorized_uris`, injects the header and forwards the request. The agent only gets the response (status, filtered headers, body).
-2. **Credentials are bound to hosts.** Each auth lists `authorized_uris` (glob patterns such as `https://api.stripe.com/**`). A pattern can reference a connection field, for example `{$credential.site_url}/**` for WordPress, rendered per connection. A call that carries a credential cannot use `allow_all_uris`: it must match a listed pattern, and so must every redirect hop. Private and loopback addresses are blocked by default.
+2. **Credentials are bound to hosts.** Each auth lists `authorized_uris` (glob patterns such as `https://api.stripe.com/**`). A pattern can reference a connection field, for example `{$credential.site_url}/**` for WordPress, rendered per connection. A call that carries a credential cannot use `allow_all_uris`: it must match a listed pattern, and so must every redirect hop. Private and loopback addresses are blocked by default, and so are the names `localhost` and every `*.localhost`.
 3. **With `http` delivery, the integration's own server never reads the token either.** A per-run proxy inside the sidecar adds the header on the way out, refreshes an expiring OAuth token and retries once after a `401`. Only integrations that declare `env` or `files` delivery receive the secret in their runner, and that runner can reach only the hosts its connection allows.
 
 How a credential is injected is the `delivery` block of the auth: `http` (a header, cookie or similar, added by the sidecar), `env` (environment variables of a local runner) or `files` (a mounted file, for certificates and SSH keys).
@@ -100,7 +100,7 @@ appstrate api POST /api/integrations/@appstrate/stripe/auths/primary/connect/ses
 # { "connect_url": "https://.../api/integrations/connect/start?token=...", "expiresAt": "..." }
 ```
 
-List your own connections with `GET /api/me/connections` and delete one with `DELETE /api/me/connections/{connectionId}` (destructive: it removes the connection everywhere and drops your own member pins and schedule overrides that named it; it is refused with `409 connection_pinned` while an admin pin or an organization default names it).
+List your own connections with `GET /api/me/connections` and delete one with `DELETE /api/me/connections/{connectionId}` (destructive: it removes the connection everywhere and drops your own member pins and schedule overrides that named it; it is refused with `409 connection_pinned` while an admin pin or an organization default names it). `GET /api/me/connections/{connectionId}/delete-impact` previews what a delete would change. In the dashboard, the delete confirmation shows that preview and cannot be confirmed until it has loaded.
 
 ## Scopes
 

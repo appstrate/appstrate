@@ -65,7 +65,7 @@ The sidecar is a small server in front of everything the agent reaches.
 
 ### SSRF protection
 
-Every target, and every redirect hop, is checked three ways: a literal check against private, loopback, link-local and metadata ranges (including IPv4-mapped IPv6); a DNS check that refuses the call if any resolved address is blocked; and resolve-and-pin, so the connection goes to the address that was validated. A host that must be reached on an internal address is listed by the operator in `EGRESS_ALLOW_INTERNAL_HOSTS`. A refused call returns an error that says which guard tripped.
+Every target, and every redirect hop, is checked three ways: a literal check against private, loopback, link-local and metadata ranges (including IPv4-mapped IPv6) and against the names `localhost` and every `*.localhost`; a DNS check that refuses the call if any resolved address is blocked; and resolve-and-pin, so the connection goes to the address that was validated. A host that must be reached on an internal address is listed by the operator in `EGRESS_ALLOW_INTERNAL_HOSTS`. A refused call returns an error that says which guard tripped.
 
 ### Large results
 

@@ -64,7 +64,7 @@ Whatever the route, the installer writes a `.env` with generated secrets (and, f
 How the first account is created depends on how you installed:
 
 - **Open instance** (Tier 0, or a Docker tier where you left the bootstrap email empty). Anyone who can reach the URL can sign up, and each new account creates its own organization.
-- **Invitation-only instance** (an unattended Docker install, or a bootstrap email given at the prompt or in `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`). Public sign-up is off. The installer generates a single-use token, prints it with the claim URL at the end of the install, and stores it in `.env` as `AUTH_BOOTSTRAP_TOKEN`. Open `<APP_URL>/claim`, paste the token and enter your name, email and password to create the first owner. Everyone else joins by invitation.
+- **Invitation-only instance** (an unattended Docker install, or a bootstrap email given at the prompt or in `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`). Public sign-up is off. The installer generates a single-use token, prints it with the claim URL at the end of the install, and stores it in `.env` as `AUTH_BOOTSTRAP_TOKEN`. Open `<APP_URL>/claim`, paste the token and enter your name, email and password to create the first owner. When you gave a bootstrap email, the claim accepts that address only. Everyone else joins by invitation. Re-running the installer on an existing install never mints a new token.
 
 The full matrix of options (domain restrictions, platform admins, magic links) is in [`AUTH_MODES.md`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). Environment variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
 

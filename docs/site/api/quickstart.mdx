@@ -20,7 +20,7 @@ export APPSTRATE_URL=http://localhost:3000
 
 ### Create an API key
 
-In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
+In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, the `credential-proxy:call` and `llm-proxy:call` proxy scopes included when you hold them, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
 export APPSTRATE_KEY=apst_your_key_here

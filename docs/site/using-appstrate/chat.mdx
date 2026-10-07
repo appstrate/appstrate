@@ -9,12 +9,12 @@ The chat is a module (`@appstrate/module-chat`) that is part of the default `MOD
 
 ## What you need
 
-- **A model.** The chat runs on one of your organization's models. An administrator adds them under **Organization settings → Models**. If you have several, choose one in the composer.
+- **A model.** The chat runs on one of your organization's models. An administrator adds them under **Organization settings → Models**. If you have several, choose one in the composer. Until you choose, the chat follows the organization's default model, so a change of that default reaches everyone who never picked one.
 - **A role that can chat in the current space.** Conversations belong to a space. Every built-in space role can read conversations, and the `admin`, `builder`, `operator` and `runner` roles can also write. The `viewer` role is read-only.
 
 ## Using it
 
-Open **Chat** in the sidebar (under Activity) and type. Your conversations are listed on the left. They are private to your account and to the space you are in, and they are stored on the server: if you leave the page while the assistant is answering, the answer is still saved. Deleting a conversation deletes its messages and files, except a file that a run still uses.
+Open **Chat** in the sidebar (under Activity) and type. Your conversations are listed on the left. They are private to your account and to the space you are in, and they are stored on the server: if you leave the page while the assistant is answering, the answer is still saved. Deleting a conversation asks for confirmation, then deletes its messages and files, except a file that a run still uses. The address of a deleted conversation, or of one that belongs to another account or space, shows "Conversation not found". A role that can only read conversations does not get the **New conversation** button. The chat interface follows the dashboard's language (English or French).
 
 Things the assistant can do for you:
 
@@ -24,7 +24,7 @@ Things the assistant can do for you:
 - **Work with files.** Attach files to a message. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched.
 - **Schedule runs and create agents**, where your role allows it (see below).
 
-The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**.
+The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**. When the server returned one, the failure shows a request ID that an administrator can look up in the logs.
 
 ## Control what it can do
 

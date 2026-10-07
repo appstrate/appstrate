@@ -140,7 +140,7 @@ When a service needs more than one value, use `type: "custom"` with a schema of 
 
 The host depends on the connection, so `authorized_uris` references `{$credential.site_url}`. It is rendered per connection. The platform refuses an auth that injects a credential over HTTP while leaving the host to the caller (no `authorized_uris`, `allow_all_uris: true`, or a pattern such as `https://**`).
 
-Custom auths can also acquire the credential themselves: a declarative `connect.login` (one HTTP request that exchanges a password for a session) or a `connect.tool` (a tool that logs in, run once at connect time or at the start of every run). Those are covered in the repository guide.
+Custom auths can also acquire the credential themselves: a declarative `connect.login` (one HTTP request that exchanges a password for a session) or a `connect.tool` (a tool that logs in, run once at connect time or at the start of every run). Those are covered in the repository guide. A login request that a secret is substituted into is held to the same host binding as an injected credential: when the auth's `authorized_uris` leaves the host to the caller, the run refuses that request with a `403`.
 
 ## A hosted MCP server
 

@@ -38,14 +38,20 @@ LLM calls take the same path. The agent's model SDK talks to the sidecar's `/llm
 Every outbound call from an integration passes the same checks, on the target and on every redirect hop:
 
 1. **`authorized_uris` is mandatory.** A call is allowed only if its URL matches an entry the integration declares. An empty or missing list authorizes nothing, and `allow_all_uris` is dropped for any call that carries a credential. An entry whose host the caller could choose (`https://**`) is refused for credentialed calls.
-2. **Blocked network ranges.** Loopback, link-local, private (RFC 1918), IPv6 unique-local and mapped addresses, and the cloud metadata addresses are refused. The platform resolves DNS itself, refuses the call if any record lands in a blocked range, and connects to the validated address (resolve and pin), which defeats DNS rebinding. A host that does not resolve returns `502`, a blocked one `403`.
+2. **Blocked network ranges.** Loopback, link-local, private (RFC 1918), IPv6 unique-local and mapped addresses, and the cloud metadata addresses are refused. So are the host names `localhost` and every `*.localhost` name (loopback by RFC 6761), and the container names `sidecar` and `agent` and `host.docker.internal`. The platform resolves DNS itself, refuses the call if any record lands in a blocked range, and connects to the validated address (resolve and pin), which defeats DNS rebinding. A host that does not resolve returns `502`, a blocked one `403`.
 3. **Redirects.** A redirect to a host outside `authorized_uris` is refused. A redirect to another origin strips credentials and the request body.
 4. **Internal hosts are opt-in on both sides.** To let an integration reach a private or internal API, the integration's `authorized_uris` must name that host literally, and the operator must list it in `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated hostnames). Neither alone is enough. A listed host is trusted by every organization of the instance and by every egress site that reads the variable (OAuth token exchange, LLM upstreams, organization proxies, remote MCP servers). Add only hosts that every organization may call. See the full semantics in [Environment Variables](/docs/self-hosting/environment-variables).
-5. **The sidecar needs working DNS.** It resolves every target host itself, even when it sends traffic through `PROXY_URL`. Without DNS the call fails with `502 Target host could not be resolved`.
+5. **The sidecar needs working DNS.** It resolves the target host of an `api_call` itself, even when it sends traffic through `PROXY_URL`. Without DNS the call fails with `502 Target host could not be resolved`. The one exception is a host that rule 4 trusts (named literally in `authorized_uris` and listed in `EGRESS_ALLOW_INTERNAL_HOSTS`): it is not looked up.
 
 The same blocklist guards webhook URLs at creation and at delivery. See [Webhooks](/docs/features/webhooks).
 
 A run that is refused logs `Target refused (SSRF)` with the host in the sidecar log. A model on a private endpoint (Ollama, a LAN vLLM) is called by the platform's LLM proxy, so its host must be in `EGRESS_ALLOW_INTERNAL_HOSTS` and reachable from the API process.
+
+## Live model catalog
+
+The API process reads a signed model catalog from `get.appstrate.dev` so that a model a vendor ships becomes selectable without a release. It does this in the background when it starts and then every hour (up to two anonymous GET requests, redirects refused, 10 seconds each), and boot never waits on it. Nothing about your instance is sent and nothing is stored: the accepted file lives in memory. It only adds models an organization can bind with its own credentials, and a file is refused unless its signature verifies against a key built into the platform. A read that fails is logged as a warning (`model catalog not refreshed`) and the instance keeps serving the bundled registry.
+
+To stop the reads, set `MODEL_CATALOG_URL=off`; the instance then runs on the bundled registry alone. An empty value is not a switch, it means the default. To read the catalog from a mirror, set the variable to that URL (`http` or `https`). The variable is described in [Environment Variables](/docs/self-hosting/environment-variables), and the design in [MODEL_CATALOG.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
 
 ## Container hardening and resource limits
 
@@ -98,6 +104,7 @@ Appstrate has no required external service at boot. For a network without intern
 - Use filesystem storage or an internal S3 endpoint.
 - Send outbound traffic through your gateway with `PROXY_URL` or `SYSTEM_PROXIES`.
 - Point `SYSTEM_PROVIDER_KEYS` at a model endpoint you can reach, and list its host in `EGRESS_ALLOW_INTERNAL_HOSTS` if it is on a private address.
+- Set `MODEL_CATALOG_URL=off`, or the API logs a warning every hour for a catalog it cannot reach (see [Live model catalog](#live-model-catalog)).
 - Leave OpenTelemetry off. It exports nothing unless `@appstrate/module-observability` is in `MODULES` and an endpoint is configured.
 
 ## What Appstrate does not do
