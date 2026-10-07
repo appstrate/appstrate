@@ -36,14 +36,17 @@ import {
   setRealmResolver,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
-import { createTestContext, restoreRealmResolverAfterSuite } from "../helpers/auth.ts";
+import {
+  createTestContext,
+  issuedMagicLinkToken,
+  restoreRealmResolverAfterSuite,
+} from "../helpers/auth.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { flushRedis } from "../helpers/redis.ts";
 import { seedInvitation } from "../helpers/seed.ts";
 import { captureMails, enableSmtpForSuite } from "../helpers/smtp.ts";
 import {
   account,
-  verification,
   organizations,
   organizationMembers,
   user,
@@ -414,9 +417,9 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           body: JSON.stringify({ email: "ops@acme.com" }),
         });
         expect(sent.status).toBe(200);
-        const [link] = await db.select().from(verification);
+        const token = await issuedMagicLinkToken();
         const verified = await app.request(
-          `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}`,
+          `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}`,
         );
         expect(verified.status).toBeLessThan(400);
 
@@ -544,11 +547,10 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           body: JSON.stringify({ email: "owner@acme.com" }),
         });
         expect(sent.status).toBe(200);
-        const [link] = await db.select().from(verification);
-        expect(link).toBeDefined();
+        const token = await issuedMagicLinkToken();
 
         const verified = await app.request(
-          `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}`,
+          `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}`,
         );
         expect(verified.status).toBeLessThan(400);
 

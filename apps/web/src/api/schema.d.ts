@@ -9630,6 +9630,18 @@ export interface operations {
                     };
                 };
             };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
         };
     };
     signOut: {
@@ -9723,6 +9735,18 @@ export interface operations {
             };
             /** @description The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

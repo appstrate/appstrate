@@ -30,6 +30,7 @@ import {
   session as sessionTable,
   account as accountTable,
   profiles,
+  verification as verificationTable,
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
@@ -330,4 +331,23 @@ export function restoreRealmResolverAfterSuite(): void {
   afterAll(() => {
     _swapRealmResolverForTesting(installed);
   });
+}
+
+/**
+ * Better Auth stores an issued magic link under `magic-link:<token>` (the
+ * purpose prefix of GHSA-965c-763c-88jm, 1.7.7): the emailed token is the
+ * suffix, never the stored identifier itself.
+ */
+const MAGIC_LINK_IDENTIFIER_PREFIX = "magic-link:";
+
+/** The token of the magic link last issued (for `email`, when given). */
+export async function issuedMagicLinkToken(email?: string): Promise<string> {
+  const rows = await db.select().from(verificationTable);
+  const link = rows.find(
+    (row) =>
+      row.identifier.startsWith(MAGIC_LINK_IDENTIFIER_PREFIX) &&
+      (email === undefined || row.value.includes(`"email":"${email}"`)),
+  );
+  if (!link) throw new Error(`no magic link issued${email ? ` for ${email}` : ""}`);
+  return link.identifier.slice(MAGIC_LINK_IDENTIFIER_PREFIX.length);
 }

@@ -83,6 +83,11 @@ export const authPaths = {
             "The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free.",
           content: betterAuthError,
         },
+        "429": {
+          description:
+            "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
+          content: betterAuthError,
+        },
       },
     },
   },
@@ -145,6 +150,11 @@ export const authPaths = {
         "403": {
           description:
             "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
+          content: betterAuthError,
+        },
+        "429": {
+          description:
+            "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
           content: betterAuthError,
         },
       },
