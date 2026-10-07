@@ -47,6 +47,8 @@ export function isBlockedHost(hostname: string): boolean {
   if (h === "localhost" || h === "sidecar" || h === "agent" || h === "host.docker.internal") {
     return true;
   }
+  // Every `*.localhost` name is loopback (RFC 6761 §6.3).
+  if (h.endsWith(".localhost")) return true;
   if (h === "metadata.google.internal") return true;
 
   // --- IPv4 checks (URL parser normalizes all numeric formats to dotted-decimal) ---

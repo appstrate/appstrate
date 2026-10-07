@@ -52,7 +52,7 @@ import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/ru
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
-/** RFC 3986 `scheme://` prefix a templated authorized_uris entry must start with. */
+/** RFC 3986 `scheme://` prefix of an authority-form templated authorized_uris entry. */
 const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 // ─────────────────────────────────────────────
