@@ -2727,19 +2727,24 @@ describe("Packages API", () => {
       const enc = (str: string) => new TextEncoder().encode(str);
       const id = "@pkgorg/conflicting-skill";
       const archive = (version: string, body: string) => {
-        const afps = zipSync({
-          "manifest.json": enc(
-            JSON.stringify({
-              name: id,
-              version,
-              type: "skill",
-              schema_version: "0.1",
-              display_name: "Conflicting Skill",
-              description: "A skill.",
-            }),
-          ),
-          "SKILL.md": enc(`---\nname: conflicting-skill\ndescription: A skill.\n---\n\n${body}`),
-        });
+        const afps = zipSync(
+          {
+            "manifest.json": enc(
+              JSON.stringify({
+                name: id,
+                version,
+                type: "skill",
+                schema_version: "0.1",
+                display_name: "Conflicting Skill",
+                description: "A skill.",
+              }),
+            ),
+            "SKILL.md": enc(`---\nname: conflicting-skill\ndescription: A skill.\n---\n\n${body}`),
+          },
+          // Pinned: a ZIP entry carries the clock at 2 s resolution, so two
+          // archives of the same content would otherwise differ now and then.
+          { mtime: new Date("2026-01-01T00:00:00Z") },
+        );
         const form = new FormData();
         form.append("file", new File([new Uint8Array(afps)], "skill.afps"));
         return form;
