@@ -317,6 +317,10 @@ could not be resolved`) instead of failing for good on the first. Without
   refused before anything is written, with `409 version_not_higher`, forced
   or not. A bundle import refuses such a root the same way, and leaves such
   a dependency as the organization has it, with a warning.
+- **`/api/admin/storage-deletion-jobs` no longer asks for `X-Org-Id`**
+  (#1713). The routes are instance-wide, so a platform administrator who
+  belongs to no organization got a 400. A header that is sent is ignored.
+  The operator guard is unchanged.
 - **An aliased run backed by OpenAI keeps its output cap and temperature**
   (#1705). Pi 1.0 reads a credential that is not `sk-`-shaped as a ChatGPT
   sign-in and drops `max_output_tokens`, `temperature` and the cache
