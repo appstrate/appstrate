@@ -14,6 +14,7 @@ import {
   type BuiltinProvider,
 } from "@earendil-works/pi-ai/providers/all";
 import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { PiModelDialect } from "@appstrate/core/sidecar-types";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "./model-compat.ts";
@@ -133,8 +134,22 @@ export function piModelDialect(record: Model<Api>): PiModelDialect {
   };
 }
 
+/**
+ * The levels of a model Pi keeps no record of: those every reasoning backend
+ * takes. Pi sends `minimal` verbatim, and OpenAI's o-series and gpt-5.1+ refuse
+ * it. An alias's client model has no record by design and keeps Pi's set: the
+ * platform clamps its level to the backing before the run.
+ */
+const UNRECORDED_THINKING_LEVEL_MAP = { minimal: null } as const;
+
+function thinkingLevelMapOf(spec: PiModelSpec): Model<Api>["thinkingLevelMap"] {
+  if (spec.dialect) return spec.dialect.thinkingLevelMap;
+  return spec.apiShape === ALIAS_CLIENT_API_SHAPE ? undefined : UNRECORDED_THINKING_LEVEL_MAP;
+}
+
 export function buildPiModel(spec: PiModelSpec): Model<Api> {
   const dialect = spec.dialect;
+  const thinkingLevelMap = thinkingLevelMapOf(spec);
   return {
     id: spec.id,
     name: dialect?.name ?? spec.id,
@@ -142,7 +157,7 @@ export function buildPiModel(spec: PiModelSpec): Model<Api> {
     provider: spec.piProvider ?? deriveProviderFromApi(spec.apiShape),
     baseUrl: spec.baseUrl,
     reasoning: spec.reasoning ?? false,
-    ...(dialect?.thinkingLevelMap ? { thinkingLevelMap: dialect.thinkingLevelMap } : {}),
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
     input: spec.input ? [...spec.input] : ["text"],
     cost: { ...ZERO_MODEL_COST, ...spec.cost },
     compat: { ...dialect?.compat, ...PLATFORM_MODEL_COMPAT },

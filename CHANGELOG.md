@@ -379,6 +379,16 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **A gateway model declared reasoning takes a reasoning level** (#1736). An
+  `openai-compatible` or `anthropic-compatible` model created with
+  `reasoning: true` offered no level, not even `off`: every one was refused
+  with `reasoning_level_unsupported`, and its runs always reasoned at
+  `medium`. It now takes `off`, `low`, `medium` and `high`, the set every
+  reasoning backend accepts; `minimal`, which OpenAI's o-series and gpt-5.1+
+  refuse, and `xhigh`/`max` stay refused, and an alias over it sends `low`
+  for `minimal`. The default stays `medium`. On an `openai-compatible` model,
+  `off` sends no reasoning parameter: the server keeps its own behaviour, and
+  the level control says so.
 - **The space authentication tab no longer offers to keep a stored secret**
   (#1725). With SMTP or a social provider already configured, the password
   or client secret field read "leave empty to keep the current one" and was

@@ -27937,7 +27937,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["temperature", "reasoning"],
-        "description": "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
+        "description": "Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. A model the registry has no record of (a gateway model) takes its reasoning levels from its declared `reasoning`: `off`, `low`, `medium` and `high` when it reasons, `off` alone otherwise. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal.",
         "properties": {
           "temperature": {
             "type": "string",

@@ -213,7 +213,7 @@ export function RunOverridesPanel({
       {orgModels && orgModels.length > 0 && (
         <ModelGenerationFields
           value={value.generation_config_override ?? {}}
-          capabilities={selectedModel?.generation}
+          model={selectedModel}
           onChange={(generation) => {
             if (Object.keys(generation).length === 0) {
               const { generation_config_override: _omit, ...rest } = value;

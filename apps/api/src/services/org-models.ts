@@ -11,7 +11,11 @@ import {
   lookupCatalogModel,
   piProviderOf,
 } from "./model-catalog.ts";
-import { buildPiModel, clampPiReasoningLevel } from "@appstrate/runner-pi/pi-model";
+import {
+  buildPiModel,
+  clampPiReasoningLevel,
+  piReasoningLevels,
+} from "@appstrate/runner-pi/pi-model";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   MODEL_INPUT_MODALITIES,
@@ -42,9 +46,9 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { listedModelIds } from "./model-providers/model-listing.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
+  MODEL_REASONING_LEVELS,
   ModelGenerationError,
   resolveModelGenerationSettings,
-  UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
   type ModelReasoningLevel,
@@ -282,50 +286,50 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   return mergeSystemAndDb<ModelDefinition, (typeof renderableRows)[number], OrgModelInfo>({
     system,
     rows: renderableRows,
-    mapSystem: (id, def): OrgModelInfo => ({
-      id,
-      ...resolveModelMetadata(
-        def,
-        def.modelId,
-        resolveCatalogDefaults(def.providerId, def.modelId, "bundled"),
-      ),
-      generation: generationOf(
-        resolveCatalogDefaults(def.providerId, def.modelId, "bundled"),
-        def.aliased === true,
-      ),
-      apiShape: def.apiShape,
-      providerId: def.providerId,
-      provider_name: getModelProvider(def.providerId)?.displayName ?? null,
-      pi_provider: resolvePiProvider(def.providerId),
-      pi_dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
-      base_url: def.baseUrl,
-      modelId: def.modelId,
-      enabled: def.enabled !== false,
-      is_default: pointer !== null ? id === pointer : def.isDefault === true,
-      // System (env) models read their key from `SYSTEM_PROVIDER_KEYS` — no
-      // stored blob to be revoked or to stop decrypting, so never "dead".
-      needs_reconnection: false,
-      aliased: def.aliased === true,
-      iconUrl: def.iconUrl ?? null,
-      source: "built-in",
-      credentialId: def.credentialId,
-      created_by: null,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    mapSystem: (id, def): OrgModelInfo => {
+      const defaults = resolveCatalogDefaults(def.providerId, def.modelId, "bundled");
+      const metadata = resolveModelMetadata(def, def.modelId, defaults);
+      return {
+        id,
+        ...metadata,
+        generation: generationOf(defaults, {
+          apiShape: def.apiShape,
+          reasoning: metadata.reasoning,
+          aliased: def.aliased === true,
+        }),
+        apiShape: def.apiShape,
+        providerId: def.providerId,
+        provider_name: getModelProvider(def.providerId)?.displayName ?? null,
+        pi_provider: resolvePiProvider(def.providerId),
+        pi_dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
+        base_url: def.baseUrl,
+        modelId: def.modelId,
+        enabled: def.enabled !== false,
+        is_default: pointer !== null ? id === pointer : def.isDefault === true,
+        // System (env) models read their key from `SYSTEM_PROVIDER_KEYS` — no
+        // stored blob to be revoked or to stop decrypting, so never "dead".
+        needs_reconnection: false,
+        aliased: def.aliased === true,
+        iconUrl: def.iconUrl ?? null,
+        source: "built-in",
+        credentialId: def.credentialId,
+        created_by: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     mapRow: (row): OrgModelInfo => {
       const creds = credByRow.get(row.id)!;
+      const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+      const metadata = resolveModelMetadata(row, row.modelId, defaults);
       return {
         id: row.id,
-        ...resolveModelMetadata(
-          row,
-          row.modelId,
-          resolveCatalogDefaults(creds.providerId, row.modelId),
-        ),
-        generation: generationOf(
-          resolveCatalogDefaults(creds.providerId, row.modelId),
-          row.aliased,
-        ),
+        ...metadata,
+        generation: generationOf(defaults, {
+          apiShape: creds.apiShape,
+          reasoning: metadata.reasoning,
+          aliased: row.aliased,
+        }),
         apiShape: creds.apiShape,
         providerId: creds.providerId,
         provider_name: getModelProvider(creds.providerId)?.displayName ?? null,
@@ -839,10 +843,47 @@ export function resolveCatalogDefaults(
   };
 }
 
+/** What decides the controls of a model: its API, its declared reasoning, and whether it is an alias. */
+interface GenerationSubject {
+  apiShape: string;
+  reasoning: boolean | null;
+  aliased: boolean;
+}
+
+/**
+ * The controls of a model the catalog has no record of: the reasoning levels Pi
+ * takes for the model this platform builds for it ({@link buildPiModel}).
+ * Its temperature support stays unknown.
+ */
+function unrecordedGeneration({
+  apiShape,
+  reasoning,
+}: GenerationSubject): ModelGenerationCapabilities {
+  const levels = new Set<string>(
+    piReasoningLevels(buildPiModel({ id: "", apiShape, baseUrl: "", reasoning })),
+  );
+  return {
+    temperature: "unknown",
+    reasoning: {
+      supported: reasoning ? "supported" : "unsupported",
+      adaptive: null,
+      levels: Object.fromEntries(
+        MODEL_REASONING_LEVELS.map((level) => [
+          level,
+          levels.has(level) ? "supported" : "unsupported",
+        ]),
+      ),
+    },
+  };
+}
+
 /** The controls a caller may set: an alias's are its public contract, never its backing's. */
-function generationOf(defaults: CatalogDefaults, aliased: boolean): ModelGenerationCapabilities {
-  const generation = defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES;
-  return aliased ? projectAliasedGenerationCapabilities(generation) : generation;
+function generationOf(
+  defaults: CatalogDefaults,
+  subject: GenerationSubject,
+): ModelGenerationCapabilities {
+  const generation = defaults.generation ?? unrecordedGeneration(subject);
+  return subject.aliased ? projectAliasedGenerationCapabilities(generation) : generation;
 }
 
 function resolvePiProvider(providerId: string): string | null {
@@ -864,6 +905,7 @@ function resolvePiDialect(
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   // The bundled registry alone: the platform pays for a system model.
   const defaults = resolveCatalogDefaults(def.providerId, def.modelId, "bundled");
+  const metadata = resolveModelMetadata(def, def.modelId, defaults);
   return {
     providerId: def.providerId,
     piProvider: resolvePiProvider(def.providerId),
@@ -872,8 +914,12 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    ...resolveModelMetadata(def, def.modelId, defaults),
-    generation: generationOf(defaults, def.aliased === true),
+    ...metadata,
+    generation: generationOf(defaults, {
+      apiShape: def.apiShape,
+      reasoning: metadata.reasoning,
+      aliased: def.aliased === true,
+    }),
     isSystemModel: true,
     aliased: def.aliased === true,
     aliasId: def.id,
@@ -890,6 +936,7 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+  const metadata = resolveModelMetadata(row, row.modelId, defaults);
   return {
     providerId: creds.providerId,
     piProvider: resolvePiProvider(creds.providerId),
@@ -898,8 +945,12 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    ...resolveModelMetadata(row, row.modelId, defaults),
-    generation: generationOf(defaults, row.aliased),
+    ...metadata,
+    generation: generationOf(defaults, {
+      apiShape: creds.apiShape,
+      reasoning: metadata.reasoning,
+      aliased: row.aliased,
+    }),
     isSystemModel: false,
     aliased: row.aliased,
     aliasId: row.id,
