@@ -104,6 +104,13 @@ test.describe("Space authentication settings — UI", () => {
     );
     // Write-only: the stored password is never sent back to fill the field.
     await expect(field(smtp, "Mot de passe").locator("input")).toHaveValue("");
+    // …so it has to be typed again on every save, and the field says so.
+    await expect(field(smtp, "Mot de passe").locator("input")).toHaveAttribute("required", "");
+    await expect(
+      field(smtp, "Mot de passe").getByText(
+        "Le mot de passe enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.",
+      ),
+    ).toBeVisible();
 
     const res = await apiClient.get(`/spaces/${spaceId}/smtp-config`);
     expect(res.status()).toBe(200);
@@ -162,6 +169,12 @@ test.describe("Space authentication settings — UI", () => {
       "openid email profile",
     );
     await expect(field(google, "Client Secret").locator("input")).toHaveValue("");
+    await expect(field(google, "Client Secret").locator("input")).toHaveAttribute("required", "");
+    await expect(
+      field(google, "Client Secret").getByText(
+        "Le secret enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.",
+      ),
+    ).toBeVisible();
     // The other provider shares the tab, not the row.
     await expect(section(page, /^GitHub Sign-In/).getByText("Non configuré")).toBeVisible();
 

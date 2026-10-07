@@ -379,6 +379,13 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **The space authentication tab no longer offers to keep a stored secret**
+  (#1725). With SMTP or a social provider already configured, the password
+  or client secret field read "leave empty to keep the current one" and was
+  optional, while saving always replaces the secret: an empty field failed
+  with a raw validation error in a toast. The field is now required on every
+  save, and its hint says the stored value is never displayed and has to be
+  entered again.
 - **An import no longer answers 201 for a version it does not create**
   (#1699). Importing a new version lower than the highest published one
   replaced the draft, published nothing and still answered 201. It is now
