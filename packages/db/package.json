@@ -34,7 +34,7 @@
     "@aws-sdk/lib-storage": "^3.1141.0",
     "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@electric-sql/pglite": "^0.5.8",
-    "better-auth": "1.7.6",
+    "better-auth": "1.7.7",
     "drizzle-orm": "^0.45.3",
     "nodemailer": "^10.0.11",
     "postgres": "^3.4.9",
