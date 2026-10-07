@@ -544,8 +544,10 @@ export const mePaths = {
         "they could attach when building an agent in the current space (their own or " +
         "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
-        "respect the caller's role (operations beyond it 403 at invoke time). Space context " +
-        "resolves from `X-Space-Id`, the API key's space, or the org default.",
+        "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
+        "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
+        "is refused — else the one `X-Space-Id` names; with neither the request is a 400, " +
+        "except through the MCP server, which falls back to the org's default space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -600,11 +602,10 @@ export const mePaths = {
                   space: {
                     type: "object",
                     description:
-                      "The space this request resolved to (`X-Space-Id`, else the API key's " +
-                      "space, else the org default). Every list in this payload is scoped to " +
-                      "it. An empty list means this space holds nothing of that kind, this is " +
-                      "not the space you meant, or the caller's permissions do not cover that " +
-                      "list.",
+                      "The space this request resolved to. Every list in this payload is " +
+                      "scoped to it. An empty list means nothing of that kind is available to " +
+                      "this caller in this space, this is not the space you meant, or the " +
+                      "caller's permissions do not cover that list.",
                     required: ["id", "name", "personal"],
                     properties: {
                       id: { type: "string" },

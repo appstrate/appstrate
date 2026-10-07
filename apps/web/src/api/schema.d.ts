@@ -2045,7 +2045,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -14732,7 +14732,7 @@ export interface operations {
                             /** @description Organization slug. */
                             slug?: string | null;
                         };
-                        /** @description The space this request resolved to (`X-Space-Id`, else the API key's space, else the org default). Every list in this payload is scoped to it. An empty list means this space holds nothing of that kind, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        /** @description The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
                         space: {
                             id: string;
                             /** @description Human-readable space name. */
