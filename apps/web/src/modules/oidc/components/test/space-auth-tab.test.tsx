@@ -30,9 +30,9 @@ const SPACE_ID = "spc_a";
 const STAMP = "2026-09-05T10:00:00Z";
 
 const SMTP_HINT =
-  "Le mot de passe enregistré n'est jamais affiché : saisissez-le à nouveau à chaque modification.";
+  "Le mot de passe enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.";
 const SOCIAL_HINT =
-  "Le secret enregistré n'est jamais affiché : saisissez-le à nouveau à chaque modification.";
+  "Le secret enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.";
 
 const SMTP: SmtpConfigView = {
   spaceId: SPACE_ID,
@@ -113,15 +113,17 @@ function secretInput(section: string): string {
 }
 
 describe("a configured section", () => {
-  const { smtp, google } = renderSections({ smtp: SMTP, google: GOOGLE });
+  const rows = { smtp: SMTP, google: GOOGLE };
 
   it("requires the SMTP password again and says so", () => {
+    const { smtp } = renderSections(rows);
     expect(smtp).toContain("Configuré");
     expect(secretInput(smtp)).toContain('required=""');
     expect(smtp).toContain(SMTP_HINT);
   });
 
   it("requires the client secret again and says so", () => {
+    const { google } = renderSections(rows);
     expect(google).toContain("Configuré");
     expect(secretInput(google)).toContain('required=""');
     expect(google).toContain(SOCIAL_HINT);
@@ -129,15 +131,17 @@ describe("a configured section", () => {
 });
 
 describe("an unconfigured section", () => {
-  const { smtp, github } = renderSections({ smtp: null, google: GOOGLE });
+  const rows = { smtp: null, google: GOOGLE };
 
   it("requires the SMTP password, with no hint about a stored one", () => {
+    const { smtp } = renderSections(rows);
     expect(smtp).toContain("Non configuré");
     expect(secretInput(smtp)).toContain('required=""');
     expect(smtp).not.toContain(SMTP_HINT);
   });
 
   it("requires the client secret, with no hint about a stored one", () => {
+    const { github } = renderSections(rows);
     expect(github).toContain("Non configuré");
     expect(secretInput(github)).toContain('required=""');
     expect(github).not.toContain(SOCIAL_HINT);

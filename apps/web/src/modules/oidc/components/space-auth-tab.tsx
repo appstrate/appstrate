@@ -151,7 +151,6 @@ function SmtpSection() {
               type="password"
               value={form.pass}
               onChange={(e) => setForm({ ...form, pass: e.target.value })}
-              placeholder={initial ? "••••••••" : undefined}
               required
             />
           </Field>
@@ -367,7 +366,6 @@ function SocialSection({
             type="password"
             value={form.clientSecret}
             onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-            placeholder={config ? "••••••••" : undefined}
             required
           />
         </Field>

@@ -108,7 +108,7 @@ test.describe("Space authentication settings — UI", () => {
     await expect(field(smtp, "Mot de passe").locator("input")).toHaveAttribute("required", "");
     await expect(
       field(smtp, "Mot de passe").getByText(
-        "Le mot de passe enregistré n'est jamais affiché : saisissez-le à nouveau à chaque modification.",
+        "Le mot de passe enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.",
       ),
     ).toBeVisible();
 
@@ -172,7 +172,7 @@ test.describe("Space authentication settings — UI", () => {
     await expect(field(google, "Client Secret").locator("input")).toHaveAttribute("required", "");
     await expect(
       field(google, "Client Secret").getByText(
-        "Le secret enregistré n'est jamais affiché : saisissez-le à nouveau à chaque modification.",
+        "Le secret enregistré n'est jamais affiché : saisissez-le à nouveau à chaque enregistrement.",
       ),
     ).toBeVisible();
     // The other provider shares the tab, not the row.
