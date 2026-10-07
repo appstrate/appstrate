@@ -19333,6 +19333,16 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "409": {
+            "description": "A package with this name already exists (`code: name_collision`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
           "415": {
             "$ref": "#/components/responses/UnsupportedMediaType"
           }

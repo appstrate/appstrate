@@ -6,11 +6,12 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
  * 429 for the `/api/auth/oauth2/*` endpoints, which Better Auth's own limiter
  * guards (the budgets are the `rateLimit` block of `oauthProvider()` in
  * `auth/plugins.ts`); the mount restates its refusal (`oauthRateLimitResponse`)
- * in the RFC 6749 §5.2 shape, not ProblemDetail: OAuth clients parse `{ error }`.
+ * as an RFC 6749 `{ error, error_description }` body, not ProblemDetail: OAuth
+ * clients parse `{ error }`.
  */
 const providerRateLimited = {
   description:
-    "Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`).",
+    "Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1).",
   headers: {
     "Retry-After": {
       description: "Seconds until the current window resets.",

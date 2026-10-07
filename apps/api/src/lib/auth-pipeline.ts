@@ -85,7 +85,8 @@ const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
 
 /**
  * Better Auth's limiter answers `{ message }` under `X-Retry-After`, untyped; on the OAuth
- * endpoints it is restated as RFC 6749 §5.2 JSON under `Retry-After`, like the CLI limiters.
+ * endpoints it is restated as an RFC 6749 JSON error under `Retry-After`, with the
+ * `temporarily_unavailable` code RFC 6749 §4.1.2.1 defines for the authorization endpoint.
  */
 function oauthRateLimitResponse(path: string, res: Response): Response {
   const retryAfter = res.headers.get("X-Retry-After");
