@@ -785,6 +785,11 @@ export const mePaths = {
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
+                space: {
+                  id: "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                  name: "Sales",
+                  personal: false,
+                },
                 connections: [
                   { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   {

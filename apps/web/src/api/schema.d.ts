@@ -14663,6 +14663,11 @@ export interface operations {
                      *         "name": "Acme",
                      *         "slug": "acme"
                      *       },
+                     *       "space": {
+                     *         "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                     *         "name": "Sales",
+                     *         "personal": false
+                     *       },
                      *       "connections": [
                      *         {
                      *           "integration_package_id": "@appstrate/gmail",
