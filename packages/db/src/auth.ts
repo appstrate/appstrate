@@ -597,8 +597,8 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
           magicLink({
             // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
             // chain still enforces per-context policy: the OIDC module's
-            // `oidcBeforeSignupGuard` blocks creation for org-level clients with
-            // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
+            // `oidcBeforeSignupGuard` blocks creation for an OIDC client with
+            // `allowSignup: false` (the client the link's token is bound to),
             // and the ee module's free-tier hook applies its own gate. Outside an OIDC
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,

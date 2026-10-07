@@ -31,13 +31,14 @@ packages/core (@appstrate/core)→ 0 pi-* imports
 Agent runs execute the SDK inside a sandboxed container, and credentials are
 mediated by the sidecar (see `SIDECAR.md`). The API process reaches pi-ai only
 through `@appstrate/runner-pi`: the model registry and pricing (`pi-model.ts`,
-below) and the in-process chat engine.
+below) and the in-process chat engine, whose per-turn credential store
+(`InMemoryCredentialStore`) comes from the barrel.
 
-The entire import surface, after this hardening, is **four barrel files** and `pi-model.ts`:
+The entire import surface, after this hardening, is **four barrel files**, `pi-model.ts` and `pi-payload.ts`:
 
 | Package                | Barrel                             | Symbols consumed                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `Type` (value), plus `createAgentSession`, `DefaultResourceLoader`, `SessionManager`, `SettingsManager` through the `loadPiCodingAgentSdk()` dynamic loader; `ExtensionAPI`, `ExtensionFactory`, `ModelRuntime`, `Api`, `KnownApi`, `Model`, `Transport`, `Message`, `AgentSessionEvent`, `AssistantMessageEvent`, `Usage` (types)                                                             |
+| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `Type`, `InMemoryCredentialStore` (values), plus `createAgentSession`, `DefaultResourceLoader`, `SessionManager`, `SettingsManager` through the `loadPiCodingAgentSdk()` dynamic loader; `ExtensionAPI`, `ExtensionFactory`, `ModelRuntime`, `Api`, `KnownApi`, `Model`, `Transport`, `Message`, `AgentSessionEvent`, `AssistantMessageEvent`, `Usage` (types)                                 |
 | `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type` (value); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                                     |
 | `runtime-pi` (sidecar) | `runtime-pi/sidecar/pi-sdk.ts`     | `streamSimple` from the five `pi-ai/api/*` protocol entrypoints, `builtinProviders` from `pi-ai/providers/all` and `normalizeContext` (values, wrapped as `streamBacking`); `Api`, `AssistantMessage`, `AssistantMessageEvent`, `AssistantMessageEventStream`, `Context`, `Model`, `SimpleStreamOptions`, `ThinkingLevel`, `ToolCall`, `TranscriptContext`, `Usage`, `PiMessagesEvent` (types) |
 | `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                                                                                         |
@@ -52,6 +53,11 @@ on every boot (model catalog, ledger pricing). Measured cost: ~14 ms to import;
 the sidecar bundle grows 1.55 → 2.15 MB. The sidecar barrel is the one exception: it
 imports `pi-ai/providers/all` itself to dispatch through the registry's providers,
 at no extra load cost since the sidecar already loads `pi-model`.
+
+`packages/runner-pi/src/pi-payload.ts` is the other file off the barrel: it imports
+`streamSimple` from `pi-ai/compat` to capture the request body Pi builds for a model,
+without a network call. Only the model-catalog build (`scripts/build-model-catalog.ts`)
+and the tests import it; nothing on the run path does.
 
 > `examples/custom-skill/skill.ts` intentionally imports
 > `@earendil-works/pi-coding-agent` directly — it is user-facing documentation that
@@ -85,13 +91,13 @@ one-line override for them too.
 
 ### Single swap point (barrel) + ESLint guard
 
-Because the SDK is imported only through the four `pi-sdk.ts` barrels and
-`pi-model.ts`, swapping the implementation is a change to those files alone — no
+Because the SDK is imported only through the four `pi-sdk.ts` barrels,
+`pi-model.ts` and `pi-payload.ts`, swapping the implementation is a change to those files alone — no
 agent logic moves.
 
 A `no-restricted-imports` rule in `eslint.config.mjs` forbids any direct
 `@earendil-works/pi-*` import (the whole vendor family — including subpaths) outside
-the barrels (the barrels and `pi-model.ts` are exempted via `ignores`). The guard covers every
+the barrels (the barrels, `pi-model.ts` and `pi-payload.ts` are exempted via `ignores`). The guard covers every
 declared SDK consumer tree: `packages/runner-pi/src`, `runtime-pi`, `apps/cli/src`,
 `apps/api/src`, and `packages/afps-runtime/src`. `afps-runtime` is SDK-agnostic and
 imports zero pi-\* symbols today, so it has no barrel — the guard simply keeps it

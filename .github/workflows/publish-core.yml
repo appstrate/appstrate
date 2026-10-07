@@ -87,8 +87,10 @@ jobs:
       - name: TypeScript type-check
         run: tsc --noEmit
 
+      # The package's `test` script carries the per-test timeout the PR gate
+      # applies (`scripts/run-tests.ts`); bare `bun test` would run with Bun's 5 s.
       - name: Tests
-        run: bun test
+        run: bun run test
 
       - name: Check schemas are up-to-date
         run: |

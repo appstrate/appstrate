@@ -252,7 +252,8 @@ const proxyResponses = {
       "`credential_not_found` — no credentials or connection for the requested integration, " +
       "including when no connection of it is accessible to the caller, when the `X-Run-Id` " +
       "run bound none, or when the integration has no published version; `not_found` when " +
-      "`X-Run-Id` names no run of this space.",
+      "`X-Run-Id` names no run of this space, or when the integration is not active in this " +
+      "space.",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

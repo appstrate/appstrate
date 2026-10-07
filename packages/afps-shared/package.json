@@ -66,6 +66,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --timeout=15000"
   }
 }

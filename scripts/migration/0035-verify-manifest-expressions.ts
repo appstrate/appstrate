@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0035 — READ-ONLY pre-flight, run BEFORE deploying #1641:
+ * 0035 — READ-ONLY pre-flight, run BEFORE deploying the release that refuses these expressions:
  *
  *   DATABASE_URL=<platform> bun scripts/migration/0035-verify-manifest-expressions.ts
  *

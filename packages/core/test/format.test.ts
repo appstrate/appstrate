@@ -54,4 +54,10 @@ describe("formatBytes", () => {
   it("keeps the English units for another locale", () => {
     expect(formatBytes(2048, "en")).toBe("2.0 KB");
   });
+
+  it("renders the English form for a malformed locale tag instead of throwing", () => {
+    expect(formatBytes(2048, "fr_FR")).toBe("2.0 KB");
+    expect(formatBytes(512, "fr_FR")).toBe("512 B");
+    expect(formatBytes(2048, "")).toBe("2.0 KB");
+  });
 });
