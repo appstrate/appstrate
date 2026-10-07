@@ -6,7 +6,8 @@
  * write it exists for must be one the server refuses there by rule (409
  * `personal_space_*`, RBAC spec §3.6) — and a page left unflagged must be one
  * whose write still works. Flagging a route with no refusal behind it hides a
- * usable page; this suite fails until the route has an entry here.
+ * usable page; this suite fails until the route has an entry here, or, for a
+ * module feature's page, in the module suite `MODULE_SUITES` names.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -20,7 +21,6 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { getModules } from "../../../src/lib/modules/module-loader.ts";
 import { ROUTE_ACCESS } from "../../../../web/src/lib/route-access.ts";
 
 const app = getTestApp();
@@ -30,9 +30,11 @@ const flagged = Object.entries(ROUTE_ACCESS as Record<string, Declaration>)
   .filter(([, access]) => access.teamSpaceOnly)
   .map(([path, access]) => ({ path, feature: access.feature }));
 
-const loadedFeatures = new Set(
-  [...getModules().values()].flatMap((mod) => Object.keys(mod.features ?? {})),
-);
+/** Repo-relative suite pinning a module feature's flagged pages, with the module loaded. */
+const MODULE_SUITES: Record<string, string> = {
+  oidc: "apps/api/src/modules/oidc/test/integration/routes/spa-team-space-routes.test.ts",
+};
+const coreFlagged = flagged.filter((route) => route.feature === undefined).map((r) => r.path);
 
 const json = (ctx: TestContext, spaceId: string) => ({
   ...authHeaders(ctx, { "X-Space-Id": spaceId }),
@@ -59,17 +61,6 @@ const CREATE_IN_PERSONAL_SPACE: Record<
       headers: json(ctx, personalId),
       body: JSON.stringify({ name: "headless", scopes: ["agents:read"] }),
     }),
-  "/org-settings/space/oauth": (ctx, personalId) =>
-    app.request("/api/oauth/clients", {
-      method: "POST",
-      headers: json(ctx, ctx.defaultSpaceId),
-      body: JSON.stringify({
-        level: "space",
-        name: "Portal",
-        redirectUris: ["https://acme.example.com/oauth/callback"],
-        referencedSpaceId: personalId,
-      }),
-    }),
   "/end-users": (ctx, personalId) =>
     app.request("/api/end-users", {
       method: "POST",
@@ -91,17 +82,23 @@ describe("SPA teamSpaceOnly routes ↔ personal-space refusals", () => {
     personalId = data.find((space) => space.personal)!.id;
   });
 
-  it("pins every flagged route to a create, and no other", () => {
-    expect(flagged.length).toBeGreaterThan(0);
-    expect(Object.keys(CREATE_IN_PERSONAL_SPACE).sort()).toEqual(
-      flagged.map((route) => route.path).sort(),
-    );
+  it("pins every flagged core route to a create, and no other", () => {
+    expect(coreFlagged.length).toBeGreaterThan(0);
+    expect(Object.keys(CREATE_IN_PERSONAL_SPACE).sort()).toEqual([...coreFlagged].sort());
   });
 
-  for (const route of flagged) {
-    const unloaded = route.feature !== undefined && !loadedFeatures.has(route.feature);
-    it.skipIf(unloaded)(`${route.path}: its create is refused in a personal space`, async () => {
-      const res = await CREATE_IN_PERSONAL_SPACE[route.path]!(ctx, personalId);
+  it("leaves every flagged module route to a module suite that exists", async () => {
+    for (const { feature } of flagged) {
+      if (feature === undefined) continue;
+      expect(Object.keys(MODULE_SUITES)).toContain(feature);
+      const suite = new URL(`../../../../../${MODULE_SUITES[feature]}`, import.meta.url);
+      expect(await Bun.file(suite).exists()).toBe(true);
+    }
+  });
+
+  for (const path of coreFlagged) {
+    it(`${path}: its create is refused in a personal space`, async () => {
+      const res = await CREATE_IN_PERSONAL_SPACE[path]!(ctx, personalId);
       const problem = await expectProblem(res, 409);
       expect(problem.code).toMatch(/^personal_space_/);
     });

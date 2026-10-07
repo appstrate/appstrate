@@ -12,9 +12,9 @@
  * config shape is the cheapest regression guard available.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { _rebuildAuthForTesting, getAuth } from "@appstrate/db/auth";
+import { describe, it, expect } from "bun:test";
+import { getAuth } from "@appstrate/db/auth";
+import { useAuthEnv } from "../helpers/auth-env.ts";
 
 const SOCIAL_TEST_VARS = {
   GOOGLE_CLIENT_ID: "test-google-client-id",
@@ -24,25 +24,7 @@ const SOCIAL_TEST_VARS = {
 } as const;
 
 describe("auth social provider config — emailVerified comes from the provider", () => {
-  const saved: Record<string, string | undefined> = {};
-
-  beforeAll(() => {
-    for (const [key, value] of Object.entries(SOCIAL_TEST_VARS)) {
-      saved[key] = process.env[key];
-      process.env[key] = value;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
-
-  afterAll(() => {
-    for (const [key, original] of Object.entries(saved)) {
-      if (original === undefined) delete process.env[key];
-      else process.env[key] = original;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
+  useAuthEnv(SOCIAL_TEST_VARS);
 
   it.each(["google", "github"])("%s carries no mapProfileToUser override", (provider) => {
     // Without one, `emailVerified` is the provider's own answer (Google's

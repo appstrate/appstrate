@@ -604,16 +604,15 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
   let ctx: TestContext;
   let connId: string;
 
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+  /** An api_key integration active in the default space, with a connection 3 rejections deep. */
+  async function seedRejectedConnection(id: string): Promise<string> {
     await seedPackage({
-      id: packageId,
+      id,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
       draftManifest: localIntegrationManifest({
-        name: packageId,
+        name: id,
         auths: {
           key: {
             type: "api_key",
@@ -623,13 +622,13 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
         },
       }),
     });
-    await seedPublishedVersion(packageId, "1.0.0");
-    await seedPackageShare(ctx.defaultSpaceId, packageId);
-    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId });
+    await seedPublishedVersion(id, "1.0.0");
+    await seedPackageShare(ctx.defaultSpaceId, id);
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: id });
     const [conn] = await db
       .insert(integrationConnections)
       .values({
-        integrationId: packageId,
+        integrationId: id,
         authKey: "key",
         accountId: "acct-1",
         label: "acct-1",
@@ -639,15 +638,21 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
         refreshFailureCount: 3,
       })
       .returning({ id: integrationConnections.id });
-    connId = conn!.id;
+    return conn!.id;
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+    connId = await seedRejectedConnection(packageId);
   });
 
-  async function callReturning(status: number): Promise<number> {
+  async function callReturning(status: number, integrationId = packageId): Promise<number> {
     const res = await proxyCall({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      integrationId: packageId,
+      integrationId,
       method: "GET",
       target: "https://api.example.com/v1/items",
       headers: {},
@@ -656,24 +661,36 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     return res.status;
   }
 
-  async function failures(): Promise<number> {
+  async function failures(id = connId): Promise<number> {
     const [row] = await db
       .select({ count: integrationConnections.refreshFailureCount })
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
+      .where(eq(integrationConnections.id, id));
     return row!.count;
+  }
+
+  /** The streak is cleared in the background, after the call returns. */
+  async function clearedWithin(id: string, ms: number): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    while ((await failures(id)) !== 0 && Date.now() < deadline) await Bun.sleep(10);
+    return (await failures(id)) === 0;
   }
 
   it("a 2xx ends the streak", async () => {
     expect(await callReturning(200)).toBe(200);
-    const deadline = Date.now() + 1000;
-    while ((await failures()) !== 0 && Date.now() < deadline) await Bun.sleep(10);
-    expect(await failures()).toBe(0);
+    expect(await clearedWithin(connId, 1000)).toBe(true);
   });
 
   it("a non-2xx leaves it", async () => {
+    const sentinelId = "@cprefreshorg/sentinel";
+    const sentinel = await seedRejectedConnection(sentinelId);
+
     expect(await callReturning(403)).toBe(403);
-    await Bun.sleep(50);
+    // A clear the 403 started would be issued before this 2xx's: once this one
+    // has landed, so has that one.
+    expect(await callReturning(200, sentinelId)).toBe(200);
+    expect(await clearedWithin(sentinel, 1000)).toBe(true);
+
     expect(await failures()).toBe(3);
   });
 });

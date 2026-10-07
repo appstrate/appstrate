@@ -70,10 +70,21 @@ export interface PostBootstrapOrgInfo {
   userEmail: string;
 }
 
-let _postBootstrapOrgHook: ((info: PostBootstrapOrgInfo) => Promise<void>) | null = null;
+type PostBootstrapOrgHook = (info: PostBootstrapOrgInfo) => Promise<void>;
 
-export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Promise<void>): void {
+let _postBootstrapOrgHook: PostBootstrapOrgHook | null = null;
+
+export function setPostBootstrapOrgHook(hook: PostBootstrapOrgHook): void {
   _postBootstrapOrgHook = hook;
+}
+
+/** Test-only: swap the hook (null = none) and return the previous one. */
+export function _swapPostBootstrapOrgHookForTesting(
+  hook: PostBootstrapOrgHook | null,
+): PostBootstrapOrgHook | null {
+  const previous = _postBootstrapOrgHook;
+  _postBootstrapOrgHook = hook;
+  return previous;
 }
 
 /**
@@ -151,17 +162,25 @@ async function maybeBootstrapOrgForOwner(
 // state (e.g. the OIDC pending-client cookie in `auth/signup-guard.ts`)
 // can do so without adding a parallel hook channel.
 
-let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Promise<void>) | null =
-  null;
+type BeforeSignupHook = (email: string, ctx: BeforeSignupContext) => void | Promise<void>;
+
+let _beforeSignupHook: BeforeSignupHook | null = null;
 
 let _afterSignupHook:
   ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>) | null =
   null;
 
-export function setBeforeSignupHook(
-  hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,
-): void {
+export function setBeforeSignupHook(hook: BeforeSignupHook): void {
   _beforeSignupHook = hook;
+}
+
+/** Test-only: swap the hook (null = none) and return the previous one. */
+export function _swapBeforeSignupHookForTesting(
+  hook: BeforeSignupHook | null,
+): BeforeSignupHook | null {
+  const previous = _beforeSignupHook;
+  _beforeSignupHook = hook;
+  return previous;
 }
 
 // ─── Realm resolver (injected at boot, typically by the OIDC module) ───
