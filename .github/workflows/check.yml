@@ -161,6 +161,12 @@ jobs:
   # setup — but it is kept out of the `check` job because it must NOT run inside a
   # workspace install. `timeout-minutes: 15` is deliberate headroom for a slow or
   # degraded registry, not an expected runtime.
+  #
+  # `--pack-unpublished-workspace-deps`: a workspace leaf whose version the
+  # consumer's floor names but npm lacks yet comes from a pack of the workspace,
+  # so the PR bumping a leaf and its consumer's floor together is green and the
+  # leaf is tagged on `main` after merge. The publish workflows never pass it:
+  # publishing a consumer still requires the leaf on npm.
   package-resolution:
     name: Package resolves for consumers (${{ matrix.package }})
     runs-on: ubuntu-latest
@@ -186,7 +192,7 @@ jobs:
       # No `bun install` on purpose — the script only uses Bun stdlib + npm, and a
       # workspace install is precisely the environment that hides the defect.
       - name: Verify ${{ matrix.package }} resolves in a clean consumer install
-        run: bun scripts/verify-package-resolves.ts ${{ matrix.package }}
+        run: bun scripts/verify-package-resolves.ts ${{ matrix.package }} --pack-unpublished-workspace-deps
 
   # The schema the migration chain builds, as a committed fingerprint
   # (`packages/db/schema-catalog.txt`, produced by `scripts/schema-catalog.sql`).

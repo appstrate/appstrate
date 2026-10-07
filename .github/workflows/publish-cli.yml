@@ -34,13 +34,13 @@ jobs:
   publish:
     name: Quality, Tests & Publish
     runs-on: ubuntu-latest
-    # 20m caps the worst case: ~3m of install + tsc + tests + pack +
-    # smoke + publish, up to 12m waiting for the version on the registry
-    # (its own budget, which fails first with a clear error), then the
-    # bunx smoke + GH Release, plus slack. A hang past 20m means npm/CDN
-    # is wedged — fail loud rather than burn the GH Actions minutes
-    # quota until the 6h hard ceiling.
-    timeout-minutes: 20
+    # 35m caps the worst case: ~3m of install + tsc + tests + pack +
+    # smoke + publish, up to 12m waiting for the version in the packument
+    # and up to 15m for its tarball (each its own budget, which fails first
+    # with a clear error), then the bunx smoke + GH Release, plus slack. A
+    # hang past 35m means npm/CDN is wedged — fail loud rather than burn the
+    # GH Actions minutes quota until the 6h hard ceiling.
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: apps/cli
@@ -207,6 +207,32 @@ jobs:
             sleep "$POLL_SECONDS"
           done
           echo "appstrate@$VERSION visible after ${SECONDS}s"
+
+      - name: Wait for the tarball on the npm registry
+        # The packument lists a version minutes before the CDN serves its
+        # tarball: for 1.0.0-beta.65 bunx resolved the version, then got a 404
+        # on the .tgz. So poll the tarball URL bun downloads (no cache buster)
+        # until it answers 200, for up to 15 min; a curl error or a request hung
+        # past 30 s counts as "not yet".
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          WAIT_MINUTES: 15
+          POLL_SECONDS: 15
+        run: |
+          TARBALL_URL="https://registry.npmjs.org/appstrate/-/appstrate-$VERSION.tgz"
+          polls=0
+          until curl -fsS --max-time 30 -o /dev/null "$TARBALL_URL"; do
+            if [ "$SECONDS" -ge $((WAIT_MINUTES * 60)) ]; then
+              echo "::error::npm publish succeeded, but $TARBALL_URL still did not answer 200 after $WAIT_MINUTES minutes. Do NOT republish or re-run this job (npm refuses an existing version): once the tarball is served, check it with 'bunx appstrate@$VERSION __install-source'."
+              exit 1
+            fi
+            polls=$((polls + 1))
+            if [ $((polls % 4)) -eq 0 ]; then
+              echo "appstrate@$VERSION tarball not served yet (${SECONDS}s elapsed)"
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          echo "appstrate@$VERSION tarball served after ${SECONDS}s"
 
       - name: Post-publish smoke test (registry → bunx)
         # Runs what users download, once: catches wrong registry metadata (bin
