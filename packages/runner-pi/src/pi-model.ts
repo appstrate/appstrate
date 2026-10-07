@@ -76,6 +76,11 @@ export function getPiModel(piProvider: string, id: string, api: string): Model<A
   return record?.id === id && record.api === api ? record : undefined;
 }
 
+/** Every provider's records served over `api`. */
+export function listPiModelsOfApi(api: string): Model<Api>[] {
+  return [...PI_PROVIDERS].flatMap((provider) => listPiModels(provider, api));
+}
+
 /** Every provider's record of `id`, whatever its API shape. */
 export function findPiModelsById(id: string): Model<Api>[] {
   return [...PI_PROVIDERS].flatMap((provider) => {

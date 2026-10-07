@@ -125,7 +125,7 @@ function assertInferenceProbeable(def: ModelProviderDefinition): void {
         `speaks openai-completions only.`,
     );
   }
-  if (listCatalogModels(def).length === 0) {
+  if (listCatalogModels(def, "bundled").length === 0) {
     throw new Error(
       `Model provider ${JSON.stringify(def.providerId)} declares publicModelListing but its ` +
         `offer is empty; the inference probe needs a model to call.`,
@@ -141,7 +141,7 @@ function assertInferenceProbeable(def: ModelProviderDefinition): void {
  */
 function validateCatalogReferences(def: ModelProviderDefinition): void {
   for (const modelId of def.featuredModels) {
-    if (!lookupCatalogModel(def, modelId)) {
+    if (!lookupCatalogModel(def, modelId, "bundled")) {
       throw new Error(
         `Model provider ${JSON.stringify(def.providerId)} features ${JSON.stringify(modelId)}, ` +
           `which is not in its offer (Pi provider ${JSON.stringify(piProviderOf(def))} on ` +
