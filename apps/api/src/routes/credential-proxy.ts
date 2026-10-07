@@ -16,7 +16,8 @@
  *     device-flow JWTs (`oauth2-instance`, `oauth2-dashboard`). Cookie
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
- *   - Explicit `credential-proxy:call` scope — NOT granted by default
+ *   - `credential-proxy:call` scope required — a key created with `scopes` omitted or
+ *     empty carries it when its creator holds it
  *   - Per-space scope (principal cannot reach providers in another space)
  *   - Run binding — `X-Run-Id` confines the call to its run's bound connections
  *     (`selectAccessibleConnection`)
