@@ -23,6 +23,7 @@ import {
   createTestContext,
   createTestUser,
   enableDashboardSso,
+  issuedMagicLinkToken,
 } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -322,10 +323,9 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
 
     /** Open the link last issued for `email`, mailed or withheld. */
     async function openLinkFor(email: string): Promise<Response> {
-      const rows = await db.select().from(verificationTable);
-      const link = rows.find((row) => row.value.includes(`"email":"${email}"`));
+      const token = await issuedMagicLinkToken(email);
       return app.request(
-        `/api/auth/magic-link/verify?token=${encodeURIComponent(link!.identifier)}&callbackURL=%2F`,
+        `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}&callbackURL=%2F`,
       );
     }
 
