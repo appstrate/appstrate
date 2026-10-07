@@ -709,6 +709,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refused before anything is written** (#1753): the 409 `version_not_higher`
   came after the dependencies ordered ahead of the root were inserted.
 - **An invalid `PROXY_URL` is not logged** (#1753): it can carry credentials.
+- **No session manages OAuth clients through Better Auth's client endpoints**
+  (#1754). `/api/auth/oauth2/create-client`, `get-client(s)`,
+  `update-client`, `client/rotate-secret` and `delete-client` answer 401 to
+  every session; platform clients are managed through the org and space
+  OAuth client routes. Unauthenticated dynamic registration is unchanged.
 - **The chat's Pi runtime no longer reads the host's Pi CLI credentials**
   (#1646). Without a credential store of its own it opened the default one
   (`~/.pi/agent/auth.json`), where a credential outranks the key the platform
