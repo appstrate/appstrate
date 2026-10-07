@@ -378,12 +378,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           // previous platform-injected value first so the refreshed delivery
           // plan can install its current header name and value cleanly.
           headers.delete(credentialInjection.header.name);
-          if (refreshed.credentialHeaderName) {
-            // Keep the strip set in sync — the refreshed payload may name a
-            // different header than the original resolution.
-            sensitiveHeaderNames.add(refreshed.credentialHeaderName);
-          }
           credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
+          // Keep the strip set in sync — the refreshed payload may name a
+          // different header than the original resolution.
+          const refreshedCarrier = credentialCarryingHeader(credentialInjection);
+          if (refreshedCarrier) sensitiveHeaderNames.add(refreshedCarrier);
           res = await performFetch({
             ...fetchInit,
             headers,

@@ -26,6 +26,9 @@ import {
   setDefaultModel,
   modelNeedsReconnection,
 } from "../../../src/services/org-models.ts";
+// Imported for its module-level boot: `setDefaultModel` and `listOrgModels`
+// read the model and provider registries only the app helper initialises.
+import "../../helpers/app.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";

@@ -346,7 +346,8 @@ export function createWebhooksRouter() {
     return c.body(null, 204);
   });
 
-  // POST /api/webhooks/:id/test — deliver a synthetic test.ping event
+  // POST /api/webhooks/:id/test — queue a signed test.ping delivery (one
+  // attempt). The 200 confirms it was queued, not that it was delivered.
   router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
     const webhook = await loadWebhookForAction(c, "write");
     const result = await sendTestPing(webhook);

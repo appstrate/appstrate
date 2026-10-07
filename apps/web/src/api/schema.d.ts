@@ -4901,7 +4901,7 @@ export interface paths {
         put?: never;
         /**
          * Send a test ping
-         * @description Deliver a synthetic `test.ping` event to the webhook URL, signed like a real event. The call returns once the delivery is queued; its outcome is a single attempt (never retried) listed by `GET /api/webhooks/{id}/deliveries`. Sent whether or not the webhook is enabled or subscribed to any event.
+         * @description Queue a synthetic `test.ping` event for delivery to the webhook URL, signed like a real event. The 200 confirms the delivery was queued, not that it was delivered: it is a single attempt (never retried), whose outcome `GET /api/webhooks/{id}/deliveries` lists. Sent whether or not the webhook is enabled or subscribed to any event.
          */
         post: operations["testWebhook"];
         delete?: never;
@@ -9357,7 +9357,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
+            /** @description Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
@@ -9527,7 +9527,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Too many requests — the per-IP limiter refused the call (RFC 6749 §5.2 error, `temporarily_unavailable`). */
+            /** @description Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
@@ -19094,6 +19094,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description A package with this name already exists (`code: name_collision`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             415: components["responses"]["UnsupportedMediaType"];
         };
     };
@@ -24846,7 +24855,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Test event queued for delivery */
+            /** @description Test event queued for delivery (one attempt, outcome not yet known) */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

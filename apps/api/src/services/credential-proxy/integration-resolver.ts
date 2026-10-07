@@ -151,7 +151,7 @@ export async function resolveIntegrationProxyCredentials(
  * reactive 401-retry path) and rebuild the payload. `input.connectionId` names
  * the connection the failed call used; the selection still re-checks reach. Never throws for a
  * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
- * a throw would be swallowed and buy nothing. Returns `null` in the four
+ * a throw would be swallowed and buy nothing. Returns `null` in the five
  * not-refreshed cases, which are NOT equivalent and are told apart by what
  * they leave behind:
  *

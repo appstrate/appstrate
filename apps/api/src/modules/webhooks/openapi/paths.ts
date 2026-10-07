@@ -380,7 +380,7 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Send a test ping",
       description:
-        "Deliver a synthetic `test.ping` event to the webhook URL, signed like a real event. The call returns once the delivery is queued; its outcome is a single attempt (never retried) listed by `GET /api/webhooks/{id}/deliveries`. Sent whether or not the webhook is enabled or subscribed to any event.",
+        "Queue a synthetic `test.ping` event for delivery to the webhook URL, signed like a real event. The 200 confirms the delivery was queued, not that it was delivered: it is a single attempt (never retried), whose outcome `GET /api/webhooks/{id}/deliveries` lists. Sent whether or not the webhook is enabled or subscribed to any event.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -388,7 +388,7 @@ export const webhooksPaths = {
       ],
       responses: {
         "200": {
-          description: "Test event queued for delivery",
+          description: "Test event queued for delivery (one attempt, outcome not yet known)",
           headers: {
             "Request-Id": { $ref: "#/components/headers/RequestId" },
             "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },

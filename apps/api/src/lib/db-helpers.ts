@@ -286,7 +286,7 @@ export async function setExactlyOneDefault(opts: SetExactlyOneDefaultOptions): P
  */
 interface DefaultPointer {
   /** Read the pointer (system id, custom UUID, or null). Single read path. */
-  getDefaultId(orgId: string): Promise<string | null>;
+  getDefaultId(orgId: string, executor?: DbOrTx): Promise<string | null>;
   /**
    * Inside the caller's insert transaction: when `newRowId` is the org's very
    * first row of this domain table, point the org default at it; no-op
@@ -299,7 +299,7 @@ interface DefaultPointer {
    * `isSystem`; a custom id must be UUID-shaped AND an org-owned row, else
    * `notFound` is thrown. The `isUuid` guard avoids a 22P02 on the uuid column.
    */
-  setDefault(orgId: string, id: string | null): Promise<void>;
+  setDefault(orgId: string, id: string | null, executor?: DbOrTx): Promise<void>;
   /**
    * Inside the caller's transaction: point the org default at `id` ONLY when no
    * default is set yet; no-op when one already exists. Returns whether it set.
@@ -352,8 +352,8 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
   // Derive the column from the field — one source of truth, no desync.
   const pointerColumn: PgColumn = organizations[pointerField];
 
-  async function getDefaultId(orgId: string): Promise<string | null> {
-    const [row] = await db
+  async function getDefaultId(orgId: string, executor: DbOrTx = db): Promise<string | null> {
+    const [row] = await executor
       .select({ value: pointerColumn })
       .from(organizations)
       .where(eq(organizations.id, orgId))
@@ -373,17 +373,21 @@ export function createDefaultPointer(opts: CreateDefaultPointerOptions): Default
     }
   }
 
-  async function setDefault(orgId: string, id: string | null): Promise<void> {
+  async function setDefault(
+    orgId: string,
+    id: string | null,
+    executor: DbOrTx = db,
+  ): Promise<void> {
     if (id !== null && !isSystem(id)) {
       // A non-UUID id can't be a custom row PK — reject without hitting the
       // `uuid` column (which would raise 22P02 → 500 instead of a clean 404).
       const [row] = isUuid(id)
-        ? await db.select({ id: table.id }).from(table).where(scopeWhere(orgId, id)).limit(1)
+        ? await executor.select({ id: table.id }).from(table).where(scopeWhere(orgId, id)).limit(1)
         : [];
       if (!row) throw notFound(`${entityName} '${id}' not found`);
     }
     const set: Record<string, unknown> = { [pointerField]: id, updatedAt: new Date() };
-    await db.update(organizations).set(set).where(eq(organizations.id, orgId));
+    await executor.update(organizations).set(set).where(eq(organizations.id, orgId));
   }
 
   async function setDefaultIfUnset(tx: Tx, orgId: string, id: string): Promise<boolean> {
