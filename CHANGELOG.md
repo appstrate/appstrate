@@ -22,7 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becomes selectable without a release. Each API process reads it in the
   background when it starts and every hour (two anonymous GETs) and holds it in
   memory; nothing about the instance is sent, nothing is stored and boot never
-  waits on it. Set the variable empty to run on the bundled registry alone.
+  waits on it. Set the variable to `off` to run on the bundled registry alone;
+  an empty value is the default channel, not a switch.
   Until a file is published for a Pi version the read answers 404 and nothing
   changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
 - **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).

@@ -77,7 +77,8 @@ time in seconds and only ever grows.
 
 A record that fails 4 or 5 is skipped and logged. A file that fails 1 to 3 is
 refused whole and the one held stays. A file replaces the one a process holds
-only with a higher `serial`.
+only with a higher `serial`. Every read that fails or is refused logs one
+warning, so a process that cannot read its channel says so once an hour.
 
 ## Who reads it
 
@@ -108,8 +109,9 @@ primitive is an asynchronous read-through of single rows, and the catalog is
 read synchronously by every lookup of a model. It is process state loaded at
 start, like the model-provider registry, refreshed on a timer.
 
-`MODEL_CATALOG_URL` empty starts nothing: the instance runs on the bundled
-registry alone.
+`MODEL_CATALOG_URL=off` starts nothing: the instance runs on the bundled
+registry alone. An empty value does not: like every variable here it then
+takes its default, the public channel.
 
 ## The producer
 

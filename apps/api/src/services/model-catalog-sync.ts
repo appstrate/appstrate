@@ -86,10 +86,10 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Read the channel now and every hour, in the background: boot never waits on
- * the network. An empty `MODEL_CATALOG_URL` starts nothing. Idempotent.
+ * the network. `MODEL_CATALOG_URL=off` starts nothing. Idempotent.
  */
 export function startModelCatalogSync(options: ModelCatalogSyncOptions = {}): void {
-  if (timer || !(options.url ?? getEnv().MODEL_CATALOG_URL)) return;
+  if (timer || (options.url ?? getEnv().MODEL_CATALOG_URL) === "off") return;
   const refresh = () =>
     void refreshModelCatalog(options).catch((err) => {
       logger.warn("model catalog not refreshed — serving what this process holds", {
