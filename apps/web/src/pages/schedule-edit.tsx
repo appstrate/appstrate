@@ -9,6 +9,7 @@ import {
   useScheduleFormDeps,
 } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { isQueryInFlight } from "../lib/query-state";
 import { ScheduleForm } from "../components/schedule-form";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
@@ -27,14 +28,15 @@ export function ScheduleEditPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
-  const { data: schedule, isLoading, error } = useScheduleById(id);
+  const scheduleQuery = useScheduleById(id);
+  const { data: schedule, error } = scheduleQuery;
   const { deps, error: depsError, denied } = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const { can } = usePermissions();
   const mayWrite = useCanWriteSchedule(schedule);
 
-  if (isLoading) return <LoadingState />;
+  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   // Reached by URL on a schedule running as another member: every write would 403.
   if (!mayWrite) {

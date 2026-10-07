@@ -45,7 +45,12 @@ export interface RemoteResolverInputs {
    * Bearer …` header and lets the platform decide.
    */
   bearerToken: string;
-  spaceId: string;
+  /**
+   * Space id pinned on the profile (interactive) or passed via
+   * `APPSTRATE_SPACE_ID` (headless). Unset for an API key that names no
+   * space: the key pins one server-side, so no `X-Space-Id` is sent.
+   */
+  spaceId?: string;
   /**
    * Org id pinned on the profile (interactive) or passed via
    * `APPSTRATE_ORG_ID` (headless). Required for JWT auth on routes that

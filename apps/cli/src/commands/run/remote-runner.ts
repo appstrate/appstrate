@@ -166,8 +166,8 @@ export interface RunRemoteOptions {
   instance: string;
   /** Bearer token (`apst_…` or OIDC JWT). */
   bearerToken: string;
-  /** Space id (`X-Space-Id`). */
-  spaceId: string;
+  /** Space id (`X-Space-Id`), sent only when set: an API key pins its own. */
+  spaceId?: string | undefined;
   /** Organization id (`X-Org-Id`). Required for cookie/JWT auth contexts. */
   orgId?: string | undefined;
 
@@ -531,10 +531,10 @@ interface HttpDeps {
 function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> = {}): Headers {
   const h = new Headers({
     Authorization: `Bearer ${opts.bearerToken}`,
-    "X-Space-Id": opts.spaceId,
     Accept: "application/json",
     ...extra,
   });
+  if (opts.spaceId) h.set("X-Space-Id", opts.spaceId);
   if (opts.orgId) h.set("X-Org-Id", opts.orgId);
   return h;
 }

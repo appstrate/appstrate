@@ -54,7 +54,7 @@ describe("a conversation URL the caller has no conversation for", () => {
     expect(html).toContain('data-testid="chat-conversation-not-found"');
     expect(html).toContain("conversation.notFound.title");
     expect(html).toContain("threads.new");
-    expect(html).not.toContain("Message Appstrate");
+    expect(html).not.toContain("composer.placeholder");
   });
 
   it("offers no new conversation to a caller who cannot write", () => {
@@ -85,7 +85,7 @@ describe("a conversation URL the caller has no conversation for", () => {
       </QueryClientProvider>,
     );
     expect(html).not.toContain("conversation.notFound.title");
-    expect(html).toContain("Message Appstrate");
+    expect(html).toContain("composer.placeholder");
   });
 
   it("still mounts the composer for a conversation that exists", () => {
@@ -95,6 +95,6 @@ describe("a conversation URL the caller has no conversation for", () => {
       () => true,
     );
     expect(html).not.toContain("conversation.notFound.title");
-    expect(html).toContain("Message Appstrate");
+    expect(html).toContain("composer.placeholder");
   });
 });

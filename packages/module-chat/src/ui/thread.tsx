@@ -54,6 +54,7 @@ import { IntegrationIcon } from "./integration-icon.tsx";
 import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
+import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
@@ -103,34 +104,39 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
 // Generic, instance-agnostic prompts — must not reference any specific
 // agent/package or org data (this UI ships to every Appstrate user).
-const WELCOME_SUGGESTIONS = [
-  "Que peux-tu faire ?",
-  "Quels agents puis-je lancer ?",
-  "Montre-moi mes derniers runs",
-  "Cherche dans mes fichiers",
+const WELCOME_SUGGESTION_KEYS = [
+  "welcome.suggestion.capabilities",
+  "welcome.suggestion.agents",
+  "welcome.suggestion.runs",
+  "welcome.suggestion.files",
 ];
 
 function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
-  const canWrite = useChatHost().can("chat:write");
+  const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Demandez à lancer un agent, inspecter un run, ou chercher dans vos fichiers.
-          </p>
+          <p className="text-muted-foreground mt-1 text-sm">{t("welcome.hint")}</p>
         </div>
         <Composer slot={composerSlot} />
         {canWrite && (
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-            {WELCOME_SUGGESTIONS.map((s) => (
-              <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
+            {WELCOME_SUGGESTION_KEYS.map((key) => (
+              <ThreadPrimitive.Suggestion
+                key={key}
+                prompt={t(key)}
+                method="replace"
+                autoSend
+                asChild
+              >
                 <button
                   type="button"
                   className="hover:bg-accent rounded-lg border px-3 py-2 text-left text-sm transition-colors"
                 >
-                  {s}
+                  {t(key)}
                 </button>
               </ThreadPrimitive.Suggestion>
             ))}
@@ -143,14 +149,14 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
 /** Honest, action-aware disclaimer — the chat triggers real runs. */
 function Disclaimer() {
+  const { t } = useChatHost();
   return (
-    <p className="text-muted-foreground/70 px-4 text-center text-xs">
-      L’assistant peut se tromper et exécute de vraies actions — vérifiez avant de confirmer.
-    </p>
+    <p className="text-muted-foreground/70 px-4 text-center text-xs">{t("thread.disclaimer")}</p>
   );
 }
 
 function ScrollToBottom() {
+  const { t } = useChatHost();
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
@@ -158,7 +164,7 @@ function ScrollToBottom() {
         variant="outline"
         size="icon"
         className="absolute -top-10 rounded-full disabled:invisible"
-        aria-label="Aller en bas"
+        aria-label={t("thread.scrollToBottom")}
       >
         <ArrowDownIcon />
       </Button>
@@ -170,7 +176,7 @@ function ScrollToBottom() {
 function ComposerAttachmentChip() {
   const name = useAuiState((s) => s.attachment.name);
   const size = useAuiState((s) => s.attachment.file?.size ?? 0);
-  const { formatBytes } = useChatHost();
+  const { formatBytes, t } = useChatHost();
   return (
     <AttachmentPrimitive.Root className="bg-muted flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
@@ -179,7 +185,7 @@ function ComposerAttachmentChip() {
       <AttachmentPrimitive.Remove asChild>
         <button
           type="button"
-          aria-label="Retirer la pièce jointe"
+          aria-label={t("composer.removeAttachment")}
           className="text-muted-foreground hover:text-foreground ml-0.5 shrink-0"
         >
           <XIcon className="size-3.5" />
@@ -280,7 +286,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
       <ComposerPrimitive.Input
         rows={1}
         autoFocus
-        placeholder="Message Appstrate…"
+        placeholder={t("composer.placeholder")}
         className="placeholder:text-muted-foreground max-h-40 min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none"
       />
       <div className="flex items-center justify-between gap-2">
@@ -291,7 +297,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
               variant="ghost"
               size="icon"
               className="text-muted-foreground size-8 shrink-0 rounded-lg"
-              aria-label="Joindre un fichier"
+              aria-label={t("composer.attach")}
             >
               <PaperclipIcon />
             </Button>
@@ -304,7 +310,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
               type="button"
               size="icon"
               className="size-8 shrink-0 rounded-lg"
-              aria-label="Envoyer"
+              aria-label={t("composer.send")}
             >
               <SendHorizontalIcon />
             </Button>
@@ -317,7 +323,7 @@ function Composer({ slot }: { slot?: React.ReactNode }) {
               size="icon"
               variant="secondary"
               className="size-8 shrink-0 rounded-lg"
-              aria-label="Arrêter"
+              aria-label={t("composer.stop")}
             >
               <SquareIcon className="size-3 fill-current" />
             </Button>
@@ -338,6 +344,7 @@ function UserMessage() {
   // marker is persisted with the message).
   // Return a stable string from the selector (not a fresh object) and parse in
   // render, so useAuiState's reference-equality check doesn't churn re-renders.
+  const { t } = useChatHost();
   const resumeText = useAuiState(({ message: m }) => {
     const parts = (m.content ?? (m as { parts?: readonly unknown[] }).parts ?? []) as readonly {
       text?: unknown;
@@ -355,10 +362,13 @@ function UserMessage() {
       <MessagePrimitive.Root className="flex w-full max-w-(--thread-max-width) justify-center py-1.5">
         <span className="bg-muted/50 text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs">
           <IntegrationIcon src={resume.icon} className="size-3.5" />
-          <span className="font-medium">
-            {resume.name || resume.packageId.split("/").pop() || "Intégration"}
+          <span>
+            {sentenceWithName(
+              t,
+              "connect.resumed",
+              resume.name || resume.packageId.split("/").pop() || t("connect.integrationName"),
+            )}
           </span>
-          <span>connectée</span>
           <CheckIcon className="text-primary size-3.5" />
         </span>
       </MessagePrimitive.Root>
@@ -470,12 +480,13 @@ function TurnModelBadge() {
 }
 
 function TurnLimitNotice() {
+  const { t } = useChatHost();
   const reached = useAuiState((s) => turnLimitReached(sourceMessage(s.message)));
   if (!reached) return null;
   return (
     <div className="text-muted-foreground mt-3 flex items-center gap-2 text-xs" role="status">
       <AlertTriangleIcon className="size-3.5 shrink-0" />
-      <span>Réponse partielle : limite d'étapes atteinte.</span>
+      <span>{t("turn.stepLimitReached")}</span>
     </div>
   );
 }
@@ -540,6 +551,7 @@ const ASSISTANT_PART_COMPONENTS = {
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 function AssistantMessage() {
+  const { t } = useChatHost();
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className="text-foreground text-sm leading-relaxed">
@@ -557,7 +569,7 @@ function AssistantMessage() {
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <ActionBarPrimitive.Copy asChild>
-            <IconButton label="Copier">
+            <IconButton label={t("action.copy")}>
               <MessagePrimitive.If copied>
                 <CheckIcon />
               </MessagePrimitive.If>

@@ -108,7 +108,6 @@ export function useUpdateModelProviderCredential() {
 export function useDeleteModelProviderCredential() {
   const invalidate = useInvalidateModelProviderCredentials();
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
-    meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
   });
 }

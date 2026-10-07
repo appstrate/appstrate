@@ -8,16 +8,18 @@
 
 import * as React from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { useChatHost } from "./runtime-context.ts";
 
 export function JsonView({ value }: { value: unknown }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   const [copied, setCopied] = React.useState(false);
+  const { t } = useChatHost();
 
   return (
     <div className="relative">
       <button
         type="button"
-        aria-label="Copier"
+        aria-label={t("action.copy")}
         className="text-muted-foreground hover:text-foreground absolute top-2 right-2"
         onClick={() => {
           void navigator.clipboard?.writeText(text);

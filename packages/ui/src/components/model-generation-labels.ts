@@ -11,10 +11,7 @@ import type { ModelGenerationControlLabels } from "./model-generation-controls.t
 /**
  * Wire every label of this control from one i18n key family, so the two
  * surfaces that render it (the model settings page and the chat model picker)
- * cannot drift apart. They used to keep parallel families — `models.generation.*`
- * in `settings.json` and `generation.*` in `chat.json` — 19 of whose 23 values
- * were byte-identical; the locale guard could not see the duplication because
- * it exempted both prefixes as dynamic.
+ * cannot drift apart.
  *
  * `t` must already be bound to a namespace that resolves `models.generation.*`
  * (`settings`, which is a boot namespace and therefore loaded on every route).

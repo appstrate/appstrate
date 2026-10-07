@@ -9,6 +9,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
 import {
   useMyConnections,
+  useConnectionDeleteImpact,
   useDisconnectIntegrationConnection,
   useUpdateMeIntegrationConnection,
 } from "../../hooks/use-me-connections";
@@ -18,6 +19,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
+import { isQueryInFlight } from "../../lib/query-state";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
@@ -320,6 +322,7 @@ export function PreferencesConnectionsPage() {
     identity: string | null;
     connectionId: string;
   } | null>(null);
+  const deleteImpact = useConnectionDeleteImpact(confirmState?.connectionId);
 
   const totalConnections = useMemo(
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
@@ -444,6 +447,7 @@ export function PreferencesConnectionsPage() {
             : ""
         }
         isPending={disconnectIntegration.isPending}
+        confirmDisabled={isQueryInFlight(deleteImpact)}
         onConfirm={() => {
           if (!confirmState) return;
           disconnectIntegration.mutate(
@@ -454,7 +458,7 @@ export function PreferencesConnectionsPage() {
       >
         {confirmState && (
           <>
-            <ConnectionDeleteImpact connectionId={confirmState.connectionId} />
+            <ConnectionDeleteImpact impact={deleteImpact} />
             <ConnectionTeardownSteps connectionId={confirmState.connectionId} />
           </>
         )}

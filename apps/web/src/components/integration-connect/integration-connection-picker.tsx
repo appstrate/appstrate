@@ -313,7 +313,9 @@ export function IntegrationConnectionPicker({
   const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
   const deadConns = verdictConns.filter((c) => c.needs_reconnection);
   const hasCandidates = candidates.length > 0;
-  const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !upsertPin.isPending;
+  // Every entry that writes waits for the write in flight.
+  const busy = upsertPin.isPending || deletePin.isPending;
+  const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !busy;
 
   // An empty set clears the pick. False = refused; the mutation already toasted why.
   const persist = async (connectionIds: string[]): Promise<boolean> => {
@@ -512,7 +514,7 @@ export function IntegrationConnectionPicker({
                 key={c.id}
                 // The row is the checkbox a screen reader sees; the box is a glyph.
                 {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": isChecked })}
-                disabled={!oneClick && atCap && !isChecked}
+                disabled={oneClick ? busy : atCap && !isChecked}
                 // Toggling must not close the menu — "Valider" writes.
                 onSelect={(e) => {
                   if (oneClick) {
@@ -641,6 +643,7 @@ export function IntegrationConnectionPicker({
           )}
           {explicitIds.length > 0 && (
             <DropdownMenuItem
+              disabled={busy}
               onSelect={() => void persist([])}
               data-testid={`member-pick-reset-${integrationId}`}
             >

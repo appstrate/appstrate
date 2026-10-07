@@ -139,7 +139,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
-  const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
+  const detailQuery = usePackageDetail(type, packageId);
+  const { data: detail, error } = detailQuery;
 
   // Configuration tab data, agents only (must be before early returns — hooks rule)
   const { data: orgProxies } = useProxies(type === "agent");
@@ -266,7 +267,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
 
   // ── Loading / Error ──
-  if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
+  if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) return <ResourceErrorState error={error} />;
 
   // A published version whose stored archive is unavailable EXISTS — redirecting

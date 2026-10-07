@@ -40,6 +40,7 @@ import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/ch
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
+import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
@@ -624,10 +625,10 @@ export function runPiChat(input: PiChatInput): Response {
           modelLabel: input.modelLabel,
           ...(input.requestId ? { requestId: input.requestId } : {}),
         });
-        // A provider-reported error throws nothing: log it under the id shown.
+        // A provider-reported error throws nothing: log it under both request ids.
         if (closing.clientError) {
           logger.warn("chat turn failed on a model error", {
-            requestId: closing.clientError.requestId,
+            ...turnErrorLogIds(input.requestId, closing.clientError),
             orgId: input.orgId,
             presetId: input.presetId,
             chatSessionId: input.chatSessionId,
@@ -693,7 +694,7 @@ export function runPiChat(input: PiChatInput): Response {
           logger.error("Pi chat turn failed", {
             err: String(err),
             chatSessionId: input.chatSessionId,
-            requestId: closing.clientError?.requestId ?? input.requestId,
+            ...turnErrorLogIds(input.requestId, closing.clientError),
             ...(closing.clientError ? { category: closing.clientError.category } : {}),
           });
           for (const chunk of closing.chunks) write(chunk);

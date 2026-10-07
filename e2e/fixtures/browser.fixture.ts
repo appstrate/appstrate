@@ -48,7 +48,7 @@ export async function createAuthedContext(
     ({ userId, orgId, spaceId }) => {
       localStorage.setItem("appstrate_current_org", orgId);
       localStorage.setItem(
-        "appstrate_last_space_by_org",
+        "appstrate_last_space",
         JSON.stringify({ [`${userId}:${orgId}`]: spaceId }),
       );
     },
