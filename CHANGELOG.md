@@ -328,6 +328,13 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Added
 
+- **`GET /api/me/context` names the space it resolved** (#1721): the payload
+  (the MCP `get_me` tool) carries `space: { id, name, personal }`, the space
+  every list in it is scoped to. An agent holding a key bound to an empty space
+  could not tell an empty space from the wrong one. The descriptions also say
+  an empty list can mean the caller's permissions do not cover it. Run and
+  model `cost` descriptions in the OpenAPI spec now state USD instead of
+  "dollars" or no currency; no wire field changes.
 - **Live model catalog, read side** (#1717, #1732): a process accepts a file
   only on its Ed25519 signature (public key in the source), its exact Pi SDK
   version, a strict shape and a `serial` not lower than the one it holds, then
