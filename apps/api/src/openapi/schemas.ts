@@ -1172,7 +1172,7 @@ export const schemas = {
         description:
           "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.",
       },
-      cost: { type: ["number", "null"], description: "Run cost in dollars" },
+      cost: { type: ["number", "null"], description: "Run cost in USD" },
       cost_pricing_status: {
         type: ["string", "null"],
         enum: ["priced", "partial", "unpriced", null],
@@ -1772,7 +1772,7 @@ export const schemas = {
       },
       cost: {
         type: ["object", "null"],
-        description: "Cost per million tokens",
+        description: "Cost in USD per million tokens",
         properties: {
           input: { type: "number" },
           output: { type: "number" },

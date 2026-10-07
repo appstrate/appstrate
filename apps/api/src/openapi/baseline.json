@@ -3643,7 +3643,7 @@
                   "cost": {
                     "type": "number",
                     "minimum": 0,
-                    "description": "Authoritative terminal run cost written to the `runs` row."
+                    "description": "Authoritative terminal run cost in USD, written to the `runs` row."
                   },
                   "artifacts": {
                     "type": "object",
@@ -9124,7 +9124,7 @@
                   },
                   "cost": {
                     "type": "object",
-                    "description": "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                     "properties": {
                       "input": {
                         "type": "number"
@@ -9439,7 +9439,7 @@
                           },
                           "cost": {
                             "type": ["object", "null"],
-                            "description": "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                            "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
                             "properties": {
                               "input": {
                                 "type": "number"
@@ -9669,7 +9669,7 @@
                   },
                   "cost": {
                     "type": ["object", "null"],
-                    "description": "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "description": "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                     "properties": {
                       "input": {
                         "type": "number"
@@ -29070,7 +29070,7 @@
           },
           "cost": {
             "type": ["number", "null"],
-            "description": "Run cost in dollars"
+            "description": "Run cost in USD"
           },
           "cost_pricing_status": {
             "type": ["string", "null"],
@@ -29893,7 +29893,7 @@
           },
           "cost": {
             "type": ["object", "null"],
-            "description": "Cost per million tokens",
+            "description": "Cost in USD per million tokens",
             "properties": {
               "input": {
                 "type": "number"

@@ -6020,7 +6020,7 @@ export interface components {
             source: "built-in" | "custom";
             /** @description ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed. */
             credentialId: string | null;
-            /** @description Cost per million tokens */
+            /** @description Cost in USD per million tokens */
             cost?: {
                 input?: number;
                 output?: number;
@@ -6458,7 +6458,7 @@ export interface components {
              * @enum {string|null}
              */
             model_source: "system" | "org" | null;
-            /** @description Run cost in dollars */
+            /** @description Run cost in USD */
             cost: number | null;
             /**
              * @description How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.
@@ -15736,7 +15736,7 @@ export interface operations {
                     maxTokens?: number;
                     /** @description Whether the model supports reasoning */
                     reasoning?: boolean;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -15885,7 +15885,7 @@ export interface operations {
                             input?: ("text" | "image")[];
                             /** @description Whether model supports reasoning */
                             reasoning?: boolean;
-                            /** @description Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
+                            /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
                             cost?: {
                                 input?: number;
                                 output?: number;
@@ -16072,7 +16072,7 @@ export interface operations {
                     contextWindow?: number | null;
                     maxTokens?: number | null;
                     reasoning?: boolean | null;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -22153,7 +22153,7 @@ export interface operations {
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
                     };
-                    /** @description Authoritative terminal run cost written to the `runs` row. */
+                    /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;
                     /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
                     artifacts?: {
