@@ -2239,9 +2239,12 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "GET /api/auth/cli/sessions": "application/json",
   "POST /api/auth/cli/sessions/revoke": "application/json",
   "POST /api/auth/cli/sessions/revoke-all": "application/json",
-  // Better Auth's account endpoints: its own `APIError` body, `{ code, message }`.
+  // Better Auth's account endpoints: its own `APIError` body, `{ code, message }`,
+  // and its limiter's 429, which answers every route it serves.
   "POST /api/auth/sign-up/email": "application/json",
   "POST /api/auth/sign-in/email": "application/json",
+  "POST /api/auth/sign-out 429": "application/json",
+  "GET /api/auth/get-session 429": "application/json",
   // Browser navigations: every refusal renders an HTML page.
   "GET /activate": "text/html",
   "POST /activate": "text/html",

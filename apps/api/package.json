@@ -30,7 +30,7 @@
     "@appstrate/module-observability": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/shared-types": "workspace:*",
-    "@better-auth/cimd": "1.7.3",
+    "@better-auth/cimd": "1.7.7",
     "@better-auth/core": "1.7.7",
     "@better-auth/oauth-provider": "1.7.7",
     "@hono/swagger-ui": "^0.6.1",
