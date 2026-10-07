@@ -82,6 +82,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   list is not listed (a run drops it and serves the list), but the next draft
   save refuses it: fix it when convenient. System packages are skipped: the
   image ships them (#1641).
+- **Magic links and OAuth sign-ins in flight at the deploy cannot finish**
+  (Better Auth 1.7.7, GHSA-965c-763c-88jm). Their stored identifiers now carry
+  a purpose prefix: a link mailed before the restart is refused, and a Google
+  or GitHub sign-in or account link started before it has to be started again.
+  No data is rewritten. Upgrade every replica in the same cutover.
 - **Migration `0078` rewrites `runs` under an exclusive lock** (the
   `model_source` column becomes the `credential_source` enum) and adds three
   CHECKs and the nullable `package_schedules.disabled_reason`. It writes no
@@ -590,6 +595,17 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **Better Auth 1.7.7** (GHSA-965c-763c-88jm, critical; #1734, #1743, #1742).
+  Before it, an OAuth sign-in state value was accepted as a magic-link token:
+  anyone who knew an address could start a Google or GitHub sign-in for it and
+  finish a magic-link sign-in to that account without reading its mail, or
+  create it marked verified. The platform enables the magic link whenever the
+  instance `SMTP_*` variables are set and keeps OAuth state in the database,
+  so an instance with them and working Google or GitHub credentials (the
+  instance's or a space's) was exposed. `better-auth`, `@better-auth/core`,
+  `@better-auth/oauth-provider` and `@better-auth/cimd` move together, as the
+  advisory requires. Better Auth's rate limiter now answers its 429 as JSON,
+  declared on the four Better Auth routes of the spec.
 - **MCP TypeScript SDK 1.32.1** (GHSA-6qxp-vccf-f47h). The SDK's OAuth
   client could send credentials to an authorization server chosen by the MCP
   server. The platform does not use that client; the bump clears the audit.

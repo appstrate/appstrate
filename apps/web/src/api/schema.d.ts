@@ -9276,6 +9276,18 @@ export interface operations {
                     } | null;
                 };
             };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
         };
     };
     oauth2Jwks: {
@@ -9665,6 +9677,18 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
         };
     };
     signUpEmail: {

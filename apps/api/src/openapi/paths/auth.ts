@@ -16,6 +16,13 @@ const betterAuthError = {
   },
 } as const;
 
+/** Better Auth's own limiter answers every route it serves, before the handler. */
+const betterAuthRateLimited = {
+  description:
+    "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
+  content: betterAuthError,
+} as const;
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
@@ -83,11 +90,7 @@ export const authPaths = {
             "The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free.",
           content: betterAuthError,
         },
-        "429": {
-          description:
-            "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
-          content: betterAuthError,
-        },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -152,11 +155,7 @@ export const authPaths = {
             "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
           content: betterAuthError,
         },
-        "429": {
-          description:
-            "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
-          content: betterAuthError,
-        },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -181,6 +180,7 @@ export const authPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -308,6 +308,7 @@ export const authPaths = {
             },
           },
         },
+        "429": betterAuthRateLimited,
       },
     },
   },
