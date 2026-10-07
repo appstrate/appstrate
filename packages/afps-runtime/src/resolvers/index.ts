@@ -50,8 +50,8 @@ export {
 } from "./http-delivery.ts";
 
 // Canonical `{{var}}` credential substitution — shared by the platform
-// credential proxy (`@appstrate/connect` re-export), the delivery.http
-// renderer, and the portable integration resolver.
+// credential proxy (`@appstrate/connect` re-export) and the portable
+// integration resolver.
 export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
 // The caller half of an `api_call` (target, headers, body templates), one preparation for every path.

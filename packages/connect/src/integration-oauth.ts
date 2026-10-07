@@ -330,8 +330,7 @@ export async function handleIntegrationOAuthCallback(
     tokenEndpoint: integration.tokenEndpoint,
     clientId: client.clientId,
     clientSecret: client.clientSecret,
-    // AFPS (CC-10, §7.3): default-when-missing flipped from
-    // `"client_secret_post"` to `"client_secret_basic"` — the RFC 8414 §2 /
+    // AFPS (CC-10, §7.3): absent → `client_secret_basic`, the RFC 8414 §2 /
     // RFC 7591 §2 default.
     tokenEndpointAuthMethod: client.tokenEndpointAuthMethod ?? "client_secret_basic",
     codeVerifier: stateRow.codeVerifier || undefined,

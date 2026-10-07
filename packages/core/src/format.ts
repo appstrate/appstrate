@@ -30,7 +30,7 @@ const BYTE_UNITS = {
  *
  * `locale` (a BCP 47 tag, e.g. the UI language) localises the unit names and
  * the decimal separator: `fr` renders `2,0 Ko`. Omitted — the CLI, logs, the
- * prompt builder — the output is the English form, byte for byte as before.
+ * prompt builder — the output is the English form (`2.0 KB`).
  */
 export function formatBytes(bytes: number, locale?: string): string {
   const units = locale?.toLowerCase().startsWith("fr") ? BYTE_UNITS.fr : BYTE_UNITS.en;
