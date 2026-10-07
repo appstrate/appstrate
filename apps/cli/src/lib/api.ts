@@ -20,7 +20,7 @@
  */
 
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
-import { getProfile, type Profile } from "./config.ts";
+import { getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
@@ -181,6 +181,51 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
     orgId: profile.orgId,
     spaceId: profile.spaceId,
   };
+}
+
+/**
+ * The explicit `apst_…` API key of a headless invocation: the `--api-key`
+ * flag, else `APPSTRATE_API_KEY`. An empty value counts as "not set".
+ * When this returns a key it overrides the profile credential ENTIRELY —
+ * there is no ambiguity about which principal the platform audit log
+ * records.
+ */
+export function explicitApiKey(flag: string | undefined): string | undefined {
+  return (flag ?? process.env.APPSTRATE_API_KEY) || undefined;
+}
+
+/**
+ * Where an API-key invocation points: `APPSTRATE_INSTANCE`, else the
+ * active / `--profile` profile's instance. The profile is optional here
+ * (and returned for callers that read further fallbacks off it) — a key
+ * needs neither a login nor a readable `config.toml`. `instance` is the
+ * raw string; `undefined` when neither source has one.
+ */
+export async function resolveApiKeyTarget(
+  profileFlag: string | undefined,
+): Promise<{ instance: string | undefined; profile: Profile | undefined }> {
+  const profile = (await resolveActiveProfileOrNull(profileFlag))?.profile;
+  return { instance: process.env.APPSTRATE_INSTANCE ?? profile?.instance, profile };
+}
+
+/**
+ * `resolveAuthContext` for an explicit API key. Never touches the keyring
+ * and never refreshes anything. `orgId` / `spaceId` are deliberately
+ * absent: the key pins its own org and space server-side, and the
+ * platform answers 403 to an `X-Org-Id` / `X-Space-Id` that disagrees —
+ * forwarding the profile's pins would turn a valid key into a 403.
+ */
+export async function resolveApiKeyAuthContext(
+  apiKey: string,
+  profileFlag: string | undefined,
+): Promise<AuthContext> {
+  const { instance } = await resolveApiKeyTarget(profileFlag);
+  if (!instance) {
+    throw new AuthError(
+      "No Appstrate instance URL for the API key. Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile.",
+    );
+  }
+  return { instance: normalizeInstance(instance), accessToken: apiKey };
 }
 
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {

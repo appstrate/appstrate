@@ -27,6 +27,9 @@ import { saveTokens, loadTokens } from "../src/lib/keyring.ts";
 import { setProfile } from "../src/lib/config.ts";
 import {
   apiFetchRaw,
+  explicitApiKey,
+  resolveApiKeyTarget,
+  resolveApiKeyAuthContext,
   AuthError,
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
@@ -515,5 +518,66 @@ describe("_awaitRefreshQuiesce (PR #191 review)", () => {
     await pending;
     await waiter;
     expect(quiesceDone).toBe(true);
+  });
+});
+
+describe("explicit API key helpers", () => {
+  const ENV = ["APPSTRATE_API_KEY", "APPSTRATE_INSTANCE"] as const;
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = {};
+    for (const k of ENV) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("explicitApiKey: flag, else env, and empty means not set", () => {
+    expect(explicitApiKey(undefined)).toBeUndefined();
+    process.env.APPSTRATE_API_KEY = "";
+    expect(explicitApiKey(undefined)).toBeUndefined();
+    process.env.APPSTRATE_API_KEY = "apst_env";
+    expect(explicitApiKey(undefined)).toBe("apst_env");
+    expect(explicitApiKey("apst_flag")).toBe("apst_flag");
+  });
+
+  it("resolveApiKeyTarget: env instance wins, the profile is still returned", async () => {
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+
+    const target = await resolveApiKeyTarget(undefined);
+    expect(target.instance).toBe("https://ci.example.com");
+    expect(target.profile?.spaceId).toBe("spc_1");
+  });
+
+  it("resolveApiKeyTarget: no env, no profile → nothing, without throwing", async () => {
+    expect(await resolveApiKeyTarget(undefined)).toEqual({
+      instance: undefined,
+      profile: undefined,
+    });
+  });
+
+  it("resolveApiKeyAuthContext: profile instance, key as bearer, no org / space", async () => {
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+
+    const ctx = await resolveApiKeyAuthContext("apst_k", undefined);
+    expect(ctx).toEqual({ instance: "https://app.example.com", accessToken: "apst_k" });
+    expect(ctx.orgId).toBeUndefined();
+    expect(ctx.spaceId).toBeUndefined();
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("resolveApiKeyAuthContext: no instance anywhere → AuthError naming the env var", async () => {
+    await expect(resolveApiKeyAuthContext("apst_k", undefined)).rejects.toThrow(AuthError);
+    await expect(resolveApiKeyAuthContext("apst_k", undefined)).rejects.toThrow(
+      /APPSTRATE_INSTANCE/,
+    );
   });
 });
