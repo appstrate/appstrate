@@ -171,7 +171,7 @@ export const apiKeysPaths = {
                   scopes: {
                     type: "array",
                     items: { type: "string" },
-                    description: "Validated scopes granted to the key. Empty = full role access.",
+                    description: "Validated scopes granted to the key.",
                   },
                 },
               },
