@@ -860,7 +860,7 @@ function unrecordedGeneration({
   reasoning,
 }: GenerationSubject): ModelGenerationCapabilities {
   const levels = new Set<string>(
-    piReasoningLevels(buildPiModel({ id: "", apiShape, baseUrl: "", reasoning })),
+    piReasoningLevels(buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning })),
   );
   return {
     temperature: "unknown",

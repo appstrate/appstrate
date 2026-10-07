@@ -13,6 +13,7 @@ import {
 const model = {
   api: "anthropic-messages",
   modelId: "claude-sonnet-4-5",
+  dialect: null,
 };
 
 // Every call passes the topology explicitly — the orchestrator's
@@ -105,6 +106,7 @@ describe("buildRuntimePiEnv", () => {
         api: "openai-completions",
         modelId: "deepseek-chat",
         piProvider: "deepseek",
+        dialect: null,
       },
       agentPrompt: "p",
       ...sidecar,

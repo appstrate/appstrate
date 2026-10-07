@@ -17,7 +17,8 @@ import {
 } from "../src/pi-model.ts";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
-import { capturePayload, nativeModel } from "./pi-payload.ts";
+import { capturePayload } from "../src/pi-payload.ts";
+import { nativeModel } from "./pi-payload.ts";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import { reasoningOffSendsNothing } from "../../ui/src/components/reasoning-off.ts";
 
@@ -138,6 +139,7 @@ describe("buildPiModel", () => {
     };
     const spec = {
       id: "claude-fable-5",
+      dialect: null,
       apiShape: "anthropic-messages",
       baseUrl: "https://gateway.example",
     };
@@ -156,6 +158,7 @@ describe("buildPiModel", () => {
   it("gives a model with no record and no limits the platform defaults", () => {
     const model = buildPiModel({
       id: "gw-model",
+      dialect: null,
       apiShape: "openai-completions",
       piProvider: null,
       baseUrl: "https://gateway.example",
@@ -222,6 +225,7 @@ describe("clampPiReasoningLevel", () => {
   it("answers off for a model without reasoning", () => {
     const model = buildPiModel({
       id: "plain",
+      dialect: null,
       apiShape: "openai-completions",
       baseUrl: PROXY,
       reasoning: false,
@@ -232,7 +236,7 @@ describe("clampPiReasoningLevel", () => {
 
 describe("a reasoning model Pi keeps no record of", () => {
   const gateway = (apiShape: string) =>
-    buildPiModel({ id: "my-model", apiShape, baseUrl: PROXY, reasoning: true });
+    buildPiModel({ id: "my-model", dialect: null, apiShape, baseUrl: PROXY, reasoning: true });
   // Pi's session hands level `off` to the request as no reasoning at all.
   const offPayload = (model: ReturnType<typeof gateway>) => capturePayload(model);
 
@@ -263,6 +267,7 @@ describe("a reasoning model Pi keeps no record of", () => {
   it("leaves an alias's client model Pi's own set: the platform clamped the level already", () => {
     const client = buildPiModel({
       id: "alias",
+      dialect: null,
       apiShape: ALIAS_CLIENT_API_SHAPE,
       baseUrl: PROXY,
       reasoning: true,

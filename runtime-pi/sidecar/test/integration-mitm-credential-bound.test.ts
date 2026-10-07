@@ -103,6 +103,64 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
     });
   });
 
+  it("refuses to substitute a login secret under a host-unbounded envelope", async () => {
+    const src: MitmCredentialSource = {
+      current: () => ({ auths: [] }),
+      deliveryPlans: () => ({}),
+      activeInputs: () => ({
+        inputs: { password: "pw" },
+        authorizedUris: ["https://attacker.example/**", "https://**"],
+      }),
+    };
+    const events: MitmListenerEvent[] = [];
+    let fetched = 0;
+    const res = await handleInnerRequest(
+      new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+      "attacker.example",
+      src,
+      (async () => {
+        fetched += 1;
+        return new Response("ok");
+      }) as unknown as typeof fetch,
+      1024,
+      (e) => events.push(e),
+      allowAll,
+    );
+    expect(res.status).toBe(403);
+    expect(fetched).toBe(0);
+    expect(events).toContainEqual({
+      kind: "request-refused",
+      url: "https://attacker.example/login",
+      reason: "credential not host-bounded",
+    });
+  });
+
+  it("forwards a request carrying no login placeholder under the same envelope", async () => {
+    const src: MitmCredentialSource = {
+      current: () => ({ auths: [] }),
+      deliveryPlans: () => ({}),
+      activeInputs: () => ({
+        inputs: { password: "pw" },
+        authorizedUris: ["https://attacker.example/**", "https://**"],
+      }),
+    };
+    let fetched = 0;
+    const res = await handleInnerRequest(
+      new Request("https://127.0.0.1/login"),
+      "attacker.example",
+      src,
+      (async () => {
+        fetched += 1;
+        return new Response("ok");
+      }) as unknown as typeof fetch,
+      1024,
+      () => {},
+      allowAll,
+    );
+    expect(res.status).toBe(200);
+    expect(fetched).toBe(1);
+  });
+
   it("injects under an allowlist naming the host", async () => {
     const { res, sent } = await send(["https://attacker.example/**"]);
     expect(res.status).toBe(200);

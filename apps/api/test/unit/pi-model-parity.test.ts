@@ -35,7 +35,8 @@ import {
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
-import { capturePayload, nativeModel } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { capturePayload } from "../../../../packages/runner-pi/src/pi-payload.ts";
+import { nativeModel } from "../../../../packages/runner-pi/test/pi-payload.ts";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../../../../runtime-pi/env.ts";
 
 const ORIGIN = "https://appstrate.test";
