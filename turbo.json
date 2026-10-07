@@ -76,6 +76,9 @@
   // tsconfig.base.json (turbo hashes content — `touch` moves nothing and reads
   // as a false negative), run again — every hash must move.
   "globalDependencies": ["tsconfig.base.json", "bun.lock"],
+  // Off: under an AI agent, turbo writes a block of its own into AGENTS.md
+  // before every run, and `AGENTS.md` is the hand-kept single guide.
+  "agentGuidance": false,
   "globalPassThroughEnv": [
     "BETTER_AUTH_SECRET",
     "CONNECTION_ENCRYPTION_KEY",
