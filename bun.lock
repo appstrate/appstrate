@@ -228,7 +228,7 @@
       "version": "14.0.0",
       "dependencies": {
         "@afps-spec/schema": "^0.7.0",
-        "@appstrate/afps-shared": "^0.10.0",
+        "@appstrate/afps-shared": "^0.10.1",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",
