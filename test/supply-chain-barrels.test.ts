@@ -98,10 +98,14 @@ async function valueImportsOfBarrel(
 }
 
 describe("supply-chain: pi-sdk barrel completeness", () => {
-  it("@appstrate/runner-pi barrel exposes the static Type value and the SDK loader handle", () => {
+  it("@appstrate/runner-pi barrel exposes its static values and the SDK loader handle", () => {
     const barrel = runnerPiBarrel as Record<string, unknown>;
 
     expect(barrel.Type, 'runner-pi pi-sdk barrel is missing value export "Type"').toBeDefined();
+    expect(
+      barrel.InMemoryCredentialStore,
+      'runner-pi pi-sdk barrel is missing value export "InMemoryCredentialStore"',
+    ).toBeDefined();
     expect(
       barrel.loadPiCodingAgentSdk,
       'runner-pi pi-sdk barrel is missing value export "loadPiCodingAgentSdk"',

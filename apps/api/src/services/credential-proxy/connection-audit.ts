@@ -26,15 +26,17 @@ interface ConnectionUse {
   sessionTtlSeconds: number;
 }
 
-/** Never throws: a cache or database fault is logged. */
+/** Never throws: a cache or database fault is logged, and releases the session's dedupe claim. */
 export async function auditForeignConnectionUse(
   c: Context<AppEnv>,
   input: ConnectionUse,
 ): Promise<void> {
+  let release: (() => Promise<void>) | null = null;
   try {
     const cache = await getCache();
     const key = `cp:audited:${input.sessionId}:${input.actor.type}:${input.actor.id}:${input.connectionId}`;
     if (!(await cache.set(key, "1", { ttlSeconds: input.sessionTtlSeconds, nx: true }))) return;
+    release = () => cache.del(key);
     const [row] = await db
       .select({
         userId: integrationConnections.userId,
@@ -65,5 +67,7 @@ export async function auditForeignConnectionUse(
       connectionId: input.connectionId,
       error: getErrorMessage(err),
     });
+    // The session's next call writes the row the claim stood for.
+    await release?.().catch(() => {});
   }
 }

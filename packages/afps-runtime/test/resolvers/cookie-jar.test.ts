@@ -8,6 +8,7 @@
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
 import { fetchApiCall } from "../../src/resolvers/api-call-engine.ts";
+import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
 
 const API = "https://api.example.com/x";
 const CONTENT = "https://content.example.com/x";
@@ -142,6 +143,16 @@ describe("cookieScope.header", () => {
     expect(scope.header("https://attacker.glob.example/", null)).toBeUndefined();
     expect(scope.header(API, null)).toBeUndefined();
     expect(scope.header("https://victim.glob.example/y", null)).toBe("s=victim");
+  });
+
+  it("never sends an https-captured sibling cookie to a non-https URL", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", LITERAL);
+    scope.capture(API, ["sess=secure"]);
+    scope.capture("http://content.example.com/x", ["plain=1"]);
+    expect(scope.header("http://api.example.com/x", null)).toBe("plain=1");
+    expect(scope.header("http://content.example.com/y", null)).toBe("plain=1");
+    expect(scope.header(CONTENT, null)).toBe("sess=secure; plain=1");
   });
 
   it("never reads another integration's buckets", () => {
@@ -313,5 +324,33 @@ describe("fetchApiCall — the per-call cookie scope", () => {
 
   it("keeps it origin-scoped when a glob entry matched the hosts", async () => {
     expect(await secondHopCookie(["https://*.vendor.example/**"])).toBeNull();
+  });
+});
+
+describe("guardedFetchChain — a literal-allowlist jar across an https→http redirect", () => {
+  it("sends the http hop no Cookie after the https hop set one", async () => {
+    const seen: (string | null)[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("cookie"));
+      return seen.length === 1
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "http://api.example.com/home", "set-cookie": "sess=S; Secure" },
+          })
+        : new Response("ok");
+    }) as unknown as typeof fetch;
+
+    await guardedFetchChain(
+      "https://api.example.com/login",
+      { headers: { cookie: "caller=c" } },
+      {
+        resolve: async () => ["203.0.113.7"],
+        fetchImpl,
+        cookies: cookieScope(new Map(), "i", LITERAL),
+        forwardCredentials: () => true,
+      },
+    );
+
+    expect(seen).toEqual(["caller=c", null]);
   });
 });
