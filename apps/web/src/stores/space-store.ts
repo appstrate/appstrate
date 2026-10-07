@@ -4,7 +4,7 @@ import { createStore } from "zustand/vanilla";
 import { authStore } from "./auth-store";
 import { getCurrentOrgId } from "./org-store";
 
-const STORAGE_KEY = "appstrate_last_space_by_org";
+const STORAGE_KEY = "appstrate_last_space";
 
 /** By user as well as org: the map outlives the session, and the next account must not inherit it. */
 export function rememberedSpaceKey(userId: string, orgId: string): string {

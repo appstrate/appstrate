@@ -48,7 +48,7 @@ import { setActiveStream, clearActiveStream } from "./resumable.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 import type { UsageRejection } from "@appstrate/core/module";
 import { turnCapabilities } from "./capabilities.ts";
-import { classifyClientTurnError, clientTurnErrorMarker } from "./turn-error.ts";
+import { classifyClientTurnError, clientTurnErrorMarker, turnErrorLogIds } from "./turn-error.ts";
 import {
   ModelGenerationError,
   modelGenerationSettingsSchema,
@@ -168,8 +168,12 @@ export const chatStreamSchema = z
   });
 
 function logAndMarkStreamError(error: unknown, requestId: string): string {
-  logger.error("chat turn stream failed", { err: String(error), requestId });
-  return clientTurnErrorMarker(classifyClientTurnError(error, requestId));
+  const shown = classifyClientTurnError(error, requestId);
+  logger.error("chat turn stream failed", {
+    err: String(error),
+    ...turnErrorLogIds(requestId, shown),
+  });
+  return clientTurnErrorMarker(shown);
 }
 
 /**

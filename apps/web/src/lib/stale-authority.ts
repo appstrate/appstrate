@@ -43,6 +43,7 @@ let onSessionRefused: (() => void) | null = null;
  */
 export function registerSessionCheck(deps: {
   hasSession: () => Promise<boolean | null>;
+  /** Signs out and clears what the session loaded: the next user must not see it. */
   endSession: () => Promise<void>;
 }): void {
   let checking = false;
@@ -55,8 +56,6 @@ export function registerSessionCheck(deps: {
       .then(async (alive) => {
         if (alive !== false) return;
         await deps.endSession();
-        // The next user must not be shown what this session had loaded.
-        queryClient.clear();
       })
       .finally(() => {
         checking = false;

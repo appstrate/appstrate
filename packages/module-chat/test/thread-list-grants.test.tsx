@@ -52,13 +52,13 @@ describe("the conversation list", () => {
   it("offers a new conversation to a caller who can write", () => {
     const html = render(["chat:read", "chat:write"]);
     expect(html).toContain('aria-label="threads.new"');
-    expect(html).toContain('aria-label="Supprimer"');
+    expect(html).toContain('aria-label="threads.actions.delete"');
   });
 
   it("offers a reader no new conversation, and no row action", () => {
     const html = render(["chat:read"]);
     expect(html).toContain("Budget");
     expect(html).not.toContain('aria-label="threads.new"');
-    expect(html).not.toContain('aria-label="Supprimer"');
+    expect(html).not.toContain('aria-label="threads.actions.delete"');
   });
 });

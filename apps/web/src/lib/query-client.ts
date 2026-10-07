@@ -33,8 +33,8 @@ const mutationCache = new MutationCache({
 
 /**
  * A 4xx is the server's answer, not a hiccup: asking again returns the same
- * refusal after the retry delay, which is how a missing run sat behind a
- * spinner for seconds. 408 and 429 are the two that a second attempt can change.
+ * refusal after the retry delay. 408 and 429 are the two that a second attempt
+ * can change.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   if (failureCount >= 1) return false;

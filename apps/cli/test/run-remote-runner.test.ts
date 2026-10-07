@@ -584,6 +584,35 @@ describe("runRemote — happy path", () => {
   });
 });
 
+describe("runRemote — scope headers", () => {
+  it("sends no X-Space-Id / X-Org-Id when none is set: an API key pins its own", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": { status: 201, body: { id: "run_k" } },
+        "GET /api/runs/run_k/logs": {
+          status: 200,
+          body: { object: "list", data: [], hasMore: false },
+        },
+        "GET /api/runs/run_k": { status: 200, body: recordSummary({ id: "run_k" }) },
+      },
+      calls,
+    );
+
+    const opts = withCapturedWriters(
+      buildBaseOpts({ fetchImpl, spaceId: undefined, orgId: undefined }),
+    );
+    const outcome = await runToTerminal(opts, new AbortController().signal);
+    expect(outcome.status).toBe("success");
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call.headers["authorization"]).toBe("Bearer ask_test_key");
+      expect(call.headers["x-space-id"]).toBeUndefined();
+      expect(call.headers["x-org-id"]).toBeUndefined();
+    }
+  });
+});
+
 describe("runRemote — non-success terminals", () => {
   it("returns exit code 1 on `failed` status", async () => {
     const calls: FetchCall[] = [];

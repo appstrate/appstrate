@@ -25,7 +25,6 @@ import { McpClientConnect } from "../../components/org-settings/mcp-client-conne
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
-import { toastError } from "../../lib/mutation-error";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -92,12 +91,7 @@ export function OrgSettingsGeneralPage() {
   });
 
   const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
-    meta: { errorHandledByCaller: true },
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
-    onError: (err) => {
-      // The server is the real guard (owners may have changed meanwhile).
-      toastError(err);
-    },
   });
 
   if (!currentOrg) {

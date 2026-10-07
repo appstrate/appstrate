@@ -2,23 +2,44 @@
 
 /**
  * What a delete rewrites among the caller's own member pins and schedule overrides, said
- * before the user confirms. Mount only while the confirmation is open.
+ * before the user confirms. The confirmation owns the query and keeps its button disabled
+ * while it is in flight.
  */
 
 import { useTranslation } from "react-i18next";
-import { $api } from "../../api/client";
+import type { useConnectionDeleteImpact } from "../../hooks/use-me-connections";
+import { errorDetail } from "../../lib/mutation-error";
+import { Spinner } from "../spinner";
 
-export function ConnectionDeleteImpact({ connectionId }: { connectionId: string }) {
+export function ConnectionDeleteImpact({
+  impact,
+}: {
+  impact: { data: ReturnType<typeof useConnectionDeleteImpact>["data"]; error: unknown };
+}) {
   const { t } = useTranslation("settings");
-  const { data } = $api.useQuery(
-    "get",
-    "/api/me/connections/{connectionId}/delete-impact",
-    { params: { path: { connectionId } } },
-    // Never answered from cache: the user confirms on what this says, and a
-    // pick made since the last open would be missing from it.
-    { gcTime: 0 },
-  );
-  if (!data || (data.pins.length === 0 && data.schedules.length === 0)) return null;
+  const { data, error } = impact;
+
+  if (error) {
+    const detail = errorDetail(error);
+    return (
+      <div className="text-destructive mt-4 text-sm" data-testid="connection-delete-impact-error">
+        <p>{t("connections.deleteImpact.error")}</p>
+        {detail && <p className="mt-1">{detail}</p>}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div
+        className="text-muted-foreground mt-4 flex items-center gap-2 text-sm"
+        data-testid="connection-delete-impact-loading"
+      >
+        <Spinner />
+        {t("connections.deleteImpact.loading")}
+      </div>
+    );
+  }
+  if (data.pins.length === 0 && data.schedules.length === 0) return null;
 
   return (
     <div

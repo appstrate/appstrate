@@ -506,7 +506,6 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
-    meta: { errorHandledByCaller: true },
     mutationFn: async (
       version: string,
     ): Promise<{ id: string; version: string | null; etag: string | null }> => {

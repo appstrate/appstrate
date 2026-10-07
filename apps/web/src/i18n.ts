@@ -55,7 +55,7 @@ i18n.on("languageChanged", (lng) => {
     document.documentElement.lang = i18n.resolvedLanguage ?? lng;
   }
   try {
-    localStorage.setItem("i18nextLng", lng);
+    localStorage.setItem(I18N_LANGUAGE_STORAGE_KEY, lng);
   } catch {
     // Storage blocked — language just won't persist across reloads.
   }

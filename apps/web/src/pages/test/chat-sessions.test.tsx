@@ -86,7 +86,7 @@ describe("chat page session scope", () => {
     expect(html).not.toContain("Only in B");
     // ChatPage computes this marker, while ThreadList reads its own query.
     // Seeing the row alone would miss an observer stranded outside the provider.
-    expect(html.match(/aria-label="Réponse non lue"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="threads.unread"/g)).toHaveLength(1);
   });
 });
 

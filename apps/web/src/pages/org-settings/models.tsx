@@ -48,7 +48,6 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
-import { toastError } from "../../lib/mutation-error";
 
 function ModelsList({
   models,
@@ -471,9 +470,6 @@ export function OrgSettingsModelsPage() {
       : 0;
 
   const closeConfirm = () => setConfirmState(null);
-  const reportDeleteFailure = (err: unknown) => {
-    toastError(err);
-  };
 
   return (
     <>
@@ -602,10 +598,7 @@ export function OrgSettingsModelsPage() {
           if (confirmState.type === "deleteModel") {
             deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
           } else {
-            deletePkMutation.mutate(
-              { params },
-              { onSuccess: closeConfirm, onError: reportDeleteFailure },
-            );
+            deletePkMutation.mutate({ params }, { onSuccess: closeConfirm });
           }
         }}
       />

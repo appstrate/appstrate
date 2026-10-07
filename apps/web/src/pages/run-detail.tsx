@@ -72,7 +72,8 @@ export function RunDetailPage() {
     "agent",
     isInlinePath ? undefined : packageId,
   );
-  const { data: run, isLoading, error } = useRun(runId);
+  const runQuery = useRun(runId);
+  const { data: run, error } = runQuery;
   const runNumber = run?.runNumber ?? stateNumber;
 
   // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
@@ -226,7 +227,7 @@ export function RunDetailPage() {
     ),
   });
 
-  if (isLoading) return <LoadingState />;
+  if (isQueryInFlight(runQuery)) return <LoadingState />;
 
   if (error || !run) return <ResourceErrorState error={error} />;
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;

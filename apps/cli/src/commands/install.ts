@@ -452,10 +452,11 @@ export async function composeUpgradeCommand(
  *      means "skip" (open mode + footer pointer in the generated `.env`).
  *   3. Otherwise → undefined (open mode).
  *
- * Upgrades short-circuit to undefined: `mergeEnv` preserves whatever
- * `AUTH_*` keys the user already has in their `.env`, so re-running
- * `appstrate install` on a closed-mode instance never silently flips
- * the policy, and no token is minted: `mergeEnv` would keep the one on disk.
+ * An upgrade never prompts and never mints a token: it returns the owner
+ * `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` names, else nothing. `mergeEnv` keeps
+ * the `AUTH_*` keys already in `.env` (a token on disk included), so
+ * re-running `appstrate install` on a closed-mode instance never silently
+ * flips the policy.
  */
 export async function resolveBootstrapEmail(opts: {
   tier: Tier;

@@ -439,6 +439,8 @@
   "connections.scheduleImpact.resets": "no connection left chosen: it goes back to the usual resolution, checked when you re-enable it",
   "connections.scheduleImpact.disables": "it will be disabled: choose another connection, then re-enable it",
   "connections.scheduleImpact.unnamed": "Unnamed schedule",
+  "connections.deleteImpact.loading": "Checking what the delete changes…",
+  "connections.deleteImpact.error": "Could not check what the delete changes.",
   "connections.connectedAtLabel": "Connected on",
   "connections.scopesLabel": "Permissions",
   "connections.descriptionUnified": "All your external connections, across every organization.",
