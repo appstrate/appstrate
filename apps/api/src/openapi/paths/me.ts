@@ -544,8 +544,10 @@ export const mePaths = {
         "they could attach when building an agent in the current space (their own or " +
         "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
-        "respect the caller's role (operations beyond it 403 at invoke time). Space context " +
-        "resolves from `X-Space-Id`, the API key's space, or the org default.",
+        "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
+        "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
+        "is refused — else the one `X-Space-Id` names; with neither the request is a 400, " +
+        "except through the MCP server, which falls back to the org's default space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -561,6 +563,7 @@ export const mePaths = {
                 required: [
                   "user",
                   "org",
+                  "space",
                   "connections",
                   "recent_runs",
                   "agents",
@@ -594,6 +597,25 @@ export const mePaths = {
                         description: "Human-readable organization name.",
                       },
                       slug: { type: ["string", "null"], description: "Organization slug." },
+                    },
+                  },
+                  space: {
+                    type: "object",
+                    description:
+                      "The space this request resolved to. Every list in this payload is " +
+                      "scoped to it. An empty list means nothing of that kind is available to " +
+                      "this caller in this space, this is not the space you meant, or the " +
+                      "caller's permissions do not cover that list.",
+                    required: ["id", "name", "personal"],
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: "string", description: "Human-readable space name." },
+                      personal: {
+                        type: "boolean",
+                        description:
+                          "Whether this space is one member's personal space (always " +
+                          "`private`, no other members) rather than a team space.",
+                      },
                     },
                   },
                   recent_runs: {
@@ -764,6 +786,11 @@ export const mePaths = {
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
+                space: {
+                  id: "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                  name: "Sales",
+                  personal: false,
+                },
                 connections: [
                   { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   {
