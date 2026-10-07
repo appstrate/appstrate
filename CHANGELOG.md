@@ -509,6 +509,9 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **MCP TypeScript SDK 1.32.1** (GHSA-6qxp-vccf-f47h). The SDK's OAuth
+  client could send credentials to an authorization server chosen by the MCP
+  server. The platform does not use that client; the bump clears the audit.
 - **An account the environment names needs proof of ownership.** The
   account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an `AUTH_PLATFORM_ADMIN_EMAILS`
   address is created by the bootstrap token, a provider-verified social
