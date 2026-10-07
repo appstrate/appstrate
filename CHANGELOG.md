@@ -113,7 +113,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The
   keyring is not read and no profile is required. `--api-key ""` and a key
   with whitespace or non-ASCII characters are refused, for `run` as well,
-  and `run` now treats an empty `APPSTRATE_INSTANCE` as unset.
+  and `run` now treats an empty `APPSTRATE_INSTANCE` / `_SPACE_ID` /
+  `_ORG_ID` as unset.
 - **In a run, `api_call` forwards a header named like a credential proxy
   control header instead of refusing the call** (#1670). `X-Integration-Id`,
   `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,

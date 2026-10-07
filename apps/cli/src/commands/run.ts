@@ -879,7 +879,7 @@ async function buildResolverInputs(
     headlessApiKey = explicitApiKey(opts.apiKey);
   } catch (err) {
     throw new ResolverConfigError(
-      (err as Error).message,
+      err instanceof Error ? err.message : String(err),
       "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
     );
   }
@@ -894,8 +894,8 @@ async function buildHeadlessRemoteInputs(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
   const { instance, profile } = await resolveApiKeyTarget(opts.profile);
-  const spaceId = process.env.APPSTRATE_SPACE_ID ?? profile?.spaceId;
-  const orgId = process.env.APPSTRATE_ORG_ID ?? profile?.orgId;
+  const spaceId = process.env.APPSTRATE_SPACE_ID || profile?.spaceId;
+  const orgId = process.env.APPSTRATE_ORG_ID || profile?.orgId;
 
   if (!instance) {
     throw new ResolverConfigError(

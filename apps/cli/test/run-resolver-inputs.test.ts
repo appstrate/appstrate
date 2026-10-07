@@ -162,9 +162,10 @@ describe("buildResolverInputs — remote", () => {
       expect((err as Error).message).not.toMatch(/ask_SE|CRET/);
     });
 
-    it("treats an empty APPSTRATE_INSTANCE as unset and uses the profile's", async () => {
+    it("treats an empty APPSTRATE_INSTANCE / _SPACE_ID as unset and uses the profile's", async () => {
       process.env.APPSTRATE_API_KEY = "ask_headless_3";
       process.env.APPSTRATE_INSTANCE = "";
+      process.env.APPSTRATE_SPACE_ID = "";
       await seedPinnedProfile("default");
 
       const inputs = (await _buildResolverInputsForTesting(
@@ -172,6 +173,7 @@ describe("buildResolverInputs — remote", () => {
         bundleOpts(),
       )) as RemoteResolverInputs;
       expect(inputs.instance).toBe("https://app.example.com");
+      expect(inputs.spaceId).toBe("spc_1");
     });
   });
 

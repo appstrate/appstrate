@@ -144,12 +144,6 @@ export class AuthError extends Error {
   }
 }
 
-export class EmptyApiKeyFlagError extends AuthError {
-  constructor() {
-    super("--api-key is empty");
-  }
-}
-
 async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   const profile = await getProfile(profileName);
   if (!profile) {
@@ -191,13 +185,15 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
 
 /** The `--api-key` flag, else `APPSTRATE_API_KEY` (empty env = unset). */
 export function explicitApiKey(flag: string | undefined): string | undefined {
-  // An explicitly passed empty flag (`--api-key "$UNSET_VAR"`) must not
-  // degrade to the profile's full-authority credential.
-  if (flag === "") throw new EmptyApiKeyFlagError();
-  const key = flag ?? process.env.APPSTRATE_API_KEY;
-  if (!key) return undefined;
-  // Visible ASCII only. `fetch` rejects any other header value with a
-  // message that quotes it — the key would land on stderr. Never echo it.
+  const key = (flag ?? process.env.APPSTRATE_API_KEY)?.trim();
+  if (!key) {
+    // An explicitly passed empty flag (`--api-key "$UNSET_VAR"`) must not
+    // degrade to the profile's full-authority credential.
+    if (flag !== undefined) throw new AuthError("--api-key is empty");
+    return undefined;
+  }
+  // A CR/LF, NUL or non-Latin-1 character makes `fetch` throw an error that
+  // quotes the key; deliberately stricter (visible ASCII), and never echoed.
   if (!/^[\x21-\x7e]+$/.test(key)) {
     throw new AuthError(
       "The API key contains whitespace, a line break or a non-ASCII character. Check --api-key / APPSTRATE_API_KEY.",

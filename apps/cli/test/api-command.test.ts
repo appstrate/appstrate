@@ -67,7 +67,13 @@ function installFetch(responder: (call: FetchCall) => Promise<Response> | Respon
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
+function clearHeadlessEnv(): void {
+  delete process.env.APPSTRATE_API_KEY;
+  delete process.env.APPSTRATE_INSTANCE;
+}
+
 beforeEach(async () => {
+  clearHeadlessEnv();
   await configHome.setup();
   keyring = installFakeKeyring();
   fetchCalls = [];
@@ -75,9 +81,7 @@ beforeEach(async () => {
 afterEach(async () => {
   keyring.restore();
   globalThis.fetch = originalFetch;
-  // The preload starts every file without them; the key-mode tests set them.
-  delete process.env.APPSTRATE_API_KEY;
-  delete process.env.APPSTRATE_INSTANCE;
+  clearHeadlessEnv();
   await configHome.teardown();
 });
 
@@ -1617,7 +1621,7 @@ describe("apiCommand — explicit API key", () => {
     expect(stdoutText(stderr) + stdoutText(stdout)).not.toMatch(/apst_SE|CRET/);
   });
 
-  it('--api-key "" is a usage error (exit 2), never a fallback to the profile', async () => {
+  it('--api-key "" is refused (exit 1), never a fallback to the profile', async () => {
     process.env.APPSTRATE_API_KEY = "apst_from_env";
     await seedPinnedProfile();
     installFetch(() => jsonResponse(200, {}));
@@ -1625,7 +1629,7 @@ describe("apiCommand — explicit API key", () => {
     const { io, exitCode, stderr } = makeIO();
     await runCommand({ path: "/api/x", apiKey: "" }, io);
 
-    expect(exitCode.value).toBe(2);
+    expect(exitCode.value).toBe(1);
     expect(fetchCalls).toHaveLength(0);
     expect(stdoutText(stderr)).toContain("--api-key is empty");
   });
@@ -1664,6 +1668,18 @@ describe("apiCommand — explicit API key", () => {
     await runCommand({ path: "/api/x", apiKey: "apst_k", profile: "ci" }, io);
 
     expect(fetchCalls[0]!.url).toBe("https://other.example.com/api/x");
+    expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
+  });
+
+  it("a key with a trailing newline (secret mounted from a file) is sent trimmed", async () => {
+    process.env.APPSTRATE_API_KEY = "apst_k\n";
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+    installFetch(() => jsonResponse(200, {}));
+
+    const { io, exitCode } = makeIO();
+    await runCommand({ path: "/api/x" }, io);
+
+    expect(exitCode.value).toBe(0);
     expect(fetchCalls[0]!.headers["Authorization"]).toBe("Bearer apst_k");
   });
 

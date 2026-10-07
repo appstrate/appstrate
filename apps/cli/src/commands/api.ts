@@ -51,7 +51,6 @@ import {
   resolveApiKeyAuthContext,
   explicitApiKey,
   AuthError,
-  EmptyApiKeyFlagError,
   ApiError,
 } from "../lib/api.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
@@ -165,7 +164,7 @@ export async function apiCommand(
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
       writeError(`${err.message}\n`);
-      return exit(err instanceof EmptyApiKeyFlagError ? 2 : 1);
+      return exit(1);
     }
     throw err;
   }

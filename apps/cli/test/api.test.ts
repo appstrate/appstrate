@@ -30,7 +30,6 @@ import {
   explicitApiKey,
   resolveApiKeyTarget,
   AuthError,
-  EmptyApiKeyFlagError,
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
 } from "../src/lib/api.ts";
@@ -522,11 +521,12 @@ describe("_awaitRefreshQuiesce (PR #191 review)", () => {
 });
 
 describe("explicit API key helpers", () => {
-  // The preload starts every file without them.
-  afterEach(() => {
+  const clearEnv = (): void => {
     delete process.env.APPSTRATE_API_KEY;
     delete process.env.APPSTRATE_INSTANCE;
-  });
+  };
+  beforeEach(clearEnv);
+  afterEach(clearEnv);
 
   it("explicitApiKey: flag, else env; an empty ENV value means not set", () => {
     expect(explicitApiKey(undefined)).toBeUndefined();
@@ -537,9 +537,18 @@ describe("explicit API key helpers", () => {
     expect(explicitApiKey("apst_flag")).toBe("apst_flag");
   });
 
+  it("explicitApiKey: surrounding whitespace is trimmed; whitespace-only env is unset", () => {
+    expect(explicitApiKey(" apst_flag\n")).toBe("apst_flag");
+    process.env.APPSTRATE_API_KEY = "apst_env\n";
+    expect(explicitApiKey(undefined)).toBe("apst_env");
+    process.env.APPSTRATE_API_KEY = " \n";
+    expect(explicitApiKey(undefined)).toBeUndefined();
+  });
+
   it("explicitApiKey: an empty flag throws even when the env var holds a key", () => {
     process.env.APPSTRATE_API_KEY = "apst_env";
-    expect(() => explicitApiKey("")).toThrow(EmptyApiKeyFlagError);
+    expect(() => explicitApiKey("")).toThrow("--api-key is empty");
+    expect(() => explicitApiKey("  ")).toThrow("--api-key is empty");
   });
 
   it("explicitApiKey: a key that is not visible ASCII throws without quoting it", () => {
