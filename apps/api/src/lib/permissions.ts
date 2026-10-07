@@ -330,13 +330,13 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:delete",
   // Credential proxy — BYOI ("Bring Your Own Instance") for remote
   // AFPS runs. High-value scope: one compromised API key can reach every
-  // provider in the space. NOT granted by default; callers must
-  // explicitly add it when minting the key.
+  // provider in the space. A key minted without an explicit `scopes` list
+  // carries it when its creator holds it; pass `scopes` to mint a narrower key.
   "credential-proxy:call",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
-  // per-call in `llm_usage` (source='proxy'). NOT granted by default;
-  // callers must explicitly add it when minting the key.
+  // per-call in `llm_usage` (source='proxy'). A key minted without an explicit
+  // `scopes` list carries it when its creator holds it; pass `scopes` to narrow.
   "llm-proxy:call",
 ]);
 
