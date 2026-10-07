@@ -995,8 +995,7 @@ export async function compareDeclaredClientWithStored(
  * designed to be toggled without touching the DB.
  *
  * Also invalidates the `getClientCached` entry so the new value is visible
- * to `loadClientSignupPolicy` (and the magic-link pre-check in
- * `auth/guards.ts`) on the next request rather than after a 30s TTL.
+ * to `loadClientSignupPolicy` on the next request rather than after a 30s TTL.
  */
 export async function updateInstanceClientPolicyFromEnv(
   clientId: string,

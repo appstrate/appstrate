@@ -30,10 +30,12 @@ const BYTE_UNITS = {
  *
  * `locale` (a BCP 47 tag, e.g. the UI language) localises the unit names and
  * the decimal separator: `fr` renders `2,0 Ko`. Omitted — the CLI, logs, the
- * prompt builder — the output is the English form (`2.0 KB`).
+ * prompt builder — the output is the English form (`2.0 KB`). So is it for a
+ * malformed tag (`fr_FR`): a display helper never throws.
  */
 export function formatBytes(bytes: number, locale?: string): string {
-  const units = locale?.toLowerCase().startsWith("fr") ? BYTE_UNITS.fr : BYTE_UNITS.en;
+  const tag = canonicalLocale(locale);
+  const units = tag?.toLowerCase().startsWith("fr") ? BYTE_UNITS.fr : BYTE_UNITS.en;
   if (!Number.isFinite(bytes) || bytes < 0 || bytes < 1024) return `${bytes} ${units[0]}`;
   let value = bytes / 1024;
   let tier = 1;
@@ -42,12 +44,22 @@ export function formatBytes(bytes: number, locale?: string): string {
     tier++;
   }
   const digits = value >= 10 ? 0 : 1;
-  const amount = new Intl.NumberFormat(locale ?? "en", {
+  const amount = new Intl.NumberFormat(tag ?? "en", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
     useGrouping: false,
   }).format(value);
   return `${amount} ${units[tier]}`;
+}
+
+/** The canonical form of a BCP 47 tag, or `undefined` when it is absent or malformed. */
+function canonicalLocale(locale: string | undefined): string | undefined {
+  if (locale === undefined) return undefined;
+  try {
+    return Intl.getCanonicalLocales(locale)[0];
+  } catch {
+    return undefined;
+  }
 }
 
 /**

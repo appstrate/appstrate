@@ -526,6 +526,58 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
   });
 });
 
+describe("importBundle — a root below its highest published version", () => {
+  const DEP = "@fwdorg/a-dep";
+  const ROOT = "@fwdorg/z-root";
+
+  function agentAfps(name: string, version: string): Uint8Array {
+    return buildRawAfps(
+      {
+        schema_version: "0.2",
+        name,
+        type: "agent",
+        version,
+        display_name: name,
+        description: "forward-only agent",
+      },
+      `Prompt ${name}@${version}.`,
+    );
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("is refused with version_not_higher before a dependency ordered ahead of it is written", async () => {
+    const ctx = await createTestContext({ orgSlug: "fwdorg" });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    await handleImportBundle(agentAfps(ROOT, "2.0.0"), scope, ctx.user.id, noAuthorize, noShare);
+
+    const dep = await readOrBuildBundle(agentAfps(DEP, "1.0.0"), scope);
+    const root = await readOrBuildBundle(agentAfps(ROOT, "1.0.0"), scope);
+    const bundle: Bundle = {
+      bundleFormatVersion: "1.0",
+      root: root.root,
+      packages: new Map([...dep.packages, ...root.packages]),
+      integrity: "sha256-abc",
+    };
+    expect([...bundle.packages.keys()][0]).toBe(`${DEP}@1.0.0`);
+
+    const err = await importBundle(bundle, scope, ctx.user.id, noShare).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("version_not_higher");
+
+    const depRows = await db.select({ id: packages.id }).from(packages).where(eq(packages.id, DEP));
+    expect(depRows).toHaveLength(0);
+    const rootVersions = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, ROOT));
+    expect(rootVersions.map((r) => r.version)).toEqual(["2.0.0"]);
+  });
+});
+
 /**
  * Re-importing a bundle whose ROOT already lives in another space.
  *

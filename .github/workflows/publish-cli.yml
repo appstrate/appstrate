@@ -78,6 +78,8 @@ jobs:
       - name: TypeScript type-check
         run: bun run typecheck
 
+      # The `test` script carries the per-test timeout the PR gate applies; bunfig
+      # has no such key, so bare `bun test` would run with Bun's 5 s.
       - name: Tests
         run: bun run test
 

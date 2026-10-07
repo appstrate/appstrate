@@ -58,7 +58,8 @@ jobs:
 
       # Every `bun test` in this workflow names its per-test timeout: bunfig has no
       # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
-      # 15 s itself (10 s for the CLI workspace, below).
+      # 15 s itself; the CLI workspace's `test` script passes 10 s (below), so
+      # `publish-cli.yml` runs it with the same timeout.
       #
       # Everything is a unit test unless it is explicitly infra-heavy. This is an
       # exclusion list, not the hand-enumerated inclusion list it replaced: that
@@ -173,7 +174,7 @@ jobs:
       - name: Run CLI unit tests
         if: matrix.partition == 1
         working-directory: apps/cli
-        run: bun test --timeout=10000 --coverage --coverage-reporter=lcov --coverage-dir=coverage
+        run: bun run test --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
       - name: Upload CLI coverage to Codecov
         if: always() && matrix.partition == 1

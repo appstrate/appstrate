@@ -94,7 +94,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           : null,
       };
     } catch {
-      logger.warn("Invalid proxy URL, ignoring", { proxyUrl: config.proxyUrl });
+      // The value is not logged: a proxy URL can carry `user:pass`.
+      logger.warn("Invalid proxy URL, ignoring");
       return null;
     }
   }

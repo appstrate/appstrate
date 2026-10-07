@@ -27,7 +27,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
@@ -945,6 +945,28 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         (r) => (r.after as { principalId?: string } | null)?.principalId,
       );
       expect(principals.sort()).toEqual(["eu_a", "eu_b"]);
+    });
+
+    it("writes the row on the session's next call when the first write failed", async () => {
+      const session = uuidV4();
+      // Every read of this context throws: the write fails after the dedupe claim.
+      const failing = {
+        get: () => {
+          throw new Error("audit write failed");
+        },
+      } as unknown as Context<AppEnv>;
+      await auditForeignConnectionUse(failing, {
+        actor: { type: "end_user", id: "eu_a" },
+        connectionId: shared,
+        integrationId: INTEGRATION_ID,
+        sessionId: session,
+        runId: null,
+        sessionTtlSeconds: 60,
+      });
+      expect(await proxiedRows()).toHaveLength(0);
+
+      await audit("eu_a", session);
+      expect(await proxiedRows()).toHaveLength(1);
     });
   });
 

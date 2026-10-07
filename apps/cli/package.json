@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test test/",
+    "test": "bun test --timeout=10000 test/",
     "build": "bun scripts/build.ts",
     "prepack": "bun run build"
   },

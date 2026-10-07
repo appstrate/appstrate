@@ -11,7 +11,8 @@ export type CookieJar = Map<string, string[]>;
 /** One integration's view of a {@link CookieJar} under one call's URL policy. */
 export interface CookieScope {
   /** One Cookie header for `url` (undefined when empty). By name: literal-allowlist sibling
-   *  origins < `base` (injected credential / caller cookies) < `url`'s own origin. */
+   *  origins < `base` (injected credential / caller cookies) < `url`'s own origin. A cookie
+   *  captured over https never reaches a non-https `url`. */
   header(url: string, base: string | null | undefined): string | undefined;
   /** Merge `url`'s Set-Cookie into its own bucket; an expired cookie deletes the name. */
   capture(url: string, setCookieHeaders: string[]): void;
@@ -76,8 +77,12 @@ export function cookieScope(
       const byName = new Map<string, string>();
       if (gate(url) === "allowlist") {
         const siblings = key("allowlist", "");
+        const secure = origin.startsWith("https:");
         for (const [k, pairs] of jar) {
-          if (k.startsWith(siblings) && k !== key("allowlist", origin)) fold(byName, pairs);
+          if (!k.startsWith(siblings) || k === key("allowlist", origin)) continue;
+          // RFC 6265 `Secure` for every https-captured cookie (attributes are not stored).
+          if (!secure && k.slice(siblings.length).startsWith("https:")) continue;
+          fold(byName, pairs);
         }
       }
       fold(byName, base?.split(";") ?? []);

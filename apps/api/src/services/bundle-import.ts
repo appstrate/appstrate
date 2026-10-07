@@ -54,7 +54,7 @@ import { assertArchiveContentConforms } from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
-import { findHigherPublishedVersion } from "./package-versions.ts";
+import { assertVersionNotLower, findHigherPublishedVersion } from "./package-versions.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -291,6 +291,27 @@ function foreignOwnerConflict(identity: string) {
   );
 }
 
+/**
+ * Refuse a root below its highest published version before any package of the
+ * bundle is written: dependencies precede the root in the bundle's order, and a
+ * refusal reached in the loop would leave them inserted. The owner is checked
+ * first, since the version read spans every org's versions of that id.
+ */
+async function assertRootVersionForward(
+  root: { identity: string; packageId: string; version: string },
+  orgId: string,
+): Promise<void> {
+  if (isSystemPackage(root.packageId)) return;
+  const [owner] = await db
+    .select({ orgId: packages.orgId })
+    .from(packages)
+    .where(eq(packages.id, root.packageId))
+    .limit(1);
+  if (!owner) return;
+  if (owner.orgId !== orgId) throw foreignOwnerConflict(root.identity);
+  await assertVersionNotLower(root.packageId, root.version);
+}
+
 interface BundleImportPreflight {
   bundle: Bundle;
   conflicts: BundleConflict[];
@@ -312,6 +333,12 @@ export async function importBundle(
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
+
+  const rootParsed = parsePackageIdentity(bundle.root);
+  if (!rootParsed) {
+    throw invalidRequest("Bundle root identity is invalid");
+  }
+  await assertRootVersionForward({ identity: bundle.root, ...rootParsed }, scope.orgId);
 
   for (const [identity, pkg] of bundle.packages) {
     const parsedIdentity = parsePackageIdentity(identity);
@@ -397,7 +424,8 @@ export async function importBundle(
     }
 
     // A version below the highest published one cannot be created. A
-    // dependency is left as the org has it; the root falls through and is
+    // dependency is left as the org has it. The root passed
+    // `assertRootVersionForward`; a publish landing since falls through and is
     // refused by `postInstallPackage`.
     const higher = await findHigherPublishedVersion(packageId, version);
     if (higher && identity !== bundle.root) {
@@ -580,10 +608,6 @@ export async function importBundle(
   // door: when the caller holds `<type>:share` in the root's home, the offer is
   // written with the placement, in one transaction; when they do not,
   // `activatePackage` refuses and the result says `root_active: false`.
-  const rootParsed = parsePackageIdentity(bundle.root);
-  if (!rootParsed) {
-    throw invalidRequest("Bundle root identity is invalid");
-  }
   let rootActive = false;
   try {
     const mayShare = await mayShareRoot(rootParsed.packageId);

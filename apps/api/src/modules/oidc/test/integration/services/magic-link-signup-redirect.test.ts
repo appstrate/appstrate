@@ -1,48 +1,128 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Open-redirect regression on `enforceMagicLinkSignupPolicy`.
+ * How a magic-link verify is refused with `?error=signup_disabled`.
  *
- * The hook short-circuits a magic-link verify with a `?error=signup_disabled`
- * redirect when the pending OAuth client has `allowSignup=false` AND the
- * verify would create a brand-new user. The redirect target is built from
- * the request's `errorCallbackURL` (or `callbackURL` fallback) — both are
- * attacker-controlled query params at this stage of the request because:
+ * Two sources, two suites:
  *
- *   - Better Auth's `originCheck` middleware (registered via `use:` on
- *     `/magic-link/verify` — see `node_modules/better-auth/dist/plugins/
- *     magic-link/index.mjs:87-95`) validates these URLs against
- *     `trustedOrigins`, BUT
- *   - plugin `hooks.before` fire BEFORE the route's `use:` chain (see
- *     `node_modules/better-auth/dist/api/to-auth-endpoints.mjs:74` →
- *     `runBeforeHooks` precedes `endpoint(...)` which executes `use:`).
- *
- * Without an explicit same-origin gate in `enforceMagicLinkSignupPolicy`,
- * an attacker who tricks the victim into clicking a magic link issued for a
- * closed-signup client (the `(token → client)` binding makes the hook fire)
- * with `errorCallbackURL=https://evil.example.com/x` appended receives an
- * authenticated open-redirect into `https://evil.example.com/x
- * ?error=signup_disabled`. Useful for branded "your sign-in failed,
- * please re-enter your password" phishing.
- *
- * Test approach: the `magicLink()` plugin only mounts `/magic-link/verify`
- * when SMTP is configured, and the test preload deliberately strips SMTP
- * env vars. We therefore exercise `enforceMagicLinkSignupPolicy` directly
- * with a synthesized BA hook context. This is the same pattern
- * `signup-guard.test.ts` uses for `oidcBeforeSignupGuard` — the alternative
- * (enabling SMTP in the test env and running BA's full magic-link plugin)
- * would buy negligible additional coverage at the cost of substantial
- * test-infra surface and would be torn down the next time SMTP gating
- * changes.
+ *   - A client with a closed signup policy and an address with no account:
+ *     `oidcBeforeSignupGuard` refuses the creation, and Better Auth's verify
+ *     turns that `APIError` into a redirect to its origin-checked
+ *     `errorCallbackURL`. Driven end to end through Better Auth's own
+ *     `/magic-link/verify` with a link issued by `/api/oauth/magic-link`.
+ *     Better Auth skips its origin check under test (`isTest()`), so that
+ *     check is not exercised here.
+ *   - A link whose client is gone (deleted or disabled):
+ *     `enforceMagicLinkSignupPolicy` redirects before Better Auth runs. A
+ *     plugin `hooks.before` fires BEFORE the route's `use:` chain, so Better
+ *     Auth's `originCheck` has not yet validated `errorCallbackURL` and the
+ *     hook gates the target's origin itself. Driven directly with a
+ *     synthesized hook context, since the redirect target is the contract.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { prefixedId } from "@appstrate/db/ids";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { _swapBeforeSignupHookForTesting } from "@appstrate/db/auth";
+import { spaces, user as userTable } from "@appstrate/db/schema";
+import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestContext } from "../../../../../../test/helpers/auth.ts";
+import { captureIssuedMagicLinks, createTestContext } from "../../../../../../test/helpers/auth.ts";
+import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
 import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
-import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
+import { createClient, deleteClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { persistMagicLinkClientBinding } from "../../../services/oauth-transaction-binding.ts";
+import {
+  upsertSmtpConfig,
+  _clearSmtpCacheForTesting,
+  _setSmtpSpy,
+} from "../../../services/smtp.ts";
+import oidcModule from "../../../index.ts";
+
+describe("magic-link verify — a closed-signup client and a new address", () => {
+  enableSmtpForSuite();
+  const app = getTestApp({ modules: [oidcModule] });
+  const magicLinks = captureIssuedMagicLinks();
+
+  // The boot installs every module's `beforeSignup` (`lib/boot.ts`); the test
+  // app does not, so the suite installs the OIDC one and restores the original.
+  let installedSignupHook: ReturnType<typeof _swapBeforeSignupHookForTesting>;
+  beforeAll(() => {
+    installedSignupHook = _swapBeforeSignupHookForTesting((email, ctx) =>
+      oidcModule.hooks!.beforeSignup!(email, ctx),
+    );
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    _resetClientCache();
+    _clearSmtpCacheForTesting();
+    _setSmtpSpy(() => {});
+  });
+
+  afterEach(() => {
+    _setSmtpSpy(null);
+  });
+
+  afterAll(() => {
+    _swapBeforeSignupHookForTesting(installedSignupHook);
+    getTestApp();
+  });
+
+  /** Issue a link for `email` through the client's hosted magic-link page. */
+  async function issueLink(email: string): Promise<string> {
+    const ctx = await createTestContext({ orgSlug: `closed-${crypto.randomUUID().slice(0, 8)}` });
+    const spaceId = prefixedId("spc");
+    await db
+      .insert(spaces)
+      .values({ id: spaceId, orgId: ctx.orgId, name: "Closed", createdBy: ctx.user.id });
+    const client = await createClient({
+      level: "space",
+      name: "Closed app",
+      redirectUris: ["https://closed.example.com/oauth/callback"],
+      referencedSpaceId: spaceId,
+      allowSignup: false,
+    });
+    await upsertSmtpConfig(spaceId, {
+      host: "__test_json__",
+      port: 587,
+      username: "u",
+      pass: "p",
+      fromAddress: `no-reply@${spaceId}.test`,
+      fromName: "Closed",
+    });
+    const qs = `?client_id=${encodeURIComponent(client.clientId)}&state=s`;
+    const page = await app.request(`/api/oauth/magic-link${qs}`);
+    const cookie = (page.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const csrf = /name="_csrf" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
+    await app.request(`/api/oauth/magic-link${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookie },
+      body: `_csrf=${csrf}&email=${encodeURIComponent(email)}`,
+    });
+    return magicLinks.tokenFor(email);
+  }
+
+  const accountOf = async (email: string) =>
+    db.select({ id: userTable.id }).from(userTable).where(eq(userTable.email, email));
+
+  it("is refused with signup_disabled on the error callback and creates no account", async () => {
+    const email = `new-${crypto.randomUUID()}@closed.test`;
+    const token = await issueLink(email);
+
+    const res = await app.request(
+      `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}&callbackURL=%2F`,
+    );
+
+    expect(res.status).toBe(302);
+    expect(
+      new URL(res.headers.get("location")!, "http://localhost").searchParams.get("error"),
+    ).toBe("signup_disabled");
+    expect(res.headers.getSetCookie().join(";")).not.toContain("session_token");
+    expect(await accountOf(email)).toHaveLength(0);
+  });
+});
 
 interface RedirectThrown {
   redirectTo: string;
@@ -56,36 +136,11 @@ interface RedirectThrown {
 function makeCtx(opts: {
   baseURL: string;
   query: { token?: string; errorCallbackURL?: string; callbackURL?: string };
-  email: string;
-  emailExists: boolean;
-}): {
-  request: Request;
-  query: { token?: string; errorCallbackURL?: string; callbackURL?: string };
-  context: {
-    baseURL: string;
-    internalAdapter: {
-      findVerificationValue: (k: string) => Promise<{ value: string; expiresAt: Date } | null>;
-      findUserByEmail: (e: string) => Promise<{ user: unknown } | null>;
-    };
-  };
-  redirect: (url: string) => never;
-} {
+}) {
   return {
     request: new Request(`${opts.baseURL}/api/auth/magic-link/verify`),
     query: opts.query,
-    context: {
-      baseURL: opts.baseURL,
-      internalAdapter: {
-        // The hook only inspects `value` (parsed for `email`) and short-
-        // circuits on null. Returning a populated row exercises the
-        // redirect path; returning null exercises the pass-through.
-        findVerificationValue: async () => ({
-          value: JSON.stringify({ email: opts.email }),
-          expiresAt: new Date(Date.now() + 60_000),
-        }),
-        findUserByEmail: async () => (opts.emailExists ? { user: { id: "x" } } : null),
-      },
-    },
+    context: { baseURL: opts.baseURL },
     redirect: (url: string): never => {
       const err: RedirectThrown = { redirectTo: url };
       throw err;
@@ -93,122 +148,96 @@ function makeCtx(opts: {
   };
 }
 
-describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
-  let closedOrgClientId: string;
+async function redirectOf(ctx: ReturnType<typeof makeCtx>): Promise<RedirectThrown | null> {
+  try {
+    await enforceMagicLinkSignupPolicy(ctx);
+  } catch (err) {
+    return err as RedirectThrown;
+  }
+  return null;
+}
+
+describe("enforceMagicLinkSignupPolicy — a link whose client is gone", () => {
+  let goneClientId: string;
+  let liveClientId: string;
   const baseURL = "http://localhost:3000";
 
   beforeEach(async () => {
     await truncateAll();
     _resetClientCache();
     const ctx = await createTestContext({ orgSlug: "redirgate" });
-
-    // A client with closed signup so the hook fires its redirect path
-    // (rather than falling through and letting BA proceed to createUser).
-    const closed = await createClient({
-      level: "org",
-      name: "Closed Portal",
-      redirectUris: ["http://localhost:3000/cb"],
-      referencedOrgId: ctx.orgId,
-      allowSignup: false,
-    });
-    closedOrgClientId = closed.clientId;
+    const client = (allowSignup: boolean) =>
+      createClient({
+        level: "org",
+        name: "Portal",
+        redirectUris: ["http://localhost:3000/cb"],
+        referencedOrgId: ctx.orgId,
+        allowSignup,
+      });
+    goneClientId = (await client(true)).clientId;
+    await deleteClient(goneClientId);
+    liveClientId = (await client(false)).clientId;
   });
 
   it("rewrites an off-origin errorCallbackURL to a safe in-origin redirect", async () => {
-    const evil = "https://evil.example.com/exfil";
-    await persistMagicLinkClientBinding("magic_redir_off", closedOrgClientId);
-    const ctx = makeCtx({
-      baseURL,
-      query: { token: "magic_redir_off", errorCallbackURL: evil, callbackURL: `${baseURL}/cb` },
-      email: `fresh-${Date.now()}@example.com`,
-      emailExists: false,
-    });
+    await persistMagicLinkClientBinding("magic_redir_off", goneClientId);
+    const redirected = await redirectOf(
+      makeCtx({
+        baseURL,
+        query: {
+          token: "magic_redir_off",
+          errorCallbackURL: "https://evil.example.com/exfil",
+          callbackURL: `${baseURL}/cb`,
+        },
+      }),
+    );
 
-    let redirected: RedirectThrown | null = null;
-    try {
-      await enforceMagicLinkSignupPolicy(ctx);
-    } catch (err) {
-      redirected = err as RedirectThrown;
-    }
-
-    // The hook MUST throw the redirect — if it returned silently the
-    // closed-signup gate has been bypassed, defeating the whole point
-    // of the hook (a separate but equally damaging regression).
+    // The hook MUST throw the redirect: returning would let the link sign in.
     expect(redirected).not.toBeNull();
-    expect(redirected!.redirectTo).toBeTruthy();
-
-    // CRITICAL: the redirect MUST NOT point at evil.example.com. If
-    // this fails, the open-redirect is back. We assert positively on
-    // the safe origin too — checking the absence of evil alone would
-    // miss a "redirect to about:blank" or similarly broken state.
+    // A positive origin check, not just "not evil": a broken target
+    // (about:blank, empty) must fail too.
     const target = new URL(redirected!.redirectTo);
     expect(target.hostname).not.toBe("evil.example.com");
     expect(target.origin).toBe(baseURL);
-
-    // The error code must still be carried so the login page can
-    // render the localized banner — losing it would silently break
-    // the closed-signup UX even though the security fix lands.
+    // The code drives the login page's localized banner.
     expect(target.searchParams.get("error")).toBe("signup_disabled");
   });
 
   it("preserves an in-origin errorCallbackURL exactly as supplied", async () => {
-    // Negative regression: the same-origin gate must NOT reject legit
-    // same-origin URLs. The OIDC login page lives at
-    // /api/oauth/login?client_id=... and is the canonical recovery
-    // surface — fail-closing on this would break every closed-signup
-    // OAuth client in production.
-    const safe = `${baseURL}/api/oauth/login?client_id=${encodeURIComponent(closedOrgClientId)}`;
-    await persistMagicLinkClientBinding("magic_redir_in", closedOrgClientId);
-    const ctx = makeCtx({
-      baseURL,
-      query: { token: "magic_redir_in", errorCallbackURL: safe, callbackURL: `${baseURL}/cb` },
-      email: `inorigin-${Date.now()}@example.com`,
-      emailExists: false,
-    });
-
-    let redirected: RedirectThrown | null = null;
-    try {
-      await enforceMagicLinkSignupPolicy(ctx);
-    } catch (err) {
-      redirected = err as RedirectThrown;
-    }
+    // The OIDC login page is the canonical recovery surface: the origin gate
+    // must not fail closed on it.
+    const safe = `${baseURL}/api/oauth/login?client_id=${encodeURIComponent(goneClientId)}`;
+    await persistMagicLinkClientBinding("magic_redir_in", goneClientId);
+    const redirected = await redirectOf(
+      makeCtx({
+        baseURL,
+        query: { token: "magic_redir_in", errorCallbackURL: safe, callbackURL: `${baseURL}/cb` },
+      }),
+    );
 
     expect(redirected).not.toBeNull();
     const target = new URL(redirected!.redirectTo);
     expect(target.origin).toBe(baseURL);
     expect(target.pathname).toBe("/api/oauth/login");
-    expect(target.searchParams.get("client_id")).toBe(closedOrgClientId);
+    expect(target.searchParams.get("client_id")).toBe(goneClientId);
     expect(target.searchParams.get("error")).toBe("signup_disabled");
   });
 
   it("falls back to safe redirect on malformed errorCallbackURL (lone %)", async () => {
-    // `decodeURIComponent("%ZZ")` throws `URIError`. Before the fix,
-    // that surfaced as an uncaught 500 — ugly UX and a minor oracle
-    // distinguishing "hook fired and choked" from "hook did not fire"
-    // for an attacker who can plant the pending-client cookie. Post-
-    // fix: the URIError is caught and we emit the same in-origin
-    // `?error=signup_disabled` redirect as the off-origin branch.
-    await persistMagicLinkClientBinding("magic_redir_malformed", closedOrgClientId);
-    const ctx = makeCtx({
-      baseURL,
-      query: {
-        token: "magic_redir_malformed",
-        errorCallbackURL: "%ZZ",
-        callbackURL: `${baseURL}/cb`,
-      },
-      email: `malformed-${Date.now()}@example.com`,
-      emailExists: false,
-    });
+    // `decodeURIComponent("%ZZ")` throws `URIError`: caught, and answered with
+    // the same in-origin redirect as the off-origin branch rather than a 500.
+    await persistMagicLinkClientBinding("magic_redir_malformed", goneClientId);
+    const redirected = await redirectOf(
+      makeCtx({
+        baseURL,
+        query: {
+          token: "magic_redir_malformed",
+          errorCallbackURL: "%ZZ",
+          callbackURL: `${baseURL}/cb`,
+        },
+      }),
+    );
 
-    let redirected: RedirectThrown | null = null;
-    try {
-      await enforceMagicLinkSignupPolicy(ctx);
-    } catch (err) {
-      redirected = err as RedirectThrown;
-    }
-
-    // The hook MUST throw a redirect (not surface the URIError as a
-    // 500). If this fails as an unhandled error, the fix regressed.
     expect(redirected).not.toBeNull();
     const target = new URL(redirected!.redirectTo);
     expect(target.origin).toBe(baseURL);
@@ -216,32 +245,19 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
   });
 
   it("falls back to safe redirect on unparseable URL string", async () => {
-    // `new URL("https://[", baseURL)` throws `TypeError` — the bracket
-    // opens an IPv6-literal host that is never closed. Same contract
-    // as the malformed-percent case above: the throw must be caught
-    // and converted into the safe in-origin redirect. Assert this as
-    // a separate case because the underlying error class differs
-    // (TypeError vs URIError) and a `catch (err: URIError)`-style
-    // narrowing mistake in the fix would fail this test but not the
-    // one above.
-    await persistMagicLinkClientBinding("magic_redir_unparseable", closedOrgClientId);
-    const ctx = makeCtx({
-      baseURL,
-      query: {
-        token: "magic_redir_unparseable",
-        errorCallbackURL: "https://[",
-        callbackURL: `${baseURL}/cb`,
-      },
-      email: `unparseable-${Date.now()}@example.com`,
-      emailExists: false,
-    });
-
-    let redirected: RedirectThrown | null = null;
-    try {
-      await enforceMagicLinkSignupPolicy(ctx);
-    } catch (err) {
-      redirected = err as RedirectThrown;
-    }
+    // `new URL("https://[", baseURL)` throws `TypeError`, a different class
+    // from the `URIError` above: a catch narrowed to one would fail here.
+    await persistMagicLinkClientBinding("magic_redir_unparseable", goneClientId);
+    const redirected = await redirectOf(
+      makeCtx({
+        baseURL,
+        query: {
+          token: "magic_redir_unparseable",
+          errorCallbackURL: "https://[",
+          callbackURL: `${baseURL}/cb`,
+        },
+      }),
+    );
 
     expect(redirected).not.toBeNull();
     const target = new URL(redirected!.redirectTo);
@@ -249,24 +265,29 @@ describe("enforceMagicLinkSignupPolicy — redirect target gating", () => {
     expect(target.searchParams.get("error")).toBe("signup_disabled");
   });
 
-  it("pass-through when the verify carries no client binding", async () => {
-    // Sanity: outside an OIDC flow, the hook is a no-op. If this ever
-    // starts redirecting, the gate has accidentally widened to apply
-    // to every magic-link signup, breaking the platform sign-up UX.
-    const ctx = makeCtx({
-      baseURL,
-      query: {
-        token: "magic_no_cookie",
-        errorCallbackURL: "https://evil.example.com/x",
-        callbackURL: `${baseURL}/cb`,
-      },
-      email: `fresh2-${Date.now()}@example.com`,
-      emailExists: false,
-    });
-    // Use db here just to silence "unused import" warnings if we ever
-    // need raw queries — left intentionally unused, inspecting db
-    // state is not part of this contract.
-    void db;
-    await expect(enforceMagicLinkSignupPolicy(ctx)).resolves.toBeUndefined();
+  it("passes through when the bound client resolves, whatever its signup policy", async () => {
+    // A closed policy is the signup guard's to enforce, inside Better Auth.
+    await persistMagicLinkClientBinding("magic_live", liveClientId);
+    await expect(
+      enforceMagicLinkSignupPolicy(
+        makeCtx({ baseURL, query: { token: "magic_live", callbackURL: `${baseURL}/cb` } }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("passes through when the verify carries no client binding", async () => {
+    // Outside an OIDC flow the hook is a no-op.
+    await expect(
+      enforceMagicLinkSignupPolicy(
+        makeCtx({
+          baseURL,
+          query: {
+            token: "magic_no_binding",
+            errorCallbackURL: "https://evil.example.com/x",
+            callbackURL: `${baseURL}/cb`,
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
   });
 });
