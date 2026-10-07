@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sign in to the account of every named address: an existing one is not
   re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **The API reads a live model catalog from `get.appstrate.dev`** (#1717,
-  #1732). A new variable, `MODEL_CATALOG_URL` (default
+  #1732, #1735). A new variable, `MODEL_CATALOG_URL` (default
   `https://get.appstrate.dev/model-catalog`), names a signed file listing the
   models a later Pi registry records and this build can serve, so a new model
   becomes selectable without a release. Each API process reads it in the
