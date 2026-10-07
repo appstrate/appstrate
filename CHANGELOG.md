@@ -6,13 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.65] - 2026-10-07
+
 ### Operators
 
 - **An account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or
   `AUTH_PLATFORM_ADMIN_EMAILS` that does not exist yet is no longer created
-  by the sign-up form.** Set `AUTH_BOOTSTRAP_TOKEN`, restart and claim it at
-  `<APP_URL>/claim`, or use a magic link or a verified Google/GitHub
-  sign-in; remove the token from `.env` once claimed. Check that you can
+  by the sign-up form** (#1707). On an instance with no organization yet, set
+  `AUTH_BOOTSTRAP_TOKEN`, restart and claim it at `<APP_URL>/claim`; remove
+  the token from `.env` once claimed. Once an organization exists the token
+  is dead (`/claim` answers 410): a newly named address then gets its account
+  only through a magic link (SMTP) or a Google/GitHub sign-in whose provider
+  asserts the address verified, and without either it cannot get one while
+  it is named (recovery under Pitfalls in the doc below). Check that you can
   sign in to the account of every named address: an existing one is not
   re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
 - **The API reads a live model catalog from `get.appstrate.dev`** (#1717,
@@ -38,7 +44,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
   `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
   Fireworks `accounts/fireworks/models/glm-5p2` and
-  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`. An
+  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`;
+  OpenRouter `inclusionai/ling-3.0-flash-fin:free`,
+  `inclusionai/ling-3.0-flash-vl:free`, `nex-agi/nex-n2.5-mini:free`,
+  `nex-agi/nex-n2.5-pro:free`, `qwen/qwen3.8-27b:free`. An
   existing `org_models` row on one of them keeps its stored values and loses
   the catalog defaults (label, limits, capabilities, price); it can no longer
   be created.
@@ -63,9 +72,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proxy the reverse tightening applies: a listed host is reached only when
   `authorized_uris` names it literally, no longer through `allow_all_uris`,
   a wildcard entry or a host taken from a connection value. A run's sidecar
-  now resolves every `api_call` host itself (a literal host used to skip the
+  now resolves an `api_call` host itself (a literal host used to skip the
   lookup), so it needs working DNS even when it sends through `PROXY_URL`:
-  without it the call is a 502 `Target host could not be resolved`. The
+  without it the call is a 502 `Target host could not be resolved`. An
+  exempt internal host (listed in `EGRESS_ALLOW_INTERNAL_HOSTS` and named
+  literally in `authorized_uris`) is the exception: it is not looked up. The
   local resolver of `appstrate run` is unchanged.
 - **Pre-flight the stored integration manifests before the deploy**:
   `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
@@ -109,21 +120,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dry run is the per-kid inventory and exits 0 only when nothing live is left
   outside the active kid. Procedure: `docs/ENV.md` § "Rotating
   `CONNECTION_ENCRYPTION_KEY`" (#1641).
+- **Billing pins the Stripe API version `2026-09-30.endive`** (stripe-node 23,
+  #1738). A webhook endpoint renders its payloads at the version it was
+  created with and that version cannot be changed: before the deploy, the
+  billing endpoint (`<APP_URL>/api/billing/webhooks`) must be one created at
+  `2026-09-30.endive`, with its signing secret in `STRIPE_WEBHOOK_SECRET`. Never
+  leave two endpoints active on the same URL: the module does not deduplicate
+  events. Only instances that load `@appstrate/module-ee` are concerned.
 
 ### Changed
 
-- **`appstrate api` uses an API key when one is set** (#1720): `--api-key`
-  or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
-  `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
+- **BREAKING (CLI): `appstrate run` with an API key reads the org and space
+  only from `APPSTRATE_ORG_ID` / `APPSTRATE_SPACE_ID`** (#1752), never from
+  the active profile, whose pins could contradict the key's and answer 403. A
+  remote run needs neither; a local run still requires `APPSTRATE_SPACE_ID`,
+  and one with a preset model now also requires `APPSTRATE_ORG_ID`.
+- **BREAKING (CLI): `appstrate api` uses an API key when one is set** (#1720):
+  `--api-key` or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads,
+  with `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
   behaviour for a shell that already exports `APPSTRATE_API_KEY` for
-  `appstrate run`**: every `appstrate api` call there now goes out as the
-  key instead of the logged-in user — another principal, no `X-Org-Id` /
+  `appstrate run`**: every `appstrate api` call there now goes out as the key
+  instead of the logged-in user — another principal, no `X-Org-Id` /
   `X-Space-Id` (the key's own org and space apply), and the instance
-  `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The
-  keyring is not read and no profile is required. `--api-key ""` and a key
-  with whitespace or non-ASCII characters are refused, for `run` as well,
-  and `run` now treats an empty `APPSTRATE_INSTANCE` / `_SPACE_ID` /
-  `_ORG_ID` as unset.
+  `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The keyring
+  is not read and no profile is required. `--api-key ""` and a key with
+  whitespace or non-ASCII characters are refused, for `run` as well, and `run`
+  now treats an empty `APPSTRATE_INSTANCE` / `_SPACE_ID` / `_ORG_ID` as unset.
+- **`appstrate install` with a named owner writes `AUTH_BOOTSTRAP_TOKEN` and
+  sends the operator to `/claim`** (#1707), instead of opening a `/register`
+  form pre-filled and locked to the owner's address. Every fresh closed
+  install now writes the token, and with `AUTH_BOOTSTRAP_OWNER_EMAIL` set the
+  claim accepts that address only (403 `bootstrap_owner_email_mismatch`); an
+  upgrade mints no token. `bootstrapOwnerEmail` is gone from
+  `window.__APP_CONFIG__`.
 - **In a run, `api_call` forwards a header named like a credential proxy
   control header instead of refusing the call** (#1670). `X-Integration-Id`,
   `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,
@@ -135,8 +164,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   still reads some of them, is unchanged. The sidecar also stops re-checking
   the type of `target` and the case of `method`: the agent runtime validates
   a model's arguments against the tool's schema before it calls.
-- **Models, proxies and endpoint URLs refuse three states they used to
-  accept** (#1681). A disabled model cannot be the organization default:
+- **BREAKING (API): models, proxies and endpoint URLs refuse three states they
+  used to accept** (#1681). A disabled model cannot be the organization default:
   `PUT /api/models/default` naming one, and `PATCH /api/models/{id}` with
   `enabled: false` on the current default, answer 409 `model_disabled` (move or
   clear the default first). `base_url_override` / `base_url` on
@@ -163,9 +192,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`POST /api/webhooks/{id}/test` sends a real request** (#1683): one signed
   `test.ping` to the webhook URL, single attempt, listed in its deliveries and
   recorded as a `webhook.test_sent` audit event. A delivery whose hostname does
-  not resolve is retried up to its third attempt (`Delivery target hostname
-could not be resolved`) instead of failing for good on the first. Without
-  Redis, cron schedules now fire on the minute rather than up to 30 s late.
+  not resolve is retried up to its third attempt
+  (`Delivery target hostname could not be resolved`) instead of failing for
+  good on the first. Without Redis, cron schedules now fire on the minute
+  rather than up to 30 s late.
 - **BREAKING (API): deleting the default space answers
   `409 default_space_not_deletable`** (#1680), was `400 invalid_request`.
   Every refusal of `DELETE /api/spaces/{id}` that is about the space's state
@@ -175,13 +205,8 @@ could not be resolved`) instead of failing for good on the first. Without
   rename moved an organization). Spaces are listed default first, then
   personal spaces, then team spaces, each oldest first (a personal space was
   ranked by its creation date, a different place for each member).
-- **`GET /api/profile` reports `can_create_org`** (#1680): whether
-  `POST /api/orgs` would accept the user — true on an open instance, and for
-  platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
-  routes on it, so the `orgCreationDisabled` flag is gone from
-  `window.__APP_CONFIG__`.
-- **Six refusals answer with their own problem `code`, and a taken package
-  identifier is always a 409** (#1677). A client that branches on the old
+- **BREAKING (API): six refusals answer with their own problem `code`, and a
+  taken package identifier is always a 409** (#1677). A client that branches on the old
   value must follow; `detail`, `param` and the other statuses are unchanged.
   - `POST /api/orgs` with `AUTH_DISABLE_ORG_CREATION` set, for a caller who
     is not a platform admin: 403 `forbidden` → 403 `org_creation_disabled`.
@@ -200,23 +225,21 @@ could not be resolved`) instead of failing for good on the first. Without
     package's identifier, or one owned by another organization).
   - A model or proxy connection test that is refused at the TCP level
     answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
-
-- **One process reads the Pi model registry: the API** (#1706). It hands every
-  model builder the record's _dialect_ (`name`, `thinkingLevelMap`, `compat`)
-  next to the limits, modalities, reasoning and price it already resolved. The
-  agent container reads it from `MODEL_DIALECT`, the sidecar from
-  `PI_MODEL_SWAP_JSON` (`backing.dialect`), the chat and the CLI from
-  `pi_dialect` on `GET /api/models` (opaque, `null` for a gateway and for an
-  alias). None of them looks a model up, so a model's dialect does not depend
-  on which Pi registry an image or a CLI was built with; the request is still
-  serialized by each one's own Pi code. The field is required wherever a Pi
-  provider is named (`null` when Pi keeps no record), and a consumer handed a
-  provider without it refuses instead of building the model bare: the
-  container and the sidecar at boot, `appstrate run --model-source preset`
-  before any call. A preset run therefore needs the CLI and the instance at
-  the same version. `ModelSwapBacking.dialect` is a required field of
-  `@appstrate/core`: its next release is a major. Plan:
-  `docs/plans/live-model-catalog.md`, step 1.
+- **BREAKING (CLI): one process reads the Pi model registry, the API** (#1706).
+  It hands every model builder the record's _dialect_ (`name`,
+  `thinkingLevelMap`, `compat`) next to the limits, modalities, reasoning and
+  price it already resolved. The agent container reads it from `MODEL_DIALECT`,
+  the sidecar from `PI_MODEL_SWAP_JSON` (`backing.dialect`), the chat and the
+  CLI from `pi_dialect` on `GET /api/models` (opaque, `null` for a gateway and
+  for an alias). None of them looks a model up, so a model's dialect does not
+  depend on which Pi registry an image or a CLI was built with; the request is
+  still serialized by each one's own Pi code. The field is required wherever a
+  Pi provider is named (`null` when Pi keeps no record), and a consumer handed a
+  provider without it refuses instead of building the model bare: the container
+  and the sidecar at boot, `appstrate run --model-source preset` before any
+  call. A preset run therefore needs the CLI and the instance at the same
+  version. `ModelSwapBacking.dialect` is a required field of `@appstrate/core`:
+  its next release is a major. Plan: `docs/plans/live-model-catalog.md`, step 1.
 - **`claude-sonnet-5-5` replaces `claude-sonnet-5` among the featured models**
   of the `anthropic` and `claude-code` providers (#1705), now that the pinned
   Pi registry (`@earendil-works/pi-ai` 1.0.4) records it; existing
@@ -304,9 +327,6 @@ could not be resolved`) instead of failing for good on the first. Without
   resource** (#1641). The `content_base64` field is gone; the bytes arrive as
   a `resource` content block with `blob`, whose `uri` is the file's REST
   content URL.
-- **Platform MCP tools return structured output** (#1641). Every JSON result
-  carries `structuredContent` beside its text block (MCP 2025-06-18); an error
-  carries the text only.
 - **BREAKING (API): the Stripe webhook receiver answers its refusals as RFC
   9457 problem documents** (#1641). `POST /api/billing/webhooks` answers
   `400 invalid_request` for a missing or invalid `stripe-signature` and
@@ -314,8 +334,10 @@ could not be resolved`) instead of failing for good on the first. Without
 - **BREAKING (API): the OAuth endpoints' 429 is a standard OAuth error**
   (#1641):
   `/api/auth/oauth2/*` answers `Retry-After` and a JSON body with
-  `"error": "temporarily_unavailable"` (RFC 6749 §5.2) instead of Better
-  Auth's `X-Retry-After` and untyped `{message}`.
+  `"error": "temporarily_unavailable"` instead of Better Auth's
+  `X-Retry-After` and untyped `{message}`. The code is the one RFC 6749
+  §4.1.2.1 defines for the authorization endpoint, reused on the token
+  endpoint.
 - **Notification kinds are a declared union** (#1641). `GET /api/notifications`
   items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
   typed payload each, and the database refuses any other kind.
@@ -332,12 +354,36 @@ could not be resolved`) instead of failing for good on the first. Without
 - **BREAKING (API): the retired `X-Integration` header is no longer
   stripped** by the credential proxy or the sidecar (#1641); it reaches the upstream like any
   other header.
+- **An integration cannot name itself as its MCP server** (#1675): a manifest
+  write refuses an integration whose `source.server.name` is the integration
+  itself, which could never resolve and failed every run with
+  `mcp_server_unresolved`. A stored manifest holding one still loads.
+- **The import 409s `draft_overwrite` and `integrity_mismatch` name what the
+  import would overwrite** (#1675), as RFC 9457 extension members:
+  `packageId`, plus `active_version` on `draft_overwrite` (`null` when the
+  draft declares none) and `version` on `integrity_mismatch`, or on a
+  `draft_overwrite` whose published version of that number also differs.
+- **An OIDC client's `https://<x>.localhost` redirect URI is refused**
+  (#1748), like `https://localhost` already was, now that every `*.localhost`
+  name is a blocked host. `http://<x>.localhost` is still accepted as
+  loopback (RFC 8252 §7.3).
+- **The repository requires Bun 1.3.14 or later** (#1654): the root
+  `engines.bun` moves from `>=1.3.9` to `>=1.3.14`, the version CI, the
+  Dockerfile and `packageManager` pin, and the root test preload refuses an
+  older Bun. Published packages keep their own `>=1.3.9`.
 - **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
-  `@appstrate/module-chat` are private workspace packages** (#1641). None was
-  ever published; the dead `publishConfig` is removed.
+  `@appstrate/module-chat` are private workspace packages** (#1641). No
+  release of them was ever published (npm holds only a
+  `@appstrate/afps-runtime@0.0.0` placeholder); the dead `publishConfig` is
+  removed.
 
 ### Added
 
+- **`GET /api/profile` reports `can_create_org`** (#1680): whether
+  `POST /api/orgs` would accept the user — true on an open instance, and for
+  platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
+  routes on it, so the `orgCreationDisabled` flag is gone from
+  `window.__APP_CONFIG__`.
 - **`GET /api/me/context` names the space it resolved** (#1721): the payload
   (the MCP `get_me` tool) carries `space: { id, name, personal }`, the space
   every list in it is scoped to. An agent holding a key bound to an empty space
@@ -381,9 +427,44 @@ could not be resolved`) instead of failing for good on the first. Without
   connection used. A call that fails after the credential may have left
   (timeout, unreachable upstream, refused redirect) is audited like one that
   returns; one refused before sending is not.
+- **Platform MCP tools return structured output** (#1641). Every JSON result
+  carries `structuredContent` beside its text block (MCP 2025-06-18); an error
+  carries the text only.
 
 ### Fixed
 
+- **A failed connection-use audit write is retried on the session's next
+  call** (#1753): the dedupe key is released when the write fails.
+- **Byte sizes render in English on a malformed locale tag** (#1753) instead
+  of failing the page.
+- **Disabling the default model and making a disabled model the default can
+  no longer both succeed** (#1749): the two writes take the same row lock, so
+  one of them answers 409 `model_disabled`.
+- **A refused mutation shows one error toast, not two** (#1752), and detail
+  pages no longer show an error state while a retry is in flight. The
+  connection delete confirmation waits for its impact before it can be
+  confirmed.
+- **The chat interface is translated** (#1752): its remaining French-only
+  strings follow the interface language.
+- **The chat no longer re-creates a deleted conversation** (#1682). Its URL
+  showed the empty welcome screen with a live composer, and the first message
+  sent there re-created the conversation under its old id; a conversation
+  that is deleted or not the caller's now reads as not found. The model
+  picker no longer stores the organization's default as the user's pick, so
+  a changed default reaches everyone who never chose a model. Deleting a
+  conversation asks for confirmation, a reader (`chat:read` only) is no
+  longer offered "New conversation", and every failed turn carries a request
+  id, the chat request's own when the upstream named none.
+- **The self-hosting compose files forward the variables the docs and the
+  installer set** (#1726). `AUTH_BOOTSTRAP_TOKEN`, which the installer writes
+  to `.env`, and `EGRESS_ALLOW_INTERNAL_HOSTS` reached no container, so `/claim`
+  could not find the token. The tier templates also dropped SMTP, Google and
+  GitHub sign-in, run limits, proxies and a few others the root file forwards.
+  All are bare passthroughs: an unset variable stays unset.
+  `deploy/docker-compose.yml`, which loads `.env` whole, is not affected.
+- **A subscription pairing token minted on a `*.localhost` instance is
+  accepted** (#1648), as loopback (RFC 6761 §6.3). It needs
+  `@appstrate/connect-helper` 0.3.1.
 - **A gateway model declared reasoning takes a reasoning level** (#1736). An
   `openai-compatible` or `anthropic-compatible` model created with
   `reasoning: true` offered no level, not even `off`: every one was refused
@@ -407,6 +488,11 @@ could not be resolved`) instead of failing for good on the first. Without
   refused before anything is written, with `409 version_not_higher`, forced
   or not. A bundle import refuses such a root the same way, and leaves such
   a dependency as the organization has it, with a warning.
+- **A re-import onto an existing version no longer leaves the draft dirty**
+  (#1675). Importing a version that already exists, identical or forced,
+  kept the draft marked as holding unpublished changes, so every later import
+  answered a spurious 409 `draft_overwrite`. When that version is the latest
+  published one, the draft is now settled against it.
 - **`/api/admin/storage-deletion-jobs` no longer asks for `X-Org-Id`**
   (#1713). The routes are instance-wide, so a platform administrator who
   belongs to no organization got a 400. A header that is sent is ignored.
@@ -506,13 +592,11 @@ could not be resolved`) instead of failing for good on the first. Without
   `token_type`, `id_token` or `scope` worked after the connect and failed
   with an unresolved placeholder after the first refresh. A refresh now
   starts from the stored outputs and replaces what the provider returns.
-
 - **The integration editor's default auth allowlist is the source host**
   (#1641): a new integration's `authorized_uris` starts empty and takes the
   remote source's host (`https://<host>/**`) as the URL is typed, until the
   author edits it. The former default, `https://**`, is what the host-bound
   rule refuses.
-
 - **An upstream verdict is credited to the credential that earned it**
   (#1641). The sidecar reports a 401 or 2xx against the
   `credential_revision` its request carried, not the one held when the
@@ -605,6 +689,39 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **A bundle import cannot take a dependency another organization owns**
+  (#1749): a package created by another organization after the import's
+  preflight is a 409 `bundle_conflict`, never a "reused" dependency naming
+  that organization's latest version.
+- **A connect-login secret is bound like an injected credential** (#1751):
+  the MITM listener refuses (403) a login request a secret would be
+  substituted into when the auth's `authorized_uris` leaves the host to the
+  caller.
+- **Every `*.localhost` name is a blocked host** (#1748), like `localhost`
+  itself (RFC 6761 §6.3); `EGRESS_ALLOW_INTERNAL_HOSTS` still lifts it.
+- **The sidecar's forward proxy logs a request target as origin + path**
+  (#1751), never its query string.
+- **A cookie captured over https is never sent to a non-https URL** (#1753).
+  After an https → http redirect on a host the allowlist names for both
+  schemes, the sticky-cookie jar re-added the session cookies the downgrade
+  had stripped.
+- **A bundle import whose root is below its highest published version is
+  refused before anything is written** (#1753): the 409 `version_not_higher`
+  came after the dependencies ordered ahead of the root were inserted.
+- **An invalid `PROXY_URL` is not logged** (#1753): it can carry credentials.
+- **No session manages OAuth clients through Better Auth's client endpoints**
+  (#1754). `/api/auth/oauth2/create-client`, `get-client(s)`,
+  `update-client`, `client/rotate-secret` and `delete-client` answer 401 to
+  every session; platform clients are managed through the org and space
+  OAuth client routes. Unauthenticated dynamic registration is unchanged.
+- **The chat's Pi runtime no longer reads the host's Pi CLI credentials**
+  (#1646). Without a credential store of its own it opened the default one
+  (`~/.pi/agent/auth.json`), where a credential outranks the key the platform
+  registers: a `pi` login on the API host answered in place of the
+  organization's subscription. Each turn now gets an empty in-memory store.
+- **Dependency advisories**: `proxy-addr` and `source-map-js` patched (#1696);
+  the `braces` advisory accepted for the dev tree only, until 2026-12-31
+  (#1654).
 - **Better Auth 1.7.7** (GHSA-965c-763c-88jm, critical; #1734, #1743, #1742).
   Before it, an OAuth sign-in state value was accepted as a magic-link token:
   anyone who knew an address could start a Google or GitHub sign-in for it and
@@ -619,25 +736,27 @@ could not be resolved`) instead of failing for good on the first. Without
 - **MCP TypeScript SDK 1.32.1** (GHSA-6qxp-vccf-f47h). The SDK's OAuth
   client could send credentials to an authorization server chosen by the MCP
   server. The platform does not use that client; the bump clears the audit.
-- **An account the environment names needs proof of ownership.** The
-  account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an `AUTH_PLATFORM_ADMIN_EMAILS`
-  address is created by the bootstrap token, a provider-verified social
-  sign-in or a magic link, never by the sign-up form, and no existing
-  account can change its e-mail to such an address.
+- **An account the environment names needs proof of ownership** (#1707).
+  The account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an
+  `AUTH_PLATFORM_ADMIN_EMAILS` address is created by the bootstrap token, a
+  provider-verified social sign-in or a magic link, never by the sign-up
+  form, and no existing account can change its e-mail to such an address.
 - **A space's own SMTP server carries auth e-mails only to that space's
-  accounts**, or to an address with no account that the environment does
-  not name. Any other mail is withheld; the page answers as before.
-- **A magic link signs in an account of the audience it was issued for**:
-  the client's when a hosted sign-in page issued it, else the platform's.
-  A refusal redirects with `error=signup_disabled` and leaves the account
-  untouched; a link whose client was deleted or disabled is refused too.
-- **A pending-client cookie left in the browser binds nothing**: a magic
-  link or a sign-up asked from the dashboard creates a platform account.
+  accounts** (#1707), or to an address with no account that the environment
+  does not name. Any other mail is withheld; the page answers as before.
+- **A magic link signs in an account of the audience it was issued for**
+  (#1707): the client's when a hosted sign-in page issued it, else the
+  platform's. A refusal redirects with `error=signup_disabled` and leaves the
+  account untouched; a link whose client was deleted or disabled is refused
+  too.
+- **A pending-client cookie left in the browser binds nothing** (#1707): a
+  magic link or a sign-up asked from the dashboard creates a platform
+  account.
 - **A Google or GitHub identity is attached to an existing account only
-  when the provider asserts its e-mail as verified**, and a new Google
-  account is created verified only on that same assertion.
+  when the provider asserts its e-mail as verified** (#1707), and a new
+  Google account is created verified only on that same assertion.
 - **`/claim` answers a refused account creation as a `403` with the
-  refusal's code**, with or without SMTP, instead of a `500`.
+  refusal's code** (#1707), with or without SMTP, instead of a `500`.
 - **An `api_call` reaches an internal host only when the manifest and the
   operator both allow it** (#1657). The three paths disagreed: a run's
   sidecar skipped the SSRF gate for any host `authorized_uris` named
