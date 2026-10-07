@@ -389,6 +389,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -478,6 +496,24 @@
           },
           "403": {
             "description": "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
             "content": {
               "application/json": {
                 "schema": {
