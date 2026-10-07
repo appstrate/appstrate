@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
+import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import type {
   ModelGenerationCapabilities,
   ModelGenerationSettings,
@@ -10,16 +11,21 @@ import type {
 
 export function ModelGenerationFields({
   value,
-  capabilities,
+  model,
   onChange,
   disabled,
 }: {
   value: ModelGenerationSettings;
-  capabilities?: ModelGenerationCapabilities | null;
+  model?: {
+    generation?: ModelGenerationCapabilities | null;
+    apiShape?: string | null;
+    pi_dialect?: unknown;
+  } | null;
   onChange: (value: ModelGenerationSettings) => void;
   disabled?: boolean;
 }) {
   const { t } = useTranslation(["settings"]);
+  const capabilities = model?.generation;
 
   return (
     <ModelGenerationControls
@@ -27,7 +33,7 @@ export function ModelGenerationFields({
       capabilities={capabilities}
       onChange={onChange}
       disabled={disabled}
-      labels={buildGenerationLabels(t, capabilities)}
+      labels={buildGenerationLabels(t, capabilities, !!model && reasoningOffSendsNothing(model))}
     />
   );
 }

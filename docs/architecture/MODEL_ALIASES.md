@@ -168,7 +168,8 @@ the alias never reaches upstream. Two layers hide the backing from users:
    `clampThinkingLevel` (`clampToBackingLevel`, applied to the plan only — the
    run row keeps the requested level) because the container never learns the
    backing; the chat's Pi session clamps against the backing record it is
-   given. The temperature/reasoning support bits still narrow the set of
+   given. A backing Pi keeps no record of (a gateway model) takes no
+   `minimal` (`buildPiModel`), so both send it `low`. The temperature/reasoning support bits still narrow the set of
    possible backing models, an accepted limitation of making aliases
    configurable without revealing their exact binding. The operator
    create/update responses keep the full shape.

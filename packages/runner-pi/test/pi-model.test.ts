@@ -11,12 +11,15 @@ import {
   isPiProvider,
   listPiModels,
   piModelDialect,
+  piReasoningLevels,
   piTokenCostUsd,
   usableRecordMaxTokens,
 } from "../src/pi-model.ts";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
 import { capturePayload, nativeModel } from "./pi-payload.ts";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
+import { reasoningOffSendsNothing } from "../../ui/src/components/reasoning-off.ts";
 
 const PROXY = "https://appstrate.test/api/llm-proxy/openai-responses/v1";
 
@@ -126,6 +129,7 @@ describe("buildPiModel", () => {
       api: "anthropic-messages",
       baseUrl: "https://gateway.example",
       reasoning: false,
+      thinkingLevelMap: { minimal: null },
       input: ["text"],
       cost: { ...ZERO_MODEL_COST },
       compat: { ...PLATFORM_MODEL_COMPAT },
@@ -223,6 +227,47 @@ describe("clampPiReasoningLevel", () => {
       reasoning: false,
     });
     expect(clampPiReasoningLevel(model, "high")).toBe("off");
+  });
+});
+
+describe("a reasoning model Pi keeps no record of", () => {
+  const gateway = (apiShape: string) =>
+    buildPiModel({ id: "my-model", apiShape, baseUrl: PROXY, reasoning: true });
+  // Pi's session hands level `off` to the request as no reasoning at all.
+  const offPayload = (model: ReturnType<typeof gateway>) => capturePayload(model);
+
+  it("takes off, low, medium and high, never minimal, which a level clamps up from", () => {
+    const model = gateway("openai-completions");
+    expect(piReasoningLevels(model)).toEqual(["off", "low", "medium", "high"]);
+    expect(clampPiReasoningLevel(model, "minimal")).toBe("low");
+  });
+
+  it("sends reasoning_effort on chat completions, and nothing at all for off", async () => {
+    const model = gateway("openai-completions");
+    expect(await capturePayload(model, "high")).toMatchObject({ reasoning_effort: "high" });
+    expect(await offPayload(model)).not.toHaveProperty("reasoning_effort");
+    expect(reasoningOffSendsNothing({ apiShape: "openai-completions", pi_dialect: null })).toBe(
+      true,
+    );
+  });
+
+  it("disables thinking explicitly for off on the Messages API", async () => {
+    const model = gateway("anthropic-messages");
+    expect(await offPayload(model)).toMatchObject({ thinking: { type: "disabled" } });
+    expect(await capturePayload(model, "low")).toMatchObject({ thinking: { type: "enabled" } });
+    expect(reasoningOffSendsNothing({ apiShape: "anthropic-messages", pi_dialect: null })).toBe(
+      false,
+    );
+  });
+
+  it("leaves an alias's client model Pi's own set: the platform clamped the level already", () => {
+    const client = buildPiModel({
+      id: "alias",
+      apiShape: ALIAS_CLIENT_API_SHAPE,
+      baseUrl: PROXY,
+      reasoning: true,
+    });
+    expect(piReasoningLevels(client)).toContain("minimal");
   });
 });
 

@@ -1952,7 +1952,13 @@ describe("Models API", () => {
       const listRes = await app.request("/api/models", { headers: authHeaders(ctx) });
       expect(listRes.status).toBe(200);
       const list = (await listRes.json()) as any;
-      expect(list.data.map((m: any) => m.id)).toContain(created.id);
+      const listed = list.data.find((m: any) => m.id === created.id);
+      expect(listed).toBeDefined();
+      // Declared without reasoning: Pi sends it no reasoning parameter, `off` only.
+      expect(listed.generation.reasoning).toMatchObject({
+        supported: "unsupported",
+        levels: { off: "supported", low: "unsupported", high: "unsupported" },
+      });
     });
 
     it("refuses a client-side sentinel as a providerId", async () => {

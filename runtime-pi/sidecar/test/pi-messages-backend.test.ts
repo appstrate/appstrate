@@ -391,7 +391,8 @@ describe("buildBackingModel", () => {
     expect(model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
   });
 
-  // A gateway backing names no Pi provider: no record, the generic key.
+  // A gateway backing names no Pi provider: no record, the generic key, and
+  // the levels every reasoning backend takes (no `minimal`).
   it("gives a gateway backing no record", () => {
     const deps = depsFor({
       ...BACKINGS.find((b) => b.name === "anthropic adaptive")!,
@@ -400,7 +401,7 @@ describe("buildBackingModel", () => {
     const model = buildBackingModel(deps);
     expect(model.provider).toBe("anthropic");
     expect(model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
-    expect(model.thinkingLevelMap).toBeUndefined();
+    expect(model.thinkingLevelMap).toEqual({ minimal: null });
   });
 
   it("refuses to re-originate without the backing catalog", () => {

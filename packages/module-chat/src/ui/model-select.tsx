@@ -14,6 +14,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
+import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
@@ -183,6 +184,7 @@ export function ModelSelect({
                     labels={buildGenerationLabels(
                       (key, options) => t(`settings:${key}`, options),
                       active.generation,
+                      reasoningOffSendsNothing(active),
                     )}
                   />
                 )}

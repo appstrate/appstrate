@@ -291,7 +291,7 @@ function ModelSectionEditor({
       )}
       <ModelGenerationFields
         value={generation}
-        capabilities={resolvedModel?.generation}
+        model={resolvedModel}
         onChange={setGeneration}
         disabled={setAgentModel.isPending}
       />
