@@ -355,6 +355,12 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **An import no longer answers 201 for a version it does not create**
+  (#1699). Importing a new version lower than the highest published one
+  replaced the draft, published nothing and still answered 201. It is now
+  refused before anything is written, with `409 version_not_higher`, forced
+  or not. A bundle import refuses such a root the same way, and leaves such
+  a dependency as the organization has it, with a warning.
 - **`/api/admin/storage-deletion-jobs` no longer asks for `X-Org-Id`**
   (#1713). The routes are instance-wide, so a platform administrator who
   belongs to no organization got a 400. A header that is sent is ignored.

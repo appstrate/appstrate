@@ -54,6 +54,7 @@ import { assertArchiveContentConforms } from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
+import { findHigherPublishedVersion } from "./package-versions.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
@@ -375,6 +376,18 @@ export async function importBundle(
         );
       }
       imported.push({ identity, status: "reused", version_id: existingVer.id });
+      continue;
+    }
+
+    // A version below the highest published one cannot be created. A
+    // dependency is left as the org has it; the root falls through and is
+    // refused by `postInstallPackage`.
+    const higher = await findHigherPublishedVersion(packageId, version);
+    if (higher && identity !== bundle.root) {
+      warnings.push(
+        `${identity}: not imported — version ${higher} of this package is already published here and versions only move forward`,
+      );
+      imported.push({ identity, status: "reused", version_id: null });
       continue;
     }
 

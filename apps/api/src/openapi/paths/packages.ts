@@ -274,7 +274,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org). Error code: `bundle_conflict`.",
+            "One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org): `bundle_conflict`. A root whose version is new but lower than the highest published one: `version_not_higher` (a dependency in that case is left as the org has it, with a warning).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -367,7 +367,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both).",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both).",
           content: {
             "application/problem+json": {
               schema: importConflictProblem,
@@ -452,7 +452,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description:
-            "Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again.",
+            "Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again.",
           content: {
             "application/problem+json": {
               schema: importConflictProblem,
