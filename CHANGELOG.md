@@ -121,6 +121,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`appstrate run` with an API key reads the org and space only from
+  `APPSTRATE_ORG_ID` / `APPSTRATE_SPACE_ID`** (#1752), never from the active
+  profile, whose pins could contradict the key's and answer 403. A remote run
+  needs neither; a local run still requires `APPSTRATE_SPACE_ID`, and one
+  with a preset model now also requires `APPSTRATE_ORG_ID`.
 - **`appstrate api` uses an API key when one is set** (#1720): `--api-key`
   or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
   `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
@@ -189,8 +194,8 @@ could not be resolved`) instead of failing for good on the first. Without
   platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
   routes on it, so the `orgCreationDisabled` flag is gone from
   `window.__APP_CONFIG__`.
-- **Six refusals answer with their own problem `code`, and a taken package
-  identifier is always a 409** (#1677). A client that branches on the old
+- **BREAKING (API): six refusals answer with their own problem `code`, and a
+  taken package identifier is always a 409** (#1677). A client that branches on the old
   value must follow; `detail`, `param` and the other statuses are unchanged.
   - `POST /api/orgs` with `AUTH_DISABLE_ORG_CREATION` set, for a caller who
     is not a platform admin: 403 `forbidden` → 403 `org_creation_disabled`.
@@ -393,6 +398,15 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **Disabling the default model and making a disabled model the default can
+  no longer both succeed** (#1749): the two writes take the same row lock, so
+  one of them answers 409 `model_disabled`.
+- **A refused mutation shows one error toast, not two** (#1752), and detail
+  pages no longer show an error state while a retry is in flight. The
+  connection delete confirmation waits for its impact before it can be
+  confirmed.
+- **The chat interface is translated** (#1752): its remaining French-only
+  strings follow the interface language.
 - **The self-hosting compose files forward the variables the docs and the
   installer set** (#1726). `AUTH_BOOTSTRAP_TOKEN`, which the installer writes
   to `.env`, and `EGRESS_ALLOW_INTERNAL_HOSTS` reached no container, so `/claim`
@@ -624,6 +638,18 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **A bundle import cannot take a dependency another organization owns**
+  (#1749): a package created by another organization after the import's
+  preflight is a 409 `bundle_conflict`, never a "reused" dependency naming
+  that organization's latest version.
+- **A connect-login secret is bound like an injected credential** (#1751):
+  the MITM listener refuses (403) a login request a secret would be
+  substituted into when the auth's `authorized_uris` leaves the host to the
+  caller.
+- **Every `*.localhost` name is a blocked host** (#1748), like `localhost`
+  itself (RFC 6761 §6.3); `EGRESS_ALLOW_INTERNAL_HOSTS` still lifts it.
+- **The sidecar's forward proxy logs a request target as origin + path**
+  (#1751), never its query string.
 - **The chat's Pi runtime no longer reads the host's Pi CLI credentials**
   (#1646). Without a credential store of its own it opened the default one
   (`~/.pi/agent/auth.json`), where a credential outranks the key the platform
