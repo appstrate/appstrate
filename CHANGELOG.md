@@ -24,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   memory; nothing about the instance is sent, nothing is stored and boot never
   waits on it. Set the variable to `off` to run on the bundled registry alone;
   an empty value is the default channel, not a switch.
+  On a Docker install the variable reaches the container only when the
+  `appstrate` service lists it under `environment:`. The shipped compose files
+  now do; an install that keeps an older compose file adds
+  `- MODEL_CATALOG_URL` there before setting it.
   Until a file is published for a Pi version the read answers 404 and nothing
   changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
 - **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
