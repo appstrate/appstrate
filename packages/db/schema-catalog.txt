@@ -186,11 +186,6 @@ column llm_usage.request_id text
 column llm_usage.run_id text
 column llm_usage.source llm_usage_source not null
 column llm_usage.user_id text
-column model_catalog_overlays.checked_at timestamp with time zone not null default now()
-column model_catalog_overlays.payload text not null
-column model_catalog_overlays.sdk_version text not null
-column model_catalog_overlays.serial bigint not null
-column model_catalog_overlays.signature text not null
 column model_provider_credentials.base_url_override text
 column model_provider_credentials.created_at timestamp with time zone not null default now()
 column model_provider_credentials.created_by text
@@ -730,7 +725,6 @@ constraint llm_usage llm_usage_proxy_has_request_id CHECK (((source <> 'proxy'::
 constraint llm_usage llm_usage_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REFERENCES runs(id, org_id) ON DELETE SET NULL (run_id)
 constraint llm_usage llm_usage_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
 constraint llm_usage llm_usage_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
-constraint model_catalog_overlays model_catalog_overlays_pkey PRIMARY KEY (sdk_version)
 constraint model_provider_credentials model_provider_credentials_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint model_provider_credentials model_provider_credentials_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
@@ -1070,7 +1064,6 @@ index CREATE UNIQUE INDEX integration_org_defaults_pkey ON public.integration_or
 index CREATE UNIQUE INDEX integration_pins_pkey ON public.integration_pins USING btree (id)
 index CREATE UNIQUE INDEX jwks_pkey ON public.jwks USING btree (id)
 index CREATE UNIQUE INDEX llm_usage_pkey ON public.llm_usage USING btree (id)
-index CREATE UNIQUE INDEX model_catalog_overlays_pkey ON public.model_catalog_overlays USING btree (sdk_version)
 index CREATE UNIQUE INDEX model_provider_credentials_pkey ON public.model_provider_credentials USING btree (id)
 index CREATE UNIQUE INDEX model_provider_pairings_pkey ON public.model_provider_pairings USING btree (id)
 index CREATE UNIQUE INDEX model_provider_pairings_token_hash_unique ON public.model_provider_pairings USING btree (token_hash)

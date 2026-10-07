@@ -256,10 +256,8 @@ export async function bootBackground(): Promise<void> {
     });
   });
 
-  // Before anything below resolves a model: the scheduler fires runs.
-  await startModelCatalogSync().catch((err) => {
-    logger.warn("Could not start the model catalog sync", { error: getErrorMessage(err) });
-  });
+  // Read in the background: boot never waits on the channel.
+  startModelCatalogSync();
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([

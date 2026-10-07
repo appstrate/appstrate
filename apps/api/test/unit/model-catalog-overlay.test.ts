@@ -79,16 +79,6 @@ describe("readModelCatalog — the file", () => {
     ).rejects.toThrow(/signature does not verify/);
   });
 
-  // The signature names the stored file: one file, one spelling.
-  it("refuses a signature that is not canonical base64", async () => {
-    const payload = catalogFile([next()]);
-    const signature = await signer.sign(payload);
-    expect(signature.endsWith("==")).toBe(true);
-    for (const spelling of [signature.slice(0, -2), `${signature}\n`, ` ${signature}`]) {
-      await expect(read(payload, spelling)).rejects.toThrow(/not canonical base64/);
-    }
-  });
-
   it("pins a production key of the right size", () => {
     expect(Buffer.from(MODEL_CATALOG_PUBLIC_KEY, "base64")).toHaveLength(32);
   });

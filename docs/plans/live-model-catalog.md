@@ -81,7 +81,7 @@ This step is worth merging alone: one resolver instead of four.
 
 `apps/api/src/services/model-catalog-overlay.ts` accepts a file and holds the
 accepted one in memory, with no database and no network behind it;
-`model-catalog-sync.ts` reads the channel and the table.
+`model-catalog-sync.ts` reads the channel.
 
 ### The file
 
@@ -123,7 +123,7 @@ authenticated request.
 
 A file is applied only when all of these hold, checked again on every load:
 
-1. Ed25519 signature (canonical base64, raw 64 bytes) over the exact bytes,
+1. Ed25519 signature (base64, raw 64 bytes) over the exact bytes,
    against `MODEL_CATALOG_PUBLIC_KEY`, a constant in the source.
 2. Strict Zod parse: an unknown field anywhere refuses the file.
 3. `sdk_version` equals `PI_SDK_VERSION`.
@@ -139,12 +139,10 @@ A file is applied only when all of these hold, checked again on every load:
    is skipped.
 
 A record that fails 4 or 5 is skipped and logged. A file that fails 1 to 3 is
-refused whole and the stored one stays.
+refused whole and the one held stays.
 
-One more rule sits at the write, in SQL, so that concurrent replicas cannot
-undo it: a file replaces the stored one only with a higher `serial`, or as the
-very same file (same signature). A lower serial is a rollback; the stored
-serial under other bytes is not the file that was stored.
+A file replaces the one a process holds only with a higher `serial`: a lower
+one is a rollback, the same one is the file already held.
 
 What the signature does not settle, on purpose:
 
@@ -152,33 +150,22 @@ What the signature does not settle, on purpose:
   one, or none: a withdrawal reaches an instance only if the channel delivers
   it. A signed expiry would close that, at the price of every instance dropping
   its models whenever the producer stops for a few days. Not taken.
-- **First contact has no floor.** An instance that stored nothing accepts any
-  file ever published for its Pi version.
+- **A process that just started has no floor.** It holds no file, so it
+  accepts any file ever published for its Pi version.
 
 ### Wiring
 
-- **Storage:** the core table `model_catalog_overlays` (`sdk_version` PK,
-  `serial`, `payload`, `signature`, `checked_at`), migration `0079`. The file
-  is kept byte for byte as text: `jsonb` would reformat what was signed. An
-  instance reads and writes the row of its own Pi version, so the replicas of a
-  rolling deploy across a Pi bump keep theirs; a row of another version that
-  nobody confirmed for thirty days is deleted. A restart without network keeps
-  the offer.
-- **Sync:** one timer per process, every minute (`startModelCatalogSync`). A
-  pass serves the stored row when its signature is not the one already served
-  (one small read otherwise), and asks the channel when the row's last
-  confirmation (`checked_at`, shared through the row) is older than six hours
-  or when the process serves no file. So one replica fetches and the others
-  follow within a minute, with no queue and no bus. A queue job runs once per
-  cluster, which is the wrong shape here: every process must reload.
-- **Channel read:** two GETs (the file, then its `.sig`), redirects refused,
-  10 s timeout, 2 MB cap, no conditional request: the file holds only the
-  models the bundled registry lacks and is a few kilobytes. The two GETs are
-  not atomic; a publication between them fails the signature and the next
-  attempt reads a consistent pair. A 404 means no file for this Pi version. Any
-  answer that stores nothing makes this process wait an hour before asking
-  again. Boot serves the stored row before the scheduler starts and never
-  waits on the network.
+- **No storage.** Each API process holds the accepted file in memory. A table
+  would serve the file before the scheduler starts and keep the rollback floor
+  across restarts. Not worth one: the bundled registry is always there, so all
+  it would protect is the models the catalog adds, for the second a restarted
+  process needs to read the channel.
+- **Sync:** `startModelCatalogSync`, one timer per process. A read of the
+  channel at start, in the background, and one every hour: two GETs (the file,
+  then its `.sig`), redirects refused, 10 s timeout, 2 MB cap. The two GETs are
+  not atomic; a publication between them fails the signature and the next read
+  gets a consistent pair. A 404 means no file for this Pi version. Replicas
+  read on their own and agree within the hour.
 - **Merge point:** `apps/api/src/services/model-catalog.ts` only.
   `listCatalogModels`, `lookupCatalogModel` and `lookupCatalogDialect` take a
   scope, `all` (default: bundled plus overlay) or `bundled`, so
@@ -192,13 +179,11 @@ What the signature does not settle, on purpose:
 - **Subscription providers** (`authMode: "oauth2"`) are offered no overlay
   record with a price tier one request can reach, the rule
   `verify:system-models` holds the bundled registry to (#1552).
-- **Env:** `MODEL_CATALOG_URL` (`http`/`https`). Empty disables the read; the
-  stored row stays, unread.
-- **A model whose record is gone** — withdrawn, channel switched off, or a Pi
-  bump whose file is not read yet — keeps its `org_models` row and runs
-  without catalog defaults or dialect, unpriced: the same state as an id a Pi
-  bump drops. During the minute replicas take to agree, one may refuse a
-  `POST /api/models` another would accept.
+- **Env:** `MODEL_CATALOG_URL` (`http`/`https`). Empty starts nothing.
+- **A model whose record is absent** — withdrawn, channel switched off, a Pi
+  bump whose file is not published yet, or a process that restarted and has
+  not read the channel — keeps its `org_models` row and runs without catalog
+  defaults or dialect, unpriced: the same state as an id a Pi bump drops.
 
 ## Step 3: CI produces the file
 
@@ -238,7 +223,7 @@ kill switch: every instance the channel reaches drops its overlay.
 | PR  | Content                                                                                 | Effect alone                   |
 | --- | --------------------------------------------------------------------------------------- | ------------------------------ |
 | 1   | Step 1                                                                                  | none visible; one resolver     |
-| 2   | Step 2 (table, env, reader)                                                             | inert: the file does not exist |
+| 2   | Step 2 (env, reader)                                                                    | inert: the file does not exist |
 | 3   | Step 3, signing key, `docs/architecture/MODEL_CATALOG.md`, `SUPPLY_CHAIN.md`, CHANGELOG | live after the next release    |
 
 Each PR carries the `integration` and `e2e` labels. #1705 merges first.
