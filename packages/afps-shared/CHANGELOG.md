@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-10-07
+
 ### Security
 
 - **`isBlockedHost` blocks every `*.localhost` name** (`foo.localhost`,
