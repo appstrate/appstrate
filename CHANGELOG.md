@@ -15,6 +15,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sign-in; remove the token from `.env` once claimed. Check that you can
   sign in to the account of every named address: an existing one is not
   re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
+- **The API reads a live model catalog from `get.appstrate.dev`** (#1717,
+  #1732, #1735). A new variable, `MODEL_CATALOG_URL` (default
+  `https://get.appstrate.dev/model-catalog`), names a signed file listing the
+  models a later Pi registry records and this build can serve, so a new model
+  becomes selectable without a release. Each API process reads it in the
+  background when it starts and every hour (two anonymous GETs) and holds it in
+  memory; nothing about the instance is sent, nothing is stored and boot never
+  waits on it. Set the variable to `off` to run on the bundled registry alone;
+  an empty value is the default channel, not a switch.
+  On a Docker install the variable reaches the container only when the
+  `appstrate` service lists it under `environment:`. The shipped compose files
+  now do; an install that keeps an older compose file adds
+  `- MODEL_CATALOG_URL` there before setting it.
+  Until a file is published for a Pi version the read answers 404 and nothing
+  changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
+- **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
+  Run `bun run verify:system-models` with the platform env before the deploy:
+  a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
+  boot. Removed from the offer: OpenCode Go `glm-5.1`, `kimi-k2.6`,
+  `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-max`; Together AI
+  `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
+  `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
+  Fireworks `accounts/fireworks/models/glm-5p2` and
+  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`. An
+  existing `org_models` row on one of them keeps its stored values and loses
+  the catalog defaults (label, limits, capabilities, price); it can no longer
+  be created.
 - **Log levels and messages changed; update any alert that matches them**
   (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
   (method, matched route pattern, status, duration, `Request-Id`). No longer at
@@ -80,6 +107,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`appstrate api` uses an API key when one is set** (#1720): `--api-key`
+  or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
+  `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
+  behaviour for a shell that already exports `APPSTRATE_API_KEY` for
+  `appstrate run`**: every `appstrate api` call there now goes out as the
+  key instead of the logged-in user — another principal, no `X-Org-Id` /
+  `X-Space-Id` (the key's own org and space apply), and the instance
+  `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The
+  keyring is not read and no profile is required. `--api-key ""` and a key
+  with whitespace or non-ASCII characters are refused, for `run` as well,
+  and `run` now treats an empty `APPSTRATE_INSTANCE` / `_SPACE_ID` /
+  `_ORG_ID` as unset.
 - **In a run, `api_call` forwards a header named like a credential proxy
   control header instead of refusing the call** (#1670). `X-Integration-Id`,
   `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,
@@ -294,6 +333,35 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Added
 
+- **`GET /api/me/context` names the space it resolved** (#1721): the payload
+  (the MCP `get_me` tool) carries `space: { id, name, personal }`, the space
+  every list in it is scoped to. An agent holding a key bound to an empty space
+  could not tell an empty space from the wrong one. The descriptions also say
+  an empty list can mean the caller's permissions do not cover it. Run and
+  model `cost` descriptions in the OpenAPI spec now state USD instead of
+  "dollars" or no currency; no wire field changes.
+- **Live model catalog, read side** (#1717, #1732): a process accepts a file
+  only on its Ed25519 signature (public key in the source), its exact Pi SDK
+  version, a strict shape and a `serial` not lower than the one it holds, then
+  keeps the records whose dialect the pinned Pi code already knows (provider
+  and API shape together, compat keys, non-boolean compat values, thinking
+  levels and their effort words). It only adds models an organization can bind
+  with its own credentials: bundled ids, featured ids and system models (boot
+  rules, price, limits and dialect) read the bundled registry, and a
+  subscription provider is offered no model with a price tier one request can
+  reach. The file lives in memory: a model bound from it runs without its
+  catalog defaults until a restarted process has read the channel. The channel
+  cannot forge a file or roll a running process back; it can withhold a newer
+  one. Plan: `docs/plans/live-model-catalog.md`, step 2.
+- **Live model catalog, producer** (#1731): `scripts/build-model-catalog.ts`
+  and `.github/workflows/publish-model-catalog.yml` build, every six hours and
+  per Pi version in use, the file instances read. Of the latest Pi package
+  only JSON data is read. A record is published when an instance would keep it,
+  every field and endpoint Pi gave it is one a bundled sibling has, and the
+  pinned code builds its request at every thinking level; the signed file is
+  read back as an instance reads it before anything is pushed. The workflow
+  signs with the repository secret `MODEL_CATALOG_SIGNING_KEY`, the seed of
+  the key pinned in `model-catalog-overlay.ts`.
 - **A schedule the system disabled says why** (#1641). `disabled_reason`
   (`actor_invalid`, `actor_left_org`, `connection_deleted`) is set by the
   system act, cleared on re-enable and `NULL` otherwise: on an enabled
@@ -311,6 +379,23 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **The space authentication tab no longer offers to keep a stored secret**
+  (#1725). With SMTP or a social provider already configured, the password
+  or client secret field read "leave empty to keep the current one" and was
+  optional, while saving always replaces the secret: an empty field failed
+  with a raw validation error in a toast. The field is now required on every
+  save, and its hint says the stored value is never displayed and has to be
+  entered again.
+- **An import no longer answers 201 for a version it does not create**
+  (#1699). Importing a new version lower than the highest published one
+  replaced the draft, published nothing and still answered 201. It is now
+  refused before anything is written, with `409 version_not_higher`, forced
+  or not. A bundle import refuses such a root the same way, and leaves such
+  a dependency as the organization has it, with a warning.
+- **`/api/admin/storage-deletion-jobs` no longer asks for `X-Org-Id`**
+  (#1713). The routes are instance-wide, so a platform administrator who
+  belongs to no organization got a 400. A header that is sent is ignored.
+  The operator guard is unchanged.
 - **An aliased run backed by OpenAI keeps its output cap and temperature**
   (#1705). Pi 1.0 reads a credential that is not `sk-`-shaped as a ChatGPT
   sign-in and drops `max_output_tokens`, `temperature` and the cache
@@ -505,6 +590,9 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **MCP TypeScript SDK 1.32.1** (GHSA-6qxp-vccf-f47h). The SDK's OAuth
+  client could send credentials to an authorization server chosen by the MCP
+  server. The platform does not use that client; the bump clears the audit.
 - **An account the environment names needs proof of ownership.** The
   account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an `AUTH_PLATFORM_ADMIN_EMAILS`
   address is created by the bootstrap token, a provider-verified social

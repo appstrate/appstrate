@@ -8,6 +8,8 @@
  * authenticated API calls without ever seeing the raw bearer token. The
  * agent shells out, the CLI injects `Authorization` + `X-Org-Id` from
  * the keyring-backed profile, everything else is a transparent pipe.
+ * An explicit API key (`--api-key` / `APPSTRATE_API_KEY`) replaces the
+ * profile credential — see `lib/api.ts::resolveApiKeyAuthContext`.
  *
  *   METHOD / path are positional.
  *   -H / -F / -q repeatable (Commander's `collect` default).
@@ -44,7 +46,13 @@
  */
 
 import { readConfig, resolveProfileName } from "../lib/config.ts";
-import { resolveAuthContext, AuthError, ApiError } from "../lib/api.ts";
+import {
+  resolveAuthContext,
+  resolveApiKeyAuthContext,
+  explicitApiKey,
+  AuthError,
+  ApiError,
+} from "../lib/api.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
@@ -141,13 +149,18 @@ export async function apiCommand(
     return exit(code);
   };
 
-  // 1. Resolve auth profile + fresh access token.
-  const config = await readConfig();
-  const profileName = resolveProfileName(opts.profile, config);
-
+  // 1. Resolve the credential: explicit API key (`profileName` stays
+  //    undefined), else auth profile + fresh access token.
+  let profileName: string | undefined;
   let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
   try {
-    auth = await resolveAuthContext(profileName);
+    const apiKey = explicitApiKey(opts.apiKey);
+    if (apiKey) {
+      auth = await resolveApiKeyAuthContext(apiKey, opts.profile);
+    } else {
+      profileName = resolveProfileName(opts.profile, await readConfig());
+      auth = await resolveAuthContext(profileName);
+    }
   } catch (err) {
     if (err instanceof AuthError || err instanceof ApiError) {
       writeError(`${err.message}\n`);
@@ -368,7 +381,11 @@ export async function apiCommand(
     //    Silenced by `-s`; `-sS` doesn't restore it (it's a UX hint,
     //    not an error message — curl's `-S` is narrower than that).
     if (res.status === 401 && !opts.silent) {
-      io.stderr.write(`Session may be expired — run: appstrate login --profile ${profileName}\n`);
+      io.stderr.write(
+        profileName === undefined
+          ? "API key rejected — check --api-key / APPSTRATE_API_KEY (revoked, expired, or for another instance)\n"
+          : `Session may be expired — run: appstrate login --profile ${profileName}\n`,
+      );
     }
 
     // 9. Soft UX hint when a 3xx is surfaced un-followed. `redirect:
@@ -391,7 +408,7 @@ export async function apiCommand(
           location ? ` (Location: ${location})` : ""
         }.\n` +
           `Re-run with -L to follow it. Cross-origin hops drop Authorization/Cookie, ` +
-          `but your -H headers and X-Org-Id/X-Space-Id are forwarded to that host.\n`,
+          `but your -H headers and any X-Org-Id/X-Space-Id are forwarded to that host.\n`,
       );
     }
 

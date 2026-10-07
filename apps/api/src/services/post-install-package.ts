@@ -2,6 +2,7 @@
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import {
+  assertVersionNotLower,
   createVersionAndUpload,
   finalizeDraftPublication,
   getVersionForDownload,
@@ -51,6 +52,9 @@ export async function postInstallPackage(params: {
     throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
   }
   const version: string = rawVersion;
+
+  // Before the draft is replaced: a refused version must leave it untouched.
+  if (!params.create) await assertVersionNotLower(packageId, version);
 
   const draft = params.create
     ? await createPackageDraft({
@@ -103,7 +107,11 @@ export async function postInstallPackage(params: {
     zipBuffer,
     manifest,
   });
-  if (!published) return;
+  if (!published) {
+    // A concurrent publish raised the highest version after the check above.
+    await assertVersionNotLower(packageId, version);
+    throw new Error(`Package ${packageId}: version ${version} was not created`);
+  }
   if (published.outcome === "exists") {
     // A concurrent publish can land after the importer's own check: only the
     // stored row says whether the draft matches this version.

@@ -11,7 +11,7 @@
  *
  * Row absent → feature disabled for this space's OIDC clients. No fallback to
  * instance-level env creds. Secrets are write-only: the backend never
- * returns `pass` / `client_secret`.
+ * returns `pass` / `client_secret`, and every save submits them again.
  */
 
 import { useState } from "react";
@@ -144,15 +144,14 @@ function SmtpSection() {
           </Field>
           <Field
             label={t("settings:spaceAuth.smtpPass")}
-            required={!initial}
+            required
             hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
           >
             <Input
               type="password"
               value={form.pass}
               onChange={(e) => setForm({ ...form, pass: e.target.value })}
-              placeholder={initial ? "••••••••" : undefined}
-              required={!initial}
+              required
             />
           </Field>
           <Field label={t("settings:spaceAuth.smtpFromAddress")} required>
@@ -360,15 +359,14 @@ function SocialSection({
         </Field>
         <Field
           label="Client Secret"
-          required={!config}
+          required
           hint={config ? t("settings:spaceAuth.socialSecretReuploadHint") : undefined}
         >
           <Input
             type="password"
             value={form.clientSecret}
             onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-            placeholder={config ? "••••••••" : undefined}
-            required={!config}
+            required
           />
         </Field>
         <Field

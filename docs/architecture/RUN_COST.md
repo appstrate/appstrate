@@ -1,6 +1,6 @@
 # Run Cost Tracking
 
-Extracted from the root `AGENTS.md`. Canonical read path + ingestion chains for `runs.cost`.
+Extracted from the root `AGENTS.md`. Canonical read path + ingestion chains for `runs.cost` — a USD amount, like every `cost_usd` ledger row it sums.
 
 ## The two invariants
 

@@ -508,12 +508,16 @@ router.get(
  * agent can prefer already-connected integrations and respect the caller's
  * role (operations beyond it will 403 at invoke time).
  *
- * Space context resolves from `X-Space-Id`, the API key's space, or
- * (for the in-process MCP sub-dispatch) the org's default space.
+ * Space context resolves as `requireSpaceContext` does: the credential's
+ * space, else `X-Space-Id`, else (in-process MCP sub-dispatch only) the org's
+ * default space. The payload names that space: an empty list alone cannot
+ * tell an agent whether nothing is there for it or it is in the wrong space.
  */
 router.get("/context", requireSpaceContext(), async (c) => {
   const actor = getActor(c);
   const scope = getSpaceScope(c);
+  // Always set here: `requireSpaceContext` admits the space or throws.
+  const space = c.get("space")!;
 
   let identity: { id: string; name: string | null; email: string | null };
   if (actor.type === "end_user") {
@@ -582,6 +586,8 @@ router.get("/context", requireSpaceContext(), async (c) => {
       name: (c.get("orgName") as string | undefined) ?? null,
       slug: (c.get("orgSlug") as string | undefined) ?? null,
     },
+    // `personal` as the spaces routes derive it (`spaceWireForCaller`).
+    space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
     recent_runs: recentRuns,
     agents: runnable.agents,

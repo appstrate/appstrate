@@ -19,17 +19,17 @@
     "test": "bun test test/"
   },
   "dependencies": {
-    "@ai-sdk/react": "^4.0.121",
+    "@ai-sdk/react": "^4.0.130",
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
     "@appstrate/ui": "workspace:*",
-    "@assistant-ui/react": "^0.15.22",
-    "@assistant-ui/react-ai-sdk": "^1.4.13",
+    "@assistant-ui/react": "^0.15.23",
+    "@assistant-ui/react-ai-sdk": "^1.4.14",
     "@iconify/react": "^6.0.2",
-    "@assistant-ui/react-markdown": "^0.14.17",
-    "ai": "^7.0.118",
+    "@assistant-ui/react-markdown": "^0.14.18",
+    "ai": "^7.0.127",
     "assistant-stream": "^0.3.26",
     "drizzle-orm": "^0.45.3",
     "ioredis": "^6.0.0",
@@ -45,7 +45,7 @@
   "devDependencies": {
     "@appstrate/env": "workspace:*",
     "@types/react": "^19.3.0",
-    "lucide-react": "^1.48.0",
+    "lucide-react": "^1.52.0",
     "react-dom": "^19.3.0"
   }
 }

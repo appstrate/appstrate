@@ -15,6 +15,7 @@ import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts
 import { shutdownPersonalSpaceSweeperWorker } from "../services/personal-space-sweeper.ts";
 import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
 import { shutdownPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
+import { stopModelCatalogSync } from "../services/model-catalog-sync.ts";
 import { shutdownLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { drainAudits } from "../services/audit.ts";
 import { drainProxyMetering } from "../services/llm-proxy/metering.ts";
@@ -125,6 +126,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutting down OAuth model pairing cleanup worker...");
     await shutdownPairingCleanupWorker();
+    stopModelCatalogSync();
 
     logger.info("Shutting down LLM usage retry worker...");
     await shutdownLlmUsageRetryWorker();

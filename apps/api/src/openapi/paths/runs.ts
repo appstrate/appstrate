@@ -1489,7 +1489,7 @@ const canonicalRunsPaths = {
                 cost: {
                   type: "number",
                   minimum: 0,
-                  description: "Authoritative terminal run cost written to the `runs` row.",
+                  description: "Authoritative terminal run cost in USD, written to the `runs` row.",
                 },
                 artifacts: {
                   type: "object",

@@ -634,6 +634,65 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(auditRows).toHaveLength(3);
   });
 
+  it("leaves a dependency alone when the org already published a higher version of it", async () => {
+    const sourceCtx = await createTestContext({ orgSlug: "srclow" });
+    const { bytes } = await seedAndExportBundle({
+      ctx: sourceCtx,
+      rootId: "@srclow/a",
+      skillA: "@srclow/b",
+      skillB: "@srclow/c",
+    });
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "destlow" });
+    // The bundle carries @srclow/c@1.0.0; this org holds 1.5.0 and never saw 1.0.0.
+    await seedVersionedPackage({
+      id: "@srclow/c",
+      type: "skill",
+      version: "1.5.0",
+      orgId: ctx.orgId,
+      manifest: {
+        name: "@srclow/c",
+        version: "1.5.0",
+        type: "skill",
+        schema_version: "0.1",
+        display_name: "C",
+        author: "tester",
+      },
+      setLatest: true,
+    });
+    const draftOf = async () =>
+      (await db.select().from(packages).where(eq(packages.id, "@srclow/c")))[0]!;
+    const before = await draftOf();
+
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      imported: Array<{ identity: string; status: string; version_id: number | null }>;
+      warnings: string[];
+    };
+    expect(body.imported.find((i) => i.identity.startsWith("@srclow/c@"))).toMatchObject({
+      status: "reused",
+      version_id: null,
+    });
+    expect(body.warnings.some((w) => w.includes("@srclow/c@1.0.0") && w.includes("1.5.0"))).toBe(
+      true,
+    );
+    const after = await draftOf();
+    expect(after.lockVersion).toBe(before.lockVersion);
+    expect(after.draftManifest).toEqual(before.draftManifest);
+    const versions = await db
+      .select({ version: packageVersions.version })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, "@srclow/c"));
+    expect(versions.map((v) => v.version)).toEqual(["1.5.0"]);
+  });
+
   it("leaves the draft archived after importing the same bundle twice", async () => {
     const sourceCtx = await createTestContext({ orgSlug: "srctwice" });
     const { bytes } = await seedAndExportBundle({
