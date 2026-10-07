@@ -217,6 +217,14 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
+      // No session manages OAuth clients through the plugin's client CRUD
+      // (`/oauth2/create-client`, `get-client(s)`, `update-client`,
+      // `client/rotate-secret`, `delete-client`), nor registers one while
+      // signed in. Platform clients are written by `services/oauth-admin.ts`
+      // behind the org and space permissions; a client minted here would carry
+      // no level confinement and the signed-in user's full authority.
+      // Unauthenticated dynamic registration does not consult this hook.
+      clientPrivileges: async () => false,
       // OIDC scope vocabulary (identity scopes + OIDC_ALLOWED_SCOPES). Owned
       // wholly by this module — there is no cross-module scope contribution
       // point, so load ordering is irrelevant. Advertised in discovery
