@@ -686,8 +686,8 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     const sentinel = await seedRejectedConnection(sentinelId);
 
     expect(await callReturning(403)).toBe(403);
-    // A clear the 403 started would be issued before this 2xx's: once this one
-    // has landed, so has that one.
+    // Had the 403 started a clear, it would be issued before this 2xx's: once
+    // this one has landed, that one would have too.
     expect(await callReturning(200, sentinelId)).toBe(200);
     expect(await clearedWithin(sentinel, 1000)).toBe(true);
 
