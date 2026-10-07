@@ -32,7 +32,7 @@ import {
   type CatalogSigner,
 } from "../helpers/model-catalog.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
-import { capturePayload, recordSpec } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { capturePayload, recordSpec } from "../../../../packages/runner-pi/src/pi-payload.ts";
 
 const anthropic = (coreProvidersModule.modelProviders!() as ModelProviderDefinition[]).find(
   (p) => p.providerId === "anthropic",

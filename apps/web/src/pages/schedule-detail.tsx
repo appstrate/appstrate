@@ -28,6 +28,7 @@ import { ActorLabel } from "../components/actor-label";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { isQueryInFlight } from "../lib/query-state";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
@@ -42,7 +43,8 @@ export function ScheduleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const { data: schedule, isLoading, error } = useScheduleById(id);
+  const scheduleQuery = useScheduleById(id);
+  const { data: schedule, error } = scheduleQuery;
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const mayWrite = useCanWriteSchedule(schedule);
@@ -53,7 +55,7 @@ export function ScheduleDetailPage() {
   const [activeTab, setActiveTab] = useTabWithHash(tabs, readsRuns ? "runs" : "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isLoading) return <LoadingState />;
+  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)

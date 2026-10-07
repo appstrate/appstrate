@@ -97,7 +97,8 @@ export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
 export interface AppDeps {
   config: SidecarConfig;
   cookieJar: CookieJar;
-  fetchFn?: typeof fetch; // default: global fetch — injectable for tests
+  /** Tests only. Absent: api_call uses its pinned transport, `/llm/*` global fetch. */
+  fetchFn?: typeof fetch;
   isReady?: () => boolean; // default: () => true — controls /health
   /**
    * Inter-chunk idle bound applied to proxied `/llm/*` streams (both the raw

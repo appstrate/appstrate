@@ -336,10 +336,11 @@ describe("peer gate", () => {
     const { echo, port, peers, upstream } = await refusingProxy();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x`);
+      const res = await httpViaProxy(port, `http://127.0.0.1:${echo.port}/x?token=secret`);
       expect(res.status).toBe(403);
       expect(peers).toEqual(["127.0.0.1"]);
       expect(upstream()).toBe(0);
+      // The query never reaches the log: it may carry a secret.
       expect(warn).toHaveBeenCalledWith("forward proxy event", {
         kind: "request-refused",
         target: `http://127.0.0.1:${echo.port}/x`,

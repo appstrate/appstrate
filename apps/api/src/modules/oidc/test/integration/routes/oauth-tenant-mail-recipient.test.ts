@@ -20,10 +20,10 @@ import {
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import {
+  captureIssuedMagicLinks,
   createTestContext,
   createTestUser,
   enableDashboardSso,
-  issuedMagicLinkToken,
 } from "../../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -313,6 +313,8 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
   });
 
   describe("whose account a link signs in", () => {
+    const magicLinks = captureIssuedMagicLinks();
+
     async function endUser(spaceId: string, emailVerified = true) {
       const account = await createTestUser({ emailVerified });
       const realm = `end_user:${spaceId}`;
@@ -323,7 +325,7 @@ describe("OIDC per-space SMTP — who a tenant transport may write to", () => {
 
     /** Open the link last issued for `email`, mailed or withheld. */
     async function openLinkFor(email: string): Promise<Response> {
-      const token = await issuedMagicLinkToken(email);
+      const token = magicLinks.tokenFor(email);
       return app.request(
         `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}&callbackURL=%2F`,
       );

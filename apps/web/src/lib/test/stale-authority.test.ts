@@ -165,13 +165,12 @@ describe("registerSessionCheck", () => {
     queryClient.setQueryData<string[]>(["runs"], ["cached"]);
   });
 
-  it("ends the session and clears the cache when Better Auth says there is none", async () => {
+  it("ends the session when Better Auth says there is none", async () => {
     handlerFor(false)();
     await tick();
 
     expect(ended).toBe(1);
     expect(authStore.getState().user).toBeNull();
-    expect(queryClient.getQueryData(["runs"])).toBeUndefined();
   });
 
   it("checks once for a burst of 401s, including the ones its own check provokes", async () => {

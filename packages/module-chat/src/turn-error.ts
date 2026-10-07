@@ -73,6 +73,21 @@ export function classifyClientTurnError(error: unknown, turnRequestId?: string):
     : { ...classified, requestId: turnRequestId };
 }
 
+/**
+ * Log fields for a failed turn: the chat request's own `requestId`, and the provider's
+ * `upstreamRequestId` when the error the user sees names one.
+ */
+export function turnErrorLogIds(
+  requestId: string | undefined,
+  shown: ClientTurnError | undefined,
+): { requestId?: string; upstreamRequestId?: string } {
+  const upstream = shown?.requestId;
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(upstream && upstream !== requestId ? { upstreamRequestId: upstream } : {}),
+  };
+}
+
 /** Safe string carried by transient AI-SDK error chunks: `<prefix><category>[:<request id>]`. */
 export function clientTurnErrorMarker(error: ClientTurnError): string {
   return `${ERROR_MARKER_PREFIX}${error.category}${error.requestId ? `:${error.requestId}` : ""}`;

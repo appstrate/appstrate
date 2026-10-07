@@ -102,6 +102,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
+import { isQueryInFlight } from "../lib/query-state";
 import { keepAvailable, toggleCapped, unavailableConnectionIds } from "../lib/connection-set";
 import { Modal } from "../components/modal";
 import { SourceBadge } from "../components/source-badge";
@@ -136,7 +137,10 @@ import {
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
-import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
+import {
+  useConnectionDeleteImpact,
+  useDisconnectIntegrationConnection,
+} from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -1390,6 +1394,7 @@ function ConnectionTableRow({
   const [editing, setEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
@@ -1649,6 +1654,7 @@ function ConnectionTableRow({
         title={t("btn.confirm", { ns: "common" })}
         description={t("integration.connection.deleteConfirm")}
         isPending={disconnect.isPending}
+        confirmDisabled={isQueryInFlight(deleteImpact)}
         onConfirm={() =>
           disconnect.mutate(
             { params: { path: { connectionId: connection.id } } },
@@ -1658,7 +1664,7 @@ function ConnectionTableRow({
       >
         {confirmDelete && (
           <>
-            <ConnectionDeleteImpact connectionId={connection.id} />
+            <ConnectionDeleteImpact impact={deleteImpact} />
             <ConnectionTeardownSteps connectionId={connection.id} />
           </>
         )}

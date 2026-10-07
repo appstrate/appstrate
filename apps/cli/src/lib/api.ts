@@ -202,12 +202,15 @@ export function explicitApiKey(flag: string | undefined): string | undefined {
   return key;
 }
 
-/** `APPSTRATE_INSTANCE`, else the profile's instance; a key needs no profile. */
+/**
+ * `APPSTRATE_INSTANCE`, else the profile's instance; a key needs no profile. Nothing
+ * else is read off the profile: its org and space pins would contradict the key's.
+ */
 export async function resolveApiKeyTarget(
   profileFlag: string | undefined,
-): Promise<{ instance: string | undefined; profile: Profile | undefined }> {
+): Promise<{ instance: string | undefined }> {
   const profile = (await resolveActiveProfileOrNull(profileFlag))?.profile;
-  return { instance: process.env.APPSTRATE_INSTANCE || profile?.instance, profile };
+  return { instance: process.env.APPSTRATE_INSTANCE || profile?.instance };
 }
 
 /**

@@ -567,19 +567,14 @@ describe("explicit API key helpers", () => {
     expect(() => explicitApiKey(undefined)).toThrow(AuthError);
   });
 
-  it("resolveApiKeyTarget: env instance wins, the profile is still returned", async () => {
+  it("resolveApiKeyTarget: env instance wins; the profile's pins are not read", async () => {
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
     process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
 
-    const target = await resolveApiKeyTarget(undefined);
-    expect(target.instance).toBe("https://ci.example.com");
-    expect(target.profile?.spaceId).toBe("spc_1");
+    expect(await resolveApiKeyTarget(undefined)).toEqual({ instance: "https://ci.example.com" });
   });
 
   it("resolveApiKeyTarget: no env, no profile → nothing, without throwing", async () => {
-    expect(await resolveApiKeyTarget(undefined)).toEqual({
-      instance: undefined,
-      profile: undefined,
-    });
+    expect(await resolveApiKeyTarget(undefined)).toEqual({ instance: undefined });
   });
 });

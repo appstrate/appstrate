@@ -21,6 +21,7 @@
         "@readme/openapi-parser": "^9.0.0",
         "@redocly/openapi-core": "^2.57.0",
         "@types/bun": "latest",
+        "drizzle-orm": "^0.45.3",
         "eslint": "^10.12.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-react": "^7.37.5",

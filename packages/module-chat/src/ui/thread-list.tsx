@@ -20,7 +20,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@appstrate/ui/components/dialog";
-import { useChatHeaders, useChatHost, useSelectConversation } from "./runtime-context.ts";
+import {
+  useChatHeaders,
+  useChatHost,
+  useSelectConversation,
+  type ChatTranslate,
+} from "./runtime-context.ts";
 import {
   renameSession,
   deleteSession,
@@ -34,30 +39,29 @@ import {
 import { useSessions } from "./use-sessions.ts";
 
 /**
- * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
- * `Intl.RelativeTimeFormat` always prefixes "il y a", so we format by hand.
+ * ISO timestamp → compact relative time ("5 min", "2 h"), as of `now`.
+ * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", so the units are copy.
  */
-function relativeTime(iso: string, now: number): string {
+function relativeTime(t: ChatTranslate, iso: string, now: number): string {
   const sec = Math.round((now - new Date(iso).getTime()) / 1000);
   if (Number.isNaN(sec)) return "";
-  if (sec < 60) return "à l'instant";
+  if (sec < 60) return t("threads.age.now");
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min} min`;
+  if (min < 60) return t("threads.age.minutes", { count: min });
   const hour = Math.round(min / 60);
-  if (hour < 24) return `${hour} h`;
+  if (hour < 24) return t("threads.age.hours", { count: hour });
   const day = Math.round(hour / 24);
-  if (day < 30) return `${day} j`;
+  if (day < 30) return t("threads.age.days", { count: day });
   const month = Math.round(day / 30);
-  if (month < 12) return `${month} mois`;
-  const year = Math.round(day / 365);
-  return `${year} an${year > 1 ? "s" : ""}`;
+  if (month < 12) return t("threads.age.months", { count: month });
+  return t("threads.age.years", { count: Math.round(day / 365) });
 }
 
 /**
  * Re-render clock for the relative-time labels. Freshness of the list DATA is
  * event-driven (SSE + safety-net refetch), but React Query's structural sharing
  * keeps `data` referentially stable when the payload is unchanged — no
- * re-render, so a label computed at render time would freeze ("à l'instant"
+ * re-render, so a label computed at render time would freeze (the "now" label
  * forever on a quiet list). 30s granularity matches the coarsest visible unit.
  */
 function useNowTick(): number {
@@ -90,7 +94,7 @@ export function ThreadList({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
-        <span className="flex-1 text-sm font-medium">Conversations</span>
+        <span className="flex-1 text-sm font-medium">{t("threads.title")}</span>
         {canWrite && (
           <button
             type="button"
@@ -120,7 +124,7 @@ export function ThreadList({
             onClick={() => void fetchNextPage()}
             className="text-muted-foreground hover:text-foreground hover:bg-accent/50 w-full rounded-md px-2 py-1 text-xs disabled:opacity-50"
           >
-            {isFetchingNextPage ? "Chargement…" : "Afficher plus"}
+            {isFetchingNextPage ? t("threads.loadingMore") : t("threads.showMore")}
           </button>
         )}
         {!isLoading && (sessions ?? []).length === 0 && (
@@ -212,17 +216,17 @@ function ConversationRow({
         {session.generating ? (
           <Loader2Icon
             className="text-muted-foreground size-3.5 animate-spin"
-            aria-label="Opération en cours"
+            aria-label={t("threads.generating")}
           />
         ) : unread ? (
           <span
             className="bg-primary size-2 rounded-full transition-opacity group-hover:opacity-0"
-            aria-label="Réponse non lue"
-            title="Réponse non lue"
+            aria-label={t("threads.unread")}
+            title={t("threads.unread")}
           />
         ) : (
           <span className="text-muted-foreground text-xs transition-opacity group-hover:opacity-0">
-            {relativeTime(session.updatedAt, now)}
+            {relativeTime(t, session.updatedAt, now)}
           </span>
         )}
         {/* pointer-events must track visibility: opacity-0 alone keeps the
@@ -232,8 +236,8 @@ function ConversationRow({
           <div className="bg-background pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 shadow-sm transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
             <button
               type="button"
-              aria-label="Renommer"
-              title="Renommer"
+              aria-label={t("threads.actions.rename")}
+              title={t("threads.actions.rename")}
               onClick={() => setEditing(true)}
               className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md p-0.5"
             >
@@ -241,8 +245,8 @@ function ConversationRow({
             </button>
             <button
               type="button"
-              aria-label="Supprimer"
-              title="Supprimer"
+              aria-label={t("threads.actions.delete")}
+              title={t("threads.actions.delete")}
               // The mobile drawer closes on a button click: it would unmount the dialog.
               onClick={(e) => {
                 e.stopPropagation();
@@ -302,7 +306,7 @@ export function ActiveConversationTitle({ activeId }: { activeId: string | null 
       type="button"
       onClick={() => setEditing(true)}
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
-      title="Renommer"
+      title={t("threads.actions.rename")}
     >
       <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{title}</span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />

@@ -17,6 +17,18 @@ describe("isBlockedHost", () => {
     expect(isBlockedHost("localhost")).toBe(true);
   });
 
+  it("blocks every *.localhost name (RFC 6761 §6.3)", () => {
+    expect(isBlockedHost("foo.localhost")).toBe(true);
+    expect(isBlockedHost("FOO.LOCALHOST")).toBe(true);
+    expect(isBlockedHost("a.b.localhost.")).toBe(true);
+    expect(isBlockedUrl("http://tenant.localhost:3000/")).toBe(true);
+  });
+
+  it("does not treat a name merely containing localhost as loopback", () => {
+    expect(isBlockedHost("localhost.example.com")).toBe(false);
+    expect(isBlockedHost("notlocalhost")).toBe(false);
+  });
+
   it("blocks Docker internal hostnames", () => {
     expect(isBlockedHost("sidecar")).toBe(true);
     expect(isBlockedHost("agent")).toBe(true);

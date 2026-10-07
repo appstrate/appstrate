@@ -748,14 +748,14 @@ export class ProcessOrchestrator implements RunOrchestrator {
   }
 }
 
+/** The one interface a process-mode sidecar binds, and where its free ports are probed. */
+const LOOPBACK = "127.0.0.1";
+
 /**
  * Two free ports, both probes held at once so the OS hands out distinct ones.
  * They need not be adjacent: asking for `port + 1` failed whenever a busy host
  * had it taken, which the finder used to throw on. `null` when a probe fails.
  */
-/** The one interface a process-mode sidecar binds, and where its free ports are probed. */
-const LOOPBACK = "127.0.0.1";
-
 async function probeTwoFreePorts(): Promise<SidecarPorts | null> {
   // Raw TCP listeners, NOT `Bun.serve`: under `bun --hot` (the dev server) a
   // second `Bun.serve()` hot-reloads the first one and returns the SAME

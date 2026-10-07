@@ -26,10 +26,8 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { APIError } from "better-auth/api";
-import { _resetCacheForTesting } from "@appstrate/env";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import {
-  _rebuildAuthForTesting,
   getAuth,
   setBeforeSignupHook,
   setPostBootstrapOrgHook,
@@ -37,10 +35,13 @@ import {
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
 import {
+  captureIssuedMagicLinks,
   createTestContext,
-  issuedMagicLinkToken,
+  restoreBeforeSignupHookAfterSuite,
+  restorePostBootstrapOrgHookAfterSuite,
   restoreRealmResolverAfterSuite,
 } from "../helpers/auth.ts";
+import { useAuthEnv } from "../helpers/auth-env.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { flushRedis } from "../helpers/redis.ts";
 import { seedInvitation } from "../helpers/seed.ts";
@@ -67,34 +68,7 @@ const app = getTestApp();
 
 const VALID_TOKEN = "kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk";
 
-const SNAPSHOT = {
-  AUTH_BOOTSTRAP_OWNER_EMAIL: process.env.AUTH_BOOTSTRAP_OWNER_EMAIL,
-  AUTH_BOOTSTRAP_ORG_NAME: process.env.AUTH_BOOTSTRAP_ORG_NAME,
-  AUTH_BOOTSTRAP_TOKEN: process.env.AUTH_BOOTSTRAP_TOKEN,
-  AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP,
-  AUTH_DISABLE_ORG_CREATION: process.env.AUTH_DISABLE_ORG_CREATION,
-  AUTH_PLATFORM_ADMIN_EMAILS: process.env.AUTH_PLATFORM_ADMIN_EMAILS,
-  AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
-};
-
-function setEnv(vars: Record<string, string | undefined>) {
-  for (const [k, v] of Object.entries(vars)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-}
-
-function restore() {
-  for (const [k, v] of Object.entries(SNAPSHOT)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-  _resetBootstrapTokenForTesting();
-}
+const setEnv = useAuthEnv();
 
 async function signUp(email: string) {
   return app.request("/api/auth/sign-up/email", {
@@ -174,6 +148,8 @@ async function expectRootOrgOwnedBy(email: string, slug: string) {
 }
 
 restoreRealmResolverAfterSuite();
+restorePostBootstrapOrgHookAfterSuite();
+restoreBeforeSignupHookAfterSuite();
 
 describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   beforeEach(async () => {
@@ -198,7 +174,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   });
 
   afterAll(() => {
-    restore();
+    _resetBootstrapTokenForTesting();
   });
 
   for (const { kind, address, cased, naming } of NAMED_ADDRESSES) {
@@ -409,6 +385,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
 
     describe("a magic link sent to the address", () => {
       enableSmtpForSuite();
+      const magicLinks = captureIssuedMagicLinks();
 
       it("creates it verified in closed mode", async () => {
         const sent = await app.request("/api/auth/sign-in/magic-link", {
@@ -417,7 +394,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           body: JSON.stringify({ email: "ops@acme.com" }),
         });
         expect(sent.status).toBe(200);
-        const token = await issuedMagicLinkToken();
+        const token = magicLinks.tokenFor("ops@acme.com");
         const verified = await app.request(
           `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}`,
         );
@@ -533,6 +510,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
 
     describe("a magic link sent to the address", () => {
       enableSmtpForSuite();
+      const magicLinks = captureIssuedMagicLinks();
 
       it("creates the account and the root organization, and retires the token", async () => {
         // Through Better Auth's own routes, so the row is born verified
@@ -547,7 +525,7 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
           body: JSON.stringify({ email: "owner@acme.com" }),
         });
         expect(sent.status).toBe(200);
-        const token = await issuedMagicLinkToken();
+        const token = magicLinks.tokenFor("owner@acme.com");
 
         const verified = await app.request(
           `/api/auth/magic-link/verify?token=${encodeURIComponent(token)}`,

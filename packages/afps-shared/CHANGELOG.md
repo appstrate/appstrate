@@ -14,6 +14,13 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Security
+
+- **`isBlockedHost` blocks every `*.localhost` name** (`foo.localhost`,
+  case-insensitive, trailing dot included): RFC 6761 §6.3 makes them all
+  loopback, so a host that was allowed is now refused. A name that only
+  contains `localhost` (`localhost.example.com`) is unaffected.
+
 ## [0.10.0] — 2026-09-30
 
 Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new

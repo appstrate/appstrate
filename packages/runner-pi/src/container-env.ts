@@ -30,8 +30,11 @@ export interface RuntimePiModelConfig {
   modelId: string;
   /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   piProvider?: string | null;
-  /** The model's Pi dialect → `MODEL_DIALECT`. Pass it even for an {@link aliased} run. */
-  dialect?: PiModelDialect | null;
+  /**
+   * The model's Pi dialect → `MODEL_DIALECT`; null when Pi keeps no record of
+   * it. Pass it even for an {@link aliased} run.
+   */
+  dialect: PiModelDialect | null;
   /**
    * `MODEL_API_KEY` of an OAuth-subscription run: shaped like its token, never
    * the token. Absent otherwise → {@link API_KEY_PLACEHOLDER}.
@@ -166,7 +169,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // gets neither: compat flags name the vendor family.
   if (model.piProvider && !model.aliased) {
     env.MODEL_PROVIDER = model.piProvider;
-    env.MODEL_DIALECT = JSON.stringify(model.dialect ?? null);
+    env.MODEL_DIALECT = JSON.stringify(model.dialect);
   }
 
   // --- Model-alias masking: the one place the alias policy touches the container

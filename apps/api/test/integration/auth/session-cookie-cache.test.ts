@@ -21,14 +21,14 @@
  * tests below assert the size of that window rather than pretending it is zero.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { _resetCacheForTesting } from "@appstrate/env";
-import { _rebuildAuthForTesting, getAuth } from "@appstrate/db/auth";
+import { getAuth } from "@appstrate/db/auth";
 import { session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestUser } from "../../helpers/auth.ts";
+import { withAuthEnv } from "../../helpers/auth-env.ts";
 
 const app = getTestApp();
 
@@ -38,24 +38,9 @@ const PAST_TTL_MS = CACHE_TTL_SECONDS * 1000 + 250;
 
 const PASSWORD = "TestPassword123!";
 
-/**
- * Run `fn` with the cookie cache configured to `seconds` (0 = disabled),
- * rebuilding the Better Auth singleton around it — the same env-then-rebuild
- * mechanism `auth-social-provider-config.test.ts` uses.
- */
-async function withCookieCache(seconds: number, fn: () => Promise<void>): Promise<void> {
-  const prev = process.env.AUTH_SESSION_COOKIE_CACHE_SECONDS;
-  process.env.AUTH_SESSION_COOKIE_CACHE_SECONDS = String(seconds);
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-  try {
-    await fn();
-  } finally {
-    if (prev === undefined) delete process.env.AUTH_SESSION_COOKIE_CACHE_SECONDS;
-    else process.env.AUTH_SESSION_COOKIE_CACHE_SECONDS = prev;
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  }
+/** Run `fn` with the cookie cache configured to `seconds` (0 = disabled). */
+function withCookieCache(seconds: number, fn: () => Promise<void>): Promise<void> {
+  return withAuthEnv({ AUTH_SESSION_COOKIE_CACHE_SECONDS: String(seconds) }, fn);
 }
 
 /** Sign in for real and return the FULL cookie jar the browser would hold. */
@@ -84,14 +69,6 @@ async function seedSignedInUser(): Promise<{ userId: string; email: string; jar:
   const { jar } = await signIn(user.email);
   return { userId: user.id, email: user.email, jar };
 }
-
-afterAll(() => {
-  // Belt and braces: leave the shared singleton on the repo default even if a
-  // test threw between the env set and the finally block.
-  delete process.env.AUTH_SESSION_COOKIE_CACHE_SECONDS;
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-});
 
 describe("session cookie cache — the flag itself", () => {
   beforeEach(async () => {

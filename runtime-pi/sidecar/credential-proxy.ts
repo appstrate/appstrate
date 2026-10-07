@@ -115,26 +115,6 @@ interface ApiCallArgs {
 interface ApiCallSuccess {
   ok: true;
   response: Response;
-  /**
-   * URL the response was eventually served from after any redirect
-   * follow. Equals the resolved target URL when no redirect happened.
-   *
-   * An OUTPUT, never an input. `doUpstreamRequest` closes over the
-   * resolved target URL and issues against THAT on both branches — it takes
-   * the credential set and the caller's headers — so the 401 replay re-issues
-   * against the resolved target and re-follows the chain from scratch,
-   * then overwrites this value with the replay's own terminus.
-   *
-   * All three readers live in this module and it has no consumer
-   * outside it: the manual follower returns it as the chain terminus,
-   * and the debug envelope reports it as `host` (redacted) and as
-   * `redirected` (`!== resolvedUrl`).
-   *
-   * It is NOT projected onto `_meta`: the agent-side parser
-   * (`runtime-pi/mcp/upstream-meta.ts`) reads `{ status, headers }` only,
-   * and a redirect URL routinely carries credentials.
-   */
-  finalUrl: string;
 }
 
 interface ApiCallFailure {
@@ -435,8 +415,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    structured failure rather than a raw exception.
   const requestStartedAt = performance.now();
   let upstream: Response;
-  // No initializers: the try below assigns all four and the catch returns,
-  // so any value here is unreadable.
+  // No initializers: the try below assigns every one and the catch returns,
+  // so any value here is unreadable. `upstreamFinalUrl` is the terminal hop of
+  // the chain `fetchApiCall` follows, read only by the debug envelope (redacted:
+  // a redirect URL routinely carries credentials); a 401 replay re-issues
+  // against the resolved target and overwrites it.
   let upstreamFinalUrl: string;
   let upstreamHops: number;
   let requestHeaderNames: string[];
@@ -529,7 +512,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     responseHeaders: filterSensitiveHeaders(upstream.headers),
   });
 
-  return { ok: true, response: upstream, finalUrl: upstreamFinalUrl };
+  return { ok: true, response: upstream };
 }
 
 /**

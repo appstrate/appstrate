@@ -359,7 +359,7 @@ export function ChatPage({
                 <button
                   type="button"
                   onClick={() => setMobileOpen(true)}
-                  aria-label="Conversations"
+                  aria-label={t("threads.title")}
                   className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
                 >
                   <PanelLeftIcon className="size-5" />
@@ -443,6 +443,7 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
+  const { t } = useChatHost();
   const spaceId = spaceIdFromHeaders(getHeaders);
   const history = useQuery({
     queryKey: sessionQueryKey(spaceId, id),
@@ -488,7 +489,7 @@ const Conversation = memo(function Conversation({
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        Chargement…
+        {t("conversation.loading")}
       </div>
     );
   }

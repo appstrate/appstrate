@@ -6,6 +6,7 @@ import {
   clientTurnErrorFromMarker,
   clientTurnErrorMarker,
   refusalCode,
+  turnErrorLogIds,
 } from "../src/turn-error.ts";
 
 /**
@@ -98,6 +99,25 @@ describe("classifyClientTurnError", () => {
     expect(clientTurnErrorFromMarker("appstrate:chat-turn-error:unknown:<b>not an id</b>")).toEqual(
       { category: "unknown", retryable: true },
     );
+  });
+});
+
+describe("turnErrorLogIds", () => {
+  it("logs the provider's id next to the turn's own: the user may be shown either", () => {
+    const shown = classifyClientTurnError(
+      "Upstream model error (status 503, req_upstream9)",
+      "req_turn1",
+    );
+    expect(turnErrorLogIds("req_turn1", shown)).toEqual({
+      requestId: "req_turn1",
+      upstreamRequestId: "req_upstream9",
+    });
+  });
+
+  it("logs the turn's id alone when the provider named none", () => {
+    const shown = classifyClientTurnError("private opaque backend details", "req_turn1");
+    expect(turnErrorLogIds("req_turn1", shown)).toEqual({ requestId: "req_turn1" });
+    expect(turnErrorLogIds(undefined, undefined)).toEqual({});
   });
 });
 

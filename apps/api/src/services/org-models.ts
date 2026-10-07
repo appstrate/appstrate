@@ -537,12 +537,6 @@ export async function updateOrgModel(
   if (isSystemModel(modelDbId)) {
     throw new Error("Cannot modify built-in model");
   }
-  if (data.enabled === false && (await defaultModel.getDefaultId(orgId)) === modelDbId) {
-    throw conflict(
-      "model_disabled",
-      "The default model cannot be disabled. Pick another default model first, or clear the default (PUT /api/models/default with `modelId: null`).",
-    );
-  }
 
   // Keys of `updateModelSchema` (routes/models.ts).
   const updates = buildUpdateSet(data, [
@@ -558,11 +552,22 @@ export async function updateOrgModel(
     "aliased",
   ]);
 
+  const rowWhere = scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] });
   try {
-    await db
-      .update(orgModels)
-      .set(updates)
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+    await db.transaction(async (tx) => {
+      if (data.enabled === false) {
+        // The pointer is read under the row lock `setDefaultModel` also takes
+        // before checking `enabled`, so the two refusals cannot both be skipped.
+        await tx.select({ id: orgModels.id }).from(orgModels).where(rowWhere).for("update");
+        if ((await defaultModel.getDefaultId(orgId, tx)) === modelDbId) {
+          throw conflict(
+            "model_disabled",
+            "The default model cannot be disabled. Pick another default model first, or clear the default (PUT /api/models/default with `modelId: null`).",
+          );
+        }
+      }
+      await tx.update(orgModels).set(updates).where(rowWhere);
+    });
   } catch (err) {
     // Repointing a row's model or credential can land on a binding another row
     // already holds. The failed UPDATE rolled back, so the row still reads its
@@ -680,7 +685,8 @@ export async function seedOrgModelsForCredential(
  * model OR one of the org's own rows — picking any row makes exactly that row
  * the default (the integration `setDefaultIntegrationClient` analogue). An
  * unknown custom id is rejected, never stored. A single pointer write — no
- * per-row flag flip — so there is nothing to keep transactionally consistent.
+ * per-row flag flip — made under the target row's lock, the one
+ * {@link updateOrgModel} takes to refuse disabling the default.
  */
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
   // A model on a dead credential is now LISTED rather than silently dropped
@@ -691,23 +697,34 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // `org-proxies` and must stay generic. System ids, unknown rows and non-UUIDs
   // carry no binding, so the pointer helper below still owns the 404.
   const row = modelDbId === null ? undefined : await loadModelBinding(orgId, modelDbId);
-  // `resolveModel` skips a switched-off row.
-  if (row && !row.enabled) {
-    throw conflict(
-      "model_disabled",
-      "A disabled model cannot be the default model. Enable it, or pick another model.",
-    );
-  }
-  if (row && (await credentialIsDeadButListed(orgId, row.credentialId))) {
+  if (row?.enabled && (await credentialIsDeadButListed(orgId, row.credentialId))) {
     throw conflict(
       "model_needs_reconnection",
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
     );
   }
-  // Validate the target before storing it (mirrors the integration set-default
-  // guard). A system id is trusted via the registry; a custom id must be a row
-  // the org owns.
-  await defaultModel.setDefault(orgId, modelDbId);
+  await db.transaction(async (tx) => {
+    // `resolveModel` skips a switched-off row. `enabled` is read under the row
+    // lock `updateOrgModel` takes before checking the pointer, so a concurrent
+    // disable is either seen here or sees this pointer.
+    if (row && modelDbId !== null) {
+      const [locked] = await tx
+        .select({ enabled: orgModels.enabled })
+        .from(orgModels)
+        .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+        .for("update");
+      if (locked && !locked.enabled) {
+        throw conflict(
+          "model_disabled",
+          "A disabled model cannot be the default model. Enable it, or pick another model.",
+        );
+      }
+    }
+    // Validate the target before storing it (mirrors the integration set-default
+    // guard). A system id is trusted via the registry; a custom id must be a row
+    // the org owns.
+    await defaultModel.setDefault(orgId, modelDbId, tx);
+  });
 }
 
 // --- Resolution ---
@@ -860,7 +877,7 @@ function unrecordedGeneration({
   reasoning,
 }: GenerationSubject): ModelGenerationCapabilities {
   const levels = new Set<string>(
-    piReasoningLevels(buildPiModel({ id: "", apiShape, baseUrl: "", reasoning })),
+    piReasoningLevels(buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning })),
   );
   return {
     temperature: "unknown",

@@ -28,6 +28,18 @@ export function useMyConnections() {
   return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
 }
 
+/** Fetches only while `connectionId` is set, i.e. while the confirmation is open. */
+export function useConnectionDeleteImpact(connectionId: string | undefined) {
+  return $api.useQuery(
+    "get",
+    "/api/me/connections/{connectionId}/delete-impact",
+    { params: { path: { connectionId: connectionId ?? "" } } },
+    // Never answered from cache: the user confirms on what this says, and a
+    // pick made since the last open would be missing from it.
+    { gcTime: 0, enabled: !!connectionId },
+  );
+}
+
 interface OrgSpaceHeaders {
   orgId: string;
   spaceId: string;

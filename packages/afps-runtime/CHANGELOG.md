@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — no longer published to npm
+
+- The package is `"private": true`: it is not published to npm. It is
+  consumed in-tree, by the platform through `workspace:*` and by `apps/cli`,
+  which bundles it into the `appstrate` binary.
+
 ### Added — one preparation of the caller half of an api_call (#1660)
 
 - `prepareApiCallRequest({ target, headers, bodyTemplates, fields })` and
