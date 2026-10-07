@@ -698,13 +698,19 @@ program
   .description(
     "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Space-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
+      "Headless: with --api-key or APPSTRATE_API_KEY the key is the bearer and the profile credential is not used. The instance is APPSTRATE_INSTANCE, else the profile's. No X-Org-Id / X-Space-Id is injected: the key's own org and space apply.\n" +
+      "\n" +
       "Invocation forms (all curl-compatible):\n" +
       "  appstrate api GET /api/x             # explicit method + path\n" +
       "  appstrate api /api/x                 # method inferred (GET / POST / PUT)\n" +
-      "  appstrate api https://instance/api/x # absolute URL, must match active profile\n" +
+      "  appstrate api https://instance/api/x # absolute URL, must match the instance\n" +
       "  appstrate api POST /api/x -d @body   # body via -d / --data-raw / --data-binary / -F",
   )
   .option("-H, --header <kv>", "Request header 'Name: value' (repeatable)", collect, [])
+  .option(
+    "--api-key <key>",
+    "Appstrate API key (apst_...) used instead of the profile credential (env: APPSTRATE_API_KEY)",
+  )
   .option("-d, --data <str>", "Request body — literal, @file, or @- for stdin")
   .option("--data-raw <str>", "Request body — literal, no @ interpretation")
   .option(
@@ -865,6 +871,7 @@ program
     const globalOpts = program.opts<{ profile?: string }>();
     await apiCommand({
       profile: globalOpts.profile,
+      apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
       method,
       path,
       header: Array.isArray(opts.header) ? opts.header : [],

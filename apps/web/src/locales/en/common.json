@@ -185,6 +185,7 @@
   "apiError.version_exists": "This version is already published and can no longer change: bump the version number.",
   "apiError.integrity_mismatch": "This version already exists with different content.",
   "apiError.draft_overwrite": "This package has unpublished changes the import would overwrite.",
+  "apiError.version_not_higher": "A higher version is already published: bump the version in the manifest, then import again.",
   "apiError.archive_required": "An MCP server must be imported as an .afps or .zip archive.",
   "apiError.package_archive_unreadable": "This package's archive cannot be read: {{message}}",
   "apiError.version_artifact_unavailable": "The content of this published version can no longer be read: {{message}}",

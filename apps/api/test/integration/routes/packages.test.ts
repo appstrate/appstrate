@@ -2727,19 +2727,24 @@ describe("Packages API", () => {
       const enc = (str: string) => new TextEncoder().encode(str);
       const id = "@pkgorg/conflicting-skill";
       const archive = (version: string, body: string) => {
-        const afps = zipSync({
-          "manifest.json": enc(
-            JSON.stringify({
-              name: id,
-              version,
-              type: "skill",
-              schema_version: "0.1",
-              display_name: "Conflicting Skill",
-              description: "A skill.",
-            }),
-          ),
-          "SKILL.md": enc(`---\nname: conflicting-skill\ndescription: A skill.\n---\n\n${body}`),
-        });
+        const afps = zipSync(
+          {
+            "manifest.json": enc(
+              JSON.stringify({
+                name: id,
+                version,
+                type: "skill",
+                schema_version: "0.1",
+                display_name: "Conflicting Skill",
+                description: "A skill.",
+              }),
+            ),
+            "SKILL.md": enc(`---\nname: conflicting-skill\ndescription: A skill.\n---\n\n${body}`),
+          },
+          // Pinned: a ZIP entry carries the clock at 2 s resolution, so two
+          // archives of the same content would otherwise differ now and then.
+          { mtime: new Date("2026-01-01T00:00:00Z") },
+        );
         const form = new FormData();
         form.append("file", new File([new Uint8Array(afps)], "skill.afps"));
         return form;
@@ -2796,6 +2801,23 @@ describe("Packages API", () => {
           packageId: id,
           active_version: "1.0.0",
         });
+      });
+
+      it("refuses a new version below the highest published one, forced or not, and keeps the draft", async () => {
+        expect((await importArchive(archive("1.0.0", "First."))).status).toBe(201);
+        expect((await importArchive(archive("1.2.0", "Second."))).status).toBe(201);
+
+        for (const query of ["", "?force=true"]) {
+          const res = await importArchive(archive("1.1.0", "Between."), query);
+          expect(res.status).toBe(409);
+          expect(await res.json()).toMatchObject({ code: "version_not_higher", packageId: id });
+        }
+        expect(await hasUnarchivedChanges()).toBe(false);
+        const versions = await app.request(`/api/packages/skills/${id}/versions`, {
+          headers: authHeaders(ctx),
+        });
+        const listed = ((await versions.json()) as { data: { version: string }[] }).data;
+        expect(listed.map((v) => v.version).sort()).toEqual(["1.0.0", "1.2.0"]);
       });
 
       it("leaves a clean draft after a forced replacement, so the next import is not refused", async () => {

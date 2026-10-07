@@ -37,7 +37,7 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
-import { resolveAuthContext, AuthError } from "../lib/api.ts";
+import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
 import {
   resolveModel,
@@ -874,7 +874,15 @@ async function buildResolverInputs(
   // Mixing the two is rejected — an explicit env-var API key overrides
   // the profile credential entirely so there's no ambiguity about which
   // principal the platform audit log will record.
-  const headlessApiKey = opts.apiKey ?? process.env.APPSTRATE_API_KEY;
+  let headlessApiKey: string | undefined;
+  try {
+    headlessApiKey = explicitApiKey(opts.apiKey);
+  } catch (err) {
+    throw new ResolverConfigError(
+      err instanceof Error ? err.message : String(err),
+      "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
+    );
+  }
   if (headlessApiKey) {
     return buildHeadlessRemoteInputs(headlessApiKey, opts);
   }
@@ -885,19 +893,9 @@ async function buildHeadlessRemoteInputs(
   apiKey: string,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
-  let instance = process.env.APPSTRATE_INSTANCE;
-  let spaceId = process.env.APPSTRATE_SPACE_ID;
-  let orgId = process.env.APPSTRATE_ORG_ID;
-
-  if (!instance || !spaceId || !orgId) {
-    const resolved = await resolveActiveProfileOrNull(opts.profile);
-    const profile = resolved?.profile;
-    if (profile) {
-      instance ??= profile.instance;
-      spaceId ??= profile.spaceId;
-      orgId ??= profile.orgId;
-    }
-  }
+  const { instance, profile } = await resolveApiKeyTarget(opts.profile);
+  const spaceId = process.env.APPSTRATE_SPACE_ID || profile?.spaceId;
+  const orgId = process.env.APPSTRATE_ORG_ID || profile?.orgId;
 
   if (!instance) {
     throw new ResolverConfigError(

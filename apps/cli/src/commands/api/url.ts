@@ -2,8 +2,8 @@
 
 /**
  * Thrown when the request target resolves to a different origin than
- * the active profile's Appstrate instance. The whole point of
- * `appstrate api` is to inject a keyring-backed bearer — sending it to
+ * the resolved Appstrate instance. The whole point of
+ * `appstrate api` is to inject a bearer — sending it to
  * a foreign host would leak the token, so we refuse loudly.
  */
 export class HostMismatchError extends Error {

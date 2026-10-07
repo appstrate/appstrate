@@ -120,6 +120,26 @@ PR, labelled `supply-chain` / `pi-sdk`, `rangeStrategy: pin`, **no auto-merge**,
 and gated behind `dependencyDashboardApproval`. Updates to this dependency are a
 deliberate human decision, not an automated background bump.
 
+### Live model catalog — later registry data, never later code
+
+One path reads a Pi release this repository does not pin: the live model
+catalog (`docs/architecture/MODEL_CATALOG.md`). Every six hours a workflow
+downloads the latest `@earendil-works/pi-ai` tarball and extracts its model
+**data** (`dist/providers/data/*.json`). Nothing of that package is installed,
+imported or run, on the runner or on an instance; the code that serves a model
+stays the pinned one.
+
+What a compromised or mistaken upstream release can reach through it is
+bounded by what a record is allowed to say: a new id on a provider and an API
+shape the pinned registry already pairs, in the dialect vocabulary the pinned
+registry already uses, with a price and limits of its choosing. It cannot name
+an endpoint or a header, change an existing id, or touch a system model. The
+price is the part no human reads before it is offered.
+
+The published file is signed with a key dedicated to that workflow
+(`MODEL_CATALOG_SIGNING_KEY`), whose public half is a constant in the source.
+An instance that must not read it sets `MODEL_CATALOG_URL=off`.
+
 ## 3. Swap-cost estimate
 
 | Scenario                                   | Cost                                                                                    |

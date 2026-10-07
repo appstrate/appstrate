@@ -20,7 +20,7 @@
  */
 
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
-import { getProfile, type Profile } from "./config.ts";
+import { getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
@@ -181,6 +181,55 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
     orgId: profile.orgId,
     spaceId: profile.spaceId,
   };
+}
+
+/** The `--api-key` flag, else `APPSTRATE_API_KEY` (empty env = unset). */
+export function explicitApiKey(flag: string | undefined): string | undefined {
+  const key = (flag ?? process.env.APPSTRATE_API_KEY)?.trim();
+  if (!key) {
+    // An explicitly passed empty flag (`--api-key "$UNSET_VAR"`) must not
+    // degrade to the profile's full-authority credential.
+    if (flag !== undefined) throw new AuthError("--api-key is empty");
+    return undefined;
+  }
+  // A CR/LF, NUL or non-Latin-1 character makes `fetch` throw an error that
+  // quotes the key; deliberately stricter (visible ASCII), and never echoed.
+  if (!/^[\x21-\x7e]+$/.test(key)) {
+    throw new AuthError(
+      "The API key contains whitespace, a line break or a non-ASCII character. Check --api-key / APPSTRATE_API_KEY.",
+    );
+  }
+  return key;
+}
+
+/** `APPSTRATE_INSTANCE`, else the profile's instance; a key needs no profile. */
+export async function resolveApiKeyTarget(
+  profileFlag: string | undefined,
+): Promise<{ instance: string | undefined; profile: Profile | undefined }> {
+  const profile = (await resolveActiveProfileOrNull(profileFlag))?.profile;
+  return { instance: process.env.APPSTRATE_INSTANCE || profile?.instance, profile };
+}
+
+/**
+ * `resolveAuthContext` for an explicit API key. No `orgId` / `spaceId`:
+ * the key pins both server-side and the platform answers 403 to a header
+ * that disagrees, so the profile's pins would break a valid key.
+ */
+export async function resolveApiKeyAuthContext(
+  apiKey: string,
+  profileFlag: string | undefined,
+): Promise<AuthContext> {
+  const { instance } = await resolveApiKeyTarget(profileFlag);
+  if (!instance) {
+    throw new AuthError(
+      "No Appstrate instance URL for the API key. Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile.",
+    );
+  }
+  try {
+    return { instance: normalizeInstance(instance), accessToken: apiKey };
+  } catch (err) {
+    throw new AuthError(err instanceof Error ? err.message : String(err));
+  }
 }
 
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {

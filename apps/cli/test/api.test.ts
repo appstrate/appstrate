@@ -27,6 +27,8 @@ import { saveTokens, loadTokens } from "../src/lib/keyring.ts";
 import { setProfile } from "../src/lib/config.ts";
 import {
   apiFetchRaw,
+  explicitApiKey,
+  resolveApiKeyTarget,
   AuthError,
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
@@ -515,5 +517,69 @@ describe("_awaitRefreshQuiesce (PR #191 review)", () => {
     await pending;
     await waiter;
     expect(quiesceDone).toBe(true);
+  });
+});
+
+describe("explicit API key helpers", () => {
+  const clearEnv = (): void => {
+    delete process.env.APPSTRATE_API_KEY;
+    delete process.env.APPSTRATE_INSTANCE;
+  };
+  beforeEach(clearEnv);
+  afterEach(clearEnv);
+
+  it("explicitApiKey: flag, else env; an empty ENV value means not set", () => {
+    expect(explicitApiKey(undefined)).toBeUndefined();
+    process.env.APPSTRATE_API_KEY = "";
+    expect(explicitApiKey(undefined)).toBeUndefined();
+    process.env.APPSTRATE_API_KEY = "apst_env";
+    expect(explicitApiKey(undefined)).toBe("apst_env");
+    expect(explicitApiKey("apst_flag")).toBe("apst_flag");
+  });
+
+  it("explicitApiKey: surrounding whitespace is trimmed; whitespace-only env is unset", () => {
+    expect(explicitApiKey(" apst_flag\n")).toBe("apst_flag");
+    process.env.APPSTRATE_API_KEY = "apst_env\n";
+    expect(explicitApiKey(undefined)).toBe("apst_env");
+    process.env.APPSTRATE_API_KEY = " \n";
+    expect(explicitApiKey(undefined)).toBeUndefined();
+  });
+
+  it("explicitApiKey: an empty flag throws even when the env var holds a key", () => {
+    process.env.APPSTRATE_API_KEY = "apst_env";
+    expect(() => explicitApiKey("")).toThrow("--api-key is empty");
+    expect(() => explicitApiKey("  ")).toThrow("--api-key is empty");
+  });
+
+  it("explicitApiKey: a key that is not visible ASCII throws without quoting it", () => {
+    for (const bad of ["apst_a\nb", "apst_a b", "\u201capst_ab\u201d", "apst_\u00e9"]) {
+      let thrown: unknown;
+      try {
+        explicitApiKey(bad);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AuthError);
+      expect((thrown as Error).message).not.toContain(bad);
+      expect((thrown as Error).message).not.toContain("apst_");
+    }
+    process.env.APPSTRATE_API_KEY = "apst_a\tb";
+    expect(() => explicitApiKey(undefined)).toThrow(AuthError);
+  });
+
+  it("resolveApiKeyTarget: env instance wins, the profile is still returned", async () => {
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+    process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
+
+    const target = await resolveApiKeyTarget(undefined);
+    expect(target.instance).toBe("https://ci.example.com");
+    expect(target.profile?.spaceId).toBe("spc_1");
+  });
+
+  it("resolveApiKeyTarget: no env, no profile → nothing, without throwing", async () => {
+    expect(await resolveApiKeyTarget(undefined)).toEqual({
+      instance: undefined,
+      profile: undefined,
+    });
   });
 });

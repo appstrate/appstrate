@@ -174,7 +174,7 @@ export interface paths {
         };
         /**
          * List storage-deletion outbox jobs
-         * @description Platform-operator surface. Requires an authentic first-party dashboard SESSION whose realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point). The listing is instance-global: rows carry the bucket + in-bucket key of objects belonging to ANY organization. Rate-limited to 60/min.
+         * @description Platform-operator surface. Requires an authentic first-party dashboard SESSION whose realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point). The listing is instance-global: rows carry the bucket + in-bucket key of objects belonging to ANY organization. **Does NOT require `X-Org-Id`**: the operator may belong to no organization. Rate-limited to 60/min.
          */
         get: operations["listStorageDeletionJobs"];
         put?: never;
@@ -196,7 +196,7 @@ export interface paths {
         put?: never;
         /**
          * Retry a storage-deletion job now
-         * @description Same platform-operator session gate as the listing above (session + `platform` realm + allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job. Rate-limited to 30/min.
+         * @description Same platform-operator session gate as the listing above (session + `platform` realm + allowlisted email), and no `X-Org-Id` either. Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job. Rate-limited to 30/min.
          */
         post: operations["retryStorageDeletionJob"];
         delete?: never;
@@ -1162,7 +1162,7 @@ export interface paths {
          * Proxy a GET request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
@@ -1177,7 +1177,7 @@ export interface paths {
          * Proxy a PUT request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
@@ -1192,7 +1192,7 @@ export interface paths {
          * Proxy a POST request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
@@ -1207,7 +1207,7 @@ export interface paths {
          * Proxy a DELETE request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
@@ -1224,7 +1224,7 @@ export interface paths {
          * Proxy a PATCH request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
@@ -2045,7 +2045,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -6020,7 +6020,7 @@ export interface components {
             source: "built-in" | "custom";
             /** @description ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed. */
             credentialId: string | null;
-            /** @description Cost per million tokens */
+            /** @description Cost in USD per million tokens */
             cost?: {
                 input?: number;
                 output?: number;
@@ -6458,7 +6458,7 @@ export interface components {
              * @enum {string|null}
              */
             model_source: "system" | "org" | null;
-            /** @description Run cost in dollars */
+            /** @description Run cost in USD */
             cost: number | null;
             /**
              * @description How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.
@@ -8783,7 +8783,7 @@ export interface operations {
                         key?: string;
                         /** @description The `apst_` prefix and the first 8 characters after it, for identification */
                         keyPrefix?: string;
-                        /** @description Validated scopes granted to the key. Empty = full role access. */
+                        /** @description Validated scopes granted to the key. */
                         scopes?: string[];
                     };
                 };
@@ -14663,6 +14663,11 @@ export interface operations {
                      *         "name": "Acme",
                      *         "slug": "acme"
                      *       },
+                     *       "space": {
+                     *         "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                     *         "name": "Sales",
+                     *         "personal": false
+                     *       },
                      *       "connections": [
                      *         {
                      *           "integration_package_id": "@appstrate/gmail",
@@ -14726,6 +14731,14 @@ export interface operations {
                             name?: string | null;
                             /** @description Organization slug. */
                             slug?: string | null;
+                        };
+                        /** @description The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        space: {
+                            id: string;
+                            /** @description Human-readable space name. */
+                            name: string;
+                            /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
+                            personal: boolean;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
@@ -15728,7 +15741,7 @@ export interface operations {
                     maxTokens?: number;
                     /** @description Whether the model supports reasoning */
                     reasoning?: boolean;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -15877,7 +15890,7 @@ export interface operations {
                             input?: ("text" | "image")[];
                             /** @description Whether model supports reasoning */
                             reasoning?: boolean;
-                            /** @description Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
+                            /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
                             cost?: {
                                 input?: number;
                                 output?: number;
@@ -16064,7 +16077,7 @@ export interface operations {
                     contextWindow?: number | null;
                     maxTokens?: number | null;
                     reasoning?: boolean | null;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -18303,7 +18316,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18388,7 +18401,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org). Error code: `bundle_conflict`. */
+            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org): `bundle_conflict`. A root whose version is new but lower than the highest published one: `version_not_higher` (a dependency in that case is left as the org has it, with a warning). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18452,7 +18465,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, or `name_collision`. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22145,7 +22158,7 @@ export interface operations {
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
                     };
-                    /** @description Authoritative terminal run cost written to the `runs` row. */
+                    /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;
                     /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
                     artifacts?: {

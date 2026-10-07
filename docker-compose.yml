@@ -325,6 +325,8 @@ services:
       - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.64}
       - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.64}
       # ── System config (JSON arrays) ──
+      # Live model catalog channel, or `off` (docs/ENV.md). Passthrough: the schema owns the default.
+      - MODEL_CATALOG_URL
       - SYSTEM_PROVIDER_KEYS
       - SYSTEM_PROXIES
       # System integrations offered out of the box (shared OAuth clients, or an

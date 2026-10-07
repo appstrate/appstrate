@@ -52,7 +52,8 @@ export const adminStorageDeletionPaths = {
         "`(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold " +
         "(still retrying — the threshold is a visibility line, not an abandon point). The " +
         "listing is instance-global: rows carry the bucket + in-bucket key of objects belonging " +
-        "to ANY organization. Rate-limited to 60/min.",
+        "to ANY organization. **Does NOT require `X-Org-Id`**: the operator may belong to no " +
+        "organization. Rate-limited to 60/min.",
       parameters: [
         {
           name: "status",
@@ -108,7 +109,7 @@ export const adminStorageDeletionPaths = {
       summary: "Retry a storage-deletion job now",
       description:
         "Same platform-operator session gate as the listing above (session + `platform` realm + " +
-        "allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker " +
+        "allowlisted email), and no `X-Org-Id` either. Resets a pending job's `next_attempt_at` to now so the next worker " +
         "pass retries it immediately. No-op (404) on a completed or unknown job. " +
         "Rate-limited to 30/min.",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],

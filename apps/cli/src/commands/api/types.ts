@@ -11,6 +11,7 @@ import { DEFAULT_IO as BASE_IO, type CommandIO } from "../../lib/io.ts";
 
 export interface ApiCommandOptions {
   profile?: string;
+  apiKey?: string;
   /**
    * HTTP method. Optional — when omitted, inferred from flags:
    * `-I/--head` → HEAD, `-T/--upload-file` → PUT, body present → POST,

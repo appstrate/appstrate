@@ -288,6 +288,8 @@ services:
       # RUN_ADAPTER=firecracker selects the runner orchestrator.
       - FIRECRACKER_RUNNER_URL
       - FIRECRACKER_RUNNER_TOKEN
+      # Live model catalog channel, or `off` (docs/ENV.md). Passthrough: the schema owns the default.
+      - MODEL_CATALOG_URL
       - SYSTEM_PROVIDER_KEYS
       # System integrations offered out of the box (shared OAuth clients, or a
       # client-less entry for DCR-based remote MCP integrations).

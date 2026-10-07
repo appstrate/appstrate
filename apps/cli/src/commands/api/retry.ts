@@ -99,7 +99,7 @@ interface RetryContext {
   firstBuild: BuiltBody;
   ac: AbortController;
   io: ApiCommandIO;
-  profileName: string;
+  profileName: string | undefined;
   connectTimeoutRef: { current: ReturnType<typeof setTimeout> | undefined };
   maxAttempts: number;
   retryDelay: number;
