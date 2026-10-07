@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.65] - 2026-10-07
+
 ### Operators
 
 - **An account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or
@@ -109,6 +111,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dry run is the per-kid inventory and exits 0 only when nothing live is left
   outside the active kid. Procedure: `docs/ENV.md` § "Rotating
   `CONNECTION_ENCRYPTION_KEY`" (#1641).
+- **Billing pins the Stripe API version `2026-09-30.endive`** (stripe-node 23,
+  #1738). A webhook endpoint renders its payloads at the version it was
+  created with and that version cannot be changed: before the deploy, the
+  billing endpoint (`<APP_URL>/api/billing/webhooks`) must be one created at
+  `2026-09-30.endive`, with its signing secret in `STRIPE_WEBHOOK_SECRET`. Never
+  leave two endpoints active on the same URL: the module does not deduplicate
+  events. Only instances that load `@appstrate/module-ee` are concerned.
 
 ### Changed
 
@@ -384,6 +393,16 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Fixed
 
+- **The self-hosting compose files forward the variables the docs and the
+  installer set** (#1726). `AUTH_BOOTSTRAP_TOKEN`, which the installer writes
+  to `.env`, and `EGRESS_ALLOW_INTERNAL_HOSTS` reached no container, so `/claim`
+  could not find the token. The tier templates also dropped SMTP, Google and
+  GitHub sign-in, run limits, proxies and a few others the root file forwards.
+  All are bare passthroughs: an unset variable stays unset.
+  `deploy/docker-compose.yml`, which loads `.env` whole, is not affected.
+- **A subscription pairing token minted on a `*.localhost` instance is
+  accepted** (#1648), as loopback (RFC 6761 §6.3). It needs
+  `@appstrate/connect-helper` 0.3.1.
 - **A gateway model declared reasoning takes a reasoning level** (#1736). An
   `openai-compatible` or `anthropic-compatible` model created with
   `reasoning: true` offered no level, not even `off`: every one was refused
@@ -605,6 +624,14 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Security
 
+- **The chat's Pi runtime no longer reads the host's Pi CLI credentials**
+  (#1646). Without a credential store of its own it opened the default one
+  (`~/.pi/agent/auth.json`), where a credential outranks the key the platform
+  registers: a `pi` login on the API host answered in place of the
+  organization's subscription. Each turn now gets an empty in-memory store.
+- **Dependency advisories**: `proxy-addr` and `source-map-js` patched (#1696);
+  the `braces` advisory accepted for the dev tree only, until 2026-12-31
+  (#1654).
 - **Better Auth 1.7.7** (GHSA-965c-763c-88jm, critical; #1734, #1743, #1742).
   Before it, an OAuth sign-in state value was accepted as a magic-link token:
   anyone who knew an address could start a Google or GitHub sign-in for it and
