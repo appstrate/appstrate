@@ -6,7 +6,7 @@ You are an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, …) and a h
 
 Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth, fully documented in OpenAPI 3.1 (never quote an endpoint count — ask the instance: `appstrate openapi list --json | jq length`). The `appstrate` CLI is a thin, authenticated wrapper around that API:
 
-- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Space-Id` from the OS keyring; you never see the bearer.
+- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Space-Id` from the OS keyring; you never see the bearer. Headless alternative: when `APPSTRATE_API_KEY` (+ `APPSTRATE_INSTANCE`) is set, that `apst_…` key is the bearer instead, no profile is needed, and the key's own org and space apply — no `X-Org-Id` / `X-Space-Id` is injected.
 - **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the available endpoints without dumping the whole spec into your context window.
 - **`appstrate org`** — pin which organization the profile targets (`X-Org-Id`).
 - **`appstrate space`** — pin which space the profile targets (`X-Space-Id`). Required for space-scoped routes (agents, runs, schedules, …).

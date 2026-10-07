@@ -672,6 +672,20 @@ appstrate api POST /api/agents/abc/run -d '@req.json'
 appstrate api https://app.example.com/api/health  # absolute URL ok if origin matches profile
 ```
 
+#### Headless use with an API key
+
+For a CI job or a shell-only agent, pass a scoped, revocable `apst_…` API key instead of logging in — the same pair `appstrate run` reads:
+
+```sh
+export APPSTRATE_API_KEY=apst_…                   # or --api-key <key> (the flag wins)
+export APPSTRATE_INSTANCE=https://app.example.com # optional when a profile exists: its instance is the fallback
+appstrate api GET /api/agents
+```
+
+- **The key replaces the profile credential entirely.** The keyring is not read, nothing is refreshed, and no profile needs to exist. An empty `APPSTRATE_API_KEY` counts as unset.
+- **The key's own org and space apply.** A key is pinned to one org and one space server-side, so the CLI injects neither `X-Org-Id` nor `X-Space-Id` (the platform answers 403 to a header that disagrees with the key). Your own `-H` headers still pass through.
+- **The key is visible to whatever launches the command.** "The agent never sees the bearer" holds for the profile path only: an environment variable or a flag is readable by the process that sets it. Give an agent a key scoped to what it may do, not a login.
+
 #### curl → appstrate api mapping
 
 Every row below is a direct drop-in: an agent can replace `curl` with `appstrate api` and strip the hostname. All flags work identically.
@@ -741,7 +755,7 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 #### Differences from curl (intentional)
 
 - **No `-u / --user`**: the whole point is that agents never see the bearer. Use `-H Authorization: …` if you really need to override (it's still `[REDACTED]` under `-v`).
-- **Cross-origin `<url>` refused**: the bearer must not leave the profile's instance. Explicit exit 2 with a pointer at plain `curl`.
+- **Cross-origin `<url>` refused**: the bearer must not leave the resolved instance (the profile's, or `APPSTRATE_INSTANCE` with an API key). Explicit exit 2 with a pointer at plain `curl`.
 - **Cookie jars rejected**: `-b file.txt` is refused (exit 2). An attacker-controlled path would otherwise silently end up in the Cookie header.
 - **No default `Content-Type`**: `-d` / `--data-urlencode` don't auto-set `application/x-www-form-urlencoded` the way curl does. Add `-H 'Content-Type: …'` explicitly when the server expects it (avoids corrupting multipart / binary payloads elsewhere in the API).
 

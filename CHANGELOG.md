@@ -317,6 +317,12 @@ could not be resolved`) instead of failing for good on the first. Without
 
 ### Added
 
+- **`appstrate api` accepts an API key** (#1720): `--api-key` or
+  `APPSTRATE_API_KEY`, the pair `appstrate run` already reads, with
+  `APPSTRATE_INSTANCE` (else the profile's instance). The key replaces the
+  profile credential entirely — no keyring read, no profile required — and
+  no `X-Org-Id` / `X-Space-Id` is injected: the key's own org and space
+  apply.
 - **Live model catalog, read side** (#1717): an instance accepts a file only
   on its Ed25519 signature (public key in the source), its exact Pi SDK
   version and a strict shape, stores it only when its `serial` follows the
