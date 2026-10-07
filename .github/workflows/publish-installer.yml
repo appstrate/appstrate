@@ -281,5 +281,15 @@ jobs:
             echo "Nothing to commit"; exit 0
           fi
           git commit -m "publish: ${{ steps.ver.outputs.version }}"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
-            HEAD:installer-pages
+          # publish-model-catalog.yml writes `model-catalog/` on this branch and
+          # may push in between: disjoint paths, so a rebase is always clean.
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          for attempt in 1 2 3; do
+            if git push "$remote" HEAD:installer-pages; then
+              exit 0
+            fi
+            echo "Push lost a race (attempt ${attempt}) — rebasing."
+            git pull --rebase "$remote" installer-pages
+          done
+          echo "::error::Could not push the installer to installer-pages."
+          exit 1
