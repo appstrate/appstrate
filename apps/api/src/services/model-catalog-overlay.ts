@@ -3,7 +3,7 @@
 /**
  * The live model catalog: the models a later Pi registry records and this
  * build's Pi code can serve, read from a signed file so that a new model needs
- * no release (`docs/plans/live-model-catalog.md`, step 2). This module accepts
+ * no release (`docs/architecture/MODEL_CATALOG.md`). This module accepts
  * a file and holds it in memory, with no database and no network. The overlay
  * only ADDS to the bundled registry; `model-catalog.ts` decides who reads it.
  */
@@ -55,7 +55,7 @@ const fileSchema = z.strictObject({
   records: z.array(recordSchema).max(5_000),
 });
 
-type CatalogRecord = z.infer<typeof recordSchema>;
+export type CatalogRecord = z.infer<typeof recordSchema>;
 
 export class ModelCatalogRefused extends Error {}
 
@@ -153,17 +153,11 @@ async function verifySignature(
 }
 
 /**
- * Throws {@link ModelCatalogRefused} on a bad signature, another Pi version or
- * an unknown shape; a record the pinned code cannot serve is skipped.
+ * What an instance keeps of a file's bytes, signature aside. Throws
+ * {@link ModelCatalogRefused} on another Pi version or an unknown shape; a
+ * record the pinned code cannot serve is skipped.
  */
-export async function readModelCatalog(
-  payload: string,
-  signature: string,
-  publicKey: string = MODEL_CATALOG_PUBLIC_KEY,
-): Promise<AcceptedCatalog> {
-  if (!(await verifySignature(payload, Buffer.from(signature, "base64"), publicKey))) {
-    throw new ModelCatalogRefused("signature does not verify");
-  }
+export function parseModelCatalog(payload: string): AcceptedCatalog {
   let json: unknown;
   try {
     json = JSON.parse(payload);
@@ -194,6 +188,18 @@ export async function readModelCatalog(
     seen.add(key);
   }
   return { serial: file.serial, sourceVersion: file.source_version, models, skipped };
+}
+
+/** {@link parseModelCatalog}, once the signature verifies. */
+export async function readModelCatalog(
+  payload: string,
+  signature: string,
+  publicKey: string = MODEL_CATALOG_PUBLIC_KEY,
+): Promise<AcceptedCatalog> {
+  if (!(await verifySignature(payload, Buffer.from(signature, "base64"), publicKey))) {
+    throw new ModelCatalogRefused("signature does not verify");
+  }
+  return parseModelCatalog(payload);
 }
 
 let applied: { serial: number; byProvider: Map<string, Model<Api>[]> } | null = null;

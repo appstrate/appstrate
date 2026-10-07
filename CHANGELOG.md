@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   memory; nothing about the instance is sent, nothing is stored and boot never
   waits on it. Set the variable empty to run on the bundled registry alone.
   Until a file is published for a Pi version the read answers 404 and nothing
-  changes.
+  changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
 - **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
   Run `bun run verify:system-models` with the platform env before the deploy:
   a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
@@ -329,6 +329,15 @@ could not be resolved`) instead of failing for good on the first. Without
   catalog defaults until a restarted process has read the channel. The channel
   cannot forge a file or roll a running process back; it can withhold a newer
   one. Plan: `docs/plans/live-model-catalog.md`, step 2.
+- **Live model catalog, producer** (#1731): `scripts/build-model-catalog.ts`
+  and `.github/workflows/publish-model-catalog.yml` build, every six hours and
+  per Pi version in use, the file instances read. Of the latest Pi package
+  only JSON data is read. A record is published when an instance would keep it,
+  every field and endpoint Pi gave it is one a bundled sibling has, and the
+  pinned code builds its request at every thinking level; the signed file is
+  read back as an instance reads it before anything is pushed. The workflow
+  signs with the repository secret `MODEL_CATALOG_SIGNING_KEY`, the seed of
+  the key pinned in `model-catalog-overlay.ts`.
 - **A schedule the system disabled says why** (#1641). `disabled_reason`
   (`actor_invalid`, `actor_left_org`, `connection_deleted`) is set by the
   system act, cleared on re-enable and `NULL` otherwise: on an enabled

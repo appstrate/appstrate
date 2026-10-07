@@ -66,6 +66,7 @@
     "detect:breaking": "bun scripts/detect-breaking-changes.ts",
     "generate:api": "bun scripts/generate-api-types.ts",
     "verify:api-types": "bun scripts/generate-api-types.ts --check",
+    "build:model-catalog": "bun scripts/build-model-catalog.ts",
     "build:system-packages": "bun scripts/build-system-packages.ts",
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "lint:manifest-casing": "bun scripts/lint-manifest-casing.ts",

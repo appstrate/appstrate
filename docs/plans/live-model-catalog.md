@@ -187,44 +187,36 @@ What the signature does not settle, on purpose:
 
 ## Step 3: CI produces the file
 
-`scripts/build-model-catalog.ts`, run from a release checkout so the pinned Pi
-code is the one the file is built for:
+Built as described in `docs/architecture/MODEL_CATALOG.md` § "The producer",
+which is the reference from here on. Where it left this plan:
 
-1. `npm pack @earendil-works/pi-ai@latest`, extract `dist/providers/data/*.json`
-   only. Nothing from the tarball is imported or executed.
-2. Strict parse of the layout. An unknown layout fails the job: the overlay
-   freezes at its last content until the next bump.
-3. Keep the records of wired providers, on their API shape, absent from the
-   bundled registry.
-4. Apply the vocabulary gate (same function as the instance).
-5. **Proof:** for each kept record, build the request with the pinned code for
-   every supported thinking level, with and without a tool, no network (the
-   `capturePayload` harness of `packages/runner-pi/test/pi-payload.ts`, moved
-   out of `test/`), and run it through the llm-proxy adapter guards. A record
-   that throws or loses a header is dropped and reported.
-6. Emit canonical JSON, sign with a dedicated key
-   (`scripts/sign-firecracker-manifest.ts` is the template).
-
-`.github/workflows/publish-model-catalog.yml`: scheduled every six hours plus
-`workflow_dispatch`, for the latest release tag and `main`, deduplicated by Pi
-version. It publishes under `model-catalog/` on the `installer-pages` branch,
-sharing the concurrency group of `publish-installer.yml`. The job summary lists
-what was added and what the gate or the proof dropped. `release.yml` dispatches
-it for a new tag so the file exists at deploy time.
-
-A file is published for every Pi version in use even when it lists nothing, so
-a 404 stays an anomaly and an instance that just moved to a new Pi version
-finds its file. `serial` only ever grows, across key rotations too: the
-publication time in seconds. An empty file with a higher serial is also the
-kill switch: every instance the channel reaches drops its overlay.
+- **No "wired providers" filter.** Every record whose provider and API shape
+  the bundled registry pairs is a candidate; an instance offers only what its
+  own provider definitions name. The file stays a few kilobytes and does not
+  depend on `MODULES`.
+- **The proof is the request build at every thinking level**
+  (`capturePayload`), run on every candidate. The harness stays under
+  `packages/runner-pi/test/`: the vendor-import guard keeps `pi-ai` out of
+  `src/` beyond the barrels. Measured on the 1,537 chat records of Pi 1.0.4
+  published under new ids: 1,492 kept, 45 dropped, all Azure (no endpoint
+  without a resource name).
+- **Two more producer-side rules**: a field Pi wrote that no bundled record of
+  the API shape has, or an endpoint no bundled record of the provider uses,
+  drops the record, since both are parts of it an instance never receives.
+- **Its own concurrency group.** In `publish-installer`'s, a run queued behind
+  a release would cancel another pending one. The two workflows write disjoint
+  paths and the push rebases on a lost race.
+- **No dispatch from `release.yml`.** `main` pins a Pi version before any tag
+  does, so its file exists by the time a release is cut. The two newest tags
+  and `main` are built, one build per Pi version.
 
 ## Order
 
-| PR  | Content                                                                                 | Effect alone                   |
-| --- | --------------------------------------------------------------------------------------- | ------------------------------ |
-| 1   | Step 1                                                                                  | none visible; one resolver     |
-| 2   | Step 2 (env, reader)                                                                    | inert: the file does not exist |
-| 3   | Step 3, signing key, `docs/architecture/MODEL_CATALOG.md`, `SUPPLY_CHAIN.md`, CHANGELOG | live after the next release    |
+| PR  | Content                                                                    | Effect alone                   |
+| --- | -------------------------------------------------------------------------- | ------------------------------ |
+| 1   | Step 1                                                                     | none visible; one resolver     |
+| 2   | Step 2 (env, reader)                                                       | inert: the file does not exist |
+| 3   | Step 3, `docs/architecture/MODEL_CATALOG.md`, `SUPPLY_CHAIN.md`, CHANGELOG | live after the next release    |
 
 Each PR carries the `integration` and `e2e` labels. #1705 merges first.
 
