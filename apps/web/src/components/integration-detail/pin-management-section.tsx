@@ -27,8 +27,8 @@ import { ConnectionSetChecklist } from "./connection-set-checklist";
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
  * write. With an org default in place, these are per-agent EXCEPTIONS. An empty set pins
- * "no connection": the agent runs without the integration — refused by the server for an
- * agent that requires it.
+ * "no connection": the agent runs without the integration — or, if it requires it, cannot run
+ * (its readiness says so).
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -160,12 +160,8 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
         </p>
       )}
 
-      {/* Add new pin */}
-      {pinnableConnections.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {t("integration.admin.pinManagement.noPinnableConnections")}
-        </p>
-      ) : pinnableAgents.length === 0 ? (
+      {/* Add new pin — "no connection" needs no shared connection. */}
+      {pinnableAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
@@ -197,13 +193,17 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
               <Checkbox checked={newPinNone} onCheckedChange={(v) => setNewPinNone(v === true)} />
               {t("integration.admin.pinManagement.none")}
             </label>
-            {!newPinNone && (
+            {newPinNone ? null : pinnableConnections.length > 0 ? (
               <ConnectionSetChecklist
                 connections={pinnableConnections}
                 value={newConnectionIds}
                 onChange={setNewConnectionIds}
                 idPrefix="pin-add-connection"
               />
+            ) : (
+              <p className="text-muted-foreground text-xs italic">
+                {t("integration.admin.pinManagement.noPinnableConnections")}
+              </p>
             )}
           </div>
           <Button

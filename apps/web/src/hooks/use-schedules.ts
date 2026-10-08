@@ -129,7 +129,7 @@ export function useCreateSchedule(packageId: string) {
     },
     onSuccess: (created) => {
       invalidateSchedules(qc);
-      toastWarnings("schedule", packageId, created.warnings);
+      toastWarnings({ kind: "schedule", userId: created.userId }, packageId, created.warnings);
     },
   });
 }
@@ -164,7 +164,11 @@ export function useUpdateSchedule() {
     },
     onSuccess: (updated) => {
       invalidateSchedules(qc);
-      toastWarnings("schedule", updated.packageId, updated.warnings);
+      toastWarnings(
+        { kind: "schedule", userId: updated.userId },
+        updated.packageId,
+        updated.warnings,
+      );
     },
   });
 }

@@ -55,11 +55,17 @@ describe("scheduleConnectionChoices", () => {
         code: "auth_serves_no_selected_tool",
         message: "unserving",
       },
+      {
+        field: "integrations.@acme/crm",
+        code: "required_integration_unbound",
+        message: "required",
+      },
     ]);
     expect(scheduleConnectionChoices(err)).toEqual([
       { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
       { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
       { integrationId: "@acme/ssh", code: "auth_serves_no_selected_tool", candidates: [] },
+      { integrationId: "@acme/crm", code: "required_integration_unbound", candidates: [] },
     ]);
   });
 
@@ -168,6 +174,7 @@ describe("refusalReasonKey", () => {
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
+    expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
 
   it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {

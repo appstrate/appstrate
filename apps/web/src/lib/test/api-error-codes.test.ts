@@ -321,6 +321,17 @@ describe("errorMessage", () => {
     );
   });
 
+  it("says what to change for a refused connection choice, not the server's English", async () => {
+    await i18n.changeLanguage("fr");
+    const detail =
+      '`connection_overrides["@acme/crm"]` is empty, but the agent marks it `required`';
+    const err = await problem({ code: "invalid_request", detail, param: "connection_overrides" });
+    expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
+    // Control: the same code blaming another member keeps the generic lead.
+    const other = await problem({ code: "invalid_request", detail, param: "input" });
+    expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
+  });
+
   it("names the field of a validation failure, keeps its reason and counts the rest", async () => {
     await i18n.changeLanguage("fr");
     const err = await problem({

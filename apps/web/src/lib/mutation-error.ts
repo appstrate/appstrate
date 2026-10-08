@@ -43,6 +43,11 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 };
 
+/** Generic refusals made precise by the member they blame: `<code>:<param>` → `agents` key. */
+const PARAM_REFUSAL_KEYS: Record<string, string> = {
+  "invalid_request:connection_overrides": "error.connectionOverridesRefused",
+};
+
 /** What a refusal carries: a problem body, or one item of its `errors[]`. */
 interface Refusal {
   code: string;
@@ -58,6 +63,8 @@ interface Refusal {
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
   const message = err.message ?? "";
+  const paramKey = PARAM_REFUSAL_KEYS[`${code}:${err.param ?? err.field}`];
+  if (paramKey) return i18n.t(paramKey, { ns: "agents" });
   const agentsKey = REFUSAL_ERROR_KEYS[code];
   if (agentsKey) {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only

@@ -22,6 +22,8 @@ const SCHEDULE_CHOICE_CODES = [
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
   "override_outranked",
+  // Sent only when the schedule's own set is the `[]` of an integration the agent requires.
+  "required_integration_unbound",
 ] as const;
 
 /**
@@ -119,6 +121,8 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
       return "error.authServesNoSelectedTool";
     case "override_outranked":
       return "error.overrideOutranked";
+    case "required_integration_unbound":
+      return "error.requiredIntegrationUnbound";
     case "must_choose_connection":
       return choice.candidates.length > 0
         ? "schedule.connectionOverrides.mustChoose"

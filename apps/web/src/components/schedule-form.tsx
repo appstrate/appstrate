@@ -572,6 +572,7 @@ export function ScheduleForm({
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
                     choices={refused}
+                    integrations={firedIntegrations ?? []}
                     value={declaredOverrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />

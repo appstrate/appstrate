@@ -8,8 +8,8 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { describeResolution } from "./integration-connect/integration-run-readiness";
-import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
+import { unboundReason, UNBOUND_LABEL_KEYS } from "./integration-connect/integration-run-readiness";
+import { useIntegrationDetail, useIntegrationReadinessEntry } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import { integrationIdOfField, type MissingIntegrationFieldError } from "../lib/connection-choice";
 import { withConnectionPick, type ConnectionSet } from "../lib/connection-set";
@@ -154,14 +154,17 @@ function MissingRow({
   // live: the connect/renew flow invalidates the `["integrations", …]` prefix
   // (hosted connect portal popup close, `connection_update` SSE), this query
   // refetches, and the header flips to resolved without a manual Re-run.
-  const { data: resolution } = useIntegrationAgentResolution(
+  const { data: verdict } = useIntegrationReadinessEntry(
     isStructural ? undefined : packageId,
     isStructural ? undefined : agentPackageId,
   );
+  const resolution = verdict?.resolution;
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
-  const resolved = !!resolution && describeResolution(resolution).resolved;
+  // Resolved = the run-kickoff gate would no longer reject it — a run starting without a
+  // non-required integration included; no verdict is not "ready".
+  const resolved = !!verdict && !verdict.run_blocking;
+  const unbound = verdict ? unboundReason(verdict) : null;
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
   // Both reads gate on `integrations:read`: without it neither lands, so the
@@ -194,7 +197,11 @@ function MissingRow({
                   behind `integration_invalid_manifest`), and a cause clipped at
                   the row width is a cause the user never reads. */}
               <span className="truncate" title={resolved ? undefined : message}>
-                {resolved ? t("missingConnections.resolved") : message}
+                {unbound
+                  ? t(UNBOUND_LABEL_KEYS[unbound])
+                  : resolved
+                    ? t("missingConnections.resolved")
+                    : message}
               </span>
             </div>
           </div>

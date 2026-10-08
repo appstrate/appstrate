@@ -101,7 +101,7 @@ function useRunAgent(packageId: string) {
       // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
-      toastWarnings("run", packageId, data.warnings);
+      toastWarnings({ kind: "run" }, packageId, data.warnings);
     },
   });
 }

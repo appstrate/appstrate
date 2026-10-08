@@ -21,7 +21,8 @@ import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
-  integrationRunState,
+  unboundReason,
+  UNBOUND_LABEL_KEYS,
 } from "../integration-connect/integration-run-readiness";
 
 interface AgentIntegrationsBlockProps {
@@ -49,8 +50,7 @@ interface AgentIntegrationsBlockProps {
  * agent selected tools/scopes: connection management applies even to an inert
  * integration. Whether an integration BLOCKS the run (run semantics) is the
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
- * One the agent does not require and nothing binds is said neutrally — the run
- * starts without it — while a required one keeps the picker's blocking warning.
+ * One the run starts without says why — a pin to none, only shared connections, nothing usable.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (placed here and switched on). An agent can
@@ -98,14 +98,7 @@ function IntegrationConnectionCard({
   appActive,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { t } = useTranslation(["agents", "common"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
-  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
   const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
@@ -122,39 +115,7 @@ function IntegrationConnectionCard({
   // disabled, explanatory control rather than a picker the run-time gate would
   // reject with `integration_not_active`.
   if (!appActive) {
-    return (
-      <CardShell title={displayName} subtitle={packageId}>
-        <span className="flex items-center gap-3">
-          <span
-            className="text-destructive max-w-[18rem] text-right text-xs"
-            data-testid={`integration-inactive-${packageId}`}
-          >
-            {t("detail.integrationInactive")}
-          </span>
-          {/* The sentence asks for an activation; without this the reader had to
-              go find the integration page to perform it. Somebody the route
-              would refuse gets the button DEAD with the reason on it, rather
-              than a click that ends in a toast. */}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={setActive.isPending || !currentSpaceId || !canActivate}
-            title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-            onClick={() => {
-              if (!currentSpaceId || !canActivate) return;
-              setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-            }}
-            data-testid={`integration-activate-${packageId}`}
-          >
-            {setActive.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              t("editor.activateIntegration")
-            )}
-          </Button>
-        </span>
-      </CardShell>
-    );
+    return <InactiveIntegrationCard packageId={packageId} displayName={displayName} />;
   }
 
   // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
@@ -216,13 +177,24 @@ function ManagedIntegrationCard({
     resolution && describeResolution(resolution).resolved
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
-  const unbound = !!entry && integrationRunState(entry) === "unbound";
+  const unbound = entry ? unboundReason(entry) : null;
+
+  // The verdict knows the integration is off even when the list said otherwise: no picker either.
+  if (unbound === "inactive") {
+    return (
+      <InactiveIntegrationCard
+        packageId={packageId}
+        displayName={displayName}
+        extraSubtitle={t(UNBOUND_LABEL_KEYS.inactive)}
+      />
+    );
+  }
 
   return (
     <CardShell
       title={displayName}
       subtitle={packageId}
-      extraSubtitle={unbound ? t("detail.integrationUnbound") : reuseInfo}
+      extraSubtitle={unbound ? t(UNBOUND_LABEL_KEYS[unbound]) : reuseInfo}
       badge={
         entry?.required ? (
           <Badge
@@ -243,6 +215,59 @@ function ManagedIntegrationCard({
         agentTools={agentTools}
         agentScopes={agentScopes}
       />
+    </CardShell>
+  );
+}
+
+/** An integration switched off in this space: the reason and the activation button, no picker. */
+function InactiveIntegrationCard({
+  packageId,
+  displayName,
+  extraSubtitle,
+}: {
+  packageId: string;
+  displayName: string;
+  extraSubtitle?: string;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
+  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+
+  return (
+    <CardShell title={displayName} subtitle={packageId} extraSubtitle={extraSubtitle ?? null}>
+      <span className="flex items-center gap-3">
+        <span
+          className="text-destructive max-w-[18rem] text-right text-xs"
+          data-testid={`integration-inactive-${packageId}`}
+        >
+          {t("detail.integrationInactive")}
+        </span>
+        {/* The sentence asks for an activation; without this the reader had to
+            go find the integration page to perform it. Somebody the route
+            would refuse gets the button DEAD with the reason on it, rather
+            than a click that ends in a toast. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={setActive.isPending || !currentSpaceId || !canActivate}
+          title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+          onClick={() => {
+            if (!currentSpaceId || !canActivate) return;
+            setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+          }}
+          data-testid={`integration-activate-${packageId}`}
+        >
+          {setActive.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            t("editor.activateIntegration")
+          )}
+        </Button>
+      </span>
     </CardShell>
   );
 }

@@ -138,6 +138,20 @@ export function useIntegrations() {
   );
 }
 
+/**
+ * An integration's display name from the cached {@link useIntegrations} list — never fetched;
+ * the id when absent.
+ */
+export function useCachedIntegrationName(): (integrationId: string) => string {
+  const qc = useQueryClient();
+  const { header } = useIntegrationsReadScope();
+  const { queryKey } = $api.queryOptions("get", "/api/integrations", { params: { header } });
+  return (integrationId) => {
+    const list = qc.getQueryData<{ data: IntegrationSummaryWire[] }>(queryKey)?.data;
+    return list?.find((i) => i.id === integrationId)?.manifest.display_name ?? integrationId;
+  };
+}
+
 export function useIntegrationDetail(packageId: string | undefined) {
   const scope = useIntegrationsReadScope();
   return $api.useQuery(

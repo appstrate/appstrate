@@ -3,31 +3,37 @@
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "../i18n";
-import { useIntegrations } from "./use-integrations";
+import { authStore } from "../stores/auth-store";
+import { useCachedIntegrationName } from "./use-integrations";
 import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
 import { packageDetailPath } from "../lib/package-paths";
-import { launchWarningsToast, type LaunchKind, type LaunchWarning } from "../lib/launch-warnings";
+import {
+  isViewersLaunch,
+  launchWarningsToast,
+  type LaunchTarget,
+  type LaunchWarning,
+} from "../lib/launch-warnings";
 
 /**
  * Says, once per launch or schedule write, which integrations the run starts without. Non
  * blocking: the run is already created. "Connecter" opens the agent's Connexions tab, whose
- * pickers hold the connect and choose flows.
+ * pickers hold the VIEWER's connections — so it is offered only when the run is theirs.
  */
 export function useLaunchWarningsToast() {
   const navigate = useNavigate();
-  const { data: integrations } = useIntegrations();
+  const nameOf = useCachedIntegrationName();
   const { can } = usePermissions();
   const canReach = useCanReach();
-  return (kind: LaunchKind, agentPackageId: string, warnings: readonly LaunchWarning[]) => {
-    const content = launchWarningsToast({
-      kind,
-      warnings,
-      nameOf: (id) => integrations?.find((i) => i.id === id)?.manifest.display_name ?? id,
-    });
+  return (target: LaunchTarget, agentPackageId: string, warnings: readonly LaunchWarning[]) => {
+    const content = launchWarningsToast({ kind: target.kind, warnings, nameOf });
     if (!content) return;
     const agentPath = packageDetailPath("agent", agentPackageId);
-    const canConnect = can("integrations:read") && canReach(agentPath);
+    const canConnect =
+      content.connectable &&
+      isViewersLaunch(target, authStore.getState().user?.id) &&
+      can("integrations:read") &&
+      canReach(agentPath);
     toast.warning(content.message, {
       description: content.description,
       ...(canConnect

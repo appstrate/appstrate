@@ -55,6 +55,7 @@ export function PickerMenu({
     explicitIds,
     pickedNone,
     canPickNone,
+    required,
     storedIds,
     unavailableIds,
     checkedIds,
@@ -95,9 +96,13 @@ export function PickerMenu({
                 : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set warns.
+  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
+  // warns — or "no connection" for an integration the agent requires (stored before it was).
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
+    ? underScopedConns.length > 0 ||
+      unavailableIds.length > 0 ||
+      deadConns.length > 0 ||
+      (pickedNone && required)
     : runBlocking;
   const TriggerIcon = triggerWarn
     ? AlertTriangle

@@ -5,17 +5,35 @@
  * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
  * recovery modal and the agent's integrations block share. This is where the
  * mapping from the resolver's codes to what the UI shows is pinned — and
- * `integrationRunState`, what a run does with each declared integration.
+ * `unboundReason`, why a run starts without a declared integration.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { describeResolution, integrationRunState } from "../integration-run-readiness";
+import { describeResolution, unboundReason } from "../integration-run-readiness";
+
+function candidate(): IntegrationAgentResolution["candidates"][number] {
+  return {
+    id: "conn_1",
+    auth_key: "oauth",
+    account_id: "me@acme.test",
+    label: "Moi",
+    owner_user_id: "usr_me",
+    owner_end_user_id: null,
+    owner_name: "Moi",
+    scopes_granted: [],
+    shared_with_org: false,
+    needs_reconnection: false,
+    missing_scopes: [],
+    is_own: true,
+  };
+}
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
     source: "fallback_auto",
     error_code: null,
+    warning_code: null,
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
@@ -167,38 +185,73 @@ describe("describeResolution — empty picker prompt", () => {
   });
 });
 
-describe("integrationRunState", () => {
+describe("unboundReason", () => {
   const entry = (run_blocking: boolean, over: Partial<IntegrationAgentResolution>) => ({
     run_blocking,
     resolution: resolution(over),
   });
+  const empty = {
+    source: null,
+    error_code: null,
+    warning_code: "integration_unbound" as const,
+    resolved_connection_ids: [],
+  };
+  const shared = { ...candidate(), is_own: false };
 
-  it("is bound while a set binds with no error", () => {
-    expect(integrationRunState(entry(false, {}))).toBe("bound");
+  it("is null while a set binds with no error", () => {
+    expect(unboundReason(entry(false, {}))).toBeNull();
   });
 
-  it("is unbound when nothing binds and nothing refuses — the run starts without it", () => {
-    // Control: the same empty verdict on a required integration is a refusal.
-    const empty = { source: null, error_code: null, resolved_connection_ids: [] };
-    expect(integrationRunState(entry(false, empty))).toBe("unbound");
-    expect(integrationRunState(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
-      "unbound",
+  it("names an integration switched off in the space before any pin", () => {
+    expect(
+      unboundReason(
+        entry(false, {
+          ...empty,
+          warning_code: "integration_not_active",
+          admin_pinned_connection_ids: [],
+          candidates: [{ ...candidate(), is_own: false }],
+        }),
+      ),
+    ).toBe("inactive");
+  });
+
+  it("names a pin to none — an admin's over the member's", () => {
+    expect(unboundReason(entry(false, { ...empty, admin_pinned_connection_ids: [] }))).toBe(
+      "admin_none",
     );
     expect(
-      integrationRunState(entry(true, { ...empty, error_code: "required_integration_unbound" })),
-    ).toBe("blocked");
-  });
-
-  it("is blocked whenever the server says the run is refused over it", () => {
-    expect(integrationRunState(entry(true, { error_code: "not_connected" }))).toBe("blocked");
-    expect(integrationRunState(entry(true, { resolved_connection_ids: [] }))).toBe("blocked");
-  });
-
-  it("is unbound for an inert integration's error too: it does not block, nothing binds", () => {
-    expect(
-      integrationRunState(
-        entry(false, { error_code: "must_choose_connection", resolved_connection_ids: [] }),
+      unboundReason(
+        entry(false, {
+          ...empty,
+          admin_pinned_connection_ids: [],
+          member_pinned_connection_ids: [],
+        }),
       ),
-    ).toBe("unbound");
+    ).toBe("admin_none");
+    expect(unboundReason(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+  });
+
+  it("tells only-shared connections from nothing usable", () => {
+    expect(unboundReason(entry(false, { ...empty, candidates: [shared] }))).toBe("shared_only");
+    expect(unboundReason(entry(false, empty))).toBe("not_connected");
+    // Control: an own candidate left unbound is no shared-only case.
+    expect(unboundReason(entry(false, { ...empty, candidates: [candidate()] }))).toBe(
+      "not_connected",
+    );
+  });
+
+  it("is null whenever the server says the run is refused over it", () => {
+    expect(
+      unboundReason(entry(true, { ...empty, error_code: "required_integration_unbound" })),
+    ).toBeNull();
+    expect(unboundReason(entry(true, empty))).toBeNull();
+  });
+
+  it("is null for a non-blocking error: an inert integration's verdict is no unbound state", () => {
+    expect(
+      unboundReason(entry(false, { ...empty, error_code: "must_choose_connection" })),
+    ).toBeNull();
   });
 });

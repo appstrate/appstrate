@@ -47,16 +47,39 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
 }
 
 /**
- * What a run does with one declared integration: refuses to start (`blocked`), binds a set
- * (`bound`), or starts without it (`unbound` — a non-required integration with nothing to bind
- * or pinned to none, whose verdict carries no error; or an inert one, whose does not block).
+ * Why a run starts without one declared integration: switched off in the space, a pin to none
+ * (an admin's or the caller's), only other members' shared connections, or nothing usable at all.
  */
-export type IntegrationRunState = "bound" | "unbound" | "blocked";
+type UnboundReason = "inactive" | "admin_none" | "member_none" | "shared_only" | "not_connected";
 
-export function integrationRunState(entry: {
+/** The run starts without it: nothing binds, nothing refuses. `null` otherwise. */
+export function unboundReason(entry: {
   run_blocking: boolean;
-  resolution: Pick<IntegrationAgentResolution, "resolved_connection_ids">;
-}): IntegrationRunState {
-  if (entry.run_blocking) return "blocked";
-  return entry.resolution.resolved_connection_ids.length === 0 ? "unbound" : "bound";
+  resolution: Pick<
+    IntegrationAgentResolution,
+    | "error_code"
+    | "warning_code"
+    | "resolved_connection_ids"
+    | "admin_pinned_connection_ids"
+    | "member_pinned_connection_ids"
+    | "candidates"
+  >;
+}): UnboundReason | null {
+  const r = entry.resolution;
+  if (entry.run_blocking || r.error_code !== null || r.resolved_connection_ids.length > 0) {
+    return null;
+  }
+  if (r.warning_code === "integration_not_active") return "inactive";
+  if (r.admin_pinned_connection_ids?.length === 0) return "admin_none";
+  if (r.member_pinned_connection_ids?.length === 0) return "member_none";
+  return r.candidates.some((c) => !c.is_own) ? "shared_only" : "not_connected";
 }
+
+/** The `agents` sentence for each {@link UnboundReason}. */
+export const UNBOUND_LABEL_KEYS: Record<UnboundReason, string> = {
+  inactive: "detail.integrationUnboundInactive",
+  admin_none: "detail.integrationUnboundAdminNone",
+  member_none: "detail.integrationUnboundMemberNone",
+  shared_only: "detail.integrationUnboundSharedOnly",
+  not_connected: "detail.integrationUnbound",
+};

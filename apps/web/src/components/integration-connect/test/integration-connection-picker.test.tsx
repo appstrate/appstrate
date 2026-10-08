@@ -68,6 +68,7 @@ function resolution(overrides: Partial<Resolution>): Resolution {
   return {
     source: "member_pin",
     error_code: null,
+    warning_code: null,
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
@@ -439,6 +440,15 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     });
     expect(html).toContain(t("none"));
     expect(html).not.toContain(t("inherit"));
+  });
+
+  it("warns on a stored 'no connection' override for an integration the agent requires", () => {
+    const none: Persistence = { mode: "override", value: [], onChange: () => {} };
+    const html = renderPicker(resolution({}), false, none, true);
+    expect(html).toContain(t("none"));
+    expect(html).toContain("text-amber-600");
+    // Control: the same override on an integration the agent does not require is a choice.
+    expect(renderPicker(resolution({}), false, none)).not.toContain("text-amber-600");
   });
 
   it("an admin pin to none locks the picker on 'no connection'", () => {
