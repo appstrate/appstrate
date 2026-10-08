@@ -21,6 +21,7 @@ Every `exports` subpath of the package, in manifest order:
 | `@appstrate/db/storage`         | S3 storage integration                                                                     |
 | `@appstrate/db/notify`          | PostgreSQL notification helpers                                                            |
 | `@appstrate/db/pg-safe`         | `toPgSafe` — replaces NULs and lone surrogates Postgres `text`/`jsonb` refuse              |
+| `@appstrate/db/logger`          | The package's pino logger (`@appstrate/core/logger`), one instance for every file          |
 
 ## Usage
 

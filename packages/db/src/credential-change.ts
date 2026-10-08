@@ -2,12 +2,10 @@
 
 import { APIError } from "better-auth/api";
 import { and, eq, isNull, like, ne, or, sql, type SQL } from "drizzle-orm";
-import { createLogger } from "@appstrate/core/logger";
 import { db } from "./client.ts";
 import { hookSlot } from "./hook-slot.ts";
+import { logger } from "./logger.ts";
 import { modelProviderPairings, session, verification } from "./schema/index.ts";
-
-const logger = createLogger("info");
 
 export const CREDENTIAL_CHANGE_REVOCATION_FAILED = "credential_change_revocation_failed";
 
