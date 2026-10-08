@@ -37,7 +37,8 @@
 # --runner-token / --host-ip) pass straight through this wrapper.
 #
 # Env overrides:
-#   APPSTRATE_VERSION             Pin a release tag (default: pinned or "latest").
+#   APPSTRATE_VERSION             Pin a release, `1.2.3` or `v1.2.3` (default:
+#                                 pinned or "latest").
 #   APPSTRATE_BIN_DIR             Install location (default: $HOME/.local/bin).
 #                                 Set to /usr/local/bin for a system-wide install
 #                                 (sudo will be requested).
@@ -106,6 +107,9 @@ _appstrate_bootstrap() {
   _DEFAULT_VERSION="__APPSTRATE_VERSION__"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
+  # A release is `v1.2.3` as a git tag but `1.2.3` everywhere an operator
+  # reads it (image tags, `.env`, `appstrate --version`): accept both (#1788).
+  if [ "$VERSION" != "latest" ]; then VERSION="v${VERSION#v}"; fi
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
   # of /usr/local/bin). Matches uv, rustup, Bun, Deno, pipx — avoids a sudo
   # prompt on the happy path, works in containers / CI without privileges, and
