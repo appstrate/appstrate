@@ -33,9 +33,9 @@ function omit(key: keyof typeof valid) {
   return Object.fromEntries(Object.entries(valid).filter(([k]) => k !== key));
 }
 
-function fieldErrorsOf(body: unknown, param?: string) {
+function fieldErrorsOf(body: unknown, param?: string, target: z.ZodType = schema) {
   try {
-    parseBody(schema, body, param);
+    parseBody(target, body, param);
   } catch (err) {
     expect(err).toBeInstanceOf(ApiError);
     return (err as ApiError).fieldErrors?.map(({ field, code }) => ({ field, code }));
@@ -73,6 +73,20 @@ describe("parseBody field-error codes", () => {
 
   it("reports a missing body as required on the param fallback", () => {
     expect(fieldErrorsOf(undefined, "payload")).toEqual([{ field: "payload", code: "required" }]);
+  });
+
+  it("keeps the Zod code where the missing value is not the issue's input", () => {
+    const tagged = z.discriminatedUnion("t", [
+      z.object({ t: z.literal("a") }),
+      z.object({ t: z.literal("b") }),
+    ]);
+    const refined = z
+      .object({ a: z.string().optional() })
+      .refine((o) => o.a !== undefined, { path: ["a"] });
+    const coerced = z.object({ n: z.coerce.number() });
+    expect(fieldErrorsOf({}, undefined, tagged)).toEqual([{ field: "t", code: "invalid_union" }]);
+    expect(fieldErrorsOf({}, undefined, refined)).toEqual([{ field: "a", code: "invalid_value" }]);
+    expect(fieldErrorsOf({}, undefined, coerced)).toEqual([{ field: "n", code: "invalid_type" }]);
   });
 });
 
