@@ -105,7 +105,11 @@ Pass `{ "responseMode": { "toFile": "outputs/export.csv" } }` to write the respo
 
 Missing parent folders are created. A target that resolves outside the workspace or through a symlink is refused with a tool error. Use it for binary downloads and for any response you want to process with a script rather than read.
 
-Without `toFile`, large responses still stay out of the model's context. A text body above the inline cap described earlier, any text body once the run-wide budget is used up, and every binary body are stored by the sidecar and then written by the agent runtime into a file under `resources/` in the workspace, which the model reads with its file tools. In that case the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. A status of `0` means the call was stopped before it reached the service.
+Without `toFile`, large responses still stay out of the model's context. A text body above the inline cap described earlier, any text body once the run-wide budget is used up, and every binary body are stored by the sidecar and then written by the agent runtime into a file under `resources/` in the workspace, which the model reads with its file tools.
+
+### Status and failure codes
+
+Without `toFile`, the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. With `toFile`, the descriptor carries `status`. A status of `0` means the sidecar answered itself: the call was refused before it was sent, or it failed after sending (a timeout, an unreachable host). When such a failure belongs to the shared vocabulary, the line names its code, for example `[api_call status=0 code=blocked_target]`, the `toFile` descriptor carries it as `code`, and the result's `_meta["dev.appstrate/api-call-error"]` holds it too. The codes are `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`, `upstream_unresolvable`, `credential_unusable`, `upstream_unreachable` and `upstream_timeout`, with the meanings listed in [Errors](/api/errors#outbound-calls-and-resolvers). The platform's credential proxy answers the same codes, and a run started with `appstrate run --integrations local` shows the agent the same line.
 
 ### Resumable uploads: `api_upload`
 
@@ -129,7 +133,7 @@ The result is a single JSON object. On success it carries `ok: true`, the final 
 
 ### Several connections: the `connection` parameter
 
-A run can bind up to 10 connections of one integration, for example two mailboxes or two SSH hosts. When a namespace has more than one, every tool of that namespace, `api_call` and `api_upload` included, gets a required `connection` parameter. It is a string restricted to the connection labels, and its description pairs each label with the account it stands for, so the model states which account a call acts on. The sidecar removes the parameter before forwarding the call. A missing or unknown value returns a tool error that lists the valid labels. With a single connection the tools carry no `connection` parameter at all.
+A run can bind up to 20 connections of one integration, for example two mailboxes or two SSH hosts. When a namespace has more than one, every tool of that namespace, `api_call` and `api_upload` included, gets a required `connection` parameter. It is a string restricted to the connection labels, and its description pairs each label with the account it stands for, so the model states which account a call acts on. The sidecar removes the parameter before forwarding the call. A missing or unknown value returns a tool error that lists the valid labels. With a single connection the tools carry no `connection` parameter at all.
 
 ## Adding your own tools
 

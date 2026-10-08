@@ -35,6 +35,8 @@ Agent commands take your request in plain words, for example `/appstrate:run-inv
 
 Installing the plugin on a fresh machine is the only step that has to come first. Without a signed-in profile it installs a setup skill that tells you what is missing.
 
+The plugin has one `SessionStart` hook, which prints a notice at the start of a session when the last sync could not complete: a lost login, a missing profile, no pinned organization or space, or a revoked organization. The notice gives the time of the failed sync and the command that fixes it, which you can ask Claude to run; then `claude plugin update appstrate@appstrate` and a new session load the result. A sync without such a problem removes the notice, and one that fails on a network or server error leaves it as it is.
+
 ### After switching organization or space
 
 The plugin follows your profile. After `appstrate org switch` or `appstrate space switch`, refresh it and start a new Claude Code session, because a running session can keep the old endpoint:

@@ -28,13 +28,13 @@ With `NODE_ENV=production`, `APP_URL` must be HTTPS (loopback excepted), and an 
 
 Five secrets are required, and each rotates independently:
 
-| Variable                    | Format                 | Impact of changing it                                                                                                                                            |
-| --------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`        | Random string          | Invalidates sessions. A rotation keyring exists (`BETTER_AUTH_ACTIVE_KID`, `BETTER_AUTH_SECRETS`)                                                                |
-| `CONNECTION_ENCRYPTION_KEY` | 32 bytes, base64       | Stored credentials become unreadable unless you rotate with a key id. See the rotation procedure in [Environment Variables](/self-hosting/environment-variables) |
-| `UPLOAD_SIGNING_SECRET`     | At least 16 characters | Invalidates in-flight upload tokens                                                                                                                              |
-| `RUN_TOKEN_SECRET`          | At least 16 characters | Invalidates tokens of in-flight runs                                                                                                                             |
-| `CONNECT_SESSION_SECRET`    | At least 16 characters | Invalidates in-flight connect sessions                                                                                                                           |
+| Variable                    | Format                 | Impact of changing it                                                                                                                                                                           |
+| --------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`        | Random string          | Changing it in place leaves what was encrypted under it (the keys that sign CLI and OIDC tokens) unreadable. Rotate through the `BETTER_AUTH_SECRETS` keyring instead, which signs everyone out |
+| `CONNECTION_ENCRYPTION_KEY` | 32 bytes, base64       | Stored credentials become unreadable unless you rotate with a key id. See the rotation procedure in [Environment Variables](/self-hosting/environment-variables)                                |
+| `UPLOAD_SIGNING_SECRET`     | At least 16 characters | Invalidates in-flight upload tokens                                                                                                                                                             |
+| `RUN_TOKEN_SECRET`          | At least 16 characters | Invalidates tokens of in-flight runs                                                                                                                                                            |
+| `CONNECT_SESSION_SECRET`    | At least 16 characters | Invalidates in-flight connect sessions                                                                                                                                                          |
 
 The installer generates them. If you do it by hand, use `openssl rand -hex 32` for the first four and `openssl rand -base64 32` for the encryption key. Keep them in a secret manager, never in git, and keep an offline copy of `CONNECTION_ENCRYPTION_KEY`: without it, no backup of the database can decrypt the credentials it holds.
 

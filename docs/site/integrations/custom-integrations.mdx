@@ -61,7 +61,7 @@ This is the shape of the shipped Stripe integration, with your own scope:
 ```
 
 - `credentials.schema` is a JSON Schema that drives the hosted form the user fills in.
-- `delivery.http` says where the sidecar puts the credential. `{$credential.<field>}` is the only template expression the platform evaluates.
+- `delivery.http` says where the sidecar puts the credential. `{$credential.<field>}` reads a field of the connection's credential. The only other template expression the platform evaluates is `{$variable.<name>}`, which reads a declared [connection variable](#connection-variables).
 - `_meta["dev.appstrate/api"]` opts the auth into the `api_call` tool. Without it the integration exposes no `api_call`, and the import refuses a manifest whose `default_tools` names `api_call` anyway.
 - `default_tools` is what an agent gets when it does not select tools itself.
 
@@ -140,6 +140,10 @@ When a service needs more than one value, use `type: "custom"` with a schema of 
 
 The host depends on the connection, so `authorized_uris` references `{$credential.site_url}`. It is rendered per connection. The platform refuses an auth that injects a credential over HTTP while leaving the host to the caller (no `authorized_uris`, `allow_all_uris: true`, or a pattern such as `https://**`).
 
+A wildcard in the host counts as bounded only when it sits under a registrable domain written literally in the entry, judged with the [Public Suffix List](https://publicsuffix.org/) (its ICANN and private sections). `https://*.zendesk.com/**` and `https://*.example.co.uk/**` are bounded. `https://*.co.uk/**`, `https://*.github.io/**`, `https://*.googleapis.com/**`, `https://*.vercel.app/**`, `https://*.supabase.co/**` and `https://*.workers.dev/**` are not, and an auth whose credential the proxy injects is refused with them when the manifest is written. List such hosts literally (`https://sheets.googleapis.com/**`), or render the host from the connection (`https://{$credential.shop_domain}/**`, with the field constrained by a `pattern` in `credentials.schema`).
+
+Because a host `*` also matches dots, each target is judged at run time too: a credential goes to a host that a wildcard matched only when that host's own registrable domain lies inside the literal part of the entry. Under `https://*.amazonaws.com/**`, `sts.amazonaws.com` receives it, but `dynamodb.us-east-1.amazonaws.com` and the S3 hosts (`s3.amazonaws.com`) do not. Such a call is refused as `credential_exfiltration_refused`, with a message naming the host to list, and such a redirect hop is followed without the credential.
+
 Custom auths can also acquire the credential themselves: a declarative `connect.login` (one HTTP request that exchanges a password for a session) or a `connect.tool` (a tool that logs in, run once at connect time or at the start of every run). Those are covered in the repository guide. A login request that a secret is substituted into is held to the same host binding as an injected credential: when the auth's `authorized_uris` leaves the host to the caller, the run refuses that request with a `403`.
 
 ## A hosted MCP server
@@ -163,6 +167,34 @@ Declare the tools you want agents to be able to pick in `tools_policy`, with the
 ```
 
 `hidden_tools` removes tools from what agents can see. A remote OAuth auth declared as a public client (`token_endpoint_auth_method: "none"`) gets its client registered automatically at connect time through discovery and dynamic client registration, so the admin has no client to create. This is how the Notion, ClickUp and Canva MCP integrations and MCP Emails work.
+
+## Connection variables
+
+When where the integration connects depends on the connection (a product offered hosted and self-hosted, or only self-hosted), declare **connection variables**. The user enters their values when connecting, before any authorization step, and every auth of the integration shares them, so one package serves every instance and each connection reaches only its own. The shipped GitLab, Twenty and Coolify MCP integrations work this way. Abridged from the GitLab integration manifest:
+
+```json
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://", "default": "https://gitlab.com" }
+    },
+    "required": ["base_url"]
+  }
+}
+```
+
+- Each property of `variables.schema` is a variable: a string, named in lower-case snake_case, and listed in `required`. `default` only prefills the form.
+- `{$variable.<name>}` is accepted in `source.remote.url`, an `oauth2` `issuer`, `authorized_uris` and the `delivery` values, and nowhere else. A reference to an undeclared variable is refused when the manifest is saved, published or imported.
+- Variables are not secrets. They are stored in plaintext with the connection and shown on it, so a token belongs in `credentials.schema`. A value changes only through a reconnect.
+- A URL rendered from a variable is checked against the egress rules for each connection: a plain `http` URL, or a private or loopback address, is refused unless the operator lists its host in `EGRESS_ALLOW_INTERNAL_HOSTS`.
+- When the remote URL or the `issuer` is a template, the authorization server is the one of the instance the user named. The platform discovers it (RFC 9728, then RFC 8414) and registers one public client per server, integration and space by dynamic client registration, so declare `token_endpoint_auth_method: "none"`. A server without dynamic client registration cannot be connected.
+
+The complete rules (URL and host forms, which `authorized_uris` entries may carry a variable) are in the repository guide, section "Connection variables".
 
 ## A local MCP server
 
@@ -311,7 +343,7 @@ cd my-integration && zip -r ../my-integration.afps manifest.json
 appstrate api POST /api/packages/import -F file=@../my-integration.afps
 ```
 
-The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` is evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
+The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` and a declared `{$variable.<name>}` are evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
 
 In the dashboard, **New integration** on the **Integrations** page (with `integrations:write`) opens the package editor on a new integration instead.
 
@@ -328,11 +360,11 @@ Activate the integration in a space, register an OAuth client if it needs one, t
 
 ## Common problems
 
-| Symptom                                                                                                 | Cause                                                                                                                     | Fix                                                                                    |
-| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Import refused with a field error naming `identity_claims`, a `{$...}` expression, or `authorized_uris` | The manifest uses something the platform cannot evaluate or cannot bound                                                  | Fix the field the error names. Only `{$credential.<field>}` is a valid template.       |
-| Saving or publishing an agent fails with `no_tools_selected` on `integrations_configuration.{id}.tools` | The integration exposes no callable tool for that selection                                                               | Select a tool, give the integration `default_tools`, or remove the dependency          |
-| Connecting answers 403 "Administrator must register OAuth client credentials"                           | An OAuth integration with no client at any tier                                                                           | Register a client, or have the operator add a system client in `SYSTEM_INTEGRATIONS`   |
-| Connection form is empty                                                                                | `credentials.schema` is missing or has no properties                                                                      | Add a JSON Schema with the fields the user must enter                                  |
-| `api_call` returns `status: 0`                                                                          | The call was stopped before reaching the service: URL outside `authorized_uris`, credential unavailable or body too large | Check the target against the patterns, including those rendered from connection fields |
-| The run fails with `409 missing_integration_connection`                                                 | No usable connection is bound                                                                                             | Connect an account, or pin or pass a connection explicitly                             |
+| Symptom                                                                                                 | Cause                                                                                                                                                                                                                                                                                     | Fix                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Import refused with a field error naming `identity_claims`, a `{$...}` expression, or `authorized_uris` | The manifest uses something the platform cannot evaluate or cannot bound                                                                                                                                                                                                                  | Fix the field the error names. Only `{$credential.<field>}` and a declared `{$variable.<name>}` are valid templates.                                              |
+| Saving or publishing an agent fails with `no_tools_selected` on `integrations_configuration.{id}.tools` | The integration exposes no callable tool for that selection                                                                                                                                                                                                                               | Select a tool, give the integration `default_tools`, or remove the dependency                                                                                     |
+| Connecting answers 403 "Administrator must register OAuth client credentials"                           | An OAuth integration with no client at any tier                                                                                                                                                                                                                                           | Register a client, or have the operator add a system client in `SYSTEM_INTEGRATIONS`                                                                              |
+| Connection form is empty                                                                                | `credentials.schema` is missing or has no properties                                                                                                                                                                                                                                      | Add a JSON Schema with the fields the user must enter                                                                                                             |
+| `api_call` returns `[api_call status=0 code=...]`                                                       | The sidecar answered itself: the call was refused before reaching the service (`unauthorized_target`, `credential_exfiltration_refused`, `blocked_target`) or failed after sending (`upstream_timeout`, `upstream_unreachable`). Without a code: credential unavailable or body too large | Check the target against the patterns, including those rendered from connection fields. The codes are listed in [Tools](/features/tools#status-and-failure-codes) |
+| The run fails with `409 missing_integration_connection`                                                 | No usable connection is bound                                                                                                                                                                                                                                                             | Connect an account, or pin or pass a connection explicitly                                                                                                        |

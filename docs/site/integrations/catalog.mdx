@@ -1,11 +1,11 @@
 ---
 title: Built-in Integrations
-description: The 67 integrations shipped with every Appstrate instance, with the auth method and the way each one is reached.
+description: The 70 integrations shipped with every Appstrate instance, with the auth method and the way each one is reached.
 ---
 
 An **integration** is the definition of an external service (Gmail, Slack, ClickUp...): how to authenticate against it, which URLs a credential may be sent to, and how the agent reaches it. For the model behind this page (sources, auth methods, connections, credential isolation), read [How integrations work](/integrations/how-integrations-work).
 
-Appstrate ships **67 built-in integrations**. They are `.afps` archives in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages), loaded at boot and addressable as `@appstrate/<name>`. System integrations are versioned and can be forked (`POST /api/packages/{scope}/{name}/fork`): publish a fork under your own scope to add a scope or an authorized URI, and make your agents depend on the fork. If the service you need is not listed, [write your own](/integrations/custom-integrations).
+Appstrate ships **70 built-in integrations**. They are `.afps` archives in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages), loaded at boot and addressable as `@appstrate/<name>`. System integrations are versioned and can be forked (`POST /api/packages/{scope}/{name}/fork`): publish a fork under your own scope to add a scope or an authorized URI, and make your agents depend on the fork. If the service you need is not listed, [write your own](/integrations/custom-integrations).
 
 To list what your instance actually offers, with the activation state in the current space:
 
@@ -15,11 +15,11 @@ appstrate api GET /api/integrations
 
 ## How to read the table
 
-| Source       | Meaning                                                                                                                                                                                                          |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api_call`   | No MCP server. The agent gets an `api_call` tool: the sidecar checks the target URL against the integration's `authorized_uris`, injects the credential and forwards the request. 59 integrations work this way. |
-| Remote MCP   | The integration is backed by the vendor's hosted MCP server. The sidecar opens the MCP connection and injects the access token. 6 integrations.                                                                  |
-| Local runner | The integration is backed by an `mcp-server` package that runs in its own sandboxed runner container, one per connection. 2 integrations (they need the `docker` or `firecracker` run adapter).                  |
+| Source       | Meaning                                                                                                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_call`   | No MCP server. The agent gets an `api_call` tool: the sidecar checks the target URL against the integration's `authorized_uris`, injects the credential and forwards the request. 59 integrations work this way.                                   |
+| Remote MCP   | The integration is backed by the vendor's MCP server: a hosted one, or, for GitLab, Twenty and Coolify, the one of the instance the user names when connecting. The sidecar opens the MCP connection and injects the access token. 9 integrations. |
+| Local runner | The integration is backed by an `mcp-server` package that runs in its own sandboxed runner container, one per connection. 2 integrations (they need the `docker` or `firecracker` run adapter).                                                    |
 
 Integrations with an own page link to it. The API and MCP variants of GitHub, Gmail, Notion and ClickUp share one page.
 
@@ -38,6 +38,7 @@ Integrations with an own page link to it. The API and MCP variants of GitHub, Gm
 | [ClickUp](/integrations/catalog/clickup)             | `@appstrate/clickup`           | Project management and productivity platform                                                                                       | OAuth 2.0                                              | `api_call`   |
 | [ClickUp (MCP)](/integrations/catalog/clickup)       | `@appstrate/clickup-mcp`       | ClickUp through ClickUp's hosted MCP server                                                                                        | OAuth 2.0 (client registered automatically)            | Remote MCP   |
 | ConvertKit (Kit)                                     | `@appstrate/convertkit`        | Email marketing platform for creators                                                                                              | OAuth 2.0                                              | `api_call`   |
+| Coolify                                              | `@appstrate/coolify-mcp`       | A Coolify instance through the MCP server built into Coolify. The instance URL is entered when connecting                          | API key (a team API token)                             | Remote MCP   |
 | [Discord](/integrations/catalog/discord)             | `@appstrate/discord`           | Communication platform for communities and teams                                                                                   | OAuth 2.0                                              | `api_call`   |
 | Dropbox                                              | `@appstrate/dropbox`           | Cloud file storage, sync, and sharing platform                                                                                     | OAuth 2.0                                              | `api_call`   |
 | Fathom                                               | `@appstrate/fathom`            | AI meeting recorder with transcripts and summaries                                                                                 | API key                                                | `api_call`   |
@@ -47,6 +48,7 @@ Integrations with an own page link to it. The API and MCP variants of GitHub, Gm
 | [GitHub](/integrations/catalog/github)               | `@appstrate/github`            | Code hosting and collaboration platform                                                                                            | OAuth 2.0                                              | `api_call`   |
 | [GitHub (MCP)](/integrations/catalog/github)         | `@appstrate/github-mcp`        | GitHub through GitHub's hosted MCP server (93 tools)                                                                               | OAuth 2.0 or personal access token                     | Remote MCP   |
 | [GitHub Git](/integrations/catalog/github)           | `@appstrate/github-git`        | Clone, edit, commit, push and open pull requests on a GitHub repo, in a sandboxed runner                                           | OAuth 2.0                                              | Local runner |
+| GitLab                                               | `@appstrate/gitlab-mcp`        | GitLab.com or a self-managed instance through GitLab's own MCP server. The instance URL is entered when connecting                 | OAuth 2.0 (client registered automatically)            | Remote MCP   |
 | [Gmail](/integrations/catalog/gmail)                 | `@appstrate/gmail`             | Email service by Google                                                                                                            | OAuth 2.0                                              | `api_call`   |
 | [Gmail (MCP)](/integrations/catalog/gmail)           | `@appstrate/gmail-mcp`         | Gmail through Google's hosted MCP server                                                                                           | OAuth 2.0                                              | Remote MCP   |
 | Google Calendar                                      | `@appstrate/google-calendar`   | Calendar and scheduling service by Google                                                                                          | OAuth 2.0                                              | `api_call`   |
@@ -82,6 +84,7 @@ Integrations with an own page link to it. The API and MCP variants of GitHub, Gm
 | [Stripe](/integrations/catalog/stripe)               | `@appstrate/stripe`            | Payment processing platform                                                                                                        | API key                                                | `api_call`   |
 | Teamwork                                             | `@appstrate/teamwork`          | Project management and collaboration platform for client work                                                                      | API key                                                | `api_call`   |
 | Telegram                                             | `@appstrate/telegram`          | Messaging platform: send messages, manage bots, and interact with chats via the Bot API                                            | API key                                                | `api_call`   |
+| Twenty                                               | `@appstrate/twenty-mcp`        | Twenty CRM, Cloud or self-hosted, through Twenty's own MCP server. The server URL is entered when connecting                       | OAuth 2.0 (client registered automatically) or API key | Remote MCP   |
 | Twilio                                               | `@appstrate/twilio`            | Cloud communications platform for SMS, voice, and messaging                                                                        | API key                                                | `api_call`   |
 | Typeform                                             | `@appstrate/typeform`          | Online form builder and survey platform                                                                                            | OAuth 2.0                                              | `api_call`   |
 | Webhooks                                             | `@appstrate/webhooks`          | Send HTTP requests to one configured URL with optional authentication                                                              | Custom fields                                          | `api_call`   |
@@ -95,7 +98,7 @@ Integrations with an own page link to it. The API and MCP variants of GitHub, Gm
 | Zoho CRM                                             | `@appstrate/zoho-crm`          | Customer relationship management platform for sales and marketing                                                                  | OAuth 2.0                                              | `api_call`   |
 | Zoom                                                 | `@appstrate/zoom`              | Video conferencing and online meetings platform                                                                                    | OAuth 2.0                                              | `api_call`   |
 
-By authentication method: 42 OAuth 2.0 and 14 API key integrations reached through `api_call`, 3 with custom credential fields (Webhooks, WooCommerce, WordPress), 6 remote MCP integrations (GitHub also accepts a personal access token) and 2 local runners (GitHub Git and SSH). The two `mcp-server` packages that back the local runners, `@appstrate/github-git-mcp` and `@appstrate/ssh-mcp`, ship in the same directory.
+By authentication method: 42 OAuth 2.0 and 14 API key integrations reached through `api_call`, 3 with custom credential fields (Webhooks, WooCommerce, WordPress), 9 remote MCP integrations (GitHub and Twenty also accept a key, and Coolify takes a team API token only) and 2 local runners (GitHub Git and SSH). The two `mcp-server` packages that back the local runners, `@appstrate/github-git-mcp` and `@appstrate/ssh-mcp`, ship in the same directory.
 
 ## What changed from "providers"
 

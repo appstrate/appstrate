@@ -71,7 +71,7 @@ The server must run OpenSSH 7.2 or later. An older `sshd` rejects the `restrict`
 
 The same page shows a second block that removes the key from the server. Keep it. Deleting the connection destroys the private key held by Appstrate but cannot reach your server to remove the line from `authorized_keys`, and once the connection is deleted Appstrate can no longer show the block.
 
-An agent can bind several SSH connections in one run (up to 10 per integration), and each tool then takes a `connection` parameter, as described in [Tools](/features/tools). Binding several SSH connections to one run works only under the `docker` adapter.
+An agent can bind several SSH connections in one run (up to 20 per integration), and each tool then takes a `connection` parameter, as described in [Tools](/features/tools). Binding several SSH connections to one run works only under the `docker` adapter.
 
 ## Use it in an agent
 

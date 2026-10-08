@@ -131,7 +131,7 @@ appstrate login --profile prod --instance https://app.example.com
 | `--no-space`             | Do not pin a space                                                                          |
 | `--device-name <name>`   | Label shown in the dashboard's list of devices (default: the hostname)                      |
 
-The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
+The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. A refresh token is single-use, and presenting one twice revokes the session, so `appstrate` processes running at the same time (a background `code sync` and your own command, for example) take turns on the refresh through a lock file, `credentials.lock`, beside the credentials in `~/.config/appstrate/`. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
 
 After the token exchange, login pins what you work in. One organization is pinned automatically, several give a picker, none offers to create one. Then the organization's default space is pinned. Every later call sends them as `X-Org-Id` and `X-Space-Id`. You can see and revoke your CLI sessions under **Preferences → Devices**, and admins can see everyone's under **Organization settings → CLI sessions**.
 

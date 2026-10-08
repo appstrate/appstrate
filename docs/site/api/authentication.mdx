@@ -123,6 +123,10 @@ curl http://localhost:3000/api/agents \
 
 When `NODE_ENV` is `production`, sign-in, sign-up and the other Better Auth routes are rate limited per client IP address; a refused call is a `429` with a JSON body. A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
 
+A session expires after 7 days. While it is used it is extended, at most once a day, and the response carries a refreshed cookie, so an active user stays signed in.
+
+Changing a password ends the account's other sessions and keeps the one that made the change. A reset (`/api/auth/reset-password`, or the hosted reset page of the OIDC module) ends every session. Both also invalidate pending reset links, magic links and social-account links, and, with the OIDC module, the account's OAuth refresh and access tokens, CLI sessions and device codes, so MCP clients and the CLI have to sign in again. API keys are not revoked, and an OAuth access token already issued as a JWT stays valid until it expires (one hour by default). The full list of what is deliberately kept is in [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md). If the revocation fails, the request answers `500` with the code `credential_change_revocation_failed` instead of reporting success.
+
 ## OIDC access tokens
 
 The `oidc` module (in the default `MODULES` set) turns Appstrate into an OAuth 2.1 and OpenID Connect authorization server. It issues ES256-signed JWTs, accepted as `Authorization: Bearer ey...`. The kind of token depends on the level of the OAuth client that issued it:
