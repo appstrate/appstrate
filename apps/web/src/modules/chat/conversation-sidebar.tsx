@@ -5,7 +5,6 @@ import {
   ActivityIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
-  EyeIcon,
   FileIcon,
   FilesIcon,
   InfoIcon,
@@ -46,23 +45,23 @@ function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
   const { can } = usePermissions();
   const readable: Record<ConversationSidebarTab, boolean> = {
-    preview: true,
     runs: canReadRuns(can),
     files: can("files:read"),
     info: true,
   };
-  const [preview, ...rest] = [
-    { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
-    { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
-    { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
-    { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
-  ] as const satisfies readonly {
-    id: ConversationSidebarTab;
-    Icon: typeof EyeIcon;
-    label: string;
-  }[];
-  const tabs = [preview, ...rest.filter(({ id }) => readable[id])];
-  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? preview };
+  const tabs = (
+    [
+      { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
+      { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
+      { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
+    ] as const satisfies readonly {
+      id: ConversationSidebarTab;
+      Icon: typeof InfoIcon;
+      label: string;
+    }[]
+  ).filter(({ id }) => readable[id]);
+  // Info is always readable, so the list is never empty.
+  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? tabs[0]! };
 }
 
 export function ConversationContextActions({
@@ -114,8 +113,19 @@ function PanelState({ children }: { children: ReactNode }) {
   );
 }
 
-/** The file's frame IS the panel: its header replaces the panel's, and closes it. */
-function PreviewTab({ file, onClose }: { file: SidebarFile; onClose: () => void }) {
+/**
+ * The file's frame IS the panel: its header replaces the panel's. Its X closes
+ * the panel, or goes back to the file list the file was opened from.
+ */
+function ShownFile({
+  file,
+  backToList,
+  onClose,
+}: {
+  file: SidebarFile;
+  backToList: boolean;
+  onClose: () => void;
+}) {
   const { t } = useTranslation("chat");
   const { data, isLoading, error } = useFile(file.id);
 
@@ -126,7 +136,10 @@ function PreviewTab({ file, onClose }: { file: SidebarFile; onClose: () => void 
       isLoading={isLoading}
       error={error}
       fallbackName={file.name || t("context.file.untitled")}
-      onClose={{ label: t("context.collapse"), onClick: onClose }}
+      onClose={{
+        label: backToList ? t("context.backToFiles") : t("context.collapse"),
+        onClick: onClose,
+      }}
       className="h-full rounded-none border-0"
     />
   );
@@ -307,9 +320,11 @@ export function ConversationSidebar({
   const { t } = useTranslation("chat");
   const { activeTab } = useConversationTabs(state.activeTab);
   const ActiveTabIcon = activeTab.Icon;
-  const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
+  const showFromList = (file: SidebarFile) => dispatch({ type: "show-file", file, fromList: true });
   const collapse = () => dispatch({ type: "toggle" });
-  const previewedFile = activeTab.id === "preview" ? state.selectedFile : null;
+  // Read from the state, not the readable tabs: a file the thread opens shows
+  // even for a caller whose Files tab is not drawn.
+  const previewedFile = state.activeTab === "files" ? state.selectedFile : null;
 
   return (
     <>
@@ -330,7 +345,11 @@ export function ConversationSidebar({
           className="bg-background absolute inset-y-0 right-0 z-30 flex h-full w-[min(92vw,36rem)] shrink-0 flex-col border-l shadow-xl lg:static lg:w-[42vw] lg:max-w-[42rem] lg:min-w-[28rem] lg:shadow-none"
         >
           {previewedFile ? (
-            <PreviewTab file={previewedFile} onClose={collapse} />
+            <ShownFile
+              file={previewedFile}
+              backToList={state.fileFromList}
+              onClose={() => dispatch({ type: "close-file" })}
+            />
           ) : (
             <>
               <div className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
@@ -349,14 +368,15 @@ export function ConversationSidebar({
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto">
-                {activeTab.id === "preview" ? (
-                  <PanelState>{t("context.preview.empty")}</PanelState>
-                ) : null}
                 {activeTab.id === "runs" ? (
                   <ConversationRuns conversationId={conversationId} active />
                 ) : null}
                 {activeTab.id === "files" ? (
-                  <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
+                  <ConversationFiles
+                    conversationId={conversationId}
+                    active
+                    onSelect={showFromList}
+                  />
                 ) : null}
                 {activeTab.id === "info" ? (
                   <ConversationInfo conversationId={conversationId} active />

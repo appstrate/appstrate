@@ -93,3 +93,12 @@ export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): num
   const { data } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
   return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }
+
+/**
+ * Whether the caller has any conversation of their own — the same query as the
+ * unread badge, so it costs no request. Undefined until it answers.
+ */
+export function useHasChatSessions(getHeaders?: GetHeaders, enabled = true): boolean | undefined {
+  const { data } = useInfiniteQuery(sessionsQuery(getHeaders, enabled));
+  return data === undefined ? undefined : data.length > 0;
+}

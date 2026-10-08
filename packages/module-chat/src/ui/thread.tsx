@@ -121,14 +121,18 @@ function ThreadWelcome({
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
 }) {
-  const canWrite = useChatHost().can("chat:write");
+  const { can, t } = useChatHost();
+  const canWrite = can("chat:write");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
           <p className="text-muted-foreground mt-1 text-sm">
-            Demandez à lancer un agent, inspecter un run, ou chercher dans vos fichiers.
+            {/* A reader asks nothing: what there is to do is reread. */}
+            {canWrite
+              ? "Demandez à lancer un agent, inspecter un run, ou chercher dans vos fichiers."
+              : t("welcome.readOnly")}
           </p>
         </div>
         <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
@@ -151,8 +155,13 @@ function ThreadWelcome({
   );
 }
 
-/** Honest, action-aware disclaimer — the chat triggers real runs. */
+/**
+ * Honest, action-aware disclaimer — the chat triggers real runs. A reader
+ * triggers none, so it is not said to them.
+ */
 function Disclaimer() {
+  const { can } = useChatHost();
+  if (!can("chat:write")) return null;
   return (
     <p className="text-muted-foreground/70 px-4 text-center text-xs">
       L’assistant peut se tromper et exécute de vraies actions — vérifiez avant de confirmer.

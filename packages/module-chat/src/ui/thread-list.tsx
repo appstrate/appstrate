@@ -122,16 +122,19 @@ export function ChatConversationList({
   const canWrite = can("chat:write");
   return (
     <>
-      <SidebarGroup className="pb-0">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("list.new")}>
-              <PlusIcon />
-              <span>{t("list.new")}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
+      {/* Starting a conversation is a write: a reader only rereads its own. */}
+      {canWrite && (
+        <SidebarGroup className="pb-0">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("list.new")}>
+                <PlusIcon />
+                <span>{t("list.new")}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
         <SidebarGroupLabel>{t("list.label")}</SidebarGroupLabel>
         <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
@@ -242,8 +245,11 @@ function ConversationRow({
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
-          every generating↔idle transition. */}
-      <div className="group-hover/menu-item:bg-sidebar-accent absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md">
+          every generating↔idle transition. Hover swaps them for the row's
+          actions; a reader has none, so for them hover changes nothing. */}
+      <div
+        className={`absolute top-1 right-1 flex h-6 w-14 items-center justify-end rounded-md ${canWrite ? "group-hover/menu-item:bg-sidebar-accent" : ""}`}
+      >
         {session.generating ? (
           <Loader2Icon
             className="text-sidebar-foreground/70 size-3.5 animate-spin"
@@ -251,12 +257,14 @@ function ConversationRow({
           />
         ) : unread ? (
           <span
-            className="bg-primary size-2 rounded-full transition-opacity group-hover/menu-item:opacity-0"
+            className={`bg-primary size-2 rounded-full transition-opacity ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
             aria-label={t("list.unread")}
             title={t("list.unread")}
           />
         ) : (
-          <span className="text-sidebar-foreground/70 text-xs transition-opacity group-hover/menu-item:opacity-0">
+          <span
+            className={`text-sidebar-foreground/70 text-xs transition-opacity ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
+          >
             {relativeTime(session.updatedAt, now, t)}
           </span>
         )}

@@ -27,7 +27,8 @@ import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { useCanReach } from "@/hooks/use-can-reach";
-import { useChatUnreadCount } from "@appstrate/module-chat/unread";
+import { usePermissions } from "@/hooks/use-permissions";
+import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
 
 interface Product {
@@ -45,10 +46,16 @@ export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const canReach = useCanReach();
+  const { can } = usePermissions();
   const chatReachable = canReach("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides
   // on the tab that switches to it.
   const chatUnread = useChatUnreadCount(buildScopingHeaders, chatReachable);
+  // Conversations are each person's own. A role that may read but not write
+  // the chat (a viewer) only ever rereads what it wrote before: without any,
+  // the tab would lead to a page with nothing to do.
+  const hasChatSessions = useHasChatSessions(buildScopingHeaders, chatReachable);
+  const chatShown = chatReachable && (can("chat:write") || hasChatSessions === true);
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.
@@ -69,7 +76,7 @@ export function ProductTabs() {
       icon: <MessageSquare className="size-4" />,
       to: "/chat",
       active: inChat,
-      enabled: chatReachable,
+      enabled: chatShown,
       unread: chatUnread,
     },
   ].filter((p) => p.enabled);

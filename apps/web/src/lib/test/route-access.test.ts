@@ -72,9 +72,12 @@ describe("route declarations", () => {
 
   it("leaves shell visibility to the declarations, never to a local permission or flag check", () => {
     // A deed is not a destination: the switcher's "add a workspace" asks for the
-    // right to CREATE one (`spaces:write`), which no route declaration says.
+    // right to CREATE one (`spaces:write`), which no route declaration says; the
+    // Chat tab asks whether there is anything to DO there (`chat:write`, else a
+    // conversation of one's own to reread), on top of the route's own verdict.
     const DEEDS: Record<string, string[]> = {
       "components/org-switcher.tsx": ["usePermissions(", "can("],
+      "components/product-tabs.tsx": ["usePermissions(", "can("],
     };
     const local = SHELL.flatMap(({ file, text }) =>
       (text.match(/\busePermissions\(|\bcan\(|\bfeatures\./g) ?? [])

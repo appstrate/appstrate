@@ -14,7 +14,7 @@ describe("conversation sidebar state", () => {
     expect(INITIAL_CONVERSATION_SIDEBAR_STATE.expanded).toBe(false);
   });
 
-  it("shows every file through the same preview action", () => {
+  it("shows every file in the Files tab", () => {
     const first = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-file",
       file: file("file_a"),
@@ -26,7 +26,7 @@ describe("conversation sidebar state", () => {
 
     expect(second).toMatchObject({
       expanded: true,
-      activeTab: "preview",
+      activeTab: "files",
       selectedFile: file("file_b"),
     });
   });
@@ -42,32 +42,52 @@ describe("conversation sidebar state", () => {
     expect(collapsed.selectedFile).toEqual(file("file_a"));
   });
 
-  it("reopens the panel when a header tab is selected", () => {
+  it("reopens the panel on a header tab, showing that tab's own content", () => {
     const collapsed: ConversationSidebarState = {
       ...INITIAL_CONVERSATION_SIDEBAR_STATE,
       expanded: false,
-      activeTab: "preview",
+      selectedFile: file("file_a"),
     };
 
     expect(
-      conversationSidebarReducer(collapsed, { type: "select-tab", tab: "preview" }),
-    ).toMatchObject({
-      expanded: true,
-      activeTab: "preview",
-    });
+      conversationSidebarReducer(collapsed, { type: "select-tab", tab: "files" }),
+    ).toMatchObject({ expanded: true, activeTab: "files", selectedFile: null });
   });
 
-  it("clears file state on navigation but keeps the user's panel layout", () => {
+  it("clears the shown file on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
       expanded: false,
       activeTab: "runs",
       selectedFile: file("file_a"),
+      fileFromList: false,
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
       expanded: false,
       activeTab: "runs",
       selectedFile: null,
+      fileFromList: false,
+    });
+  });
+
+  it("closes a file opened from the list back to the list, and one from the thread closes the panel", () => {
+    const fromList = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: file("file_a"),
+      fromList: true,
+    });
+    expect(conversationSidebarReducer(fromList, { type: "close-file" })).toMatchObject({
+      expanded: true,
+      activeTab: "files",
+      selectedFile: null,
+    });
+
+    const fromThread = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: file("file_a"),
+    });
+    expect(conversationSidebarReducer(fromThread, { type: "close-file" })).toMatchObject({
+      expanded: false,
     });
   });
 });
