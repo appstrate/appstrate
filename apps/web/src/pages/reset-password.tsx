@@ -12,6 +12,8 @@ import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
+import { ApiError } from "../api/errors";
+import { errorMessage } from "../lib/mutation-error";
 
 export function ResetPasswordPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -60,8 +62,13 @@ export function ResetPasswordPage() {
     try {
       await resetPassword(token, password);
       setState("success");
-    } catch {
-      setError(t("resetPassword.invalidToken"));
+    } catch (err) {
+      // The password is written and the link spent: not an invalid link.
+      setError(
+        err instanceof ApiError && err.code === "credential_change_revocation_failed"
+          ? errorMessage(err)
+          : t("resetPassword.invalidToken"),
+      );
       setState("form");
     }
   };

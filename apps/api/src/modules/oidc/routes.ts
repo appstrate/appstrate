@@ -95,6 +95,7 @@ import {
 import { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
 import { BA_MAGIC_LINK_VERIFY_PATH, withSmtpOverride } from "@appstrate/db/auth";
+import { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "@appstrate/db/credential-change";
 import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
@@ -2131,6 +2132,20 @@ export function createOidcRouter() {
         status: resetResponse.status,
         body: bodyText.slice(0, 200),
       });
+      // The password is written and the token spent: not an invalid link.
+      if (readErrorCode(bodyText) === CREDENTIAL_CHANGE_REVOCATION_FAILED) {
+        return c.html(
+          renderErrorPage({
+            title: "Mot de passe modifié",
+            message:
+              "Votre mot de passe a été modifié, mais vos autres appareils n'ont pas " +
+              "tous pu être déconnectés. Connectez-vous puis modifiez-le à nouveau, " +
+              "ou contactez un administrateur.",
+            branding: ctx.branding,
+          }).value,
+          500,
+        );
+      }
       return c.html(
         renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
         400,
@@ -2779,6 +2794,18 @@ function stripResetParams(params: URLSearchParams): string {
   clone.delete("error");
   const s = clone.toString();
   return s ? `?${s}` : "";
+}
+
+/** The `code` of a Better Auth error body, or `null` when the body carries none. */
+function readErrorCode(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const code = (parsed as { code?: unknown }).code;
+    return typeof code === "string" ? code : null;
+  } catch {
+    return null;
+  }
 }
 
 function readFormString(

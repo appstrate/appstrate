@@ -404,7 +404,7 @@ app.use("*", async (c, next) => {
 
 Sessions are managed by Better Auth (email/password + optional Google social login, cookie-based sessions). Account linking uses trusted providers (Google) with verified emails to prevent pre-account takeover. Email verification is opt-in (requires SMTP configuration). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
-Changing or resetting a password ends every other session of the account and revokes its OAuth refresh and access tokens (`offline_access` included) and its CLI sessions; a change keeps the session that made it. Every path that changes or resets a password goes through `endOtherAccessAfterCredentialChange` (`packages/db/src/credential-change.ts`).
+Changing or resetting a password ends every other session of the account and invalidates its outstanding password-reset links (`endOtherAccessAfterCredentialChange`, `packages/db/src/credential-change.ts`); a change keeps the session that made it. With the OIDC module, the same step revokes the account's OAuth refresh and access tokens (`offline_access` included), CLI sessions and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`). It runs on `/api/auth/change-password` and on every reset (`/api/auth/reset-password`, the hosted `/api/oauth/reset-password` page). Setting a first password on a social-only account (`POST /api/profile/password`) replaces no credential and is not covered. Two limits: an OAuth access token already issued as a JWT stays valid until it expires (one hour by default), and with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 another browser stays signed in until its cached session expires.
 
 ### Organization context verification
 

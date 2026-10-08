@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { APIError } from "better-auth/api";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { createLogger } from "@appstrate/core/logger";
 import { db } from "./client.ts";
-import { cliRefreshToken, oauthAccessToken, oauthRefreshToken } from "./schema/index.ts";
+import { verification } from "./schema/index.ts";
 
 const logger = createLogger("info");
+
+export const CREDENTIAL_CHANGE_REVOCATION_FAILED = "credential_change_revocation_failed";
 
 /** The part of Better Auth's internal adapter that ends sessions through its delete hooks. */
 interface SessionStore {
@@ -14,14 +16,30 @@ interface SessionStore {
   deleteSessions(sessionTokens: string[]): Promise<unknown>;
 }
 
+// ─── Module half (injected at boot by the OIDC module) ───
+//
+// Core ends what it owns; the credentials a module issues are revoked by the
+// hook it installs here: the OIDC module's OAuth tokens, CLI session families
+// and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`).
+
+type CredentialChangeHook = (userId: string) => Promise<void>;
+
+let _credentialChangeHook: CredentialChangeHook | null = null;
+
+export function setCredentialChangeHook(hook: CredentialChangeHook): void {
+  _credentialChangeHook = hook;
+}
+
 /**
  * Ends every way into the account other than `keepSessionId` once its
- * password has been changed or reset: the other sessions, every OAuth refresh
- * and access token, every CLI session family.
+ * password has been changed or reset: the other sessions, the reset links
+ * still outstanding, then whatever the module hook revokes.
  *
- * The tokens are revoked here because ending a session does not reach them:
- * the OAuth provider spares `offline_access` refresh tokens on session end,
- * and a CLI family is bound to no session at all.
+ * Sessions go first, so a session about to end can no longer authorize a new
+ * token or approve a device code by the time the hook runs. What it cannot
+ * close is a token minted without a session in the milliseconds between the
+ * two steps: an OAuth refresh rotation, or Better Auth's own `/device/token`
+ * exchanging a code approved earlier.
  *
  * Runs after Better Auth has written the password, which it does outside any
  * transaction. A failure is logged and fails the request: answering success
@@ -32,37 +50,34 @@ export async function endOtherAccessAfterCredentialChange(
   userId: string,
   keepSessionId: string | null,
 ): Promise<void> {
+  let step = "sessions";
   try {
-    const revokedAt = new Date();
-    await db.transaction(async (tx) => {
-      await tx
-        .update(oauthRefreshToken)
-        .set({ revoked: revokedAt })
-        .where(and(eq(oauthRefreshToken.userId, userId), isNull(oauthRefreshToken.revoked)));
-      await tx
-        .update(oauthAccessToken)
-        .set({ revoked: revokedAt })
-        .where(and(eq(oauthAccessToken.userId, userId), isNull(oauthAccessToken.revoked)));
-      await tx
-        .update(cliRefreshToken)
-        .set({ revokedAt, revokedReason: "password_changed" })
-        .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
-    });
     // Through Better Auth rather than SQL so its session-delete hooks run
-    // (the OAuth provider's back-channel logout). Not inside the transaction
-    // above: Better Auth's adapter waiting on a held PGlite connection deadlocks.
+    // (the OAuth provider's back-channel logout).
     const others = (await sessions.listSessions(userId))
       .filter((s) => s.id !== keepSessionId)
       .map((s) => s.token);
     if (others.length > 0) await sessions.deleteSessions(others);
+    step = "reset_links";
+    // Better Auth stores `reset-password:<token>` → user id, identifier unhashed.
+    await db
+      .delete(verification)
+      .where(
+        and(like(verification.identifier, "reset-password:%"), eq(verification.value, userId)),
+      );
+    if (_credentialChangeHook) {
+      step = "module";
+      await _credentialChangeHook(userId);
+    }
   } catch (err) {
     logger.error("auth: ending other access after a password change failed", {
       userId,
+      step,
       error: err instanceof Error ? err.message : String(err),
     });
     throw new APIError("INTERNAL_SERVER_ERROR", {
-      message: "credential_change_revocation_failed",
-      code: "credential_change_revocation_failed",
+      message: CREDENTIAL_CHANGE_REVOCATION_FAILED,
+      code: CREDENTIAL_CHANGE_REVOCATION_FAILED,
     });
   }
 }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Changing or resetting a password ends the account's other sessions, on the
- * platform alone (no OIDC module). The OAuth and CLI tokens revoked by the
- * same step need that module, and are covered by
+ * Core's half of a password change or reset (no OIDC module routes): the
+ * account's other sessions end and its outstanding reset links stop working.
+ * The OAuth tokens, CLI sessions and device codes the OIDC module revokes are
+ * covered by
  * `apps/api/src/modules/oidc/test/integration/services/password-change-revocation.test.ts`.
  */
 
@@ -102,15 +103,14 @@ describe("password change without SMTP", () => {
   });
 });
 
-describe("password reset (SMTP on)", () => {
+describe("password reset links (SMTP on)", () => {
   enableSmtpForSuite();
 
   beforeEach(async () => {
     await truncateAll();
   });
 
-  it("ends every session of the account", async () => {
-    const { email, a, b } = await twoBrowsers();
+  async function resetToken(email: string): Promise<string> {
     const [mail] = await captureMails(async () => {
       const res = await postAuth("/request-password-reset", {
         email,
@@ -118,15 +118,38 @@ describe("password reset (SMTP on)", () => {
       });
       expect(res.status).toBe(200);
     });
-    const token = firstLink(mail!).pathname.split("/").pop()!;
+    return firstLink(mail!).pathname.split("/").pop()!;
+  }
+
+  it("a reset ends every session of the account and spends the other links", async () => {
+    const { email, a, b } = await twoBrowsers();
+    const token = await resetToken(email);
+    const other = await resetToken(email);
 
     const res = await postAuth("/reset-password", { token, newPassword: NEW_PASSWORD });
 
     expect(res.status).toBe(200);
     expect(await profileStatus(a)).toBe(401);
     expect(await profileStatus(b)).toBe(401);
+    const replay = await postAuth("/reset-password", { token: other, newPassword: PASSWORD });
+    expect(replay.status).toBe(400);
     // The new password signs in; the old sessions are not coming back.
     const signedIn = await postAuth("/sign-in/email", { email, password: NEW_PASSWORD });
     expect(signedIn.status).toBe(200);
+  });
+
+  it("a change spends the reset links still outstanding", async () => {
+    const { email, a } = await twoBrowsers();
+    const token = await resetToken(email);
+
+    const res = await postAuth(
+      "/change-password",
+      { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+      a,
+    );
+
+    expect(res.status).toBe(200);
+    const replay = await postAuth("/reset-password", { token, newPassword: PASSWORD });
+    expect(replay.status).toBe(400);
   });
 });

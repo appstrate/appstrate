@@ -2,8 +2,9 @@
 
 /**
  * Changing or resetting a password reaches what ending a session does not:
- * an OAuth refresh token issued with `offline_access` (an MCP client's here)
- * and a CLI session family, which is bound to no session. Each path that
+ * an OAuth refresh token issued with `offline_access` (an MCP client's here),
+ * an opaque OAuth access token, a CLI session family, which is bound to no
+ * session, and a device code already approved but not yet exchanged. Each path that
  * changes or resets a password is driven end to end (`/api/auth/change-password`,
  * `/api/auth/reset-password`, the hosted `/api/oauth/reset-password` page)
  * against two browser sessions, a CLI login and an MCP client. The platform-only
@@ -13,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { deviceCode, oauthResource } from "@appstrate/db/schema";
+import { deviceCode, oauthAccessToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
@@ -85,7 +86,8 @@ async function challengeFor(verifier: string): Promise<string> {
 
 // ─── CLI: device flow → refresh token ────────────────────────────────────────
 
-async function loginCli(cookie: string): Promise<string> {
+/** A device code claimed and approved by the session in `cookie`, ready to exchange. */
+async function approveDeviceCode(cookie: string): Promise<string> {
   const codeRes = await app.request("/api/auth/device/code", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -105,11 +107,19 @@ async function loginCli(cookie: string): Promise<string> {
     .update(deviceCode)
     .set({ lastPolledAt: new Date(Date.now() - 10_000) })
     .where(eq(deviceCode.deviceCode, code.device_code));
-  const tokenRes = await postAuth("/cli/token", {
+  return code.device_code;
+}
+
+function exchangeDeviceCode(code: string): Promise<Response> {
+  return postAuth("/cli/token", {
     grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    device_code: code.device_code,
+    device_code: code,
     client_id: "appstrate-cli",
   });
+}
+
+async function loginCli(cookie: string): Promise<string> {
+  const tokenRes = await exchangeDeviceCode(await approveDeviceCode(cookie));
   expect(tokenRes.status).toBe(200);
   return ((await tokenRes.json()) as { refresh_token: string }).refresh_token;
 }
@@ -233,7 +243,11 @@ interface SignedInEverywhere {
   sessionA: string;
   sessionB: string;
   cliRefreshToken: string;
+  /** Approved by session B, not yet exchanged. */
+  approvedDeviceCode: string;
   mcp: McpGrant;
+  /** An opaque access token row, the kind introspection answers from. */
+  opaqueAccessTokenId: string;
 }
 
 let orgResource: string | null = null;
@@ -263,6 +277,16 @@ async function signInEverywhere(): Promise<SignedInEverywhere> {
   expect(mcpRotated.status).toBe(200);
   const rotatedMcp = ((await mcpRotated.json()) as { refresh_token?: string }).refresh_token;
   const mcp = { ...grant, refreshToken: rotatedMcp ?? grant.refreshToken };
+  const opaqueAccessTokenId = crypto.randomUUID();
+  await db.insert(oauthAccessToken).values({
+    id: opaqueAccessTokenId,
+    token: crypto.randomUUID(),
+    clientId: grant.clientId,
+    userId: user.id,
+    scopes: ["mcp:read"],
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  });
+  const approvedDeviceCode = await approveDeviceCode(sessionB);
 
   expect(await profileStatus(user.cookie)).toBe(200);
   expect(await profileStatus(sessionB)).toBe(200);
@@ -272,13 +296,27 @@ async function signInEverywhere(): Promise<SignedInEverywhere> {
     sessionA: user.cookie,
     sessionB,
     cliRefreshToken,
+    approvedDeviceCode,
     mcp,
+    opaqueAccessTokenId,
   };
 }
 
-async function expectRefreshRefused(res: Response): Promise<void> {
+async function expectGrantRefused(res: Response): Promise<void> {
   expect(res.status).toBe(400);
   expect(((await res.json()) as { error?: string }).error).toBe("invalid_grant");
+}
+
+/** Everything but the browser sessions, which each case checks itself. */
+async function expectTokensRevoked(access: SignedInEverywhere): Promise<void> {
+  await expectGrantRefused(await refreshCli(access.cliRefreshToken));
+  await expectGrantRefused(await exchangeDeviceCode(access.approvedDeviceCode));
+  await expectGrantRefused(await refreshMcp(access.mcp));
+  const [opaque] = await db
+    .select({ revoked: oauthAccessToken.revoked })
+    .from(oauthAccessToken)
+    .where(eq(oauthAccessToken.id, access.opaqueAccessTokenId));
+  expect(opaque?.revoked).toBeInstanceOf(Date);
 }
 
 async function resetToken(email: string): Promise<string> {
@@ -331,8 +369,7 @@ describe("a password change or reset revokes the account's other access", () => 
     expect(res.status).toBe(200);
     expect(await profileStatus(access.sessionA)).toBe(200);
     expect(await profileStatus(access.sessionB)).toBe(401);
-    await expectRefreshRefused(await refreshCli(access.cliRefreshToken));
-    await expectRefreshRefused(await refreshMcp(access.mcp));
+    await expectTokensRevoked(access);
   });
 
   it("a reset through Better Auth revokes every session and token", async () => {
@@ -344,8 +381,7 @@ describe("a password change or reset revokes the account's other access", () => 
     expect(res.status).toBe(200);
     expect(await profileStatus(access.sessionA)).toBe(401);
     expect(await profileStatus(access.sessionB)).toBe(401);
-    await expectRefreshRefused(await refreshCli(access.cliRefreshToken));
-    await expectRefreshRefused(await refreshMcp(access.mcp));
+    await expectTokensRevoked(access);
   });
 
   it("a reset on the hosted page revokes every session and token", async () => {
@@ -388,7 +424,6 @@ describe("a password change or reset revokes the account's other access", () => 
     expect(res.status).toBe(200);
     expect(await profileStatus(access.sessionA)).toBe(401);
     expect(await profileStatus(access.sessionB)).toBe(401);
-    await expectRefreshRefused(await refreshCli(access.cliRefreshToken));
-    await expectRefreshRefused(await refreshMcp(access.mcp));
+    await expectTokensRevoked(access);
   });
 });

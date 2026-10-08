@@ -739,7 +739,7 @@ function buildAuth(options: CreateAuthOptions) {
       // Fire-and-forget — the password is already changed
     }
   };
-  return betterAuth({
+  const auth = betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
       schema: { ...schema },
@@ -810,7 +810,7 @@ function buildAuth(options: CreateAuthOptions) {
       // it) lands here, after Better Auth has written the new password.
       onPasswordReset: async ({ user }): Promise<void> => {
         await notifyPasswordChanged(user.email);
-        const { internalAdapter } = await getAuth().$context;
+        const { internalAdapter } = await auth.$context;
         await endOtherAccessAfterCredentialChange(internalAdapter, user.id, null);
       },
       // Test-only fast password hasher. Better Auth's default is scrypt
@@ -906,17 +906,18 @@ function buildAuth(options: CreateAuthOptions) {
     hooks: {
       after: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/change-password") return;
-        const returned = ctx.context.returned;
-        if (returned instanceof APIError) return;
-        const { user: changed } = returned as { user: { id: string; email: string } };
+        if (ctx.context.returned instanceof APIError) return;
+        // Set by the route's `sensitiveSessionMiddleware`: a change never succeeds without it.
+        const caller = ctx.context.session;
+        if (!caller) throw new Error("/change-password succeeded without a session in context");
         // The caller's session, or the one Better Auth swapped it for when
         // the caller passed `revokeOtherSessions`: the cookie it now holds.
-        const kept = ctx.context.newSession ?? ctx.context.session;
-        await notifyPasswordChanged(changed.email);
+        const kept = ctx.context.newSession ?? caller;
+        await notifyPasswordChanged(caller.user.email);
         await endOtherAccessAfterCredentialChange(
           ctx.context.internalAdapter,
-          changed.id,
-          kept?.session.id ?? null,
+          caller.user.id,
+          kept.session.id,
         );
       }),
     },
@@ -1296,6 +1297,7 @@ function buildAuth(options: CreateAuthOptions) {
       },
     },
   });
+  return auth;
 }
 
 // ─── Factory + lazy singleton ────────────────────────────

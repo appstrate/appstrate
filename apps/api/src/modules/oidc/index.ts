@@ -75,6 +75,8 @@ import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { bindIssuedMagicLink } from "./services/oauth-transaction-binding.ts";
 import { toMagicLinkConfirmUrl } from "./pages/magic-link-confirm.ts";
 import { setRealmResolver, setMagicLinkIssuedHook } from "@appstrate/db/auth";
+import { setCredentialChangeHook } from "@appstrate/db/credential-change";
+import { revokeOidcAccessAfterCredentialChange } from "./services/credential-change.ts";
 import { setRunnerResolver } from "../../lib/runner-resolver.ts";
 import { lookupCliDeviceName } from "./services/cli-tokens.ts";
 
@@ -107,6 +109,9 @@ const oidcModule: AppstrateModule = {
       await bindIssuedMagicLink(info);
       return toMagicLinkConfirmUrl(info.url, info.email);
     });
+    // A password change or reset revokes the tokens and device codes this
+    // module issues, after core has ended the other sessions.
+    setCredentialChangeHook(revokeOidcAccessAfterCredentialChange);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.
     const env = getEnv();
