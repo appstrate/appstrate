@@ -9,21 +9,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
-  hosted MCP server (#1831).** `@appstrate/expo-mcp@1.0.0` is a system
-  integration that joins the DCR-based remote-MCP family (`notion-mcp`,
-  `canva-mcp`, `clickup-mcp`, `mcpemails`): `streamable-http` against
-  `https://mcp.expo.dev/mcp`, authorized by RFC 7591 DCR as a public client with
-  PKCE (S256) under the single `mcp:access` scope, so the operator installs the
-  connector and each member clicks Connect. Its 25 server-side tools cover EAS
-  builds and submissions, EAS Workflows, TestFlight crashes and feedback, Play
-  Console crashes, App Store and Play Store reviews, and the Expo documentation.
-  Expo's local capabilities (simulator, logs, devtools) need a local dev server
-  and are not declared. Some tools write to the stores — `build_submit`,
-  `appstore_reply_review`, `appstore_delete_review_response`,
-  `playstore_reply_review` — so an agent that should only read leaves them out
-  of its tool selection. `search_documentation` needs a paid EAS plan upstream.
-  Expo advertises no userinfo endpoint, so unless its token response names the
-  account, two connections to different Expo accounts share one account key.
+  hosted MCP server (#1831).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
+  DCR remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`,
+  `mcpemails`): `streamable-http` against `https://mcp.expo.dev/mcp`, RFC 7591
+  DCR as a public client with PKCE (S256) under the single `mcp:access` scope.
+  Of its 25 tools, a read-only agent selects only `build_list`, `build_info`,
+  `build_logs`, `workflow_list`, `workflow_info`, `workflow_logs`,
+  `workflow_validate`, `workflow_create` (returns YAML), `testflight_crashes`,
+  `testflight_feedback`, `playstore_crashes`, `appstore_reviews`,
+  `playstore_reviews`, `read_documentation` and `search_documentation` (paid
+  EAS plan); the rest change state (builds, workflow runs, cancellations,
+  store submissions and review replies, `learn` memory, `add_library`).
+  Expo's local capabilities act on a member's own dev server and are not
+  declared, so the sidecar filters them out. Expo advertises no userinfo
+  endpoint, so unless its token response names the account, two connections
+  to different Expo accounts share one account key and a reconnect is not
+  checked against the original account.
 
 ## [1.0.0-beta.66] - 2026-10-08
 
