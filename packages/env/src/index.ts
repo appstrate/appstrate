@@ -141,23 +141,19 @@ export const envSchema = z
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
     /**
-     * Auth secret keyring, Better Auth's own format:
-     * `<version>:<secret>[,<version>:<secret>…]`, current secret FIRST,
-     * versions unique non-negative integers. Unset = no keyring.
-     *
-     * Covers: data Better Auth encrypts at rest (JWKS private keys, and its
-     * other symmetric encryption; each ciphertext is tagged `$ba$<version>$`)
-     * and the HMAC cookies we sign (`apps/api/src/lib/auth-secrets.ts`): the
-     * current secret encrypts/signs, every listed one decrypts/verifies.
-     * Does not cover the session cookie: it is signed with the current secret
-     * only, so every rotation signs everyone out.
-     *
-     * `BETTER_AUTH_SECRET` keeps decrypting data written before the keyring
-     * existed (untagged hex): do NOT change it when introducing the list.
-     *
-     * Rotation: prepend `<new version>:<new secret>` + restart. Drop a
-     * version only once no data is left encrypted under it (e.g. no
-     * `jwks.private_key` starting with `"$ba$<version>$`).
+     * Auth secret keyring, Better Auth's format: `<version>:<secret>[,…]`,
+     * current secret FIRST, versions unique non-negative integers.
+     * The first secret encrypts/signs; every listed one decrypts/verifies
+     * Better Auth's at-rest data (JWKS private keys, tagged `$ba$<version>$`)
+     * and our HMAC cookies (`apps/api/src/lib/auth-secrets.ts`). What Better
+     * Auth signs with the current secret only (session cookie, in-flight
+     * social sign-in state, email verification links) is invalidated by any
+     * rotation. `BETTER_AUTH_SECRET` still decrypts data written before the
+     * list existed: leave it unchanged when introducing the list.
+     * Rotate: prepend a new version + restart. JWKS keys are never re-keyed,
+     * so to retire a version (or a leaked `BETTER_AUTH_SECRET`) delete the
+     * `jwks` rows: the next signature mints a key under the current secret,
+     * and outstanding JWTs / CLI tokens stop verifying (sign in again).
      */
     BETTER_AUTH_SECRETS: z
       .string()
