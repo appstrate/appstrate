@@ -15,9 +15,10 @@
  * filesystem has no `flock` at all, and must not enter the poll loop.
  *
  * **Why an unavailable lock fails open.** Where `flock` does not work — an
- * unsupported mount, or Windows — refusing every command is a larger breakage
- * than the rare race the lock guards, so the body runs and, unless the caller
- * opts out, stderr says so.
+ * unsupported mount, or Windows — or the lock file cannot be created or opened
+ * (a read-only home whose credentials live in the OS keyring), refusing every
+ * command is a larger breakage than the rare race the lock guards, so the body
+ * runs and, unless the caller opts out, stderr says so.
  *
  * flock is per open file description, so two holders inside ONE process
  * exclude each other exactly as two processes do.
@@ -80,7 +81,7 @@ export class FileLockBusyError extends Error {
  * names what the lock serializes, in the busy error and the unlocked warning.
  * Throws past `timeoutMs` while another holder keeps it; runs `body` unlocked,
  * after a warning on stderr (see `warnUnlocked`), where the platform or the
- * filesystem has no working `flock(2)`.
+ * filesystem has no working `flock(2)` or the lock file cannot be opened.
  */
 export async function withFileLock<T>(
   path: string,
@@ -91,24 +92,30 @@ export async function withFileLock<T>(
   const { timeoutMs, pollMs, warnUnlocked } = { ...DEFAULTS, ...options };
   const io = options.io ?? DEFAULT_IO;
   const tryLock = options.tryLock ?? sharedTryLock();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const runUnlocked = (reason: string): Promise<T> => {
+    if (warnUnlocked) {
+      io.stderr.write(
+        `warning: ${label} lock unavailable (${reason}); continuing unlocked — do not run two ${label}s at once.\n`,
+      );
+    }
+    return body();
+  };
 
-  // Never unlinked: a holder that removed it would let the next opener lock a
-  // file nobody else can see, and two holders would run at once.
-  const fd = openSync(path, "a", 0o600);
+  let fd: number;
+  try {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    // Never unlinked: a holder that removed it would let the next opener lock a
+    // file nobody else can see, and two holders would run at once.
+    fd = openSync(path, "a", 0o600);
+  } catch (err) {
+    return runUnlocked(`no lock file: ${err instanceof Error ? err.message : String(err)}`);
+  }
   try {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const attempt = tryLock(fd);
       if (attempt.status === "acquired") return await body();
-      if (attempt.status === "unsupported") {
-        if (warnUnlocked) {
-          io.stderr.write(
-            `warning: ${label} lock unavailable (${attempt.reason}); continuing unlocked — do not run two ${label}s at once.\n`,
-          );
-        }
-        return await body();
-      }
+      if (attempt.status === "unsupported") return await runUnlocked(attempt.reason);
       if (Date.now() >= deadline) throw new FileLockBusyError(label);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }

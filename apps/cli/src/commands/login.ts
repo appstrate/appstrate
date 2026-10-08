@@ -45,6 +45,7 @@ import {
   getProfile,
 } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
+import { withCredentialsLock } from "../lib/api.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
@@ -253,12 +254,15 @@ async function runLogin(
         "Check the server version and any middleware transforming the /api/auth/cli/token response, then retry.",
     );
   }
-  await saveTokens(profileName, {
+  const tokens = {
     accessToken: token.accessToken,
     expiresAt: Date.now() + token.expiresIn * 1000,
     refreshToken: token.refreshToken,
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
-  });
+  };
+  // Under the credentials lock, so a refresh in flight elsewhere cannot write
+  // the old session over this one; it re-reads and adopts the new pair.
+  await withCredentialsLock(() => saveTokens(profileName, tokens));
 
   // Preserve the previous `orgId` / `spaceId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call

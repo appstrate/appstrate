@@ -16,7 +16,7 @@
 import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
-import { _awaitRefreshQuiesce } from "../lib/api.ts";
+import { withCredentialsLock } from "../lib/api.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
@@ -47,10 +47,12 @@ export async function logoutCommand(
   let keyringRefusal: unknown;
   // Marked cleared once the profile is gone, keyring throw or not: the local
   // sign-out has happened, and a second attempt would only throw again.
+  // The delete waits out any refresh holding the credentials lock, in this
+  // process or another, so its trailing save cannot resurrect the tokens; a
+  // refresh still waiting finds them gone.
   const clearCredentials = async (): Promise<void> => {
-    await _awaitRefreshQuiesce(profileName);
     try {
-      await deleteTokens(profileName);
+      await withCredentialsLock(() => deleteTokens(profileName));
     } finally {
       await deleteProfile(profileName);
       credentialsCleared = true;

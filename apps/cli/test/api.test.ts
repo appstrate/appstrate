@@ -18,10 +18,13 @@
  *      the next invocation hits the "not logged in" branch instead of
  *      retrying.
  *   5. Transient refresh failures (network, 5xx) preserve local state.
- *   6. A refresh re-reads the stored pair under the cross-process lock: a
- *      pair another process rotated meanwhile is used as is, never
- *      redeemed again. The multi-process proof is
+ *   6. A refresh re-reads the stored pair under the cross-process
+ *      credentials lock: a pair another process rotated (or a login
+ *      replaced) meanwhile is used as is, never redeemed again, and a pair
+ *      a logout deleted stays deleted. The multi-process proof is
  *      `token-refresh-lock.test.ts`.
+ *   7. Failures that leave the credentials intact (busy lock, request
+ *      timeout) surface as themselves, never as a re-login 401.
  */
 
 import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
@@ -31,7 +34,7 @@ import {
   _setKeyringFactoryForTesting,
   type Tokens,
 } from "../src/lib/keyring.ts";
-import { FileLockBusyError, withFileLock } from "../src/lib/file-lock.ts";
+import { FileLockBusyError } from "../src/lib/file-lock.ts";
 // Imported directly for the one test that needs a profile with NO stored
 // tokens — the shared seed always writes a pair.
 import { setProfile } from "../src/lib/config.ts";
@@ -40,8 +43,7 @@ import {
   explicitApiKey,
   resolveApiKeyTarget,
   AuthError,
-  getRefreshLockPath,
-  _awaitRefreshQuiesce,
+  withCredentialsLock,
   _inFlightRefreshSizeForTesting,
 } from "../src/lib/api.ts";
 import {
@@ -115,10 +117,11 @@ function peerRotatedTokens(): Tokens {
 }
 
 /**
- * Another process rotates the stored pair right after this process's `nth`
- * read of it: the window between reading the pair and taking the refresh lock.
+ * Another process changes the stored pair right after this process's `nth`
+ * read of it: the window between reading the pair and taking the credentials
+ * lock.
  */
-function rotateByPeerAfterRead(nth: number, peer: Tokens): void {
+function changeAfterRead(nth: number, change: () => void): void {
   let reads = 0;
   _setKeyringFactoryForTesting((profile) => ({
     setPassword(value: string): void {
@@ -126,13 +129,53 @@ function rotateByPeerAfterRead(nth: number, peer: Tokens): void {
     },
     getPassword(): string | null {
       const value = keyring.store.get(profile) ?? null;
-      if (++reads === nth) keyring.store.set(profile, JSON.stringify(peer));
+      if (++reads === nth) change();
       return value;
     },
     deletePassword(): void {
       keyring.store.delete(profile);
     },
   }));
+}
+
+function peerRotates(): void {
+  keyring.store.set("default", JSON.stringify(peerRotatedTokens()));
+}
+
+function peerLogsOut(): void {
+  keyring.store.delete("default");
+}
+
+/** Another process's refresh, stuck holding the credentials lock until released. */
+async function holdCredentialsLock(): Promise<() => Promise<void>> {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const holder = withCredentialsLock(async () => {
+    entered.resolve();
+    await release.promise;
+  });
+  await entered.promise;
+  return async () => {
+    release.resolve();
+    await holder;
+  };
+}
+
+/**
+ * Settle `run` while the clock jumps past any deadline a lock waiter computes,
+ * so it gives up on its next poll instead of sitting out the real timeout.
+ */
+async function settleWithClockJumping(run: () => Promise<unknown>): Promise<unknown> {
+  const clock = setInterval(() => setSystemTime(new Date(Date.now() + 60_000)), 10);
+  try {
+    return await run().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+  } finally {
+    clearInterval(clock);
+    setSystemTime();
+  }
 }
 
 describe("apiFetchRaw (issue #165) — proactive refresh", () => {
@@ -454,7 +497,7 @@ describe("apiFetchRaw — concurrent refresh dedup (PR #191 review)", () => {
       apiFetchRaw("default", "/api/b"),
       apiFetchRaw("default", "/api/c"),
     ];
-    // Tiny yield so all three enter resolveAccessToken and register on the mutex.
+    // Tiny yield so all three enter resolveAccessToken and share the in-flight refresh.
     await Promise.resolve();
     gate.resolve();
     const results = await Promise.all(calls);
@@ -517,18 +560,20 @@ describe("apiFetchRaw — concurrent refresh dedup (PR #191 review)", () => {
   });
 });
 
-describe("apiFetchRaw — a peer process rotated first (issue #1806)", () => {
+describe("apiFetchRaw — another writer landed first (issue #1806)", () => {
   // The token endpoint answers what the server does to a second redemption of
   // a refresh token: reuse detected, family revoked.
   const reuseDetected = (): Response => jsonResponse(400, { error: "invalid_grant" });
 
+  // A login landing in that window looks the same: a pair with another
+  // refresh token, which the refresh adopts.
   it("proactive: uses the peer's access token instead of redeeming the stale refresh token", async () => {
     await seedProfile("default", {
       access: "expired",
       accessExpiresIn: -60_000,
       refresh: "stale-refresh",
     });
-    rotateByPeerAfterRead(1, peerRotatedTokens());
+    changeAfterRead(1, peerRotates);
     installFetch(async (url) =>
       url.endsWith("/api/auth/cli/token") ? reuseDetected() : jsonResponse(200, { ok: true }),
     );
@@ -548,7 +593,7 @@ describe("apiFetchRaw — a peer process rotated first (issue #1806)", () => {
     });
     // Read 1 resolves the bearer, read 2 is the 401 branch's own; the peer
     // lands after that one, so only the read under the lock can see it.
-    rotateByPeerAfterRead(2, peerRotatedTokens());
+    changeAfterRead(2, peerRotates);
     installFetch(async (url, init) => {
       if (url.endsWith("/api/auth/cli/token")) return reuseDetected();
       const auth = (init?.headers as Record<string, string>).Authorization;
@@ -563,87 +608,95 @@ describe("apiFetchRaw — a peer process rotated first (issue #1806)", () => {
     expect(fetchCalls.map((c) => c.auth)).toEqual(["Bearer access-1", "Bearer peer-access"]);
     expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
   });
+
+  it("a logout that landed meanwhile stays a logout: no redemption, nothing saved back", async () => {
+    await seedProfile("default", {
+      access: "expired",
+      accessExpiresIn: -60_000,
+      refresh: "stale-refresh",
+    });
+    changeAfterRead(1, peerLogsOut);
+    installFetch(async () => jsonResponse(200, { ok: true }));
+
+    await expect(apiFetchRaw("default", "/api/data")).rejects.toMatchObject({
+      name: "AuthError",
+      message: expect.stringContaining("No credentials"),
+    });
+    expect(fetchCalls).toHaveLength(0);
+    expect(await loadTokens("default")).toBeNull();
+  });
 });
 
-describe("apiFetchRaw — refresh lock held by another process", () => {
-  it("gives up past the lock timeout without redeeming the token or touching the credentials", async () => {
+describe("apiFetchRaw — credentials lock held by another process", () => {
+  it("proactive: gives up past the lock timeout without redeeming the token or touching the credentials", async () => {
     await seedProfile("default", { access: "expired", accessExpiresIn: -60_000, refresh: "r" });
     installFetch(async () => jsonResponse(200, {}));
+    const release = await holdCredentialsLock();
 
-    // The other process's refresh hung, holding the lock.
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const holder = withFileLock(getRefreshLockPath(), "test holder", async () => {
-      entered.resolve();
-      await release.promise;
-    });
-    await entered.promise;
-
-    // Jump the clock past whatever deadline the waiter computes rather than
-    // sit out the real timeout; the next poll then gives up.
-    const clock = setInterval(() => setSystemTime(new Date(Date.now() + 60_000)), 10);
     let error: unknown;
     try {
-      error = await apiFetchRaw("default", "/api/data").then(
-        () => undefined,
-        (e: unknown) => e,
-      );
+      error = await settleWithClockJumping(() => apiFetchRaw("default", "/api/data"));
     } finally {
-      clearInterval(clock);
-      setSystemTime();
-      release.resolve();
-      await holder;
+      await release();
     }
 
     expect(error).toBeInstanceOf(FileLockBusyError);
-    expect((error as FileLockBusyError).label).toBe("token refresh");
+    expect((error as FileLockBusyError).label).toBe("credential update");
     expect(fetchCalls).toHaveLength(0);
+    expect((await loadTokens("default"))?.refreshToken).toBe("r");
+  });
+
+  it("reactive 401: surfaces the busy lock rather than a 401 that reads as a lost login", async () => {
+    await seedProfile("default", {
+      access: "access-1",
+      accessExpiresIn: 5 * 60 * 1000,
+      refresh: "r",
+    });
+    installFetch(async () => jsonResponse(401, { error: "invalid_token" }));
+    const release = await holdCredentialsLock();
+
+    let error: unknown;
+    try {
+      error = await settleWithClockJumping(() => apiFetchRaw("default", "/api/data"));
+    } finally {
+      await release();
+    }
+
+    expect(error).toBeInstanceOf(FileLockBusyError);
+    expect(fetchCalls.map((c) => c.url)).toEqual(["https://app.example.com/api/data"]);
     expect((await loadTokens("default"))?.refreshToken).toBe("r");
   });
 });
 
-describe("_awaitRefreshQuiesce (PR #191 review)", () => {
-  it("resolves immediately when no refresh is in flight", async () => {
-    const start = Date.now();
-    await _awaitRefreshQuiesce("any-profile");
-    expect(Date.now() - start).toBeLessThan(50);
-  });
-
-  it("blocks until an in-flight refresh settles, then unblocks", async () => {
+describe("apiFetchRaw — a refresh request that never answers", () => {
+  it("is bounded by its own deadline, and its timeout keeps the credentials and is no 401", async () => {
     await seedProfile("default", {
-      access: "expiring",
-      accessExpiresIn: 5_000,
-      refresh: "r1",
-      refreshExpiresIn: 30 * 24 * 60 * 60 * 1000,
+      access: "access-1",
+      accessExpiresIn: 5 * 60 * 1000,
+      refresh: "r",
     });
-    const gate = Promise.withResolvers<void>();
-    installFetch(async (url) => {
-      if (url.endsWith("/api/auth/cli/token")) {
-        await gate.promise;
-        return jsonResponse(200, {
-          access_token: "new",
-          refresh_token: "r2",
-          token_type: "Bearer",
-          expires_in: 900,
-          refresh_expires_in: 2592000,
-          scope: "",
-        });
+    let signal: AbortSignal | null | undefined;
+    installFetch(async (url, init) => {
+      if (!url.endsWith("/api/auth/cli/token")) {
+        return jsonResponse(401, { error: "invalid_token" });
       }
-      return jsonResponse(200, {});
+      signal = init?.signal;
+      // What the request's own deadline does to a server that never answers;
+      // waiting it out for real would hold this test for 20 seconds.
+      throw new DOMException("The operation timed out.", "TimeoutError");
     });
-    const pending = apiFetchRaw("default", "/api/x");
-    // Yield so apiFetchRaw registers on the mutex.
-    await Promise.resolve();
-    let quiesceDone = false;
-    const waiter = _awaitRefreshQuiesce("default").then(() => {
-      quiesceDone = true;
-    });
-    // Quiesce must NOT resolve while refresh is pending.
-    expect(quiesceDone).toBe(false);
-    gate.resolve();
-    await pending;
-    await waiter;
-    expect(quiesceDone).toBe(true);
+
+    const error = await apiFetchRaw("default", "/api/data").then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe("TimeoutError");
+    expect((await loadTokens("default"))?.refreshToken).toBe("r");
+    // The lock went with it: the next refresh is not left waiting.
+    expect(await withCredentialsLock(async () => "free")).toBe("free");
   });
 });
 

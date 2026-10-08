@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { lstat, mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { closeSync, openSync } from "node:fs";
@@ -182,6 +182,27 @@ describe("withSyncLock without a working flock", () => {
         tryLock: () => ({ status: "unsupported", reason: "flock(2) failed with errno 95" }),
       }),
     ).resolves.toBe("ran");
+  });
+});
+
+describe("withSyncLock without a lock file", () => {
+  // A file where the lock's directory belongs: the lock file cannot be
+  // created, as on a read-only home.
+  beforeEach(async () => {
+    await writeFile(join(dataHome, "appstrate"), "");
+  });
+
+  it("runs the body unlocked and says so on stderr", async () => {
+    const { io, stderr } = createMemoryIO();
+    expect(await withSyncLock(async () => "ran", { io })).toBe("ran");
+    expect(stderr()).toContain("code sync lock unavailable (no lock file:");
+    expect(stderr()).toContain("continuing unlocked");
+  });
+
+  it("stays quiet when the caller opts out of the warning", async () => {
+    const { io, stderr } = createMemoryIO();
+    expect(await withSyncLock(async () => "ran", { io, warnUnlocked: false })).toBe("ran");
+    expect(stderr()).toBe("");
   });
 });
 

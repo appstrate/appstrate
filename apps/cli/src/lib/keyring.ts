@@ -379,16 +379,17 @@ export async function deleteTokens(profile: string): Promise<void> {
 // calls in the same Node process don't clobber each other's profiles via
 // a stale-snapshot race.
 //
-// Cross-process coordination (two `appstrate login` invocations from
-// different terminals at the same moment) is intentionally NOT handled:
-//   - The only node-land library that ever covered it (`proper-lockfile`)
-//     has not shipped a release since 2021-01; no actively maintained
-//     alternative exists.
-//   - The concrete failure mode without the lock is benign: the later
-//     write wins, the "losing" session needs a re-login. No credential
-//     corruption, no cross-profile leakage (each profile is its own key).
-//   - Mainstream CLIs (`gh`, `aws`, `gcloud`) do not lock their credentials
-//     file either. The attack surface is not worth a stale dependency.
+// Cross-process coordination lives with the callers, not here: every
+// credential writer — refresh, login, logout — runs under
+// `withCredentialsLock` (`api.ts`, over the `flock(2)` of `file-lock.ts`),
+// because the race that matters spans a read, a network call and a write,
+// not a single file operation. This module stays lock-free so the store
+// works the same in either backend, keyring or file.
+//
+// What runs outside that lock — every read, and the expired-entry scrub
+// `loadTokens` performs — relies on atomic renames: a reader sees a whole
+// file, and a write racing another resolves last-write-wins, which is why
+// the scrub deletes only on a compare-and-swap.
 
 interface FileStore {
   [profile: string]: Tokens;
@@ -398,8 +399,8 @@ interface FileStore {
  * Serialize in-process read-modify-write cycles on the credentials file.
  * A single `Mutex` shared across every `saveToFile` / `deleteFromFile`
  * call ensures 10 concurrent `Promise.all([saveTokens(...), ...])` in
- * the same process land in the file one at a time. See the top-of-section
- * note for why we don't attempt cross-process locking.
+ * the same process land in the file one at a time. Across processes the
+ * callers serialize their writes; see the top-of-section note.
  */
 const fileMutex = new Mutex();
 

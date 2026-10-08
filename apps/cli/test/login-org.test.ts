@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { loadTokens } from "../src/lib/keyring.ts";
+import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
 import { readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
@@ -48,6 +48,7 @@ let fetchCalls: FetchCall[];
 
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
+import { credentialsLockHeld } from "./helpers/credentials-lock.ts";
 
 /**
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
@@ -184,6 +185,34 @@ async function readPinnedSpaceId(profile = "default"): Promise<string | undefine
   const cfg = await readConfig();
   return cfg.profiles[profile]?.spaceId;
 }
+
+describe("login credentials write", () => {
+  it("saves the new pair under the credentials lock, so no refresh in flight can write over it", async () => {
+    installDefaultResponders();
+    const heldAtSave: boolean[] = [];
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword(value: string): void {
+        heldAtSave.push(credentialsLockHeld());
+        keyring.store.set(profile, value);
+      },
+      getPassword(): string | null {
+        return keyring.store.get(profile) ?? null;
+      },
+      deletePassword(): void {
+        keyring.store.delete(profile);
+      },
+    }));
+
+    const { io } = createMemoryIO();
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com", noOrg: true },
+      io,
+    );
+
+    expect(heldAtSave).toEqual([true]);
+    expect((await loadTokens("default"))?.refreshToken).toBe("rt-xyz");
+  });
+});
 
 describe("login org-pin branch", () => {
   it("auto-pins the single org when the user belongs to exactly one", async () => {

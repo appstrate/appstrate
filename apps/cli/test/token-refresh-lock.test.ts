@@ -73,12 +73,16 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** The server side of rotation: single-use refresh tokens, family revoked on reuse. */
+/**
+ * The server side of rotation: single-use refresh tokens, family revoked on
+ * reuse. `releaseBarrier` opens the barrier early, for a child that died.
+ */
 function startTokenServer(barrierSize: number) {
   const state = { redemptions: 0, revoked: false, issued: 0 };
   const live = new Set(["rt-0"]);
   let arrived = 0;
   const allArrived = Promise.withResolvers<void>();
+  const releaseBarrier = (): void => allArrived.resolve();
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -86,7 +90,7 @@ function startTokenServer(barrierSize: number) {
     async fetch(req) {
       const { pathname } = new URL(req.url);
       if (pathname === "/barrier") {
-        if (++arrived === barrierSize) allArrived.resolve();
+        if (++arrived === barrierSize) releaseBarrier();
         await allArrived.promise;
         return new Response("go");
       }
@@ -123,11 +127,11 @@ function startTokenServer(barrierSize: number) {
       });
     },
   });
-  return { server, state };
+  return { server, state, releaseBarrier };
 }
 
-async function runChild(barrierUrl: string) {
-  const proc = Bun.spawn([process.execPath, "-e", CHILD_SCRIPT], {
+function spawnChild(barrierUrl: string) {
+  return Bun.spawn([process.execPath, "-e", CHILD_SCRIPT], {
     cwd: CLI_ROOT,
     env: {
       ...process.env,
@@ -138,6 +142,9 @@ async function runChild(barrierUrl: string) {
     stdout: "pipe",
     stderr: "pipe",
   });
+}
+
+async function collect(proc: ReturnType<typeof spawnChild>) {
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -148,7 +155,7 @@ async function runChild(barrierUrl: string) {
 
 describe("token refresh across processes", () => {
   it("redeems the refresh token once, however many processes find it expired", async () => {
-    const { server, state } = startTokenServer(CHILDREN);
+    const { server, state, releaseBarrier } = startTokenServer(CHILDREN);
     try {
       const instance = `http://127.0.0.1:${server.port}`;
       await seedLoggedInProfile("default", {
@@ -156,9 +163,11 @@ describe("token refresh across processes", () => {
         tokens: { accessToken: "at-0", expiresAt: Date.now() - 60_000, refreshToken: "rt-0" },
       });
 
-      const results = await Promise.all(
-        Array.from({ length: CHILDREN }, () => runChild(`${instance}/barrier`)),
-      );
+      const children = Array.from({ length: CHILDREN }, () => spawnChild(`${instance}/barrier`));
+      // A child that dies before the barrier must not hold the others there:
+      // its exit opens it, and its stderr reaches the assertion below.
+      for (const child of children) void child.exited.then(releaseBarrier);
+      const results = await Promise.all(children.map(collect));
 
       // Clean exits with nothing on stderr: no child saw an auth error.
       for (const { exitCode, stderr } of results) {
@@ -171,5 +180,5 @@ describe("token refresh across processes", () => {
     } finally {
       await server.stop(true);
     }
-  });
+  }, 15_000);
 });

@@ -41,25 +41,50 @@ import { CLI_CLIENT_ID } from "./cli-client.ts";
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
 
 /**
- * Bounds the wait for another process's refresh. The holder makes one HTTP
- * call, so a longer wait means it hung: give up with `FileLockBusyError`,
- * which leaves the stored credentials for the next command.
+ * The two bounds of the credentials lock, set together. A refresh holds the
+ * lock for one request, aborted at `REFRESH_REQUEST_TIMEOUT_MS`, plus a local
+ * read and write; the margin over it keeps every holder that can still run
+ * inside a waiter's patience. A waiter that gives up (`FileLockBusyError`,
+ * stored credentials untouched) therefore faces a holder no timeout can end:
+ * a stopped or suspended process.
  */
-const REFRESH_LOCK_TIMEOUT_MS = 30_000;
+const REFRESH_REQUEST_TIMEOUT_MS = 20_000;
+const CREDENTIALS_LOCK_TIMEOUT_MS = REFRESH_REQUEST_TIMEOUT_MS + 10_000;
 
 /**
  * Below the lock's 500 ms default: the critical section is one HTTP call, and
  * every process that lost the race waits on it before its own command runs.
  */
-const REFRESH_LOCK_POLL_MS = 100;
+const CREDENTIALS_LOCK_POLL_MS = 100;
 
 /**
- * One lock for every profile: serializing refreshes of different profiles
- * costs a round-trip at worst, and a profile name never has to become a path.
- * In the config dir, beside `credentials.json`, because it guards credentials.
+ * One lock for every profile: a profile name never has to become a path, and
+ * refreshes of two profiles at once are rare enough to queue. In the config
+ * dir, beside `credentials.json`, because it guards credentials.
  */
-export function getRefreshLockPath(): string {
-  return join(getConfigDir(), "token-refresh.lock");
+export function getCredentialsLockPath(): string {
+  return join(getConfigDir(), "credentials.lock");
+}
+
+/**
+ * Run `body` holding the lock every credential writer shares across
+ * processes: refresh (read → rotate → save), login's save, logout's delete.
+ * Without it a refresh that read the pair before a login or a logout would
+ * write over the new login, or resurrect what logout deleted.
+ *
+ * Never nest it: `flock(2)` is per open file description, so a second
+ * acquisition inside `body`, even in the same process, waits on the first
+ * until it times out.
+ *
+ * Where `flock` is unavailable it fails open silently: the user cannot act on
+ * a warning about refreshes they never asked for.
+ */
+export function withCredentialsLock<T>(body: () => Promise<T>): Promise<T> {
+  return withFileLock(getCredentialsLockPath(), "credential update", body, {
+    timeoutMs: CREDENTIALS_LOCK_TIMEOUT_MS,
+    pollMs: CREDENTIALS_LOCK_POLL_MS,
+    warnUnlocked: false,
+  });
 }
 
 /**
@@ -76,7 +101,7 @@ export function getRefreshLockPath(): string {
  */
 const inFlightRefresh = new Map<string, Promise<string>>();
 
-function withRefreshLock(profileName: string, fn: () => Promise<string>): Promise<string> {
+function dedupRefresh(profileName: string, fn: () => Promise<string>): Promise<string> {
   const existing = inFlightRefresh.get(profileName);
   if (existing) return existing;
   const promise = fn().finally(() => {
@@ -90,21 +115,6 @@ function withRefreshLock(profileName: string, fn: () => Promise<string>): Promis
 // exposing the map to production callers.
 export function _inFlightRefreshSizeForTesting(): number {
   return inFlightRefresh.size;
-}
-
-/**
- * Block until any in-flight refresh for `profileName` has settled. Used
- * by `appstrate logout` to prevent the classic "refresh resurrects the
- * tokens we just deleted" race: if a parallel `apiFetchRaw` is mid-
- * rotation when logout fires, its trailing `saveTokens` would write
- * fresh credentials onto disk AFTER `deleteTokens` ran, effectively
- * un-logging-out the user. Awaiting the promise (error-swallowed —
- * logout doesn't care whether the refresh succeeded) lets logout
- * sequence its final delete after the rotation commits or bails.
- */
-export async function _awaitRefreshQuiesce(profileName: string): Promise<void> {
-  const p = inFlightRefresh.get(profileName);
-  if (p) await p.catch(() => {});
 }
 
 export class ApiError extends Error {
@@ -163,9 +173,9 @@ interface AuthContext {
  * body-stream semantics and would be broken by `apiFetchRaw`'s reactive
  * 401 retry (which replays a body that may have already been consumed).
  *
- * All the silent-refresh machinery (refresh locks, proactive margin,
- * keyring scrub on invalid_grant) is reused — this is purely a composer
- * over the existing internals.
+ * All the silent-refresh machinery (refresh dedup, credentials lock,
+ * proactive margin, keyring scrub on invalid_grant) is reused — this is
+ * purely a composer over the existing internals.
  */
 export async function resolveAuthContext(profileName: string): Promise<AuthContext> {
   const profile = await resolveProfileOrThrow(profileName);
@@ -257,26 +267,19 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
  * else is calling the CLI — so read → refresh → save runs under a `flock(2)`
  * every process shares. Serializing the HTTP calls alone is not enough: a
  * process that read the pair before waiting would still present the stale
- * token. So the pair is re-read under the lock, and a refresh token other
- * than `seen` means another process rotated meanwhile: its access token is
- * the answer, with no call to the server.
- *
- * Where `flock` is unavailable the lock fails open silently: the user cannot
- * act on a warning about refreshes they never asked for.
+ * token. So the pair is re-read under the lock: nothing stored means a
+ * logout landed meanwhile, and a refresh token other than `seen` means
+ * another process rotated or logged in again — its access token is the
+ * answer, with no call to the server.
  */
 function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
-  return withRefreshLock(profileName, () =>
-    withFileLock(
-      getRefreshLockPath(),
-      "token refresh",
-      async () => {
-        const current = await loadTokens(profileName);
-        if (!current) throw noCredentials(profileName);
-        if (current.refreshToken !== seen.refreshToken) return current.accessToken;
-        return doRefresh(profileName, profile, current);
-      },
-      { timeoutMs: REFRESH_LOCK_TIMEOUT_MS, pollMs: REFRESH_LOCK_POLL_MS, warnUnlocked: false },
-    ),
+  return dedupRefresh(profileName, () =>
+    withCredentialsLock(async () => {
+      const current = await loadTokens(profileName);
+      if (!current) throw noCredentials(profileName);
+      if (current.refreshToken !== seen.refreshToken) return current.accessToken;
+      return doRefresh(profileName, profile, current);
+    }),
   );
 }
 
@@ -292,6 +295,7 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
       normalizeInstance(profile.instance),
       CLI_CLIENT_ID,
       tokens.refreshToken,
+      AbortSignal.timeout(REFRESH_REQUEST_TIMEOUT_MS),
     );
     // Server must return a rotated refresh_token alongside the new
     // access token. If it didn't, we'd lose the ability to refresh on
@@ -321,7 +325,8 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
     if (err instanceof DeviceFlowError) {
       // `invalid_grant` is terminal (revoked / rotated / reused / expired).
       // Any other error code is transient — preserve the stored tokens so
-      // the next invocation can try again.
+      // the next invocation can try again. So is anything that is not a
+      // `DeviceFlowError` at all: a network failure, or the request timeout.
       if (err.code === "invalid_grant") {
         await deleteTokens(profileName).catch(() => {});
         throw new AuthError(
@@ -405,13 +410,15 @@ export async function apiFetchRaw(
   let rotated: string;
   try {
     rotated = await refreshAccessToken(profileName, profile, stored);
-  } catch {
-    // doRefresh already wiped credentials on terminal failures and
-    // surfaces an AuthError — return the original 401 so the caller
-    // sees the same shape as a non-refresh client would. The AuthError
-    // path is reserved for cases where the CLI knows up-front there's
-    // nothing to send.
-    return res;
+  } catch (err) {
+    // An AuthError means the session is gone (rejected, expired, logged
+    // out meanwhile) and the credentials with it: the original 401 is the
+    // truthful answer, and `apiFetch` turns it into a re-login message.
+    // Anything else — a busy credentials lock, a timeout, a 5xx — left the
+    // credentials intact, and reporting it as a 401 would send the user to
+    // log in again for nothing.
+    if (err instanceof AuthError) return res;
+    throw err;
   }
   return doFetch(rotated);
 }

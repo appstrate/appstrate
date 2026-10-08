@@ -323,11 +323,16 @@ export async function pollDeviceFlow(
  *     prompt `appstrate login`.
  *   - transient HTTP errors (network, 5xx): surfaced so the caller can
  *     decide to retry or fall through to re-auth.
+ *
+ * `signal` bounds the whole exchange, body included; an abort rejects with
+ * the signal's reason (a `TimeoutError` for `AbortSignal.timeout`), never a
+ * `DeviceFlowError`, so it reads as transient.
  */
 export async function refreshCliTokens(
   instance: string,
   clientId: string,
   refreshToken: string,
+  signal?: AbortSignal,
 ): Promise<DeviceTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -341,6 +346,7 @@ export async function refreshCliTokens(
       "User-Agent": CLI_USER_AGENT,
     },
     body,
+    signal,
   });
   if (!res.ok) {
     const err = await parseErrorBody(res);
