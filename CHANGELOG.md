@@ -34,6 +34,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `<store>.myshopify.com` host, by id, never a value, and exits 1 while one
   remains. What each line means and how to fix it:
   `scripts/migration/README.md`.
+- **Migration `0083` refuses the boot while a connection label is empty,
+  starts or ends with whitespace, holds a control, invisible or bidirectional
+  character, or exceeds 80 UTF-16 units** (#1786) — the rule the API already
+  enforces, now a database CHECK. Only a database that applied `0077` without
+  running `0032` can hold one; production is expected at 0. Count them first
+  with the read-only pre-flight in the header of
+  `scripts/migration/0038-normalize-connection-labels.sql`; at 0 there is
+  nothing to do. Otherwise stop the app container (`docker stop`), `pg_dump`,
+  run
+  `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0038-normalize-connection-labels.sql`,
+  deploy: it normalizes those labels, renames the duplicates it creates, turns
+  a label left empty into `Connexion N`, and lists every label it rewrites,
+  for their owners.
 
 ### Changed
 

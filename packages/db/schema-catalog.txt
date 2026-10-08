@@ -692,7 +692,7 @@ constraint integration_connections integration_connections_auth_key_valid CHECK 
 constraint integration_connections integration_connections_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_end_user_not_shared CHECK (((NOT shared_with_org) OR (user_id IS NOT NULL)))
 constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
-constraint integration_connections integration_connections_label_not_empty CHECK ((label <> ''::text))
+constraint integration_connections integration_connections_label_normalized CHECK (((label <> ''::text) AND (label !~ '^[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]|[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]$'::text) AND (label !~ '[\u0001-\u001F\u007F-\u009F\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\U000E0000-\U000E007F]'::text) AND ((char_length(label) + regexp_count(label, '[\U00010000-\U0010FFFF]'::text)) <= 80)))
 constraint integration_connections integration_connections_pkey PRIMARY KEY (id)
 constraint integration_connections integration_connections_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
