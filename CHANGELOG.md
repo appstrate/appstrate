@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (API): `POST /api/runs/remote` no longer answers
+  `409 agent_not_ready`** (#1783). A connection cascade that changed between
+  the readiness check and the run's creation answers
+  `409 missing_integration_connection` with its `errors[]`, like the readiness
+  check. A cascade binding several connections to one integration answers the
+  same 409 with one `remote_binds_one_connection` item per integration
+  (`field: integrations.<id>`). A client matching on the `agent_not_ready`
+  code breaks; no known consumer reads it (the CLI prints the status and body).
+
 ### Fixed
 
 - **A `400 validation_failed` response reports a missing body field with
