@@ -15,13 +15,13 @@ import type { KeyValueCache, CacheSetOptions } from "../../src/infra/cache/inter
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import { decrypt, encrypt } from "@appstrate/connect";
 
-/** Two buckets — their keys are opaque to the store. */
+/** Two buckets — their keys are opaque to the store; `expiresAt` must survive the round trip. */
 const JAR: CookieJar = new Map([
-  ["@s/shop https://a.example", ["a=1", "b=2"]],
-  ["@s/shop https://b.example", ["c=3"]],
+  ["@s/shop https://a.example", [{ pair: "a=1" }, { pair: "b=2", expiresAt: 1_900_000_000_000 }]],
+  ["@s/shop https://b.example", [{ pair: "c=3" }]],
 ]);
 
-const jarOf = (cookie: string): CookieJar => new Map([["bucket", [cookie]]]);
+const jarOf = (pair: string): CookieJar => new Map([["bucket", [{ pair }]]]);
 
 describe("LocalCookieJarStore", () => {
   it("returns an empty jar for a missing entry", async () => {
