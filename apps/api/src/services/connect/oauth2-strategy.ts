@@ -12,7 +12,7 @@
  *                  consumes the already-exchanged result.
  *
  * Re-acquisition (refresh) is not a strategy method — the live resolvers call
- * `forceRefreshIntegrationConnection` directly, since only `oauth2` refreshes.
+ * `refreshConnectionCredential`, since only `oauth2` refreshes.
  *
  * Behaviour is unchanged from the inline route logic it replaces.
  */

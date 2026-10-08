@@ -157,6 +157,42 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(blob.needsReconnection).toBe(true);
     });
 
+    it("on a 2xx invalid_grant error object: flags needsReconnection and throws OAUTH_REFRESH_REVOKED, never echoing the body", async () => {
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        accessToken: "stale",
+        refreshToken: "rt-revoked",
+        expiresAtMs: Date.now() - 10_000,
+      });
+
+      // Some IdPs answer a failed grant with 200 + an RFC 6749 §5.2 error object,
+      // and may echo a token beside it.
+      mockFetch(
+        async () =>
+          new Response(
+            JSON.stringify({ error: "invalid_grant", refresh_token: "echoed-secret-rt" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      let caught: unknown;
+      try {
+        await forceRefreshOAuthModelProviderToken(id);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
+      expect((caught as ApiError).status).toBe(410);
+      expect((caught as ApiError).message).not.toContain("echoed-secret-rt");
+      expect((caught as ApiError).message).not.toContain("{");
+
+      const blob = await readBlob(id);
+      expect(blob.needsReconnection).toBe(true);
+    });
+
     it("on already-flagged credential: short-circuits with OAUTH_CONNECTION_NEEDS_RECONNECTION (no fetch)", async () => {
       const id = await seedOAuthCredential({
         orgId,

@@ -11,7 +11,7 @@
  *
  * Refresh seam: same as the live-credentials resolver — neither function takes
  * an injectable refresh function. The refresh goes through
- * `forceRefreshIntegrationConnection` → `performRefreshTokenExchange`, which
+ * `refreshConnectionCredential` → `performRefreshTokenExchange`, which
  * POSTs to the manifest's `auths.{key}.tokenUrl`. We point that URL at a
  * controllable `Bun.serve` and seed an `integration_oauth_clients` row so the
  * `RefreshContext` builds; the server returns
@@ -157,6 +157,7 @@ describe("credential-proxy integration-resolver", () => {
     authKey?: string;
     sharedWithOrg?: boolean;
     needsReconnection?: boolean;
+    scopes?: string[];
   }): Promise<string> {
     const accountId = opts.accountId ?? "acct-1";
     const ciphertext = encryptCredentialEnvelope({
@@ -177,7 +178,7 @@ describe("credential-proxy integration-resolver", () => {
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
-        scopesGranted: ["read"],
+        scopesGranted: opts.scopes ?? ["read"],
         sharedWithOrg: opts.sharedWithOrg ?? false,
         needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
@@ -536,6 +537,84 @@ describe("credential-proxy integration-resolver", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row!.needsReconnection).toBe(false);
+  });
+
+  describe("a forced refresh that narrows the grant is checked against the space's scope floor", () => {
+    // The refresh that narrows `scopes_granted` is the only one that can see the shrink — it
+    // rewrites the column the shrink is measured against — so the proxy must check it too.
+    beforeEach(async () => {
+      const base = gmailManifest(token.url);
+      const primary = (base["auths"] as Record<string, Record<string, unknown>>)["primary"];
+      const scoped: Record<string, unknown> = {
+        ...base,
+        version: "1.0.1",
+        auths: {
+          primary: {
+            ...primary,
+            scope_catalog: [
+              { value: "read", label: "Read" },
+              { value: "send", label: "Send" },
+              { value: "delete", label: "Delete" },
+            ],
+          },
+        },
+        tools_policy: {
+          list_messages: { required_scopes: { primary: ["read"] } },
+          delete_message: { required_scopes: { primary: ["delete"] } },
+        },
+      };
+      // The floor reads the draft; the proxy reads the latest published version.
+      await db
+        .update(packages)
+        .set({ draftManifest: scoped })
+        .where(eq(packages.id, INTEGRATION_ID));
+      await seedPublishedVersion(INTEGRATION_ID, "1.0.1", { manifest: scoped });
+    });
+
+    async function activateAgent(name: string, tools: string[]) {
+      await seedPackage({
+        id: name,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: {
+          name,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: name,
+          dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
+          integrations_configuration: { [INTEGRATION_ID]: { tools } },
+        },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, name);
+    }
+
+    it("flags needsReconnection when the shrink drops below the floor, still serving the refreshed token", async () => {
+      await activateAgent("@cproxy/deleter", ["delete_message"]);
+      const connId = await seedConnection({
+        userId: ctx.user.id,
+        scopes: ["read", "send", "delete"],
+      });
+      token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read send" });
+
+      const refreshed = await forceRefreshIntegrationProxyCredentials(input());
+      expect(JSON.stringify(refreshed!.payload)).toContain("narrowed-access");
+      expect(await flaggedConnection(connId)).toBe(true);
+    });
+
+    it("does not flag a shrink that still covers the floor", async () => {
+      await activateAgent("@cproxy/reader", ["list_messages"]);
+      const connId = await seedConnection({
+        userId: ctx.user.id,
+        scopes: ["read", "send", "delete"],
+      });
+      token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read" });
+
+      const refreshed = await forceRefreshIntegrationProxyCredentials(input());
+      expect(JSON.stringify(refreshed!.payload)).toContain("narrowed-access");
+      expect(await flaggedConnection(connId)).toBe(false);
+    });
   });
 
   it("does not resolve another actor's connection (actor isolation, never leaks B's credentials)", async () => {

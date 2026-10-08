@@ -3,25 +3,16 @@
 /**
  * OAuth2 authorization-code exchange for the integration OAuth flow
  * (`handleIntegrationOAuthCallback`).
- *
- * Centralises the five error branches (network failure, non-OK response,
- * `invalid_grant` revocation, non-JSON body, missing `access_token`) and
- * the post-revoke state hygiene. Without this helper, the two paths
- * could drift on how they classify token errors — a real security
- * concern because misclassifying a transient failure as `"revoked"`
- * would force unnecessary reconnects, and misclassifying a revoked
- * token as `"transient"` would let a dead refresh-token linger.
  */
 
 import { OAuthCallbackError } from "./oauth.ts";
 import { oauthEgressFetch } from "./oauth-egress.ts";
-import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
   assertClientAuthCoherent,
-  parseTokenErrorResponse,
   parseTokenResponse,
+  readTokenResponse,
   type ParsedTokenResponse,
 } from "./token-utils.ts";
 import type { OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
@@ -86,12 +77,9 @@ interface ExchangeAuthorizationCodeResult {
  * POST `grant_type=authorization_code` to the IdP's token endpoint and
  * classify the response.
  *
- * Throws {@link OAuthCallbackError} on:
- *   - Network failure (`kind="transient"`)
- *   - Non-OK HTTP response, classified by {@link parseTokenErrorResponse}
- *     (deletes state on `"revoked"`)
- *   - Non-JSON body (`kind="transient"`)
- *   - Missing `access_token` in body (`kind="transient"`)
+ * Throws {@link OAuthCallbackError} on a network failure (`kind="transient"`)
+ * and on every response {@link readTokenResponse} classifies as a failure.
+ * State is deleted on every `"revoked"` classification.
  */
 export async function exchangeAuthorizationCode(
   input: ExchangeAuthorizationCodeInput,
@@ -142,23 +130,11 @@ export async function exchangeAuthorizationCode(
     );
   }
 
-  if (!response.ok) {
-    const body = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
-    const classification = parseTokenErrorResponse(response.status, body);
-    // Don't concatenate the raw IdP body into the error message — some
-    // IdPs echo the rejected `code` back in 400 bodies, so a generic
-    // catcher logging `err.message` would surface them. Callers needing
-    // the body for diagnostics read it off the typed `body` field.
-    const summary =
-      classification.error !== undefined
-        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
-        : `HTTP ${response.status}`;
-    // The auth code is dead by the time the IdP rejects with `revoked`
-    // (codes are one-shot), so the PKCE state row will never be useful
-    // again. Delete it instead of letting it sit until the 10-minute
-    // TTL. Errors during delete are swallowed — a stale row is a QoS
-    // issue, not a security one (the code is already dead).
-    if (classification.kind === "revoked") {
+  const read = await readTokenResponse(response);
+  if (!read.ok) {
+    // An auth code is one-shot, so once `revoked` its PKCE state row is never
+    // useful again. A stale row is a QoS issue, not a security one.
+    if (read.kind === "revoked") {
       try {
         await input.store.delete(input.state);
       } catch {
@@ -166,38 +142,17 @@ export async function exchangeAuthorizationCode(
       }
     }
     throw new OAuthCallbackError(
-      `Token exchange failed for '${input.errorLabel}': ${summary}`,
-      classification.kind,
+      `Token exchange failed for '${input.errorLabel}': ${read.summary}`,
+      read.kind,
       input.errorLabel,
-      response.status,
-      body,
-      classification.error,
-      classification.errorDescription,
+      read.status,
+      read.body,
+      read.error,
+      read.errorDescription,
+      read.cause === undefined ? undefined : { cause: read.cause },
     );
   }
 
-  let raw: Record<string, unknown>;
-  try {
-    raw = (await parseJsonUnder(response, MAX_TOKEN_BODY_BYTES)) as Record<string, unknown>;
-  } catch (err) {
-    // The read already consumed the stream, so `body` (the parameter
-    // built for exactly this) cannot be filled in here — the SyntaxError (or the size refusal) is
-    // the only remaining evidence of WHAT the provider sent. An empty 200 and
-    // an HTML interstitial are the same sentence without it. `status` is
-    // passed for the same reason; the four `undefined`s are the positional
-    // tail this class predates `ErrorOptions` by.
-    throw new OAuthCallbackError(
-      `Token exchange returned non-JSON response for '${input.errorLabel}'`,
-      "transient",
-      input.errorLabel,
-      response.status,
-      undefined,
-      undefined,
-      undefined,
-      { cause: err },
-    );
-  }
-
-  const parsed = parseTokenResponse(raw, input.scopesRequested);
-  return { parsed, raw };
+  const parsed = parseTokenResponse(read.raw, input.scopesRequested);
+  return { parsed, raw: read.raw };
 }

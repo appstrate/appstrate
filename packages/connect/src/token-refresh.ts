@@ -3,7 +3,7 @@
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import {
   parseTokenResponse,
-  parseTokenErrorResponse,
+  readTokenResponse,
   buildTokenHeaders,
   buildTokenBody,
   assertClientAuthCoherent,
@@ -11,7 +11,6 @@ import {
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { oauthEgressFetch } from "./oauth-egress.ts";
-import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 
 export interface RefreshContext {
   /**
@@ -43,17 +42,16 @@ export interface RefreshContext {
  *
  * `kind` discriminates between two cases that callers MUST treat differently:
  *
- * - `"revoked"`: the OAuth server responded with `HTTP 400` or `HTTP 401` +
- *   body `{ "error": "invalid_grant" }` per RFC 6749 §5.2. This is the only
- *   reliable signal that the refresh token is dead and the user must
- *   reconnect. Callers should set `needsReconnection = true`. A 401 carrying
- *   this code reaches here because §5.2 mandates that status whenever client
- *   credentials travelled in the `Authorization` header; while 401 bodies went
- *   unparsed such a response classified as `"transient"`, so a dead token was
- *   retried until the failure-streak threshold escalated it instead.
+ * - `"revoked"`: the OAuth server answered `{ "error": "invalid_grant" }`
+ *   (RFC 6749 §5.2) on `HTTP 400`, `HTTP 401` (mandated by §5.2 when client
+ *   credentials travelled in the `Authorization` header), or a 2xx with no
+ *   `access_token`. This is the only reliable signal that the refresh token is
+ *   dead and the user must reconnect. Callers should set
+ *   `needsReconnection = true`.
  *
  * - `"transient"`: every other failure mode (network error, timeout, 5xx,
- *   non-JSON body, other 4xx, other OAuth error codes). The credential
+ *   non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
+ *   `access_token` nor `error`). The credential
  *   might still be valid — callers MUST NOT flag the connection, and should
  *   just fail the current request. Flagging on transient errors produces
  *   false positives that force users to reconnect unnecessarily, especially
@@ -149,53 +147,24 @@ export async function performRefreshTokenExchange(
     throw new RefreshError(`${opts.label} network error: ${getErrorMessage(err)}`, "transient");
   }
 
-  if (!response.ok) {
-    const text = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
-    const classification = parseTokenErrorResponse(response.status, text);
-    // Mirror OAuthCallbackError: the raw IdP body lives on the typed
-    // `body` field, the message carries only the classification summary
-    // so a generic catcher logging `err.message` cannot leak whatever
-    // the IdP echoed back (some servers reflect the rejected token).
-    const summary =
-      classification.error !== undefined
-        ? `${classification.error}${classification.errorDescription ? ` — ${classification.errorDescription}` : ""}`
-        : `HTTP ${response.status}`;
+  // A 2xx without `access_token` is a FAILED refresh, never a success with the
+  // caller's current token substituted: that would persist the very token the
+  // refresh exists to replace and reset `needsReconnection` / the failure
+  // streak on a dead credential.
+  const read = await readTokenResponse(response);
+  if (!read.ok) {
     throw new RefreshError(
-      `${opts.label} failed: ${summary}`,
-      classification.kind,
-      response.status,
-      text,
+      `${opts.label} failed: ${read.summary}`,
+      read.kind,
+      read.status,
+      read.body,
+      read.cause === undefined ? undefined : { cause: read.cause },
     );
   }
 
-  let raw: Record<string, unknown>;
-  try {
-    raw = (await parseJsonUnder(response, MAX_TOKEN_BODY_BYTES)) as Record<string, unknown>;
-  } catch (err) {
-    // Same as the exchange path: the read consumed the stream, so the
-    // SyntaxError is the only surviving description of what came back.
-    throw new RefreshError(
-      `${opts.label} returned non-JSON response`,
-      "transient",
-      response.status,
-      undefined,
-      { cause: err },
-    );
-  }
-
-  // No access-token fallback: a 2xx body without `access_token` is a FAILED
-  // refresh, and `parseTokenResponse` throws on it. Substituting the caller's
-  // current token here recorded the exchange as a success — persisting the very
-  // token the refresh existed to replace, and resetting `needsReconnection` /
-  // the failure streak with it. Real producers of that body exist (IdPs that
-  // answer `200 {"error":"invalid_grant"}`, captive-portal JSON, a bare `{}`),
-  // and with no `expires_in` the row also lost its `expires_at`, after which
-  // neither the proactive lead window nor the failure escalation could fire
-  // again: a dead credential marked healthy, permanently.
-  //
-  // `refreshToken` as the third argument is a DIFFERENT case and stays: RFC
-  // 6749 §6 lets the server omit `refresh_token` to mean "keep the one you
-  // have", so non-rotating providers (Google, Slack, GitHub) depend on it.
-  const parsed = parseTokenResponse(raw, undefined, refreshToken);
-  return { parsed, raw };
+  // `refreshToken` as the third argument is a DIFFERENT case: RFC 6749 §6 lets
+  // the server omit `refresh_token` to mean "keep the one you have", so
+  // non-rotating providers (Google, Slack, GitHub) depend on it.
+  const parsed = parseTokenResponse(read.raw, undefined, refreshToken);
+  return { parsed, raw: read.raw };
 }
