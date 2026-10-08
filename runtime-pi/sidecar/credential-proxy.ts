@@ -551,7 +551,7 @@ function wrapRequestError(err: unknown, integrationId: string, host: string): Ap
       return {
         ok: false,
         status: 502,
-        error: `Upstream request failed${failure.code ? `: ${failure.code}` : ""} (${host})`,
+        error: `Upstream request failed${failure.errno ? `: ${failure.errno}` : ""} (${host})`,
       };
   }
 }

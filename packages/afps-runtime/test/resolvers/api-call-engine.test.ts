@@ -9,6 +9,7 @@
 
 import { describe, it, expect, mock, afterEach } from "bun:test";
 import {
+  API_CALL_FAILURE_STATUS,
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
@@ -16,6 +17,7 @@ import {
   ApiCallRefusedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
+import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/credential-guard.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
@@ -691,18 +693,49 @@ describe("classifyApiCallFailure", () => {
   it("names what every path maps: refusal, redirect, timeout, transport", () => {
     expect(classifyApiCallFailure(new ApiCallRefusedError("unresolvable", "m"))).toEqual({
       kind: "unresolvable",
+      code: "upstream_unresolvable",
       redirect: false,
       message: "m",
     });
     expect(classifyApiCallFailure(new ApiCallRefusedError("ssrf", "m", true))).toEqual({
       kind: "ssrf",
+      code: "blocked_target",
       redirect: true,
       message: "m",
     });
     expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
-    ).toEqual({ kind: "transport", redirect: false, message: "refused", code: "ECONNREFUSED" });
+    ).toEqual({
+      kind: "transport",
+      code: "upstream_unreachable",
+      redirect: false,
+      message: "refused",
+      errno: "ECONNREFUSED",
+    });
+  });
+
+  // The one vocabulary of the three paths: a change here is a change of every path's wire.
+  it("pins each kind's shared code and status", () => {
+    const pinned = [
+      [new ApiCallRefusedError("not_authorized", "m"), "unauthorized_target", 403],
+      [new ApiCallRefusedError("ssrf", "m"), "blocked_target", 403],
+      [new ApiCallRefusedError("unresolvable", "m"), "upstream_unresolvable", 502],
+      [new InvalidHeaderValueError("X-Api-Key"), "credential_unusable", 502],
+      [new DOMException("late", "TimeoutError"), "upstream_timeout", 504],
+      [new Error("reset"), "upstream_unreachable", 502],
+    ] as const;
+    for (const [err, code, status] of pinned) {
+      const failure = classifyApiCallFailure(err);
+      expect(failure.code).toBe(code);
+      expect(API_CALL_FAILURE_STATUS[failure.code]).toBe(status);
+    }
+    expect(URL_POLICY_REFUSAL_CODE).toEqual({
+      unrendered: "unauthorized_target",
+      unauthorized: "unauthorized_target",
+      exfiltration: "credential_exfiltration_refused",
+    });
+    expect(API_CALL_FAILURE_STATUS.credential_exfiltration_refused).toBe(403);
   });
 });
 

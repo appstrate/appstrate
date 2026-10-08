@@ -87,34 +87,59 @@ export class ApiCallRefusedError extends Error {
   }
 }
 
+/** The failure codes of every `api_call` path (platform, sidecar, CLI) and their HTTP status. */
+export const API_CALL_FAILURE_STATUS = {
+  unauthorized_target: 403,
+  blocked_target: 403,
+  credential_exfiltration_refused: 403,
+  upstream_unresolvable: 502,
+  credential_unusable: 502,
+  upstream_unreachable: 502,
+  upstream_timeout: 504,
+} as const;
+
+export type ApiCallFailureCode = keyof typeof API_CALL_FAILURE_STATUS;
+
+/** Each {@link ApiCallFailureClass} kind's code. */
+const FAILURE_CODE = {
+  not_authorized: "unauthorized_target",
+  ssrf: "blocked_target",
+  unresolvable: "upstream_unresolvable",
+  /** A header value is no HTTP field value; nothing was sent. */
+  invalid_header: "credential_unusable",
+  timeout: "upstream_timeout",
+  transport: "upstream_unreachable",
+} as const satisfies Record<string, ApiCallFailureCode>;
+
 /** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
 export interface ApiCallFailureClass {
-  /** `invalid_header`: a header value is no HTTP field value; nothing was sent. */
-  kind: "not_authorized" | "ssrf" | "unresolvable" | "invalid_header" | "timeout" | "transport";
+  kind: keyof typeof FAILURE_CODE;
+  /** The shared code of `kind`; its status is in {@link API_CALL_FAILURE_STATUS}. */
+  code: (typeof FAILURE_CODE)[keyof typeof FAILURE_CODE];
   /** A redirect hop was refused, not the initial target. */
   redirect: boolean;
   /** The refusal's message (hosts redacted); a transport error's own message. */
   message: string;
-  code?: string;
+  /** A transport error's own code (`ECONNREFUSED`, …). */
+  errno?: string;
 }
 
 /** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
 export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
-  if (err instanceof ApiCallRefusedError) {
-    return { kind: err.kind, redirect: err.redirect, message: err.message };
-  }
-  if (err instanceof InvalidHeaderValueError) {
-    return { kind: "invalid_header", redirect: false, message: err.message };
-  }
+  const failure = (kind: ApiCallFailureClass["kind"], message: string, redirect = false) => ({
+    kind,
+    code: FAILURE_CODE[kind],
+    redirect,
+    message,
+  });
+  if (err instanceof ApiCallRefusedError) return failure(err.kind, err.message, err.redirect);
+  if (err instanceof InvalidHeaderValueError) return failure("invalid_header", err.message);
   const error = err instanceof Error ? err : new Error(String(err));
-  if (error.name === "TimeoutError")
-    return { kind: "timeout", redirect: false, message: error.message };
-  const code = (error as { code?: unknown }).code;
+  if (error.name === "TimeoutError") return failure("timeout", error.message);
+  const errno = (error as { code?: unknown }).code;
   return {
-    kind: "transport",
-    redirect: false,
-    message: error.message,
-    ...(typeof code === "string" ? { code } : {}),
+    ...failure("transport", error.message),
+    ...(typeof errno === "string" ? { errno } : {}),
   };
 }
 

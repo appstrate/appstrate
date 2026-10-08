@@ -4,6 +4,7 @@
 /** Credential-exfiltration guard of the three `api_call` paths: docs/architecture/SIDECAR.md. */
 
 import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
+import type { ApiCallFailureCode } from "./api-call-engine.ts";
 import { referencesField } from "./template-vars.ts";
 
 /** Why a call is refused before anything is sent; {@link urlPolicyRefusalMessage} says it. */
@@ -57,6 +58,13 @@ export function redactionFields(
 ): Readonly<Record<string, string>> {
   return policy.substitutesCredential ? fields : {};
 }
+
+/** Each refusal's shared failure code. */
+export const URL_POLICY_REFUSAL_CODE = {
+  unrendered: "unauthorized_target",
+  unauthorized: "unauthorized_target",
+  exfiltration: "credential_exfiltration_refused",
+} as const satisfies Record<UrlPolicyRefusal, ApiCallFailureCode>;
 
 /** The refusal's message. Names no value: a field that failed to render may be a secret. */
 export function urlPolicyRefusalMessage(refusal: UrlPolicyRefusal, integrationId: string): string {

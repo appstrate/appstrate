@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one vocabulary of api_call failure codes (#1761)
+
+- `API_CALL_FAILURE_STATUS` and `ApiCallFailureCode` (`./resolvers`): the
+  snake_case failure codes every `api_call` path shares
+  (`unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`,
+  `upstream_unresolvable`, `credential_unusable`, `upstream_unreachable`,
+  `upstream_timeout`) and their HTTP status. `URL_POLICY_REFUSAL_CODE` maps
+  each `UrlPolicyRefusal` to its code.
+- `classifyApiCallFailure` returns the kind's shared `code`; a transport
+  error's own code (`ECONNREFUSED`, …) is renamed from `code` to `errno`.
+
 ### Fixed — a sticky cookie expires (#1778)
 
 - `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at
