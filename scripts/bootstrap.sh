@@ -843,6 +843,13 @@ _appstrate_bootstrap() {
   # earlier in PATH (dev machine with `bun link`, stale /usr/local/bin
   # shadowed by ~/.local/bin) would silently shadow the verified one —
   # defeating the trust chain. `$DEST` is the exact file we wrote + chmod'd.
+  #
+  # APPSTRATE_VERSION means a release tag here (`v1.0.0`, `latest`) but a
+  # Docker image tag to `appstrate install` (`1.0.0`), which writes it to
+  # `.env` as is. The binary we just verified IS the pinned release, and
+  # lockstep derives the image tag from its own version, so the child must
+  # not inherit ours (#1788).
+  unset APPSTRATE_VERSION
   exec "$DEST" install --yes "$@"
 
 }

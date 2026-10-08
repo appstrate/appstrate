@@ -362,10 +362,12 @@ jobs:
           # actually exec'd it at the tail of the trust chain. Echoes all
           # argv so we can also assert the `--yes` contract (#199): the
           # bootstrap MUST pass --yes to sidestep the Bun macOS setRawMode
-          # regression in the compiled binary.
+          # regression in the compiled binary. Also reports whether it
+          # inherited APPSTRATE_VERSION, which the bootstrap must withhold (#1788).
           cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
           #!/usr/bin/env bash
           echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
+          echo "FAKE_CLI_ENV APPSTRATE_VERSION=${APPSTRATE_VERSION-<unset>}"
           exit 0
           CLI
           chmod +x "$ROOT/release/appstrate-linux-x64"
@@ -494,9 +496,13 @@ jobs:
           # `curl|bash -s -- --yes` triggers the legacy all-in-one path.
           # The CLI MUST receive --yes so the Bun setRawMode regression
           # (#199) is sidestepped by construction (no clack prompt fires).
+          # APPSTRATE_VERSION is the documented pin, a release tag with its `v`:
+          # the CLI would write it to `.env` as a Docker image tag, which has
+          # none, so it must not reach the CLI (#1788).
           echo "::group::--yes (legacy auto-install)"
           set +e
           YES_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-yes" \
+            APPSTRATE_VERSION=v1.0.0-dry \
             APPSTRATE_FORCE_DUAL=1 \
             bash /tmp/bootstrap.sh --yes 2>&1)
           rc=$?
@@ -508,6 +514,8 @@ jobs:
             || { echo "::error::bootstrap did not exec the CLI under --yes"; exit 1; }
           echo "$YES_OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
             || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
+          echo "$YES_OUT" | grep -qF "FAKE_CLI_ENV APPSTRATE_VERSION=<unset>" \
+            || { echo "::error::bootstrap leaked APPSTRATE_VERSION into appstrate install (regression for #1788)"; exit 1; }
           test -x "$GITHUB_WORKSPACE/bin-yes/appstrate"
           echo "::endgroup::"
           echo "✓ --yes path OK"
