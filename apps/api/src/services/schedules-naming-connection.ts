@@ -4,12 +4,16 @@
  * Schedules whose `connection_overrides` name a connection, and the disable that losing it applies
  * to the ones another actor armed: never refused, never shrunk to the survivors — the overrides
  * stay as written and re-enabling makes that actor choose again.
+ *
+ * Every writer that locks several schedules locks them in id order, in one statement: a schedule
+ * one transaction holds as its own is another's foreign one.
  */
 
-import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { asc, inArray, or, sql, type SQL } from "drizzle-orm";
 import { schedules, type ScheduleDisabledReason } from "@appstrate/db/schema";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import type { Actor } from "../lib/actor.ts";
-import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import type { Tx } from "../lib/db-helpers.ts";
 
 /** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
 export function scheduleOverridesName(connectionId: string): SQL {
@@ -19,33 +23,31 @@ export function scheduleOverridesName(connectionId: string): SQL {
 }
 
 /** A connection and the actor owning it. */
-export interface OwnedConnection {
+interface OwnedConnection {
   id: string;
   owner: Actor;
 }
 
-/** Null-safe: the actor column `owner` does not use is NULL on every schedule it armed. */
-function notArmedBy(owner: Actor): SQL {
-  const column = owner.type === "end_user" ? schedules.endUserId : schedules.userId;
-  return sql`${column} IS DISTINCT FROM ${owner.id}`;
+/** The columns {@link isForeignNaming} judges a schedule on. */
+interface NamingSchedule {
+  userId: string | null;
+  endUserId: string | null;
+  enabled: boolean;
+  connectionOverrides: ConnectionOverrides | null;
 }
 
-/**
- * The enabled schedules naming one of `connections` that its owner did not arm, in id order. No
- * space predicate: an enabled schedule may still name a connection of another space (a re-enable
- * whose fired version does not resolve skips the reach check).
- */
-export function foreignSchedulesNaming(
-  executor: DbOrTx,
-  connections: readonly OwnedConnection[],
-  filter?: SQL,
-) {
-  const naming = connections.map((c) => and(scheduleOverridesName(c.id), notArmedBy(c.owner)));
-  return executor
-    .select({ id: schedules.id })
-    .from(schedules)
-    .where(and(eq(schedules.enabled, true), or(...naming) ?? sql`false`, filter))
-    .orderBy(asc(schedules.id));
+/** The schedule's actor is `actor`; the column `actor` does not use is NULL on its schedules. */
+export function scheduleActorIs(schedule: NamingSchedule, actor: Actor): boolean {
+  return (actor.type === "end_user" ? schedule.endUserId : schedule.userId) === actor.id;
+}
+
+/** An enabled schedule naming `connection` whose actor is not the connection's owner. */
+export function isForeignNaming(schedule: NamingSchedule, connection: OwnedConnection): boolean {
+  return (
+    schedule.enabled &&
+    !scheduleActorIs(schedule, connection.owner) &&
+    Object.values(schedule.connectionOverrides ?? {}).some((ids) => ids.includes(connection.id))
+  );
 }
 
 /** The `updated_at` bump fails the compare-and-set of a PATCH read before it. */
@@ -62,17 +64,33 @@ export async function disableSchedules(
 }
 
 /**
- * Disable {@link foreignSchedulesNaming} `connections`, locked; returns their ids, whose jobs the
- * caller removes once committed.
+ * Disable, with `reason`, the schedules {@link isForeignNaming} one of `connections`; returns
+ * their ids, whose jobs the caller removes once committed. Every schedule naming one is locked,
+ * with those `alsoLock` matches, in one id-ordered statement, for a caller that writes those next.
  */
 export async function disableForeignSchedules(
   tx: Tx,
   connections: readonly OwnedConnection[],
   reason: ScheduleDisabledReason,
+  alsoLock?: SQL,
 ): Promise<string[]> {
-  if (connections.length === 0) return [];
-  const rows = await foreignSchedulesNaming(tx, connections).for("update");
-  const ids = rows.map((row) => row.id);
+  const naming = or(...connections.map((c) => scheduleOverridesName(c.id)));
+  if (!naming && !alsoLock) return [];
+  const rows = await tx
+    .select({
+      id: schedules.id,
+      userId: schedules.userId,
+      endUserId: schedules.endUserId,
+      enabled: schedules.enabled,
+      connectionOverrides: schedules.connectionOverrides,
+    })
+    .from(schedules)
+    .where(or(naming, alsoLock))
+    .orderBy(asc(schedules.id))
+    .for("update");
+  const ids = rows
+    .filter((row) => connections.some((c) => isForeignNaming(row, c)))
+    .map((row) => row.id);
   await disableSchedules(tx, ids, reason);
   return ids;
 }

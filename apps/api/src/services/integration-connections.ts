@@ -109,7 +109,8 @@ import { fetchMcpServerManifest } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   disableSchedules,
-  foreignSchedulesNaming,
+  isForeignNaming,
+  scheduleActorIs,
   scheduleOverridesName,
 } from "./schedules-naming-connection.ts";
 import {
@@ -2046,6 +2047,27 @@ export async function deleteIntegrationOAuthClient(
               ),
             )
             .returning(deletedConnectionOwner);
+    // Each forget below locks its connection's rows; locked here first for all of them, in the
+    // plan's order, so two batches cannot each hold a row the other waits on.
+    const forgotten = deletedConns.map((c) => c.id);
+    if (forgotten.length > 0) {
+      await tx
+        .select({ id: integrationPins.id })
+        .from(integrationPins)
+        .where(arrayOverlaps(integrationPins.connectionIds, forgotten))
+        .orderBy(
+          asc(integrationPins.packageId),
+          asc(integrationPins.integrationId),
+          asc(integrationPins.id),
+        )
+        .for("update");
+      await tx
+        .select({ id: schedules.id })
+        .from(schedules)
+        .where(or(...forgotten.map((id) => scheduleOverridesName(id))))
+        .orderBy(asc(schedules.id))
+        .for("update");
+    }
     const disabledScheduleIds: string[] = [];
     for (const row of deletedConns) {
       disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
@@ -3064,9 +3086,9 @@ interface ConnectionForgetPlan {
 /**
  * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
  * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
- * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules, for a caller that applies the
- * plan in the same transaction. `scheduleFilter` narrows both schedule lists: a schedule may name a
- * connection of another space.
+ * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
+ * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
+ * lists: a schedule may name a connection of another space.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
@@ -3090,43 +3112,58 @@ export async function planConnectionForget(
       asc(integrationPins.integrationId),
       asc(integrationPins.id),
     );
+  // Every actor's schedules in one id-ordered statement (`schedules-naming-connection.ts`), split
+  // below: the owner's are rewritten, the others' disabled.
   const scheduleQuery = executor
     .select({
       id: schedules.id,
       name: schedules.name,
       agentPackageId: schedules.packageId,
+      createdAt: schedules.createdAt,
+      userId: schedules.userId,
+      endUserId: schedules.endUserId,
       enabled: schedules.enabled,
       connectionOverrides: schedules.connectionOverrides,
     })
     .from(schedules)
-    .where(and(actorFilter(owner, schedules), scheduleOverridesName(id), scheduleFilter))
-    .orderBy(asc(schedules.packageId), asc(schedules.createdAt), asc(schedules.id));
+    .where(and(scheduleOverridesName(id), scheduleFilter))
+    .orderBy(asc(schedules.id));
   const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
   const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
-  const foreignQuery = foreignSchedulesNaming(executor, [connection], scheduleFilter);
-  const foreignRows = await (lock ? foreignQuery.for("update") : foreignQuery);
+  const ownRows = scheduleRows
+    .filter((row) => scheduleActorIs(row, owner))
+    .sort(
+      (a, b) =>
+        a.agentPackageId.localeCompare(b.agentPackageId) ||
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        a.id.localeCompare(b.id),
+    );
   return {
     pins: pinRows.map((pin) => ({
       ...pin,
       nextConnectionIds: pin.connectionIds.filter((c) => c !== id),
     })),
-    schedules: scheduleRows.map(({ enabled, connectionOverrides, ...schedule }) => {
-      const overrides = connectionOverrides ?? {};
+    schedules: ownRows.map((row) => {
+      const overrides = row.connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
         const rest = ids.filter((c) => c !== id);
         return rest.length > 0 ? [[integrationId, rest] as const] : [];
       });
       return {
-        ...schedule,
+        id: row.id,
+        name: row.name,
+        agentPackageId: row.agentPackageId,
         entries: Object.entries(overrides)
           .filter(([, ids]) => ids.includes(id))
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([integrationId, ids]) => ({ integrationId, connectionCount: ids.length })),
         nextOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        disables: enabled && kept.length < Object.keys(overrides).length,
+        disables: row.enabled && kept.length < Object.keys(overrides).length,
       };
     }),
-    foreignScheduleIds: foreignRows.map((row) => row.id),
+    foreignScheduleIds: scheduleRows
+      .filter((row) => isForeignNaming(row, connection))
+      .map((row) => row.id),
   };
 }
 

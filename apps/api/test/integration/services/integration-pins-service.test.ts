@@ -661,6 +661,32 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(await db.select({ id: runs.id }).from(runs)).toEqual([]);
       });
 
+      it("disables an END USER's armed schedule naming it: its actor has no user id", async () => {
+        const [a] = await seedSharedConnections(1);
+        const endUser = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          externalId: "ext-eu-foreign-schedule",
+        });
+        const foreign = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          endUserId: endUser.id,
+          connectionOverrides: { [INTEGRATION]: [a!] },
+        });
+
+        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, a!, owner());
+
+        expect(disabledScheduleIds).toEqual([foreign.id]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, foreign.id));
+        expect(row).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          connectionOverrides: { [INTEGRATION]: [a!] },
+        });
+      });
+
       it("leaves a colleague's DISABLED schedule naming it as it is, its reason included", async () => {
         const [a] = await seedSharedConnections(1);
         const paused = await seedSchedule({

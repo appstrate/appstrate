@@ -40,10 +40,7 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import {
-  NO_CONNECTION_DELETE_IMPACT,
-  type ConnectionDeleteImpact,
-} from "../../../src/services/me-connections.ts";
+import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
 import {
   auditEvents,
   integrationConnections,
@@ -625,7 +622,11 @@ describe("/api/me/integration-pins", () => {
         other_schedules_disabled_count: 0,
       });
       // A connection nothing names lists nothing.
-      expect(await impactOf(spare!)).toEqual(NO_CONNECTION_DELETE_IMPACT);
+      expect(await impactOf(spare!)).toEqual({
+        pins: [],
+        schedules: [],
+        other_schedules_disabled_count: 0,
+      });
     });
 
     it("announces exactly the rewrites the delete then makes, read back from the rows", async () => {
@@ -674,7 +675,11 @@ describe("/api/me/integration-pins", () => {
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
       const announced = await impactOf(gone!);
       // An id no connection carries previews nothing, though one of the caller's schedules names it.
-      expect(await impactOf(unknown)).toEqual(NO_CONNECTION_DELETE_IMPACT);
+      expect(await impactOf(unknown)).toEqual({
+        pins: [],
+        schedules: [],
+        other_schedules_disabled_count: 0,
+      });
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
@@ -773,7 +778,11 @@ describe("/api/me/integration-pins", () => {
       await scheduleFor([shared], { userId: ctx.user.id });
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
 
-      expect(await impactOf(shared)).toEqual(NO_CONNECTION_DELETE_IMPACT);
+      expect(await impactOf(shared)).toEqual({
+        pins: [],
+        schedules: [],
+        other_schedules_disabled_count: 0,
+      });
       const del = await app.request(`/api/me/connections/${shared}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
@@ -781,6 +790,38 @@ describe("/api/me/integration-pins", () => {
       expect(del.status).toBe(404);
       expect(await readPins()).toEqual(pinsBefore);
       expect(await readSchedules()).toEqual(schedulesBefore);
+    });
+
+    it("counts, for a key bound to one space, only the other people's schedules of that space", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+      const shared = await seedConnectionFor(ctx.user.id, { shared: true });
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id);
+      await scheduleFor([shared], { userId: colleague.id }, "in the key's space");
+      // Enabled in another space, which no write check prevents on a re-enable.
+      await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: spaceB.id,
+        name: "elsewhere",
+        enabled: true,
+        userId: colleague.id,
+        connectionOverrides: { [INTEGRATION]: [shared] },
+      });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read", "integrations:disconnect"],
+      });
+      const keyHeaders = {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+      };
+
+      expect((await impactOf(shared, keyHeaders)).other_schedules_disabled_count).toBe(1);
+      // Unbound, the same caller counts both: the narrower count is the binding's.
+      expect((await impactOf(shared)).other_schedules_disabled_count).toBe(2);
     });
 
     it("is empty for a key bound to one space on the creator's connection of another", async () => {
@@ -800,7 +841,11 @@ describe("/api/me/integration-pins", () => {
         "X-Space-Id": ctx.defaultSpaceId,
       };
 
-      expect(await impactOf(elsewhere, keyHeaders)).toEqual(NO_CONNECTION_DELETE_IMPACT);
+      expect(await impactOf(elsewhere, keyHeaders)).toEqual({
+        pins: [],
+        schedules: [],
+        other_schedules_disabled_count: 0,
+      });
       // Unbound, the same caller sees the schedule: the empty answer is the binding's.
       expect((await impactOf(elsewhere)).schedules.map((s) => s.scheduleId)).toEqual([
         inKeySpace.id,
@@ -877,7 +922,11 @@ describe("/api/me/integration-pins", () => {
     });
 
     it("is empty for an id that is not a UUID", async () => {
-      expect(await impactOf("not-a-uuid")).toEqual(NO_CONNECTION_DELETE_IMPACT);
+      expect(await impactOf("not-a-uuid")).toEqual({
+        pins: [],
+        schedules: [],
+        other_schedules_disabled_count: 0,
+      });
     });
 
     it("gives an end user previewing its own connection only its own schedules", async () => {

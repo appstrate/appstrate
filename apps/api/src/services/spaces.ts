@@ -24,7 +24,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
-import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
+import { NOTHING_UNSHARED, unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -293,7 +293,7 @@ export async function updateSpace(
     const unshared =
       updated && changesAccess
         ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
-        : { connectionIds: [], disabledScheduleIds: [] };
+        : NOTHING_UNSHARED;
     return { space: updated, unshared };
   });
 

@@ -470,9 +470,12 @@ export const mePaths = {
         "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
-        "Another member's pins and schedules keep the id, and their next run fails " +
-        "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
-        "a set never shrinks behind its owner. " +
+        "Another member's pins keep the id, and their next run fails " +
+        "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
+        "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
+        "transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept, so " +
+        "re-enabling one requires a new choice; delete-impact counts them " +
+        "(`other_schedules_disabled_count`). " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +

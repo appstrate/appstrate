@@ -42,7 +42,7 @@ import {
 } from "../../../src/services/scheduler.ts";
 import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
 import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
-import { leaveOrganization } from "../../../src/services/organizations.ts";
+import { leaveOrganization, updateMemberRole } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -1128,6 +1128,48 @@ describeRequiresRedis("scheduler service", () => {
         nextRunAt: null,
         connectionOverrides: null,
       });
+      const queue = new Queue("schedules", {
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
+      });
+      try {
+        expect(await queue.getJobScheduler(schedule.id)).toBeUndefined();
+      } finally {
+        await queue.close();
+      }
+    });
+  });
+
+  describe("an unshare and a colleague's schedule job", () => {
+    it("a demotion that loses the owner the space removes the job of a colleague's schedule", async () => {
+      const integrationId = `@${orgSlug}/svc`;
+      await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
+      const admin = await createTestUser();
+      await addOrgMember(orgId, admin.id, "admin");
+      // No member row: an admin reaches a closed space by org role alone.
+      const closed = await seedSpace({ orgId, visibility: "closed" });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-admin",
+          spaceId: closed.id,
+          userId: admin.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          sharedWithOrg: true,
+          label: "admin's",
+        })
+        .returning({ id: integrationConnections.id });
+      const schedule = await createSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
+        cronExpression: "0 * * * *",
+        connectionOverrides: { [integrationId]: [conn!.id] },
+      });
+
+      await updateMemberRole(orgId, admin.id, "member", { userId, firstPartySession: true });
+
+      const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(after).toMatchObject({ enabled: false, disabledReason: "connection_unshared" });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
       });

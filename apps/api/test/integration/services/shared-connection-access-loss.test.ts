@@ -28,7 +28,13 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { integrationConnections, integrationPins, schedules, spaces } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationPins,
+  runs,
+  schedules,
+  spaces,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   leaveOrganization,
@@ -39,6 +45,7 @@ import {
 import { removeSpaceMember } from "../../../src/services/space-members.ts";
 import { updateSpace } from "../../../src/services/spaces.ts";
 import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { presetPermissions } from "../../../src/lib/permissions.ts";
@@ -327,6 +334,9 @@ describe("unsharing on access loss", () => {
         .select({ connectionIds: integrationPins.connectionIds })
         .from(integrationPins);
       expect(pins).toEqual([{ connectionIds: [conn] }]);
+      // Its fire is skipped: no failed run.
+      expect(await triggerScheduledRun(colleagues.id)).toBeNull();
+      expect(await db.select({ id: runs.id }).from(runs)).toEqual([]);
     });
 
     it("is disabled when the owner leaves the org, whose own schedule is the exit's", async () => {
@@ -359,6 +369,35 @@ describe("unsharing on access loss", () => {
       });
 
       expect(disabledScheduleIds).toEqual([colleagues.id]);
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    it("is disabled, and reported for its job, when the owner's open space closes", async () => {
+      const implicit = await addMember();
+      const space = await seedSpace({ orgId: ctx.orgId, visibility: "open" });
+      const conn = await seedConnection({ spaceId: space.id, userId: implicit });
+      const colleagues = await scheduleOf(ctx.user.id, conn, space.id);
+
+      const { disabledScheduleIds } = await updateSpace(
+        ctx.orgId,
+        space.id,
+        { visibility: "closed" },
+        space,
+      );
+
+      expect(disabledScheduleIds).toEqual([colleagues.id]);
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    it("is disabled when the owner's demotion loses the space", async () => {
+      const admin = await addMember("admin");
+      // No member row: an admin reaches a closed space by org role alone.
+      const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+      const conn = await seedConnection({ spaceId: closed.id, userId: admin });
+      const colleagues = await scheduleOf(ctx.user.id, conn, closed.id);
+
+      await updateMemberRole(ctx.orgId, admin, "member", asOwner());
+
       expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
     });
   });

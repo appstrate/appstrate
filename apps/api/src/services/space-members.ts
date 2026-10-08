@@ -302,27 +302,34 @@ export async function removeSpaceMember(params: {
     // member row: the removal is about to delete the only one there could be.
     const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
-    const nothingUnshared = { unsharedConnectionIds: [], disabledScheduleIds: [] };
     const existing = await loadSpaceMember(space.id, userId, tx);
-    if (!existing) return { removed: false, accessAfter, ...nothingUnshared };
+    if (!existing) return removal(false, accessAfter, NOTHING_UNSHARED);
     assertCanManageSpaceMember(params.actorPermissions, existing.ref);
     const deleted = await tx
       .delete(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    if (deleted.length === 0) return { removed: false, accessAfter, ...nothingUnshared };
+    if (deleted.length === 0) return removal(false, accessAfter, NOTHING_UNSHARED);
     const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId,
       spaceId: space.id,
     });
-    return {
-      removed: true,
-      accessAfter,
-      unsharedConnectionIds: unshared.connectionIds,
-      disabledScheduleIds: unshared.disabledScheduleIds,
-    };
+    return removal(true, accessAfter, unshared);
   });
+}
+
+function removal(
+  removed: boolean,
+  accessAfter: SpaceRoleRef | null,
+  unshared: ConnectionsUnshared,
+): SpaceMemberRemoval {
+  return {
+    removed,
+    accessAfter,
+    unsharedConnectionIds: unshared.connectionIds,
+    disabledScheduleIds: unshared.disabledScheduleIds,
+  };
 }
 
 /** A grant that was dropped, as the audit trail records it. */
@@ -373,13 +380,14 @@ export async function deleteSpaceMembershipsInOrg(
  * (`connection_unshared`). No `assertConnectionsUnpinned`: a pin or default naming one fails loudly
  * at resolution (`pinned_connection_unavailable`). Every access-loss path unshares here, locking
  * the rows in id order, so two of them sharing rows (an org exit and a space close) wait on each
- * other instead of deadlocking. The caller removes the disabled schedules' jobs once committed.
+ * other instead of deadlocking. The caller removes the disabled schedules' jobs once committed;
+ * one that writes schedules next names them in `alsoLockSchedules`, locked in the same statement.
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
   scope: { orgId: string; userId?: string; spaceId?: string },
-): Promise<{ connectionIds: string[]; disabledScheduleIds: string[] }> {
-  const none = { connectionIds: [], disabledScheduleIds: [] };
+  alsoLockSchedules?: SQL,
+): Promise<ConnectionsUnshared> {
   const lost = await connectionsOfOwnersWithoutAccess(
     tx,
     and(
@@ -389,32 +397,51 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
     ),
   );
-  if (lost.length === 0) return none;
-  const locked = await tx
-    .select({
-      id: integrationConnections.id,
-      userId: integrationConnections.userId,
-      endUserId: integrationConnections.endUserId,
-    })
-    .from(integrationConnections)
-    .where(
-      and(inArray(integrationConnections.id, lost), eq(integrationConnections.sharedWithOrg, true)),
-    )
-    .orderBy(asc(integrationConnections.id))
-    .for("update");
+  const locked =
+    lost.length === 0
+      ? []
+      : await tx
+          .select({
+            id: integrationConnections.id,
+            userId: integrationConnections.userId,
+            endUserId: integrationConnections.endUserId,
+          })
+          .from(integrationConnections)
+          .where(
+            and(
+              inArray(integrationConnections.id, lost),
+              eq(integrationConnections.sharedWithOrg, true),
+            ),
+          )
+          .orderBy(asc(integrationConnections.id))
+          .for("update");
   const ids = locked.map((row) => row.id);
-  if (ids.length === 0) return none;
-  await tx
-    .update(integrationConnections)
-    .set({ sharedWithOrg: false, updatedAt: new Date() })
-    .where(inArray(integrationConnections.id, ids));
+  if (ids.length > 0) {
+    await tx
+      .update(integrationConnections)
+      .set({ sharedWithOrg: false, updatedAt: new Date() })
+      .where(inArray(integrationConnections.id, ids));
+  }
   const disabledScheduleIds = await disableForeignSchedules(
     tx,
     locked.map((row) => ({ id: row.id, owner: actorFromIds(row.userId, row.endUserId)! })),
     "connection_unshared",
+    alsoLockSchedules,
   );
   return { connectionIds: ids, disabledScheduleIds };
 }
+
+/** What an access loss unshared, and the other actors' schedules that disabled. */
+interface ConnectionsUnshared {
+  connectionIds: string[];
+  disabledScheduleIds: string[];
+}
+
+/** {@link unshareConnectionsOfOwnersWithoutAccess} when nothing loses access. */
+export const NOTHING_UNSHARED: ConnectionsUnshared = {
+  connectionIds: [],
+  disabledScheduleIds: [],
+};
 
 /**
  * The one gate of a share (`shared_with_org: true`), called in the sharing transaction before the

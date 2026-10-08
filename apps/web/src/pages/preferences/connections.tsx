@@ -437,7 +437,8 @@ export function PreferencesConnectionsPage() {
         onClose={() => setConfirmState(null)}
         title={t("btn.confirm", { ns: "common" })}
         // The blast radius is `ConnectionDeleteImpact` below — the caller's own
-        // pins and schedules the delete rewrites — not a second sentence here.
+        // pins and schedules the delete rewrites, and the count of other people's
+        // schedules it disables — not a second sentence here.
         description={
           confirmState
             ? t("connections.deleteConfirm", {
