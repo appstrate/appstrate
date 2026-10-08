@@ -139,8 +139,11 @@ const PUBLIC_SUFFIX_LIST = { allowPrivateDomains: true, extractHostname: false }
 // Stands for what a host wildcard expands to, so the list's wildcard rules apply to it too.
 const WILDCARD_PROBE = "afps-wildcard-probe";
 
+// A loop, not `/\.+$/`: that regex backtracks quadratically on a host full of dots.
 function normalisedHost(host: string): string {
-  return host.replace(/\.+$/, "").toLowerCase();
+  let end = host.length;
+  while (end > 0 && host[end - 1] === ".") end--;
+  return host.slice(0, end).toLowerCase();
 }
 
 /** The labels right of the last one holding a `*`. */
