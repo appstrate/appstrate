@@ -463,6 +463,7 @@
   "error.connectionLabelTaken": "Une autre connexion de cette intégration porte déjà ce nom : l'agent désigne chaque connexion par son nom, choisissez-en un autre.",
   "error.connectionPinned": "Une connexion concernée est désignée par un épinglage admin ou par le défaut de l'espace : retirez-la de là d'abord.",
   "error.connectionOwnerWithoutAccess": "Le propriétaire de cette connexion n'a plus accès à l'espace : elle ne peut pas être partagée.",
+  "error.endUserConnectionNotShareable": "La connexion d'un utilisateur final ne peut pas être partagée avec l'organisation.",
   "error.pinnedConnectionUnavailable": "Une connexion épinglée ou définie par défaut n'est plus accessible (supprimée ou plus partagée) : choisissez-en une autre, ou demandez à un admin de corriger l'épinglage ou le défaut de l'espace.",
   "error.overrideConnectionUnavailable": "La connexion choisie n'est plus accessible (supprimée ou plus partagée) : choisissez-en une autre.",
   "error.needsReconnection": "La connexion doit être reconnectée par son propriétaire avant de pouvoir être utilisée.",

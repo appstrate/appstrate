@@ -26,6 +26,7 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   connection_label_taken: "error.connectionLabelTaken",
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
+  end_user_connection_not_shareable: "error.endUserConnectionNotShareable",
   pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
   override_connection_unavailable: "error.overrideConnectionUnavailable",
   needs_reconnection: "error.needsReconnection",
