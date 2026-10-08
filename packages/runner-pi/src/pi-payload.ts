@@ -56,6 +56,9 @@ export async function capturePayload(
  * Pi's session hands `off` to the request as no reasoning option at all. The
  * OpenAI shapes also pick the instruction role (`developer` or `system`) off
  * `reasoning`: it is pinned on both sides so only reasoning parameters differ.
+ * Limit: a builder that sends reasoning parameters whatever `model.reasoning`
+ * (Anthropic's `compat.supportsMidConvoEffort`: adaptive thinking at every
+ * level) reads as `unsent`; such records refuse `off` today.
  */
 export async function observedReasoningOff(model: Model<Api>): Promise<ModelReasoningOff> {
   const pinned = {

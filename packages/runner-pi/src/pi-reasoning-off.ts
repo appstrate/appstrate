@@ -5,10 +5,11 @@
  * each request builder of the pinned `@earendil-works/pi-ai`: Pi's session
  * hands `off` to the request as no reasoning option at all, and each API then
  * sends an explicit disable or nothing. Kept synchronous and request-free so
- * the catalog can serve it; an API not restated here is "not known"
- * (`undefined`), never a failed listing. Parity with the payloads Pi really
- * builds, every registry API included, is pinned by
- * `test/pi-reasoning-off-parity.test.ts`.
+ * the catalog can serve it. Only the branches Pi's registry reaches are
+ * restated; anything else (an API, a chat-completions thinking format, template
+ * arguments) is "not known" (`undefined`), never a failed listing. Parity with
+ * the payloads Pi really builds is pinned by `test/pi-reasoning-off-parity.test.ts`,
+ * which fails on a Pi bump that reaches an unrestated branch.
  */
 
 import type { ModelReasoningOff } from "@appstrate/core/model-generation";
@@ -47,29 +48,36 @@ function sendsOffParameter(model: Model<Api>): boolean | undefined {
   }
 }
 
-function completionsSendsOff(model: Model<Api>): boolean {
+function completionsSendsOff(model: Model<Api>): boolean | undefined {
   const compat = (model.compat ?? {}) as CompletionsCompat;
   const detected = detectedCompletionsDialect(model);
-  const effortOff =
-    (compat.supportsReasoningEffort ?? detected.supportsReasoningEffort) &&
-    typeof model.thinkingLevelMap?.off === "string";
   switch (compat.thinkingFormat ?? detected.thinkingFormat) {
     case "zai":
     case "qwen":
-    case "qwen-chat-template":
     case "deepseek":
     case "openrouter":
     case "together":
-    case "string-thinking":
       return true;
-    case "chat-template":
-      return templateSendsOff(model, compat.chatTemplateKwargs);
     case "baseten":
-      return templateSendsOff(model, compat.chatTemplateArgs) || effortOff;
+      // `enable_thinking: false`: the only arguments Pi's records declare.
+      return onlyThinkingEnabled(compat.chatTemplateArgs) ? true : undefined;
+    case "openai":
+    case "ant-ling": // its own branch only fires on a level
+      return (
+        (compat.supportsReasoningEffort ?? detected.supportsReasoningEffort) &&
+        typeof model.thinkingLevelMap?.off === "string"
+      );
     default:
-      // `openai`, and `ant-ling`, whose own branch only fires on a level.
-      return effortOff;
+      return undefined;
   }
+}
+
+function onlyThinkingEnabled(values: Record<string, unknown> = {}): boolean {
+  const entries = Object.values(values);
+  return (
+    entries.length > 0 &&
+    entries.every((value) => Bun.deepEquals(value, { $var: "thinking.enabled" }))
+  );
 }
 
 /** Pi's `detectCompat`, reduced to the two fields that decide `off`. */
@@ -101,16 +109,4 @@ function detectedCompletionsDialect({ provider, baseUrl }: Model<Api>) {
             ? "openrouter"
             : "openai";
   return { thinkingFormat, supportsReasoningEffort: !noEffort };
-}
-
-/** Whether a chat-template value survives Pi's `resolveChatTemplateKwargValue` at `off`. */
-function templateSendsOff(model: Model<Api>, values: Record<string, unknown> = {}): boolean {
-  return Object.values(values).some((value) => {
-    if (typeof value !== "object" || value === null) return value !== undefined;
-    const variable = value as { omitWhenOff?: boolean; $var?: string };
-    if (variable.omitWhenOff) return false;
-    if (variable.$var === "thinking.enabled") return true;
-    if (variable.$var === "thinking.budget") return false;
-    return typeof model.thinkingLevelMap?.off === "string";
-  });
 }

@@ -43,15 +43,12 @@ function nativeBaseUrl(record: Model<Api>): string {
   return record.provider === "azure" && !record.baseUrl ? AZURE_RESOURCE : record.baseUrl;
 }
 
-const unrecorded = (apiShape: string, piProvider?: string, dialect: PiModelDialect | null = null) =>
-  buildPiModel({
-    id: "my-model",
-    dialect,
-    apiShape,
-    piProvider,
-    baseUrl: PROXY,
-    reasoning: true,
-  });
+const unrecorded = (
+  apiShape: string,
+  piProvider?: string,
+  dialect: PiModelDialect | null = null,
+  baseUrl = PROXY,
+) => buildPiModel({ id: "my-model", dialect, apiShape, piProvider, baseUrl, reasoning: true });
 
 async function mismatches(models: Array<[string, Model<Api>]>): Promise<string[]> {
   const found = await Promise.all(
@@ -60,7 +57,9 @@ async function mismatches(models: Array<[string, Model<Api>]>): Promise<string[]
       const observed = await observedReasoningOff(model);
       if (restated === observed) return [];
       return restated === undefined
-        ? [`${name}: Pi's "${model.api}" request builder is not restated, observed ${observed}`]
+        ? [
+            `${name}: the branch of Pi's "${model.api}" builder it reaches is not restated, observed ${observed}`,
+          ]
         : [`${name}: restated ${restated}, observed ${observed}`];
     }),
   );
@@ -89,27 +88,44 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
     (pair) => pair.split(" ") as [string, string],
   );
 
-  it("agrees on a model Pi keeps no record of, for every API shape and provider", async () => {
-    const gateways = [...shapes]
-      .filter((shape) => shape in PROVIDER_BY_API)
-      .map((shape): [string, Model<Api>] => [`gateway ${shape}`, unrecorded(shape)]);
-    const underProvider = pairs.map(([shape, provider]): [string, Model<Api>] => [
-      `${provider} ${shape}`,
-      unrecorded(shape, provider),
-    ]);
-    expect(gateways.length).toBe(Object.keys(PROVIDER_BY_API).length);
-    expect(await mismatches([...gateways, ...underProvider])).toEqual([]);
+  // Pi's chat-completions dialect detection also reads the base URL.
+  const hosts = [
+    ...new Set(
+      RECORDS.filter((record) => record.api === "openai-completions" && record.baseUrl).map(
+        (record) => record.baseUrl,
+      ),
+    ),
+  ];
+  const gatewayShapes = [...shapes].filter((shape) => shape in PROVIDER_BY_API);
+  // A string `off` is what makes Pi's per-provider `reasoning_effort` detection decide.
+  const DIALECTS: Array<[string, PiModelDialect | null]> = [
+    ["no map", null],
+    ["an off effort", { name: "my-model", thinkingLevelMap: { off: "none" } }],
+  ];
+
+  it("covers every gateway API shape", () => {
+    expect(gatewayShapes.length).toBe(Object.keys(PROVIDER_BY_API).length);
   });
 
-  // A string `off` is what makes Pi's per-provider `reasoning_effort` detection decide.
-  it("agrees on a map that names an off effort, under every provider", async () => {
-    const dialect = { name: "my-model", thinkingLevelMap: { off: "none" } };
-    const models = pairs.map(([shape, provider]): [string, Model<Api>] => [
-      `${provider} ${shape}`,
-      unrecorded(shape, provider, dialect),
-    ]);
-    expect(await mismatches(models)).toEqual([]);
-  });
+  for (const [label, dialect] of DIALECTS) {
+    it(`agrees on a model Pi keeps no record of with ${label}, per API shape, provider and host`, async () => {
+      const models: Array<[string, Model<Api>]> = [
+        ...gatewayShapes.map((shape): [string, Model<Api>] => [
+          `gateway ${shape}`,
+          unrecorded(shape, undefined, dialect),
+        ]),
+        ...pairs.map(([shape, provider]): [string, Model<Api>] => [
+          `${provider} ${shape}`,
+          unrecorded(shape, provider, dialect),
+        ]),
+        ...hosts.map((host): [string, Model<Api>] => [
+          `gateway at ${host}`,
+          unrecorded("openai-completions", undefined, dialect, host),
+        ]),
+      ];
+      expect(await mismatches(models)).toEqual([]);
+    });
+  }
 });
 
 describe("piReasoningOff on the cases the UI names", () => {
