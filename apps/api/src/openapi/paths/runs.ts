@@ -1487,6 +1487,12 @@ const canonicalRunsPaths = {
                     output_tokens: { type: "integer", minimum: 0 },
                     cache_creation_input_tokens: { type: "integer", minimum: 0 },
                     cache_read_input_tokens: { type: "integer", minimum: 0 },
+                    tiers: {
+                      type: "array",
+                      description:
+                        "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+                      items: { $ref: "#/components/schemas/TokenUsageTier" },
+                    },
                   },
                 },
                 cost: {

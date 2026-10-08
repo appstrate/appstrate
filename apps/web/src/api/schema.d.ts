@@ -6455,6 +6455,8 @@ export interface components {
                 output_tokens?: number;
                 cache_creation_input_tokens?: number;
                 cache_read_input_tokens?: number;
+                /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
+                tiers?: components["schemas"]["TokenUsageTier"][];
             } & {
                 [key: string]: unknown;
             }) | null;
@@ -6834,6 +6836,14 @@ export interface components {
             message?: string;
             /** @description Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served). */
             status?: number;
+        };
+        /** @description The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. */
+        TokenUsageTier: {
+            input_tokens_above: number;
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
         };
         /** @description UI rendering hints for schema fields, keyed by property name. Lives at the AFPS wrapper level (outside the JSON Schema). */
         UIHintsMap: {
@@ -22472,6 +22482,8 @@ export interface operations {
                         output_tokens?: number;
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
+                        /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
+                        tiers?: components["schemas"]["TokenUsageTier"][];
                     };
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;

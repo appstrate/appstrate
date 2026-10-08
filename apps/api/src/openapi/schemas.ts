@@ -307,6 +307,19 @@ export const schemas = {
       cacheWrite: { type: "number" },
     },
   },
+  TokenUsageTier: {
+    type: "object",
+    required: ["input_tokens_above"],
+    description:
+      "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request.",
+    properties: {
+      input_tokens_above: { type: "integer", minimum: 1 },
+      input_tokens: { type: "integer", minimum: 0 },
+      output_tokens: { type: "integer", minimum: 0 },
+      cache_creation_input_tokens: { type: "integer", minimum: 0 },
+      cache_read_input_tokens: { type: "integer", minimum: 0 },
+    },
+  },
   ModelGenerationCapabilities: {
     type: "object",
     additionalProperties: false,
@@ -1144,6 +1157,12 @@ export const schemas = {
           output_tokens: { type: "integer", minimum: 0 },
           cache_creation_input_tokens: { type: "integer", minimum: 0 },
           cache_read_input_tokens: { type: "integer", minimum: 0 },
+          tiers: {
+            type: "array",
+            description:
+              "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+            items: { $ref: "#/components/schemas/TokenUsageTier" },
+          },
         },
         // Stored verbatim from the runner's JSONB — a runner may emit provider-
         // specific extra keys beyond the four documented above. additionalProperties

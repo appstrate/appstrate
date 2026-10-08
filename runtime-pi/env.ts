@@ -33,7 +33,9 @@ import {
 } from "@appstrate/core/model-generation";
 import {
   MODEL_INPUT_MODALITIES,
+  modelCostSchema,
   modelInputModalitySchema,
+  type ModelCost,
   type ModelInputModality,
 } from "@appstrate/core/module";
 
@@ -65,11 +67,11 @@ interface RuntimeEnv {
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<ModelInputModality>;
   /**
-   * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
+   * Per-token cost (input/output/cacheRead/cacheWrite USD, price tiers), or ABSENT when the
    * platform resolved no rates — unpriced, or aliased (the published rate card
    * names the vendor). Absent means the run reports no cost, never a fake 0.
    */
-  modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  modelCost?: ModelCost;
   /** Pi SDK context window in tokens; absent → `buildPiModel` sizes it. */
   modelContextWindow?: number;
   /** Pi SDK max completion tokens; absent → `buildPiModel` sizes it. */
@@ -237,7 +239,7 @@ function parseModelCost(
   raw: string | undefined,
   issues: string[],
   warnings: string[],
-): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
+): ModelCost | undefined {
   const fallback = { ...ZERO_MODEL_COST };
   if (!raw) {
     // The platform sets MODEL_COST only when the model carries rates AND the
@@ -259,27 +261,15 @@ function parseModelCost(
     issues.push(`MODEL_COST: malformed JSON — ${getErrorMessage(err)}`);
     return fallback;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    issues.push(`MODEL_COST: must be a JSON object`);
+  // The platform's own rule: tiers included, so Pi's per-request cost matches the runner row.
+  const cost = modelCostSchema.safeParse(parsed);
+  if (!cost.success) {
+    for (const issue of cost.error.issues) {
+      issues.push(`${["MODEL_COST", ...issue.path].join(".")}: ${issue.message}`);
+    }
     return fallback;
   }
-  const obj = parsed as Record<string, unknown>;
-  const num = (key: string) => {
-    const v = obj[key];
-    if (v === undefined) return 0;
-    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-      issues.push(`MODEL_COST.${key}: must be a non-negative finite number`);
-      return 0;
-    }
-    return v;
-  };
-  // `tiers` dropped: summed usage is priced at the base rate (RUN_COST.md).
-  return {
-    input: num("input"),
-    output: num("output"),
-    cacheRead: num("cacheRead"),
-    cacheWrite: num("cacheWrite"),
-  };
+  return cost.data;
 }
 
 function parsePositiveInt(
