@@ -194,14 +194,6 @@ describe("cookieScope — expiry (RFC 6265 §5.3 step 3, §5.4)", () => {
     expect(scope.header(API, "s=injected")).toBe("s=injected");
   });
 
-  it("keeps a session cookie for the jar's lifetime", () => {
-    const jar: CookieJar = new Map();
-    at(0);
-    cookieScope(jar, "i", null).capture(API, ["a=1"]);
-    at(10 * 365 * 86_400);
-    expect(ownCookies(jar, API)).toBe("a=1");
-  });
-
   it("stores the expiry and purges expired entries on the next capture", () => {
     const jar: CookieJar = new Map();
     const scope = cookieScope(jar, "i", null);

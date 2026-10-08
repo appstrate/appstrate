@@ -45,10 +45,12 @@ function originOf(url: string): string {
   }
 }
 
+const nameOf = (pair: string) => pair.split("=")[0]!.trim();
+
 function fold(byName: Map<string, string>, pairs: Iterable<string>): void {
   for (const raw of pairs) {
     const pair = raw.trim();
-    if (pair) byName.set(pair.split("=")[0]!.trim(), pair);
+    if (pair) byName.set(nameOf(pair), pair);
   }
 }
 
@@ -113,7 +115,7 @@ export function cookieScope(
       if (!setCookieHeaders.length) return;
       const k = key(gate(url), originOf(url));
       const byName = new Map<string, StoredCookie>();
-      for (const c of jar.get(k) ?? []) if (alive(c, now)) byName.set(c.pair.split("=")[0]!, c);
+      for (const c of jar.get(k) ?? []) if (alive(c, now)) byName.set(nameOf(c.pair), c);
       for (const header of setCookieHeaders) {
         const [pair = "", ...attributes] = header.split(";");
         const eq = pair.indexOf("=");
