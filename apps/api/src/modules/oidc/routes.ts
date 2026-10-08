@@ -2527,6 +2527,9 @@ export function createOidcRouter() {
     const userCode = (readFormString(form, "user_code") ?? "").replace(/-/g, "").toUpperCase();
     if (!userCode) return c.redirect("/activate", 303);
 
+    // Before the BA calls below: they refresh the session too, without the cookie.
+    const denySession = await getSessionForwardingCookies(c).catch(() => null);
+
     try {
       // BA 1.7: claim the code (GET /device) before denying — /device/deny
       // also rejects an unclaimed code with DEVICE_CODE_NOT_CLAIMED.
@@ -2549,7 +2552,6 @@ export function createOidcRouter() {
       });
     }
 
-    const denySession = await getSessionForwardingCookies(c).catch(() => null);
     const [denyCodeRow] = await db
       .select({ clientId: deviceCode.clientId })
       .from(deviceCode)

@@ -43,9 +43,13 @@ function markedHeadersWithCookie(clientId: string, cookie: string): Headers {
   return headers;
 }
 
-function badSignatureCookieHeader(clientId: string, sig: string): Headers {
-  const body = Buffer.from(JSON.stringify({ clientId, exp: 0 })).toString("base64url");
-  return markedHeadersWithCookie(clientId, `${body}.${sig}`);
+// Unexpired, so only the signature check can reject it.
+function badSignatureCookieHeader(clientId: string): Headers {
+  const exp = Math.floor(Date.now() / 1000) + 600;
+  const token = signKeyringToken(PENDING_CLIENT_TOKEN_DOMAIN, { clientId, exp }, [
+    "wrong-key-at-least-32-characters-long",
+  ]);
+  return markedHeadersWithCookie(clientId, token);
 }
 
 describe("oidcBeforeSignupGuard + pending-client cookie", () => {
@@ -100,7 +104,7 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     await expect(
       oidcBeforeSignupGuard({
         user: { email: "bad@example.com" },
-        headers: badSignatureCookieHeader(closedOrgClientId, "notasignature"),
+        headers: badSignatureCookieHeader(closedOrgClientId),
       }),
     ).resolves.toBeUndefined();
   });

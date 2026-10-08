@@ -497,7 +497,7 @@ Required vars (boot fails without them):
 
 | Variable                    | Notes                                                                           |
 | --------------------------- | ------------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`        | Session signing secret                                                          |
+| `BETTER_AUTH_SECRET`        | Signs until `BETTER_AUTH_SECRETS` is set; then decrypts pre-keyring data        |
 | `CONNECTION_ENCRYPTION_KEY` | 32 bytes base64. Primary key for new credential ciphertexts (v1 envelope)       |
 | `UPLOAD_SIGNING_SECRET`     | HMAC secret for FS upload-sink tokens (≥16 chars), rotates independently        |
 | `RUN_TOKEN_SECRET`          | HMAC secret for run bearer tokens (≥16 chars), rotates independently            |

@@ -363,7 +363,7 @@ services:
       # One-shot token the installer writes to `.env`; the first owner redeems it
       # at /claim. Empty/unset = no pending token (normal signup flow).
       - AUTH_BOOTSTRAP_TOKEN
-      # ── Auth secret rotation (optional, see `packages/env/src/index.ts`) ──
+      # ── Auth secret rotation (optional, see `docs/ENV.md`) ──
       - BETTER_AUTH_SECRETS
       # ── Credential encryption rotation (optional) ──
       - CONNECTION_ENCRYPTION_KEY_ID
