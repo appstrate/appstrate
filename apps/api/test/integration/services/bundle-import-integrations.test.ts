@@ -14,7 +14,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { handleImportBundle } from "../../../src/services/bundle-import.ts";
+import {
+  handleImportBundle,
+  importBundle,
+  readOrBuildBundle,
+} from "../../../src/services/bundle-import.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { getIntegration, listIntegrations } from "../../../src/services/integration-service.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -76,6 +81,31 @@ function validManifest(overrides: Record<string, unknown> = {}): Record<string, 
     }) as unknown as Record<string, unknown>),
     ...overrides,
   };
+}
+
+/** A `custom` connect integration whose one success criterion is `criterion`. */
+function connectManifest(name: string, criterion: Record<string, unknown>) {
+  return apiIntegrationManifest({
+    name,
+    auths: {
+      session: {
+        type: "custom",
+        credentialFields: ["password"],
+        connect: {
+          login: {
+            request: {
+              method: "POST",
+              url: "https://api.example.com/login",
+              body: "p={{password}}",
+            },
+            success_criteria: [criterion],
+            outputs: { token: "$response.body#/token" },
+          },
+        },
+        delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer ", field: "token" }),
+      },
+    },
+  }) as unknown as Record<string, unknown>;
 }
 
 describe("handleImportBundle — integration packages", () => {
@@ -146,6 +176,45 @@ describe("handleImportBundle — integration packages", () => {
     await expect(
       handleImportBundle(afps, scope, ctx.user.id, noAuthorize, noShare),
     ).rejects.toThrow();
+  });
+
+  it("imports a dependency whose connect.login the platform cannot evaluate, with a warning", async () => {
+    const xpath = connectManifest("@official/xpathy", { condition: "//ok", type: "xpath" });
+    const dep = await readOrBuildBundle(buildIntegrationAfps({ manifest: xpath }), scope);
+    const root = await readOrBuildBundle(
+      buildIntegrationAfps({ manifest: validManifest() }),
+      scope,
+    );
+    const result = await importBundle(
+      {
+        bundleFormatVersion: "1.0",
+        root: root.root,
+        packages: new Map([...dep.packages, ...root.packages]),
+        integrity: "sha256-abc",
+      },
+      scope,
+      ctx.user.id,
+      noShare,
+    );
+
+    expect(result.imported.map((p) => p.status)).toEqual(["inserted", "inserted"]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toStartWith(
+      "@official/xpathy@1.0.0: auths.session.connect.login.success_criteria.0.type: criterion type 'xpath'",
+    );
+  });
+
+  it("refuses the same integration as the bundle root", async () => {
+    const xpath = connectManifest("@official/xpathy", { condition: "//ok", type: "xpath" });
+    const err = await handleImportBundle(
+      buildIntegrationAfps({ manifest: xpath }),
+      scope,
+      ctx.user.id,
+      noAuthorize,
+      noShare,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
   });
 
   it("preserves the optional INTEGRATION.md companion as package content", async () => {

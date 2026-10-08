@@ -467,9 +467,9 @@ Each `outputs` entry is one of:
 
 - **Arazzo runtime-expression string** (Arazzo §5.9) — `$statusCode`, `$response.body`,
   `$response.body#/{json-pointer}` (RFC 6901), `$response.header.{name}`;
-- **Arazzo Selector Object** (Arazzo 1.1 §5.8.13) — `{ context, selector, type }` with
-  `type ∈ "jsonpath" | "xpath" | "jsonpointer"` (resolved per RFC 9535 / XML Path 3.1 /
-  RFC 6901);
+- **Arazzo Selector Object** (Arazzo 1.1 §5.8.13) — `{ context: "$response.body", selector, type }`
+  with `type ∈ "jsonpath" | "jsonpointer"` (RFC 9535 / RFC 6901). AFPS also lists `xpath`;
+  Appstrate does not evaluate it and refuses it at import;
 - **AFPS extractor object** — `{ from: "cookie", name }`, `{ from: "jwt", token, path }`,
   `{ from: "regex", source, pattern, group }` (extensions Arazzo cannot express). A jwt
   `token` names another, non-jwt output as `{$credential.<name>}`; a regex `source` is
@@ -483,7 +483,33 @@ variable, so a declarative login cannot target a per-connection upstream.
 
 `success_criteria` is an array of Arazzo Criterion objects (`{ condition, context?, type? }`).
 When omitted, success defaults to HTTP 2xx (AFPS-defined; Arazzo leaves HTTP success
-undefined).
+undefined). Appstrate evaluates exactly the AFPS §7.7 evaluation profile. Every other form
+is refused when the manifest is written (a dependency imported in a bundle gets a warning
+instead) and at connect start (`invalid_config`), before any login request is sent:
+
+- `simple` (or `type` omitted): one `<expr> == <operand>` comparison — exactly one `==`;
+  no other `=`, `!`, `<`, `>`, `&&`, `||`, `(`, `)` outside a quoted literal; each side a
+  runtime expression or a literal, at least one side an expression. A literal is a JSON
+  number (`200`, `-1.5`, `2e2`; not `+5`, `.5`, `5.`, `01`, `0x10`), `true`, `false`,
+  `null`, or a single-quoted string with `''` for a quote (`'O''Brien'`). Quote every
+  string (`$response.body#/status == 'ok'`). Strings compare case-insensitively, as Arazzo
+  requires; a number equals a string only when the string is the same JSON number (`'200'`,
+  not `' 200'`); an absent value (a missing header or body key) equals nothing. Quotes pair
+  across the whole condition, so a JSON pointer key or header name holding an operator
+  character, or a quote a later one closes (`$response.body#/it's == 'a'`), is refused:
+  check such a key with a `regex` criterion. Appstrate also accepts a double-quoted string
+  holding no double quote, which is outside the portable profile. Declare one criterion per comparison (all must pass), omit `success_criteria` to require
+  HTTP 2xx, or use `regex` / `jsonpath` for a check an equality cannot express;
+- `jsonpath` on `$response.body`, a singular query (`$`, `.name`, `['name']`, `[0]`, `[-1]`);
+- `regex` (an ECMA-262 regular expression that must compile) on `$response.body` or one
+  `$response.header.<name>`;
+- `xpath` is refused.
+
+The same check refuses an output the engine would only find wrong after the login request
+is sent: a `regex` pattern that does not compile or does not capture its `group`
+(default 1), a `jsonpointer` selector or jwt `path` that is not an RFC 6901 pointer,
+and an output that carries both `from` and a Selector field (`context`, `selector`,
+`type`): an output is a Selector Object or an extractor, never both.
 
 **Gating rule** (§7.7): a `delivery.*` value template MAY only reference declared
 `connect.outputs` (or, for the orchestrated `tool` mode, its declared `produces`), and

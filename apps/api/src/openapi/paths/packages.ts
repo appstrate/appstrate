@@ -254,7 +254,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded.",
                   },
                 },
               },
@@ -346,7 +346,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
                   },
                 },
               },
@@ -432,7 +432,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
                   },
                 },
               },

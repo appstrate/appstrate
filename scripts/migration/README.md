@@ -967,7 +967,8 @@ an ActiveCampaign account on another API domain than `api-us1.com` edits its `ap
 **Not a runbook, and it writes nothing.** The manifest write paths refuse each template or runtime
 expression the platform does not evaluate (`findUnevaluableExpressions`): in a delivery template
 (`http`, `env`, `files`) or in `authorized_uris`, any `{$…}` but `{$credential.<field>}`; in
-`connect.login`, what `loginBlockIssues` lists. A stored manifest holding one still loads, and
+`connect.login`, what `loginBlockIssues` lists (since #1773, every form outside the AFPS §7.7
+evaluation profile). A stored manifest holding one still loads, and
 fails at connect (`invalid_config`) or when the delivery renders. `0035` also lists each
 `{{field}}` in a delivery template: it is sent as literal text. Separately, a run refuses as
 `exfiltration` an auth that injects a credential without an `authorized_uris` list bounding its

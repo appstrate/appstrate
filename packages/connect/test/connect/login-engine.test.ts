@@ -281,6 +281,23 @@ describe("runLogin — security limits", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("refuses a simple criterion other than <expr> == <operand>, before any fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: { ...baseLogin, success_criteria: [{ condition: "$statusCode != 401" }] },
+    };
+    await expect(
+      runLogin(config, {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+    expect(calls).toHaveLength(0);
+  });
+
   it("sends an input value containing {$…} as data, not as an expression", async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
     const config: LoginConfig = {
@@ -340,6 +357,28 @@ describe("runLogin — security limits", () => {
         resolveHost: TEST_RESOLVE,
       }),
     ).rejects.toMatchObject({ reason: "response_too_large" });
+  });
+
+  it("does not read an oversized body that no criterion or output reads", async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: "x".repeat(2000), headers: { "X-Token": "tok" } },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: baseLogin.request,
+        success_criteria: [{ condition: "$statusCode == 200" }],
+        outputs: { t: "$response.header.X-Token" },
+      },
+      limits: { max_response_bytes: 1000 },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    });
+    expect(res.outputs.t).toBe("tok");
   });
 
   it("classifies an aborted (timed-out) request as `timeout`", async () => {
@@ -550,9 +589,10 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     expect(res.outputs.access_token).toBe("first");
   });
 
-  it("xpath selector raises a structured 'not supported' LoginError", async () => {
-    const { impl } = fakeFetch([{ status: 200, body: "<root><tok>X</tok></root>" }]);
-    const config: LoginConfig = {
+  it("refuses an xpath selector before any fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "<root><tok>X</tok></root>" }]);
+    // A manifest may declare xpath (AFPS §7.7); the engine's own types do not.
+    const config = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token" },
         outputs: {
@@ -563,7 +603,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
           },
         },
       },
-    };
+    } as unknown as LoginConfig;
     const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
@@ -574,10 +614,11 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
     expect((err as LoginError).message).toMatch(/xpath/);
+    expect(calls).toHaveLength(0);
   });
 
   it("jsonpath with unsupported wildcard fails with invalid_config", async () => {
-    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ a: [1, 2] }) }]);
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ a: [1, 2] }) }]);
     const config: LoginConfig = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token" },
@@ -599,6 +640,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -636,6 +678,55 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
         { condition: '$response.body#/status == "fail"', type: "simple" },
       ]),
     ).toBe(false);
+  });
+
+  it("simple: a single-quoted literal reads '' as one quote", () => {
+    const body = JSON.stringify({ name: "O'Brien" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/name == 'O''Brien'" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("simple: strings compare case-insensitively (Arazzo)", () => {
+    const body = JSON.stringify({ status: "OK" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/status == 'ok'" },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/status == 'ko'" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("simple: a number equals only a string holding the same JSON number", () => {
+    const headers = new Headers({ "X-N": "200", "X-Blank": " ", "X-Hex": "0x10" });
+    const passes = (condition: string) =>
+      evaluateSuccessCriteriaForTest(200, headers, "", [{ condition }]);
+    expect(passes("$response.header.X-N == 200")).toBe(true);
+    expect(passes("$response.header.X-Blank == 0")).toBe(false);
+    expect(passes("$response.header.X-Hex == 16")).toBe(false);
+  });
+
+  it("simple: an absent value equals nothing, not even another absent value", () => {
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), "{}", [
+        { condition: "$response.body#/a == $response.body#/b" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("simple: a body pointer reads only canonical array indices and own members", () => {
+    const passes = (body: unknown, condition: string) =>
+      evaluateSuccessCriteriaForTest(200, new Headers(), JSON.stringify(body), [{ condition }]);
+    expect(passes({ "1": "a", "01": "b" }, "$response.body#/01 == 'b'")).toBe(true);
+    expect(passes({ a: ["x", "y"] }, "$response.body#/a/01 == 'y'")).toBe(false);
+    expect(passes({ a: [1, 2, 3] }, "$response.body#/a/length == 3")).toBe(false);
+    expect(passes({ a: [1, 2, 3] }, "$response.body#/a/2 == 3")).toBe(true);
   });
 
   it("simple: $response.header.<name> == <literal>", () => {
@@ -694,14 +785,6 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
         },
       ]),
     ).toBe(true);
-  });
-
-  it("xpath: conservatively fails (no XML evaluator)", () => {
-    expect(
-      evaluateSuccessCriteriaForTest(200, new Headers(), "<root/>", [
-        { condition: "//root", type: "xpath" },
-      ]),
-    ).toBe(false);
   });
 
   it("all criteria must pass (AND semantics)", () => {
@@ -779,6 +862,41 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
         resolveHost: TEST_RESOLVE,
       },
     );
+
+  it("never reads an inherited member through a body pointer", async () => {
+    await expect(run({ p: "$response.body#/__proto__" }, { body: "{}" })).rejects.toMatchObject({
+      reason: "extract_failed",
+    });
+  });
+
+  it("refuses an extractor that also carries selector fields", async () => {
+    const sid = {
+      from: "cookie",
+      name: "sid",
+      context: "$response.body",
+      selector: "/sid",
+      type: "jsonpointer",
+    } as const;
+    const { impl, calls } = fakeFetch([{ status: 200, headers: { "Set-Cookie": "sid=x" } }]);
+    await expect(
+      runLogin(
+        {
+          login: {
+            request: { method: "POST", url: "https://idp.example.com/token" },
+            outputs: { sid },
+          },
+        },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: impl,
+          resolveHost: TEST_RESOLVE,
+        },
+      ),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+    expect(calls).toHaveLength(0);
+  });
 
   it("regex extractor reads the body named by its source", async () => {
     const res = await run(
