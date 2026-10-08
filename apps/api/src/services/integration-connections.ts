@@ -3046,8 +3046,8 @@ interface ScheduleForget {
   id: string;
   name: string | null;
   agentPackageId: string;
-  enabled: boolean;
-  connectionOverrides: ConnectionOverrides;
+  /** The integrations whose set names the connection, by id, with that set's size today. */
+  entries: { integrationId: string; connectionCount: number }[];
   /** Without the connection: an emptied set drops its integration, an emptied map is `null`. */
   nextOverrides: ConnectionOverrides | null;
   /** Enabled and a set empties: an unattended run must never fall back to another account. */
@@ -3063,12 +3063,13 @@ interface ConnectionForgetPlan {
 /**
  * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
  * overrides; other members' keep the id and fail loudly. `lock` takes the rows `FOR UPDATE`, for a
- * caller that applies the plan in the same transaction.
+ * caller that applies the plan in the same transaction. `scheduleFilter` narrows the schedules: a
+ * disabled one may name a connection of another space.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
-  { lock = false }: { lock?: boolean } = {},
+  { lock = false, scheduleFilter }: { lock?: boolean; scheduleFilter?: SQL } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
   const pinQuery = executor
@@ -3092,7 +3093,7 @@ export async function planConnectionForget(
       connectionOverrides: schedules.connectionOverrides,
     })
     .from(schedules)
-    .where(and(actorFilter(owner, schedules), scheduleOverridesName(id)))
+    .where(and(actorFilter(owner, schedules), scheduleOverridesName(id), scheduleFilter))
     .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
   // Member pins are a member's own: an end user holds none.
   const pinRows = owner.type !== "user" ? [] : await (lock ? pinQuery.for("update") : pinQuery);
@@ -3102,7 +3103,7 @@ export async function planConnectionForget(
       ...pin,
       nextConnectionIds: pin.connectionIds.filter((c) => c !== id),
     })),
-    schedules: scheduleRows.map(({ connectionOverrides, ...schedule }) => {
+    schedules: scheduleRows.map(({ enabled, connectionOverrides, ...schedule }) => {
       const overrides = connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
         const rest = ids.filter((c) => c !== id);
@@ -3110,9 +3111,12 @@ export async function planConnectionForget(
       });
       return {
         ...schedule,
-        connectionOverrides: overrides,
+        entries: Object.entries(overrides)
+          .filter(([, ids]) => ids.includes(id))
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([integrationId, ids]) => ({ integrationId, connectionCount: ids.length })),
         nextOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        disables: schedule.enabled && kept.length < Object.keys(overrides).length,
+        disables: enabled && kept.length < Object.keys(overrides).length,
       };
     }),
   };

@@ -11,14 +11,9 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSchedule, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import {
-  integrationConnections,
-  integrationOauthClients,
-  integrationPins,
-  schedules,
-} from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
@@ -494,58 +489,6 @@ describe("org-level integration OAuth clients", () => {
         client: { id: spaceRow, client_id: "space-a" },
         deletedConnections: 0,
         disabledScheduleIds: [],
-      });
-    });
-
-    it("forgets a client's connections from one pin and one schedule override: the pin goes, the schedule disables once", async () => {
-      const spaceRow = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
-      const minted: string[] = [];
-      for (const label of ["Connexion 1", "Connexion 2"]) {
-        const [row] = await db
-          .insert(integrationConnections)
-          .values({
-            integrationId: INTEGRATION,
-            authKey: AUTH_KEY,
-            accountId: `acct-${label}`,
-            label,
-            spaceId: spaceA.spaceId,
-            userId: ctx.user.id,
-            credentialsEncrypted: "enc",
-            clientRef: spaceRow,
-          })
-          .returning({ id: integrationConnections.id });
-        minted.push(row!.id);
-      }
-      const agent = await seedPackage({ orgId: ctx.orgId, homeSpaceId: spaceA.spaceId });
-      await db.insert(integrationPins).values({
-        spaceId: spaceA.spaceId,
-        packageId: agent.id,
-        integrationId: INTEGRATION,
-        userId: ctx.user.id,
-        createdBy: ctx.user.id,
-        connectionIds: minted,
-      });
-      const schedule = await seedSchedule({
-        packageId: agent.id,
-        orgId: ctx.orgId,
-        spaceId: spaceA.spaceId,
-        userId: ctx.user.id,
-        enabled: true,
-        nextRunAt: new Date(Date.now() + 3_600_000),
-        connectionOverrides: { [INTEGRATION]: minted },
-      });
-
-      expect(await deleteIntegrationOAuthClient(spaceA, INTEGRATION, spaceRow)).toMatchObject({
-        deletedConnections: 2,
-        disabledScheduleIds: [schedule.id],
-      });
-      expect(await db.select().from(integrationPins)).toEqual([]);
-      const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
-      expect(after).toMatchObject({
-        enabled: false,
-        disabledReason: "connection_deleted",
-        connectionOverrides: null,
-        nextRunAt: null,
       });
     });
 

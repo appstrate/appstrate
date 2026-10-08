@@ -361,10 +361,12 @@ export const mePaths = {
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
         "re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, " +
-        "admin pins and org defaults are not listed: the delete leaves them untouched. Wherever the delete " +
-        "refuses, the lists are empty: an id that is not a UUID, unknown, or of a connection the caller " +
-        "does not own, and for a delegated or end-user credential a connection outside its bound " +
-        "organization (and space). An end user has no pins.",
+        "admin pins and org defaults are not listed: the delete leaves them untouched. The lists are " +
+        "empty for an id that is not a UUID, unknown, or of a connection the caller does not own, and, " +
+        "for a delegated or end-user credential, a connection outside its bound organization (and " +
+        "space). A pinned connection is still listed, though its delete answers 409 " +
+        "`connection_pinned`. A delegated or end-user credential sees its bound organization (and " +
+        "space) only; an end user has no pins.",
       parameters: [
         { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
       ],
@@ -428,7 +430,7 @@ export const mePaths = {
                         disables: {
                           type: "boolean",
                           description:
-                            "True when the delete disables this schedule: it is enabled, and this set empties.",
+                            "True when the delete disables this schedule: it is enabled and one of its sets empties.",
                         },
                       },
                     },

@@ -24,6 +24,7 @@ import {
   organizationMembers,
   organizations,
   packages,
+  schedules,
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorFromIds, type Actor } from "../lib/actor.ts";
@@ -297,7 +298,7 @@ interface OwnScheduleHoldingConnection {
    * override and disables the schedule (never a silent fall-back for an unattended run).
    */
   connection_count: number;
-  /** True exactly when this delete disables the schedule: it is enabled and this set empties. */
+  /** True when the delete disables this schedule: it is enabled and one of its sets empties. */
   disables: boolean;
 }
 
@@ -309,8 +310,9 @@ export interface ConnectionDeleteImpact {
 
 /**
  * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
- * and per (schedule, integration) naming `connectionId`. Empty wherever that delete refuses: a
- * connection the caller does not own, or outside a bound credential's org (and space).
+ * and per (schedule, integration) naming `connectionId`. Empty for an unknown connection, one the
+ * caller does not own, or one outside a bound credential's org (and space); a bound credential sees
+ * only the schedules of its org (and space). A pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
   actor: Actor,
@@ -319,6 +321,7 @@ export async function getConnectionDeleteImpact(
 ): Promise<ConnectionDeleteImpact> {
   const [row] = await db
     .select({
+      id: integrationConnections.id,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
     })
@@ -335,7 +338,12 @@ export async function getConnectionDeleteImpact(
   if (!row) return { pins: [], schedules: [] };
   // `integration_connections` holds exactly one owner id.
   const owner = actorFromIds(row.userId, row.endUserId)!;
-  const plan = await planConnectionForget(db, { id: connectionId, owner });
+  // Member pins need no such filter: a pin write requires its connections in the pin's own space.
+  const plan = await planConnectionForget(
+    db,
+    { id: row.id, owner },
+    { scheduleFilter: authorityFilter(authority, schedules.orgId, schedules.spaceId) },
+  );
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];
   const agents =
     agentIds.length === 0
@@ -344,9 +352,9 @@ export async function getConnectionDeleteImpact(
           .select({ id: packages.id, draftManifest: packages.draftManifest })
           .from(packages)
           .where(inArray(packages.id, agentIds));
-  // The cascading FK on `package_id` guarantees every agent's row.
   const displayNames = new Map(agents.map((pkg) => [pkg.id, getPackageDisplayName(pkg)]));
-  const displayName = (id: string) => displayNames.get(id)!;
+  // The id stands in for an agent deleted between the two reads.
+  const displayName = (id: string) => displayNames.get(id) ?? id;
   return {
     pins: plan.pins.map((pin) => ({
       agent_package_id: pin.agentPackageId,
@@ -355,18 +363,15 @@ export async function getConnectionDeleteImpact(
       connection_count: pin.connectionIds.length,
     })),
     schedules: plan.schedules.flatMap((schedule) =>
-      Object.entries(schedule.connectionOverrides)
-        .filter(([, ids]) => ids.includes(connectionId))
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([integrationId, ids]) => ({
-          scheduleId: schedule.id,
-          schedule_name: schedule.name,
-          agent_package_id: schedule.agentPackageId,
-          agent_display_name: displayName(schedule.agentPackageId),
-          integration_package_id: integrationId,
-          connection_count: ids.length,
-          disables: schedule.enabled && !schedule.nextOverrides?.[integrationId],
-        })),
+      schedule.entries.map((entry) => ({
+        scheduleId: schedule.id,
+        schedule_name: schedule.name,
+        agent_package_id: schedule.agentPackageId,
+        agent_display_name: displayName(schedule.agentPackageId),
+        integration_package_id: entry.integrationId,
+        connection_count: entry.connectionCount,
+        disables: schedule.disables,
+      })),
     ),
   };
 }

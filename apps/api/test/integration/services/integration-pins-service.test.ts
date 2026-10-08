@@ -685,6 +685,25 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(row!.enabled).toBe(false);
       });
 
+      it("an OAuth client delete forgets two minted connections sharing a pin and a schedule set", async () => {
+        const minted = await seedSharedConnections(2);
+        const clientId = await seedClientMinting(minted);
+        await pinAs(memberId, minted);
+        const emptied = await scheduleWith({ [INTEGRATION]: minted });
+
+        const { deletedConnections, disabledScheduleIds } = await deleteIntegrationOAuthClient(
+          scope,
+          INTEGRATION,
+          clientId,
+        );
+
+        // The pin goes and the schedule is disabled once, whichever connection is forgotten first.
+        expect(deletedConnections).toBe(2);
+        expect(await memberPinSet(memberId)).toBeNull();
+        expect(await overridesOf(emptied)).toBeNull();
+        expect(disabledScheduleIds).toEqual([emptied]);
+      });
+
       it("touches no pin and no schedule when the delete is refused", async () => {
         const [a, b] = await seedSharedConnections(2);
         await pinAs(memberId, [a!, b!]);
