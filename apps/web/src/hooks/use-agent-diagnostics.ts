@@ -5,6 +5,7 @@ import { $api, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useCurrentOrgId } from "./use-org";
+import { usePermissions } from "./use-permissions";
 
 export type AgentDiagnostics =
   paths["/api/agents/{scope}/{name}/diagnostics"]["get"]["responses"]["200"]["content"]["application/json"];
@@ -13,6 +14,9 @@ export type AgentDiagnostic = AgentDiagnostics["diagnostics"][number];
 export function useAgentDiagnostics(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  // The diagnostics describe what the agent is made of: `agents:read`, like the
+  // route. A runner without it launches, and the kickoff's own check recovers.
+  const canRead = usePermissions().can("agents:read");
   const path = agentPackageId ? splitPackageRef(agentPackageId) : { scope: "", name: "" };
 
   return useQuery(
@@ -29,7 +33,7 @@ export function useAgentDiagnostics(agentPackageId: string | undefined, version?
           },
         },
       },
-      { enabled: Boolean(orgId && spaceId && agentPackageId) },
+      { enabled: Boolean(canRead && orgId && spaceId && agentPackageId) },
     ),
   );
 }

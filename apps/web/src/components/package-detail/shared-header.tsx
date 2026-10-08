@@ -23,6 +23,11 @@ interface SharedHeaderDetail {
   source: string;
   type: PackageType;
   version?: string | null;
+  /**
+   * The page shows the latest PUBLISHED version, not the draft: what a caller
+   * who may not write the package reads (`definition: "published"`).
+   */
+  readsPublished?: boolean;
   /** AFPS icon token for agents, raw image URL or Iconify id for integrations. */
   icon?: string;
   /** Appstrate Agent presentation colour token. */
@@ -143,22 +148,30 @@ export function SharedHeader({
                 </Tooltip>
               </TooltipProvider>
             )}
-            {detail.type === "agent" && detail.source !== "system" && !isHistoricalVersion && (
-              <TooltipProvider delayDuration={250}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>
-                      <Badge variant="secondary">{t("version.draft")}</Badge>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-80">
-                    {latestPublishedVersion
-                      ? t("version.draftTooltip", { version: latestPublishedVersion })
-                      : t("version.draftTooltipNoVersion")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+            {detail.type === "agent" && detail.readsPublished && !isHistoricalVersion && (
+              <Badge variant="secondary" className="font-mono">
+                v{detail.version}
+              </Badge>
             )}
+            {detail.type === "agent" &&
+              detail.source !== "system" &&
+              !detail.readsPublished &&
+              !isHistoricalVersion && (
+                <TooltipProvider delayDuration={250}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={0}>
+                        <Badge variant="secondary">{t("version.draft")}</Badge>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-80">
+                      {latestPublishedVersion
+                        ? t("version.draftTooltip", { version: latestPublishedVersion })
+                        : t("version.draftTooltipNoVersion")}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             {detail.type === "agent" && isHistoricalVersion && detail.version && (
               <Badge variant="secondary" className="font-mono">
                 v{detail.version} · <span className="font-sans">{t("version.readOnly")}</span>

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { Versioned } from "../../hooks/use-packages";
+import { RoleLimitNotice } from "../role-limit-notice";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RailLink } from "../settings/rail-link";
@@ -135,6 +136,12 @@ export function AgentSettingsView({
   // Three permissions behind one rail: configuring the agent, reading its
   // schedules, reading what it is made of. Connections are open to anyone who
   // reaches the agent.
+  // Every section stays in the rail for every role; one the role does not open
+  // is marked with a lock and its panel says why (`RoleLimitNotice`). Only a
+  // section that does not apply to this agent at all leaves the rail.
+  const applies = (section: AgentSettingsSection) =>
+    // A system agent has no history of its own to browse.
+    section !== "versions" || detail.source !== "system";
   const visible = (section: AgentSettingsSection) => {
     if (section === "model" || section === "proxy" || section === "inputs") {
       return can("agents:configure");
@@ -153,7 +160,7 @@ export function AgentSettingsView({
   };
   const groups = SETTINGS_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => visible(item.id)),
+    items: group.items.filter((item) => applies(item.id)),
   })).filter((group) => group.items.length > 0);
   const params = new URLSearchParams(location.search);
   const requestedRaw = params.get("agentSettings");
@@ -162,13 +169,16 @@ export function AgentSettingsView({
   const requested = requestedRaw === "prompt" ? "files" : requestedRaw;
   const requestedFile = params.get("file") ?? undefined;
   const fallback: AgentSettingsSection = groups[0]?.items[0]?.id ?? "connections";
+  const firstOpen =
+    groups.flatMap((group) => group.items).find((item) => visible(item.id))?.id ?? fallback;
+  // A section asked for by name opens even when locked: its panel explains.
   const activeSection =
     SETTINGS_SECTION_IDS.includes(requested as AgentSettingsSection) &&
-    visible(requested as AgentSettingsSection)
+    applies(requested as AgentSettingsSection)
       ? (requested as AgentSettingsSection)
       : visible("model")
         ? "model"
-        : fallback;
+        : firstOpen;
 
   const sectionHref = (section: AgentSettingsSection, file?: string) => {
     const search = new URLSearchParams(location.search);
@@ -204,50 +214,56 @@ export function AgentSettingsView({
     void navigate(sectionHref("files"));
   };
 
-  const body =
-    activeSection === "versions" ? (
-      <PackageVersionsSection type="agent" packageId={packageId} {...versions} />
-    ) : activeSection === "bundle" ? (
-      <PackageFilesSection
-        type="agent"
-        packageId={packageId}
-        manifest={detail.manifest ?? {}}
-        filesHref={filesHref}
-      />
-    ) : (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
-      <Suspense fallback={<LoadingState />}>
-        <AgentDefinitionEditor
-          detail={detail}
-          section={activeSection as AgentDefinitionSection}
-          onSection={(next) => void navigate(sectionHref(next))}
-        />
-      </Suspense>
-    ) : activeSection === "map" || activeSection === "files" ? (
-      <AgentOverviewTab
-        packageId={packageId}
+  const isDefinitionSection = (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection);
+  const body = !visible(activeSection) ? (
+    <div className="p-6">
+      <RoleLimitNotice>
+        {t(isDefinitionSection ? "detail.roleLimit.editDefinition" : "detail.roleLimit.section")}
+      </RoleLimitNotice>
+    </div>
+  ) : activeSection === "versions" ? (
+    <PackageVersionsSection type="agent" packageId={packageId} {...versions} />
+  ) : activeSection === "bundle" ? (
+    <PackageFilesSection
+      type="agent"
+      packageId={packageId}
+      manifest={detail.manifest ?? {}}
+      filesHref={filesHref}
+    />
+  ) : (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
+    <Suspense fallback={<LoadingState />}>
+      <AgentDefinitionEditor
         detail={detail}
-        version={version}
-        isHistorical={isHistorical}
-        currentManifest={currentManifest}
-        currentContent={currentContent}
-        key={activeSection === "files" ? requestedFile : undefined}
-        surface={activeSection}
-        initialFilePath={requestedFile}
-        onOpenFiles={openFiles}
-        fileEditHref={canEditDefinition ? fileEditHref : undefined}
-        canEditFiles={canEditDefinition}
+        section={activeSection as AgentDefinitionSection}
+        onSection={(next) => void navigate(sectionHref(next))}
       />
-    ) : (
-      <AgentConfigurationView
-        packageId={packageId}
-        detail={detail}
-        configSchemaOverride={configSchemaOverride}
-        isHistorical={isHistorical}
-        // Past the two branches above, only configuration sections remain.
-        section={activeSection as ConfigurationSection}
-        embedded
-      />
-    );
+    </Suspense>
+  ) : activeSection === "map" || activeSection === "files" ? (
+    <AgentOverviewTab
+      packageId={packageId}
+      detail={detail}
+      version={version}
+      isHistorical={isHistorical}
+      currentManifest={currentManifest}
+      currentContent={currentContent}
+      key={activeSection === "files" ? requestedFile : undefined}
+      surface={activeSection}
+      initialFilePath={requestedFile}
+      onOpenFiles={openFiles}
+      fileEditHref={canEditDefinition ? fileEditHref : undefined}
+      canEditFiles={canEditDefinition}
+    />
+  ) : (
+    <AgentConfigurationView
+      packageId={packageId}
+      detail={detail}
+      configSchemaOverride={configSchemaOverride}
+      isHistorical={isHistorical}
+      // Past the two branches above, only configuration sections remain.
+      section={activeSection as ConfigurationSection}
+      embedded
+    />
+  );
 
   return (
     <AgentDetailSplit
@@ -267,6 +283,7 @@ export function AgentSettingsView({
                     item={{ to: sectionHref(item.id), icon: item.icon, labelKey: item.labelKey }}
                     label={t(item.labelKey)}
                     active={activeSection === item.id}
+                    locked={!visible(item.id)}
                   />
                 ))}
               </div>

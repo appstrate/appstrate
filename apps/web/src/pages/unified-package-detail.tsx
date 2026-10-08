@@ -50,6 +50,7 @@ import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
+import { RoleLimitNotice } from "../components/role-limit-notice";
 import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
@@ -119,9 +120,12 @@ function AgentRunButtonInline({
   detail: AgentDetail;
   versionLabel: string | undefined;
 }) {
+  const canReadAgent = usePermissions().can("agents:read");
   const diagnostics = useAgentDiagnostics(packageId, versionLabel);
   const result = diagnostics.data;
-  const runDisabled = diagnostics.isLoading || !diagnosticsAllowLaunch(result);
+  // Without `agents:read` there is no verdict to wait for: the launch itself
+  // checks readiness and opens the recovery flow, as on every launch surface.
+  const runDisabled = canReadAgent && (diagnostics.isLoading || !diagnosticsAllowLaunch(result));
   const runDisabledTitle = result?.diagnostics.find(
     (item) => item.severity === "blocking" && !item.recoverable_on_launch,
   )?.explanation;
@@ -252,18 +256,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // ── State ──
   // The tabs this caller may MOUNT — the single gate, since `useTabWithHash`
-  // falls back to the default tab for a hash naming anything outside the list
-  // and the panels below key on its answer. The summary is withheld from an
-  // `agents:run` caller without `agents:read`: it is fed by fields the summary
-  // read omits (manifest, prompt, authoring history).
-  const agentTabVisible = (id: (typeof AGENT_DETAIL_TABS)[number]) =>
-    id === "overview"
-      ? fullRead
-      : id === "runs"
-        ? tabReads.runs
-        : id === "memory"
-          ? tabReads.memory
-          : true;
+  // falls back to the default tab for a hash naming anything outside the list.
+  // An agent's tabs are the same for every role: a tab whose read the caller
+  // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
+  // the page reads the same whatever the role and only its content changes.
+  const agentTabVisible = (_id: (typeof AGENT_DETAIL_TABS)[number]) => true;
   const allValidTabs: DetailTab[] =
     type === "agent"
       ? AGENT_DETAIL_TABS.filter(agentTabVisible)
@@ -277,7 +274,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ...(tabReads.usedBy ? (["usedBy"] as const) : []),
         ];
   // Every detail has a useful summary; explicit file/version deep links still win.
-  const defaultTab: DetailTab = fullRead ? "overview" : tabReads.runs ? "runs" : "settings";
+  const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const openAgentSettings = (section: "map" | "files" | "model") => {
     const search = new URLSearchParams(location.search);
@@ -415,6 +412,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ? pkgDetail.manifest.icon
           : undefined,
     color: type === "agent" ? agentDetail?.color : undefined,
+    readsPublished: type === "agent" && agentDetail?.definition === "published",
     homeSpaceName,
   };
 
@@ -478,7 +476,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
         }}
         statusBadges={
-          type === "agent" ? (
+          // The readiness verdict reads the agent's content: shown to whoever may read it.
+          type === "agent" && fullRead ? (
             <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
           ) : undefined
         }
@@ -639,24 +638,41 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               value="overview"
               className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
             >
-              <AgentOverviewTab
-                packageId={packageId}
-                detail={agentDetail}
-                version={versionLabel}
-                isHistorical={isHistoricalVersion}
-                currentManifest={currentManifest}
-                currentContent={currentContent}
-                surface="summary"
-                onOpenFiles={() => openAgentSettings("files")}
-                cardHeaders
-                contained
-              />
+              {fullRead ? (
+                <AgentOverviewTab
+                  packageId={packageId}
+                  detail={agentDetail}
+                  version={versionLabel}
+                  isHistorical={isHistoricalVersion}
+                  currentManifest={currentManifest}
+                  currentContent={currentContent}
+                  surface="summary"
+                  onOpenFiles={() => openAgentSettings("files")}
+                  cardHeaders
+                  contained
+                />
+              ) : (
+                // Without `agents:read` the summary's fields (manifest, prompt,
+                // authoring history) are not served: say what the role allows.
+                <div className="space-y-4">
+                  <RoleLimitNotice>{t("detail.roleLimit.overview")}</RoleLimitNotice>
+                  {tabReads.runs && (
+                    <Button variant="outline" size="sm" onClick={() => setTab("runs")}>
+                      {t("detail.roleLimit.seeRuns")}
+                    </Button>
+                  )}
+                </div>
+              )}
             </TabsContent>
             <TabsContent
               value="runs"
               className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
             >
-              <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
+              {tabReads.runs ? (
+                <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
+              ) : (
+                <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
+              )}
             </TabsContent>
             <TabsContent
               value="settings"
@@ -676,7 +692,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               value="memory"
               className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
             >
-              <AgentMemoryTab packageId={packageId} />
+              {tabReads.memory ? (
+                <AgentMemoryTab packageId={packageId} />
+              ) : (
+                <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
+              )}
             </TabsContent>
           </Tabs>
         </div>

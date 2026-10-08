@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Lock } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -28,6 +29,7 @@ export function RailLink({
   state,
   mobile = false,
   onNavigate,
+  locked = false,
 }: {
   item: RailLinkItem;
   label: string;
@@ -35,6 +37,8 @@ export function RailLink({
   state?: unknown;
   mobile?: boolean;
   onNavigate?: () => void;
+  /** The entry stays, its content says what the role does not allow: a lock marks it. */
+  locked?: boolean;
 }) {
   return (
     <Link
@@ -46,6 +50,7 @@ export function RailLink({
     >
       <item.icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
+      {locked && <Lock className="text-muted-foreground ml-auto size-3.5 shrink-0" aria-hidden />}
     </Link>
   );
 }
