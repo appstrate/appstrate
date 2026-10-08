@@ -215,7 +215,6 @@
   "apiError.agent_not_found": "Cet agent est introuvable.",
   "apiError.agent_not_active": "Cet agent n'est pas activé dans cet espace.",
   "apiError.agent_not_active_in_space": "Cet agent n'est pas activé dans cet espace. Activez-le depuis la page Packages de l'espace.",
-  "apiError.agent_not_ready": "Cet agent n'est pas prêt à être lancé : {{message}}",
   "apiError.empty_prompt": "Le prompt de l'agent est vide.",
   "apiError.missing_skill": "Un skill dont dépend l'agent est introuvable ou n'est pas activé dans cet espace : {{message}}",
   "apiError.integration_not_found": "Une intégration dont dépend l'agent est introuvable : {{message}}",

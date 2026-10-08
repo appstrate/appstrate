@@ -168,6 +168,7 @@ const NOT_SURFACED = new Set([
   "invalid_timestamp",
   "message_replayed",
   "missing_signature_headers",
+  "remote_binds_one_connection",
   "run_agent_deleted",
   "run_definition_gone",
   "run_not_running",

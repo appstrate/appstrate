@@ -25,9 +25,11 @@ import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-cred
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { extractRunAgentDenorm, freezeRunSpawnDependencies } from "./run-pipeline.ts";
-import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
+import {
+  missingIntegrationConnection,
+  resolveRunConnectionsOrError,
+} from "./integration-connection-resolver.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import { ApiError } from "../lib/errors.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
@@ -183,16 +185,18 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       .filter(([, set]) => set.length > 1)
       .map(([integrationId]) => integrationId);
     if (multi.length > 0) {
-      throw new ApiError({
-        status: 409,
-        code: "agent_not_ready",
-        title: "Agent Not Ready",
-        detail:
-          `Remote runs bind one connection per integration, but this run's connection choice binds ` +
-          `several to ${multi.map((id) => `'${id}'`).join(", ")} — the remote runner's api_call tool ` +
-          `cannot say which one to use. Pick one with a member pin (a set an admin pin or an enforced ` +
-          `org default imposes is narrowed by an admin), or run the agent on the platform.`,
-      });
+      throw missingIntegrationConnection(
+        multi.map((integrationId) => ({
+          field: `integrations.${integrationId}`,
+          code: "remote_binds_one_connection",
+          title: "Remote Run Binds One Connection",
+          message:
+            `Remote runs bind one connection per integration, but this run's connection choice binds ` +
+            `several to '${integrationId}' — the remote runner's api_call tool cannot say which one ` +
+            `to use. Pick one with a member pin (a set an admin pin or an enforced org default ` +
+            `imposes is narrowed by an admin), or run the agent on the platform.`,
+        })),
+      );
     }
   }
 

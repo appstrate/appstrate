@@ -215,7 +215,6 @@
   "apiError.agent_not_found": "This agent cannot be found.",
   "apiError.agent_not_active": "This agent is not active in this space.",
   "apiError.agent_not_active_in_space": "This agent is not active in this space. Activate it from the space's Packages page.",
-  "apiError.agent_not_ready": "This agent is not ready to run: {{message}}",
   "apiError.empty_prompt": "The agent's prompt is empty.",
   "apiError.missing_skill": "A skill the agent depends on cannot be found or is not active in this space: {{message}}",
   "apiError.integration_not_found": "An integration the agent depends on cannot be found: {{message}}",
