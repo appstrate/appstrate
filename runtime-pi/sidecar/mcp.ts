@@ -130,14 +130,14 @@ import {
   type ApiCallDeps,
   type ApiCallRequestBody,
 } from "./credential-proxy.ts";
-import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
+import { buildSidecarAnswerUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
  * `_meta` of an `api_call` the sidecar answered itself: `status: 0` tells the runtime no
  * upstream response reached it, as opposed to "upstream returned 5xx".
  */
-const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
-  [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
+const SIDECAR_ANSWER_META: Record<string, unknown> = {
+  [UPSTREAM_META_KEY]: buildSidecarAnswerUpstreamMeta(),
 };
 
 /**
@@ -263,7 +263,7 @@ function multipartError(
       content: [{ type: "text", text }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -289,7 +289,7 @@ function bodyPreflightError(
       content: [{ type: "text", text: `${label}: ${text}` }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -998,7 +998,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           ],
           isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
+          _meta: SIDECAR_ANSWER_META,
         };
       }
 
@@ -1043,10 +1043,10 @@ function buildSidecarTools(options: MountMcpOptions): {
           // the parser requires `_meta` on every result — `status: 0`, plus any shared code.
           _meta: result.code
             ? {
-                ...API_CALL_PREFLIGHT_META,
+                ...SIDECAR_ANSWER_META,
                 [API_CALL_ERROR_META_KEY]: { code: result.code } satisfies ApiCallErrorMeta,
               }
-            : API_CALL_PREFLIGHT_META,
+            : SIDECAR_ANSWER_META,
         };
       }
       return responseToToolResult(result.response, {

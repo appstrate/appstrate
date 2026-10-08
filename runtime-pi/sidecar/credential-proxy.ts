@@ -243,8 +243,7 @@ function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
  * the URL, substitute placeholders, inject the credential header
  * server-side, send the request, retry once on 401, capture cookies,
  * log persistent auth failures. Returns the raw upstream `Response`
- * (body unread) on success, or a structured `{code?, error}` failure
- * before any outbound bytes were sent.
+ * (body unread) on success, or a structured `{code?, error}` failure.
  */
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
@@ -532,23 +531,23 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 function wrapRequestError(err: unknown, integrationId: string, host: string): ApiCallFailure {
   const failure = classifyApiCallFailure(err);
   let error: string;
-  switch (failure.kind) {
-    case "not_authorized":
-    case "ssrf":
+  switch (failure.code) {
+    case "unauthorized_target":
+    case "blocked_target":
       error = failure.redirect
         ? failure.message
         : `Integration "${integrationId}": ${failure.message}`;
       break;
-    case "unresolvable":
+    case "upstream_unresolvable":
       error = `Integration "${integrationId}": ${failure.message}`;
       break;
-    case "invalid_header":
+    case "credential_unusable":
       error = `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`;
       break;
-    case "timeout":
+    case "upstream_timeout":
       error = `Upstream timeout: ${host} did not answer in time`;
       break;
-    case "transport":
+    case "upstream_unreachable":
       error = `Upstream request failed${failure.systemCode ? `: ${failure.systemCode}` : ""} (${host})`;
       break;
   }

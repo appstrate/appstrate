@@ -123,7 +123,7 @@ type IntegrationUploadResult =
   | {
       ok: false;
       protocol: UploadProtocol;
-      /** Last upstream HTTP status (may be 0 for pre-flight failures). */
+      /** Last upstream HTTP status (0 when the sidecar answered itself). */
       status: number;
       /** Last upstream response headers. */
       headers: Record<string, string>;
@@ -396,8 +396,8 @@ export class McpApiUploadResolver {
       }
       const result = await this.mcp.callTool({ name: toolName, arguments: args }, { signal });
       // The sidecar attaches `_meta` on every CallToolResult, including
-      // pre-flight errors (which carry `status: 0` to signal "no
-      // upstream contact"). A missing `_meta` is a protocol violation
+      // errors the sidecar answered itself (which carry `status: 0`: no
+      // upstream response reached it). A missing `_meta` is a protocol violation
       // — `readUpstreamMeta` throws.
       const meta = readUpstreamMeta(result);
       // Upload-protocol responses are small (Drive: ~1KB JSON; S3:

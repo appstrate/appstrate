@@ -915,13 +915,14 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     declaredUris: [],
     resolveHost,
   });
+  // The post-send rows pin the whole message; the others name the part that matters.
   it.each<[string, string, Partial<ApiCallDeps>, ApiCallFailureCode, string]>([
     [
       "a target off the allowlist (engine hop gate)",
       "https://other.example.com/v1",
       {},
       "unauthorized_target",
-      'Integration "demo": URL not in authorized_uris allowlist',
+      expect.stringContaining('Integration "demo": URL not in authorized_uris allowlist'),
     ],
     [
       "an integration with no allowlist (URL policy)",
@@ -936,28 +937,28 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
         declaredUris: [],
       },
       "unauthorized_target",
-      "declares no authorized_uris and not allow_all_uris",
+      expect.stringContaining("declares no authorized_uris and not allow_all_uris"),
     ],
     [
       "a target resolving into a blocked range",
       "https://rebind.example.com/v1",
       gated(async () => ["10.0.0.5"]),
       "blocked_target",
-      "blocked network range",
+      expect.stringContaining("blocked network range"),
     ],
     [
       "an unresolvable target",
       "https://rebind.example.com/v1",
       gated(async () => Promise.reject(new Error("ENOTFOUND"))),
       "upstream_unresolvable",
-      "could not be resolved",
+      expect.stringContaining("could not be resolved"),
     ],
     [
       "an unusable injected credential",
       "https://api.example.com/v1",
       { fetchCredentials: injected("tok\r\nX-Evil: 1", ["https://api.example.com/**"]) },
       "credential_unusable",
-      "the connection's credential is unusable",
+      expect.stringContaining("the connection's credential is unusable"),
     ],
     [
       "a silent upstream",
@@ -978,7 +979,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       "https://api.example.com/v1",
       { fetchCredentials: injected("tok", null, true), declaredUris: [] },
       "credential_exfiltration_refused",
-      "names its hosts",
+      expect.stringContaining("names its hosts"),
     ],
   ])("codes %s as the platform proxy does", async (_, targetUrl, overrides, code, error) => {
     const result = await executeApiCall(
@@ -992,7 +993,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       },
       makeDeps(overrides),
     );
-    expect(result).toEqual({ ok: false, code, error: expect.stringContaining(error) });
+    expect(result).toEqual({ ok: false, code, error });
   });
 
   it("holds an injected credential to authorized_uris on a redirect under allow_all_uris", async () => {

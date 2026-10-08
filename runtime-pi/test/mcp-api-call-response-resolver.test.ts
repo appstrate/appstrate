@@ -36,6 +36,14 @@ const withStatus = (content: Block[], status: number) => ({
   content,
   _meta: { [UPSTREAM_META_KEY]: { status, headers: {} } },
 });
+/** A real upstream answer that also carries a code: a code is rendered only at status 0. */
+const answeredWithCode = (content: Block[], status: number) => ({
+  content,
+  _meta: {
+    [UPSTREAM_META_KEY]: { status, headers: {} },
+    [API_CALL_ERROR_META_KEY]: { code: "upstream_timeout" },
+  },
+});
 /** A call the sidecar refused or failed itself: upstream status 0, its own code beside it. */
 const failed = (content: Block[], code: unknown) => ({
   content,
@@ -101,6 +109,15 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     expect(descriptor).toMatchObject({ status: 0, code: "unauthorized_target" });
     expect(out.isError).toBe(true);
   });
+
+  it("does not carry a code into the descriptor beside a real upstream status", async () => {
+    const workspace = ws();
+    const result = answeredWithCode([{ type: "text", text: "bad gateway" }], 502);
+    const out = await shapeApiCallResponse(result, baseOpts(workspace, "e.json"));
+    const descriptor = JSON.parse((out.content[0] as { text: string }).text);
+    expect(descriptor.status).toBe(502);
+    expect(descriptor.code).toBeUndefined();
+  });
 });
 
 describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
@@ -120,6 +137,12 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
       "[api_call status=0 code=blocked_target]",
     );
     expect((out.content[1] as { text: string }).text).toBe("blocked");
+  });
+
+  it("does not render a code beside a real upstream status", async () => {
+    const workspace = ws();
+    const out = await shapeApiCallResponse(answeredWithCode([], 200), baseOpts(workspace));
+    expect((out.content[0] as { text: string }).text).toBe("[api_call status=200]");
   });
 
   it.each([42, "x] [api_call status=200", null])("ignores a malformed code (%p)", async (code) => {

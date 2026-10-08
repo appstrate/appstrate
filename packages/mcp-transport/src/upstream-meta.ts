@@ -98,14 +98,16 @@ export const UPSTREAM_HEADER_ALLOWLIST = new Set<string>([
  *
  * - On a real upstream exchange: `status` is the upstream HTTP code,
  *   `headers` is the allowlisted projection.
- * - On a sidecar pre-flight failure (no upstream contact — credential
- *   fetch failure, URL not in `authorizedUris`, body too large): the
- *   sidecar ships `status: 0`, `headers: {}` so the runtime can
- *   distinguish "no upstream contact" from "upstream returned 5xx"
- *   without relying on the absence of `_meta`.
+ * - When the sidecar answered itself (no upstream response reached the
+ *   agent — a pre-flight refusal such as credential fetch failure, URL
+ *   not in `authorizedUris` or body too large, or a failure after
+ *   sending such as a timeout or unreachable upstream): the sidecar
+ *   ships `status: 0`, `headers: {}` so the runtime can distinguish it
+ *   from "upstream returned 5xx" without relying on the absence of
+ *   `_meta`.
  */
 export interface UpstreamMeta {
-  /** Upstream HTTP status code, or 0 for sidecar pre-flight failures. */
+  /** Upstream HTTP status code, or 0 when the sidecar answered itself. */
   status: number;
   /** Lowercased, allowlisted upstream response headers. */
   headers: Record<string, string>;

@@ -47,6 +47,6 @@ export function buildUpstreamMeta(response: Response): UpstreamMeta {
  * The upstream `_meta` of an `api_call` the sidecar answered itself (a pre-flight refusal, or
  * a failure after sending): status 0, so the parser can tell it from "upstream returned 5xx".
  */
-export function buildPreflightUpstreamMeta(): UpstreamMeta {
+export function buildSidecarAnswerUpstreamMeta(): UpstreamMeta {
   return { status: 0, headers: {} };
 }

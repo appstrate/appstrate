@@ -112,6 +112,12 @@ describe("fetchApiCall — a transport error", () => {
     expect(classifyApiCallFailure(out).systemCode).toBeUndefined();
   });
 
+  it("drops a system-code-shaped code that holds a credential value", async () => {
+    const odd = Object.assign(bunError(), { code: "sk_live_abc" });
+    const out = await sendFailing(odd, { api_key: "sk_live_abc" });
+    expect(classifyApiCallFailure(out).systemCode).toBeUndefined();
+  });
+
   it("is rethrown untouched on an untemplated call", async () => {
     const err = bunError();
     expect(await sendFailing(err)).toBe(err);
@@ -487,7 +493,10 @@ describe("fetchApiCall — credentials across a redirect", () => {
       authorizedUris: ["https://api.dropboxapi.com/**"],
       allowAllUris: false,
     }).catch((e: unknown) => e);
-    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "not_authorized", redirect: true });
+    expect(classifyApiCallFailure(err)).toMatchObject({
+      code: "unauthorized_target",
+      redirect: true,
+    });
   });
 
   it("classifies a hop to a host with no DNS answer as unresolvable, not as SSRF", async () => {
@@ -511,7 +520,10 @@ describe("fetchApiCall — credentials across a redirect", () => {
         return ["203.0.113.7"];
       },
     }).catch((e: unknown) => e);
-    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "unresolvable", redirect: true });
+    expect(classifyApiCallFailure(err)).toMatchObject({
+      code: "upstream_unresolvable",
+      redirect: true,
+    });
   });
 
   it("returns a streaming body's redirect unfollowed", async () => {
@@ -713,22 +725,21 @@ describe("fetchApiCall — transport", () => {
 describe("classifyApiCallFailure", () => {
   it("names what every path maps: refusal, redirect, timeout, transport", () => {
     expect(classifyApiCallFailure(new ApiCallRefusedError("unresolvable", "m"))).toEqual({
-      kind: "unresolvable",
       code: "upstream_unresolvable",
       redirect: false,
       message: "m",
     });
     expect(classifyApiCallFailure(new ApiCallRefusedError("ssrf", "m", true))).toEqual({
-      kind: "ssrf",
       code: "blocked_target",
       redirect: true,
       message: "m",
     });
-    expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
+    expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).code).toBe(
+      "upstream_timeout",
+    );
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
     ).toEqual({
-      kind: "transport",
       code: "upstream_unreachable",
       redirect: false,
       message: "refused",
@@ -794,7 +805,7 @@ describe("fetchApiCall — a header value that is no HTTP field value", () => {
         expect(JSON.stringify([err.message, { ...err }])).not.toContain(secret);
         expect(fetchFn).not.toHaveBeenCalled();
         expect(classifyApiCallFailure(err)).toMatchObject({
-          kind: "invalid_header",
+          code: "credential_unusable",
           redirect: false,
         });
       });

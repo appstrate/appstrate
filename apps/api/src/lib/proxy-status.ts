@@ -97,8 +97,7 @@ export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode
 
 /** The problem a proxy answers for `code`; `detail` never names a secret. */
 export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {
-  const problem: { status: number; title: string; proxyError?: ProxyErrorType } =
-    PROXY_PROBLEMS[code];
+  const problem: ProxyProblem = PROXY_PROBLEMS[code];
   return new ApiError({
     status: problem.status,
     code,

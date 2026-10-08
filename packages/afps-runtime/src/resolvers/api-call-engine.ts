@@ -90,7 +90,6 @@ export class ApiCallRefusedError extends Error {
 
 /** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
 export interface ApiCallFailureClass {
-  kind: keyof typeof ENGINE_FAILURE_CODE;
   code: (typeof ENGINE_FAILURE_CODE)[keyof typeof ENGINE_FAILURE_CODE];
   /** A redirect hop was refused, not the initial target. */
   redirect: boolean;
@@ -102,8 +101,7 @@ export interface ApiCallFailureClass {
 
 /** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
 export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
-  const failure = (kind: ApiCallFailureClass["kind"], message: string, redirect = false) => ({
-    kind,
+  const failure = (kind: keyof typeof ENGINE_FAILURE_CODE, message: string, redirect = false) => ({
     code: ENGINE_FAILURE_CODE[kind],
     redirect,
     message,
@@ -175,7 +173,12 @@ function scrubTransportError(err: unknown, fields: Readonly<Record<string, strin
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
   const code = (err as { code?: unknown }).code;
-  if (typeof code === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(code))
+  // A credential can be shaped like a system code (`sk_live_abc`): drop any code that holds one.
+  if (
+    typeof code === "string" &&
+    /^[A-Za-z][A-Za-z0-9_]*$/.test(code) &&
+    !Object.values(fields).some((value) => value.length > 0 && code.includes(value))
+  )
     Object.assign(clean, { code });
   return clean;
 }

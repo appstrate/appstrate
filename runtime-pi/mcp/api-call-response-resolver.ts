@@ -199,7 +199,12 @@ export async function shapeApiCallResponse(
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
   const status = safeStatus(result);
-  const code = readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0]);
+  // The shared code describes an exchange the sidecar answered itself, so it is rendered only
+  // at status 0: next to a real upstream status it would contradict it.
+  const code =
+    status === 0
+      ? readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0])
+      : null;
 
   if (opts.toFile) {
     const bytes = await extractBodyBytes(result, opts.readResource);

@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { fetchApiCall, prepareApiCallRequest } from "@appstrate/afps-runtime/resolvers";
+import { fetchApiCall } from "@appstrate/afps-runtime/resolvers";
 import {
   _capResponseBodyForTesting as capResponseBody,
-  _proxyCallErrorsForTesting as proxyCallErrors,
+  _toProxyCallErrorForTesting as toProxyCallError,
 } from "../../src/services/credential-proxy/core.ts";
 
 function streamFromChunks(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -187,16 +187,7 @@ describe("the proxy's api_call failure codes (#1761)", () => {
       () => engineFailure("https://api.acme.com/x", { fetchFn: rejecting(new Error("reset")) }),
     ],
   ] as const)("%s → %s", async (_kind, code, run) => {
-    const err = proxyCallErrors.toProxyCallError(await run(), "@acme/api", "api.acme.com", "c1");
+    const err = toProxyCallError(await run(), "@acme/api", "api.acme.com", "c1");
     expect(err).toMatchObject({ name: "ProxyCallError", code });
-  });
-
-  it.each([
-    ["unresolved_placeholder", "unresolved_placeholder", "https://api.acme.com/{{missing}}", {}],
-    ["invalid_header", "invalid_request", "https://api.acme.com/x", { "X-Bad": "a\u0001b" }],
-  ] as const)("prepare %s → %s", (_kind, code, target, headers) => {
-    const prepared = prepareApiCallRequest({ target, headers, bodyTemplates: [], fields: {} });
-    if (prepared.ok) throw new Error("expected a refusal");
-    expect(proxyCallErrors.prepareRefusalError(prepared.refusal).code).toBe(code);
   });
 });

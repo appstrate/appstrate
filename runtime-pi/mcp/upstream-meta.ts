@@ -11,8 +11,8 @@
  *
  * - Every `api_call` `CallToolResult` MUST carry `_meta` under
  *   {@link UPSTREAM_META_KEY}. The sidecar attaches it on every return
- *   path — including pre-flight failures (credential fetch, URL
- *   allowlist, body too large) which surface as `status: 0`,
+ *   path — including the ones it answered itself (pre-flight refusals,
+ *   timeouts, unreachable upstreams) which surface as `status: 0`,
  *   `headers: {}`. The runtime no longer accepts a missing `_meta` —
  *   that pre-`_meta` shape was a backwards-compat shim for sidecars
  *   older than the runtime in the same release; sidecar and runtime

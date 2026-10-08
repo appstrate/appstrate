@@ -223,7 +223,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     bodyTemplates: bodyTemplate !== null ? [bodyTemplate] : [],
     fields,
   });
-  if (!prepared.ok) throw prepareRefusalError(prepared.refusal);
+  if (!prepared.ok) {
+    throw new ProxyCallError(PREPARE_REFUSAL_CODE[prepared.refusal.kind], prepared.refusal.message);
+  }
   const { url: target, templates } = prepared.request;
 
   const authorizedUris = resolved.authorizedUris ?? [];
@@ -484,14 +486,6 @@ export function bodyReadError(err: unknown, redactedHost: string): ProxyCallErro
   return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream));
 }
 
-/** `prepareApiCallRequest`'s refusal, as the proxy's typed error. */
-function prepareRefusalError(refusal: {
-  kind: keyof typeof PREPARE_REFUSAL_CODE;
-  message: string;
-}): ProxyCallError {
-  return new ProxyCallError(PREPARE_REFUSAL_CODE[refusal.kind], refusal.message);
-}
-
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
 function toProxyCallError(
   err: unknown,
@@ -502,7 +496,9 @@ function toProxyCallError(
   const failure = classifyApiCallFailure(err);
   // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
   const sent =
-    failure.redirect || failure.kind === "timeout" || failure.kind === "transport"
+    failure.redirect ||
+    failure.code === "upstream_timeout" ||
+    failure.code === "upstream_unreachable"
       ? connectionId
       : undefined;
   switch (failure.code) {
@@ -586,4 +582,4 @@ function capResponseBody(
 export const _capResponseBodyForTesting = capResponseBody;
 
 /** @internal Exported for unit testing */
-export const _proxyCallErrorsForTesting = { prepareRefusalError, toProxyCallError };
+export const _toProxyCallErrorForTesting = toProxyCallError;
