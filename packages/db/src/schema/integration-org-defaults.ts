@@ -26,8 +26,9 @@
  *
  * Same invariants as admin pins: every referenced connection MUST be
  * `shared_with_org = true` (validation in the org-defaults service — an
- * admin can't coerce a member's personal connection), and `connection_ids`
- * carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
+ * admin can't coerce a member's personal connection), hence a member's: an
+ * end user's is never shared (CHECK `integration_connections_end_user_not_shared`).
+ * `connection_ids` carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id
  * that no longer resolves.
@@ -59,7 +60,7 @@ export const integrationOrgDefaults = pgTable(
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    /** The set every agent binds by default. Each member must be sharedWithOrg=true. */
+    /** The set every agent binds by default. Each id names a member's shared connection. */
     connectionIds: uuid("connection_ids").array().notNull(),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),

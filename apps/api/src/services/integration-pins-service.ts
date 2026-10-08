@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -228,8 +228,8 @@ interface SetPinInput {
  *   1. exists in the same space,
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
- *      leak the admin's identity to other members at run time),
- *   4. is owned by a member, never by an end user.
+ *      leak the admin's identity to other members at run time) — hence a
+ *      member's, never an end user's.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -361,10 +361,11 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
- * here: rows a member owns and shares for an admin pin or an org default, shared rows plus
- * `allowOwnedBy`'s own for a member pin. Every refusal — unknown id, another space or integration,
- * a row neither shared nor the caller's own, an end user's — is the SAME 404 naming the first
- * refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
+ * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. A shared row is a member's
+ * (CHECK `integration_connections_end_user_not_shared`), so an end user's never qualifies for an
+ * admin pin or an org default. Every refusal — unknown id, another space or integration, a row
+ * neither shared nor the caller's own — is the SAME 404 naming the first refused id, so a pin
+ * write cannot tell a colleague's private uuid from a made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -382,7 +383,7 @@ export async function validatePinTargets(
         eq(c.spaceId, scope.spaceId),
         eq(c.integrationId, integrationId),
         opts.allowOwnedBy === undefined
-          ? and(eq(c.sharedWithOrg, true), isNotNull(c.userId))
+          ? eq(c.sharedWithOrg, true)
           : or(eq(c.userId, opts.allowOwnedBy), eq(c.sharedWithOrg, true)),
       ),
     );
