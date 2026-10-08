@@ -43,8 +43,16 @@ export function sheetSpaceRows(
   spaces: readonly { id: string; name: string }[],
   /** The reader's verdict for switching it on (`next: true`) or off in that space. */
   mayToggle: (spaceId: string, next: boolean) => boolean,
+  /** The space the reader is in: its row comes first, it is the one they act on. */
+  currentSpaceId?: string | null,
 ): SheetSpaceRow[] {
-  return spaces.map((space) => {
+  const ordered = currentSpaceId
+    ? [
+        ...spaces.filter((space) => space.id === currentSpaceId),
+        ...spaces.filter((space) => space.id !== currentSpaceId),
+      ]
+    : spaces;
+  return ordered.map((space) => {
     const state: PlacementState | null = placement.activeIn.includes(space.id)
       ? "active"
       : placement.offeredIn.includes(space.id)

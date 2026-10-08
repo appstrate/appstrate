@@ -221,9 +221,7 @@ export function CataloguePreview({
   const agent = type === "agent" ? (detail as AgentDetail | undefined) : undefined;
   const other = type !== "agent" ? (detail as OrgPackageItemDetail | undefined) : undefined;
 
-  const rows = sheetSpaceRows(placement, spaces, grantOf);
-  /** The reader's own space, when the sheet lists it: the title's switch. */
-  const hereRow = rows.find((row) => row.id === currentSpaceId);
+  const rows = sheetSpaceRows(placement, spaces, grantOf, currentSpaceId);
   const mode = sheetSpaceMode(rows);
   const offers = sheetOffers(rows);
   const home = spaces.find((space) => space.id === placement.homeSpaceId);
@@ -377,21 +375,13 @@ export function CataloguePreview({
         </Alert>
       ))}
 
-      {/* The title's line carries what acts on the package: the switch for
-          the space the reader is in — the deed a Découvrir card offers, in one
-          click — and the one Actions menu, the same items as the matrix row's
-          "…" (`CatalogueMenuItems`), opening with the package's own page. */}
+      {/* The title's line carries the one Actions menu, the same items as the
+          matrix row's "…" (`CatalogueMenuItems`), opening with the package's
+          own page. Switching it on here is the Espaces table's first row: a
+          second switch up here was the same gesture twice. */}
       <div className="flex items-start justify-between gap-4">
         <SettingsHeading className="mb-2" title={item.name || item.id} />
-        <div className="flex shrink-0 items-center gap-3">
-          {hereRow && (
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">{t("catalogue.activeHere")}</span>
-              {switchFor(hereRow)}
-            </label>
-          )}
-          {actionsMenu}
-        </div>
+        <div className="flex shrink-0 items-center gap-3">{actionsMenu}</div>
       </div>
       {/* What the package IS, in the badges the package's own header uses. */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -556,9 +546,13 @@ export function CataloguePreview({
                   <TableHead>{t("catalogue.filter.state")}</TableHead>
                   {/* Only an agent has a dependency another space must hold. */}
                   {missingAnywhere && <TableHead>{t("catalogue.sheet.missingColumn")}</TableHead>}
-                  <TableHead className="w-20 text-right">{t("catalogue.filter.active")}</TableHead>
+                  {/* No wrap: a two-line header over a one-switch column reads as
+                      two columns. The width follows the label. */}
+                  <TableHead className="w-px text-right whitespace-nowrap">
+                    {t("catalogue.filter.active")}
+                  </TableHead>
                   {enforceable && (
-                    <TableHead className="w-32 text-right">
+                    <TableHead className="w-px text-right whitespace-nowrap">
                       {t("library.column.chatEnforced", { ns: "common" })}
                     </TableHead>
                   )}

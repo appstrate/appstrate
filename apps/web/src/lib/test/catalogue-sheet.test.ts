@@ -28,6 +28,12 @@ const spaces = [
 ];
 
 describe("sheetSpaceRows", () => {
+  it("puts the reader's own space first", () => {
+    const rows = sheetSpaceRows(placement({}), spaces, () => true, "spc_b");
+    expect(rows[0]?.id).toBe("spc_b");
+    expect(rows).toHaveLength(spaces.length);
+  });
+
   it("reads each space's state, its home and who offered it", () => {
     const rows = sheetSpaceRows(
       placement({
