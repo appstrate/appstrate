@@ -3,13 +3,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { VariableField } from "./connection-variables-schema";
 
-/**
- * The connection variables (AFPS §7.12) of the hosted connect form: the
- * non-secret values choosing where the connection points (e.g. an instance
- * URL), rendered above the credential fields. Controlled by the caller, like
- * `<CredentialFields>`; every variable is required, the server validates the
- * value itself.
- */
+/** The hosted connect form's connection variables, controlled like `<CredentialFields>`. */
 
 interface VariableFieldsProps {
   fields: VariableField[];

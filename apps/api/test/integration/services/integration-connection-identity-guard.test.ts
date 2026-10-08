@@ -57,6 +57,29 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
     expect(updated.label).toBe("alice@example.com");
   });
 
+  it("refuses a reconnect to a different instance and leaves the row on its own", async () => {
+    const forge = (base_url: string, connectionId?: string) =>
+      saveIntegrationConnection(scope, {
+        packageId: INTEGRATION,
+        authKey: "oauth",
+        accountId: "alice",
+        credentials: { access_token: base_url },
+        variables: { base_url },
+        actor,
+        ...(connectionId ? { connectionId } : {}),
+      });
+    const created = await forge("https://forge-a.example.com");
+    await expect(forge("https://forge-b.example.com", created.id)).rejects.toThrow(
+      /different instance \(base_url=https:\/\/forge-a\.example\.com\)/,
+    );
+    const [row] = await db
+      .select({ variables: integrationConnections.variables })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, created.id));
+    expect(row!.variables).toEqual({ base_url: "https://forge-a.example.com" });
+    expect((await forge("https://forge-a.example.com", created.id)).id).toBe(created.id);
+  });
+
   it("refuses a reconnect that authenticated a different account", async () => {
     const created = await connect("alice@example.com");
     await expect(connect("bob@example.com", created.id)).rejects.toThrow(/different account/i);

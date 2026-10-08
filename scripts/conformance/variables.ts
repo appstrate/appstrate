@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Connection variables (AFPS §7.12) for the live tiers. A manifest whose
- * `source.remote.url` or oauth2 `issuer` is a URL template has no upstream of
- * its own: the harness renders it against one instance, exactly as a
- * connection would.
- *
- * Each variable takes its `default` from `variables.schema` (the hosted service
- * — gitlab.com, api.twenty.com), overridden per package by
- * `CONFORMANCE_VARIABLES`, a JSON object mapping package id → `{ name: value }`
- * (e.g. `{"@appstrate/coolify-mcp":{"base_url":"https://coolify.example.com"}}`).
- * A variable with neither leaves the template unrendered and the live check is
- * skipped with a WARN naming the missing variable.
+ * Connection variables (AFPS §7.12) for the live tiers: a templated upstream renders with each
+ * variable's `default`, overridden per package by `CONFORMANCE_VARIABLES`
+ * (`{"@appstrate/coolify-mcp":{"base_url":"https://coolify.example.com"}}`).
  */
 
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
@@ -63,12 +55,7 @@ export function conformanceVariables(entry: SystemPackageEntry): Record<string, 
   return { ...values, ...loadOverrides()[entry.packageId] };
 }
 
-/**
- * A URL-valued manifest field as the harness should contact it: a literal as is,
- * a template rendered with {@link conformanceVariables}. `skip` names why a
- * template cannot be rendered here (a variable with no default nor override, or
- * a value its form refuses).
- */
+/** A URL-valued manifest field as the harness contacts it; `skip` says why a template cannot render. */
 export function renderForConformance(
   entry: SystemPackageEntry,
   value: string,

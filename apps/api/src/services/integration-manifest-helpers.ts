@@ -213,15 +213,16 @@ interface AppstrateConnectMeta {
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 
 /**
- * Render an AFPS value template (used by `delivery.env` / `delivery.files`) against a decrypted
- * credential bag (`{$credential.<field>}`) and the connection's variables (`{$variable.<name>}`).
+ * Render an AFPS `{$credential.<field>}` value template (used by
+ * `delivery.env` / `delivery.files`) against a decrypted credential bag.
+ * `{$variable.<name>}` renders from the connection's variables.
  * Unknown refs render empty — a missing field means "nothing to inject".
  * Returns `null` when the template resolves to an empty string (so callers can
  * skip env vars / files whose backing credential field is absent), mirroring
  * the old `delivery.env.from` "field missing → skip" behaviour.
  *
  * Thin wrapper over the shared `@appstrate/afps-shared/credential-template` renderer
- * (single implementation of the template syntax) pinned to the
+ * (single implementation of the `{$credential.<field>}` syntax) pinned to the
  * `delivery.env` / `delivery.files` empty→null policy.
  */
 export function renderCredentialTemplate(
@@ -415,11 +416,7 @@ export function getRemoteSource(
   return { url, transport };
 }
 
-/**
- * `source.remote` rendered for one connection (AFPS §7.12): a URL template from the connection's
- * variables, a literal URL as it is. `null` when the source is not remote or the URL does not
- * render (no variables, or a value its form refuses).
- */
+/** `source.remote` rendered for one connection (AFPS §7.12); `null` when absent or unrenderable. */
 export function renderRemoteSource(
   manifest: IntegrationManifest,
   variables: Readonly<Record<string, string>> | null,
@@ -430,7 +427,6 @@ export function renderRemoteSource(
   return url === null ? null : { url, transport: remote.transport };
 }
 
-/** The integration's connection-variable schema (AFPS §7.12); `null` when it declares none. */
 export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObject | null {
   const schema = (manifest as { variables?: { schema?: unknown } }).variables?.schema;
   return typeof schema === "object" && schema !== null && !Array.isArray(schema)
@@ -438,19 +434,13 @@ export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObj
     : null;
 }
 
-/**
- * Whether `auth`'s authorization server is chosen per connection (AFPS §7.3): an oauth2 auth
- * whose `issuer` is a URL template, or any oauth2 auth of an integration whose
- * `source.remote.url` is one.
- */
+/** Whether an oauth2 auth's server is chosen per connection (AFPS §7.3): a templated issuer or URL. */
 export function hasPerConnectionAuthServer(
   manifest: IntegrationManifest,
   auth: Pick<AfpsManifestAuth, "type" | "issuer">,
 ): boolean {
   if (auth.type !== "oauth2") return false;
-  if (isVariableTemplate(auth.issuer)) return true;
-  const source = (manifest as { source?: { kind?: string; remote?: { url?: unknown } } }).source;
-  return source?.kind === "remote" && isVariableTemplate(source.remote?.url);
+  return isVariableTemplate(auth.issuer) || isVariableTemplate(getRemoteSource(manifest)?.url);
 }
 
 /** Read the Appstrate orchestrated-tool extension off a connect block. */

@@ -26,9 +26,7 @@ import {
  * Standalone hosted connect form (issue #769) — the form half of the unified
  * connect portal. Reached when the dispatch endpoint
  * (`GET /api/integrations/connect/start`) redirects here: a non-OAuth session,
- * or an OAuth one whose integration declares connection variables (AFPS §7.12)
- * — the form then collects only the variables and hands the window over to the
- * authorization server.
+ * or an OAuth one that must first collect connection variables (AFPS §7.12).
  *
  * Authentication is the httpOnly page cookie pinned during dispatch — NOT the
  * platform session — so this page renders standalone (members AND embedded
@@ -104,9 +102,8 @@ export function HostedConnectPage() {
     };
   }, []);
 
-  // Back from the authorization server restores this page from the bfcache as it
-  // was left — submitting. The page cookie survives until the OAuth callback, so
-  // the form can be submitted again.
+  // Back from the authorization server, the bfcache restores a submitting page; the cookie
+  // survives until the OAuth callback, so the form can be submitted again.
   useEffect(() => {
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) setPhase((p) => (p === "submitting" ? "form" : p));
@@ -121,7 +118,6 @@ export function HostedConnectPage() {
 
   const changeVariable = (name: string, value: string) => {
     setVariableValues((prev) => ({ ...prev, [name]: value }));
-    // The refusal was about the previous value.
     setVariableErrors((prev) => {
       const next = { ...prev };
       delete next[name];
@@ -138,7 +134,6 @@ export function HostedConnectPage() {
       return;
     }
     const variableNames = context.variables ? fields.map((f) => f.name) : null;
-    // Every variable is required; whatever else a value must be, the server says.
     const missing = missingVariables(variableNames ?? [], variableValues);
     if (missing.length > 0) {
       setVariableErrors(
@@ -161,7 +156,6 @@ export function HostedConnectPage() {
           variableValues,
         },
         {
-          // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
           post: async (body) =>
             (
               await client.POST("/api/integrations/connect/submit", {
@@ -172,8 +166,7 @@ export function HostedConnectPage() {
           navigate: (url) => window.location.assign(url),
         },
       );
-      // The window is leaving for the authorization server: the form stays
-      // disabled until it does, and the OAuth callback announces the result.
+      // The OAuth callback announces the result; the form stays disabled until the window leaves.
       if (outcome.kind === "redirected") return;
       // The connection exists: announce it now. The popup opener does not close
       // this window, so an install block below stays up until the user is done.
@@ -186,7 +179,6 @@ export function HostedConnectPage() {
       else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
-      // A refusal naming a variable is shown beside its input.
       const { byName, complete } = variableFieldErrors(err, variableLabels);
       setVariableErrors(byName);
       setError(complete ? null : errorMessage(err));

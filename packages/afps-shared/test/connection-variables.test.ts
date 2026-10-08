@@ -3,10 +3,8 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  hostVariableValue,
-  isUrlTemplate,
   isVariableTemplate,
-  parseUrlVariableValue,
+  parseUrlTemplate,
   renderUrlTemplate,
   unrenderableUrlTemplateVariables,
   variableRefs,
@@ -31,7 +29,7 @@ describe("variableRefs / isVariableTemplate", () => {
   });
 });
 
-describe("isUrlTemplate", () => {
+describe("parseUrlTemplate", () => {
   for (const template of [
     "{$variable.base_url}",
     "{$variable.base_url}/",
@@ -40,7 +38,7 @@ describe("isUrlTemplate", () => {
     "https://{$variable.tenant}.example.com",
     "https://{$variable.tenant}.forge.example.com/mcp",
   ]) {
-    it(`accepts ${template}`, () => expect(isUrlTemplate(template)).toBe(true));
+    it(`accepts ${template}`, () => expect(parseUrlTemplate(template)).not.toBeNull());
   }
 
   for (const template of [
@@ -57,8 +55,22 @@ describe("isUrlTemplate", () => {
     "https://api.{$variable.tenant}.com",
     "https://example.com/mcp",
   ]) {
-    it(`refuses ${template}`, () => expect(isUrlTemplate(template)).toBe(false));
+    it(`refuses ${template}`, () => expect(parseUrlTemplate(template)).toBeNull());
   }
+
+  it("splits each form into its variable and literal parts", () => {
+    expect(parseUrlTemplate("{$variable.base_url}/mcp")).toEqual({
+      form: "url",
+      name: "base_url",
+      path: "/mcp",
+    });
+    expect(parseUrlTemplate("https://{$variable.tenant}.example.com/mcp")).toEqual({
+      form: "host",
+      name: "tenant",
+      domain: ".example.com",
+      path: "/mcp",
+    });
+  });
 });
 
 describe("renderUrlTemplate — URL form", () => {
@@ -215,18 +227,5 @@ describe("unrenderableUrlTemplateVariables", () => {
         b: "x",
       }),
     ).toEqual(["a", "b"]);
-  });
-});
-
-describe("value rules", () => {
-  it("parseUrlVariableValue keeps the path and refuses a query", () => {
-    expect(parseUrlVariableValue("https://a.example.com/x")?.pathname).toBe("/x");
-    expect(parseUrlVariableValue("https://a.example.com/x?")).toBeNull();
-    expect(parseUrlVariableValue(undefined)).toBeNull();
-  });
-
-  it("hostVariableValue lowercases valid labels", () => {
-    expect(hostVariableValue("ACME.eu")).toBe("acme.eu");
-    expect(hostVariableValue("acme_eu")).toBeNull();
   });
 });

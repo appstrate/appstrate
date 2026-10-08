@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The hosted connect form's submission (`POST /api/integrations/connect/submit`),
- * kept out of the page so the body it sends and what it does with the answer
- * are testable without a DOM: the caller supplies the request and the
- * navigation.
- *
- * Two shapes of the same form. A non-oauth auth submits its credentials (plus
- * the connection variables the integration declares) and the connection is
- * stored. An oauth2 auth reaches this form only when the integration declares
- * variables (AFPS §7.12): it submits the variables alone, and the server answers
- * with the authorization server's URL — the window goes there, and the OAuth
- * callback creates the connection.
+ * The hosted connect form's submission (`POST /api/integrations/connect/submit`). An oauth2 auth
+ * reaches the form only to enter connection variables; it is sent on to the authorization server.
  */
 
 import type { paths } from "../api/client";
@@ -30,11 +21,7 @@ interface HostedConnectInput {
   variableValues: Record<string, string>;
 }
 
-/**
- * The request body: credentials for a non-oauth auth only (the server refuses
- * them on oauth2), and one trimmed value per declared variable — never a name
- * the manifest does not declare, never a `variables` member when it declares none.
- */
+/** Credentials unless oauth2 (which refuses them); one trimmed value per declared variable. */
 export function connectSubmitBody(input: HostedConnectInput): ConnectSubmitBody {
   const body: ConnectSubmitBody = {};
   if (input.authType !== "oauth2") body.credentials = input.credentials;
@@ -54,12 +41,7 @@ export function missingVariables(names: string[], values: Record<string, string>
 type HostedConnectOutcome =
   { kind: "redirected" } | { kind: "stored"; handoffSteps: HandoffStep[] };
 
-/**
- * Submit the form. oauth2: navigate to the returned `redirect_url` and report
- * `redirected` — nothing is stored yet, so no completion is announced here.
- * Otherwise the connection is stored; its minted-credential steps, if any, are
- * returned. A refusal propagates (`ApiError`).
- */
+/** oauth2 navigates to `redirect_url`: nothing is stored yet, so no completion is announced. */
 export async function submitHostedConnect(
   input: HostedConnectInput,
   deps: {
@@ -69,8 +51,7 @@ export async function submitHostedConnect(
 ): Promise<HostedConnectOutcome> {
   const data = await deps.post(connectSubmitBody(input));
   if (input.authType === "oauth2") {
-    // The contract always carries it for oauth2; an empty message renders the
-    // generic sentence rather than an English one.
+    // An empty message renders the generic sentence, not an English one.
     if (!data?.redirect_url) throw new Error("");
     deps.navigate(data.redirect_url);
     return { kind: "redirected" };
@@ -79,10 +60,8 @@ export async function submitHostedConnect(
 }
 
 /**
- * Split a refusal between the variable inputs and the form: each
- * `variables.<name>` item of a `validation_failed` becomes a sentence naming the
- * variable by its label (first refusal per variable). `complete` is true when
- * every item landed beside a field, so the form needs no message of its own.
+ * Each `variables.<name>` refusal item as a sentence beside its input (first per variable);
+ * `complete` when every item landed beside one, so the form needs no message of its own.
  */
 export function variableFieldErrors(
   err: unknown,

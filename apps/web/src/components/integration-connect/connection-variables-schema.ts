@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Reading an integration's `variables.schema` (AFPS §7.12) — the connection
- * variables the hosted connect form asks for before any credential or OAuth
- * step. Pure functions over the `GET /connect/context` payload, kept apart from
- * the component for the same reasons as `credential-schema.ts`.
- */
+/** An integration's `variables.schema` (AFPS §7.12), read for the hosted connect form. */
 
 import type { paths } from "../../api/client";
 
-/** The `variables` member of the connect context: the schema and the values to prefill. */
 export type ConnectContextVariables = NonNullable<
   paths["/api/integrations/connect/context"]["get"]["responses"][200]["content"]["application/json"]["variables"]
 >;
 
-/** One declared variable, as the form presents it. */
 export interface VariableField {
   name: string;
   title?: string;
@@ -26,7 +19,6 @@ export interface VariableField {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
 
-/** The declared variables, in declaration order. */
 export function variableFields(schema: Record<string, unknown>): VariableField[] {
   const props = schema.properties;
   if (!props || typeof props !== "object") return [];
@@ -43,11 +35,7 @@ export function variableFields(schema: Record<string, unknown>): VariableField[]
   });
 }
 
-/**
- * Seed values for the form: the reconnected connection's value, else the
- * declared `default`. Only declared variables are seeded, so a value the
- * manifest no longer declares is never resubmitted.
- */
+/** The reconnected connection's value, else the `default`; declared variables only. */
 export function initialVariableValues(
   variables: ConnectContextVariables | null | undefined,
 ): Record<string, string> {

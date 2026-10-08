@@ -9,10 +9,6 @@ import {
   type ConnectionVariablesDeps,
 } from "../../src/services/connect/connection-variables.ts";
 import type { AfpsManifestAuth } from "../../src/services/integration-manifest-helpers.ts";
-import {
-  authorizationServerTag,
-  INTEGRATION_TAGGED_CALLBACK_PATH,
-} from "../../src/lib/integration-callback-url.ts";
 
 const forgeManifest = {
   type: "integration",
@@ -170,17 +166,5 @@ describe("authUrlTemplates", () => {
       "{$variable.base_url}",
     ]);
     expect(authUrlTemplates(tenantManifest, tenantAuth)).toEqual([]);
-  });
-});
-
-describe("authorizationServerTag", () => {
-  it("is a 22-character base64url digest of the issuer, distinct per issuer", () => {
-    const a = authorizationServerTag("https://gitlab.com");
-    const b = authorizationServerTag("https://forge.example.com");
-    expect(a).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(a).not.toBe(b);
-    expect(authorizationServerTag("https://gitlab.com")).toBe(a);
-    expect(INTEGRATION_TAGGED_CALLBACK_PATH.test(`/api/integrations/callback/${a}`)).toBe(true);
-    expect(INTEGRATION_TAGGED_CALLBACK_PATH.test("/api/integrations/callback/x")).toBe(false);
   });
 });

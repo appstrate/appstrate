@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
 
-/**
- * The connection variables (AFPS §7.12) a connection was made with — what tells
- * two connections of a self-hosted integration apart (e.g. the instance URL).
- * One compact line under the connection's label: the values, in declaration
- * order; the names ride in the tooltip. Renders nothing for an integration
- * that declares none (`null`).
- */
+/** A connection's variables (e.g. its instance URL): what tells two connections apart. */
 export function ConnectionVariablesLine({
   variables,
   testId,

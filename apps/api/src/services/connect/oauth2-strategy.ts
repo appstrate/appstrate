@@ -26,8 +26,8 @@ import {
 } from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
 import {
+  authorizationServerTag,
   integrationCallbackUrl,
-  integrationCallbackUrlFor,
 } from "../../lib/integration-callback-url.ts";
 import {
   getRemoteSource,
@@ -139,19 +139,13 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       redirectUri: clientRedirectUri,
       clientRef,
     } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
-    const effectiveRedirectUri =
-      clientRedirectUri ??
-      (perConnection && resolved.issuer ? integrationCallbackUrlFor(resolved.issuer) : redirectUri);
+    const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
-    // fallback (classic integrations have no resolved.* fields). A server chosen
-    // per connection has nothing to fall back on: its issuer is a template.
-    const issuer = perConnection ? resolved.issuer : (resolved.issuer ?? auth.issuer);
-    const authorizationEndpoint = perConnection
-      ? resolved.authorizationEndpoint
-      : (resolved.authorizationEndpoint ?? auth.authorization_endpoint);
-    const tokenEndpoint = perConnection
-      ? resolved.tokenEndpoint
-      : (resolved.tokenEndpoint ?? auth.token_endpoint);
+    // fallback (classic integrations have no resolved.* fields).
+    const issuer = resolved.issuer ?? auth.issuer;
+    const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
+    const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
+    // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
     // AFPS §7.3 client binding, on a remote source: the client is presented only to the
     // endpoints of its server's validated metadata, never to a declared endpoint it contradicts.
@@ -189,7 +183,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
-      ...(resolved.redirectTag ? { redirectTag: resolved.redirectTag } : {}),
+      ...(perConnection && issuer ? { redirectTag: authorizationServerTag(issuer) } : {}),
       ...(variables ? { variables } : {}),
     });
     return { redirectUrl: result.authUrl, state: result.state };
@@ -204,9 +198,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     }
     const result = input.result;
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
-    // The authorization server the connection was acquired from (AFPS §7.3): for one chosen per
-    // connection, the validated issuer the state carried — the issuer the minting client is bound
-    // to (the callback refused any other) — with no manifest endpoint beside it.
+    // A server chosen per connection (AFPS §7.3) is the validated issuer the state carried, the one
+    // the minting client is bound to, with no manifest endpoint beside it.
     const perConnection = hasPerConnectionAuthServer(manifest, auth as AfpsManifestAuth);
     const issuer = perConnection ? result.issuer : auth.issuer;
     const declaredEndpoints = perConnection

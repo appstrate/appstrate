@@ -1245,7 +1245,11 @@ export const integrationsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail.",
+        },
         "403": {
           description:
             "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
@@ -1253,7 +1257,11 @@ export const integrationsPaths = {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
         },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
+        },
         "502": {
           description:
             "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link.",

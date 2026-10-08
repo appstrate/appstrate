@@ -2,11 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS §7.12 connection variables: the `{$variable.<name>}` references of a manifest and the URL
- * templates (`source.remote.url`, an oauth2 `issuer`, `connect.login.request.url`) that choose a
- * connection's upstream from them. A variable is not a secret: its value may be displayed and
- * logged. The value templates and `authorized_uris` entries that reference variables render in
- * `./credential-template.ts`, with the value rules exported here.
+ * AFPS §7.12 connection variables (`{$variable.<name>}`) and the URL templates that choose a
+ * connection's upstream from them. A variable is not a secret: its value may be shown and logged.
  */
 
 /** One `{$variable.<name>}` reference; group 1 is the name (`VARIABLE_NAME_REGEX`, Appendix B). */
@@ -17,37 +14,33 @@ export function variableRefs(template: string): string[] {
   return [...new Set(Array.from(template.matchAll(VARIABLE_REF), (m) => m[1]!))];
 }
 
-/** Whether `value` references a connection variable, so it renders per connection. */
 export function isVariableTemplate(value: unknown): value is string {
   return typeof value === "string" && value.includes("{$variable.");
 }
 
+export const HOST_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
+
 // URL_TEMPLATE_REGEX of `@afps-spec/schema`, split into its two forms.
-const PLACEHOLDER = "\\{\\$variable\\.([a-z][a-z0-9_]*)\\}";
-const LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
+const PLACEHOLDER = VARIABLE_REF.source;
 const LAST_LABEL = "[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
 const SEGMENT = "(?!\\.\\.?(?:\\/|$))[A-Za-z0-9._~!$&'()+,;=:@-]+";
 const PATH = `((?:\\/${SEGMENT})*\\/?)`;
 const URL_FORM = new RegExp(`^${PLACEHOLDER}${PATH}$`);
 const HOST_FORM = new RegExp(
-  `^https:\\/\\/${PLACEHOLDER}((?:\\.${LABEL})*\\.${LAST_LABEL})${PATH}$`,
+  `^https:\\/\\/${PLACEHOLDER}((?:\\.${HOST_LABEL})*\\.${LAST_LABEL})${PATH}$`,
 );
 
 type UrlTemplate =
   | { form: "url"; name: string; path: string }
   | { form: "host"; name: string; domain: string; path: string };
 
-function parseUrlTemplate(template: string): UrlTemplate | null {
+/** A URL template split into its form, variable and literal parts; `null` for anything else. */
+export function parseUrlTemplate(template: string): UrlTemplate | null {
   const url = URL_FORM.exec(template);
   if (url) return { form: "url", name: url[1]!, path: url[2]! };
   const host = HOST_FORM.exec(template);
   if (host) return { form: "host", name: host[1]!, domain: host[2]!, path: host[3]! };
   return null;
-}
-
-/** Whether `template` is a §7.12 URL template (the URL form or the host form). */
-export function isUrlTemplate(template: string): boolean {
-  return parseUrlTemplate(template) !== null;
 }
 
 /** Whether the authority of `value` carries userinfo, even empty (`https://@host`). */
@@ -57,11 +50,10 @@ function hasUserinfo(value: string): boolean {
 }
 
 /**
- * A URL-form variable value (§7.12): an absolute `http`/`https` URL with a host, without userinfo,
- * query, fragment (an empty `?` or `#` included) or `*`. `https`-only is the egress check's: it alone
- * knows the hosts an operator trusts over `http`.
+ * A URL-form value: absolute `http`/`https` with a host, without userinfo, query, fragment (even
+ * an empty `?` or `#`) or `*`. `http` is left to the egress check, which knows the trusted hosts.
  */
-export function parseUrlVariableValue(value: unknown): URL | null {
+function parseUrlVariableValue(value: unknown): URL | null {
   if (typeof value !== "string" || /[?#*]/.test(value)) return null;
   let url: URL;
   try {
@@ -74,30 +66,40 @@ export function parseUrlVariableValue(value: unknown): URL | null {
   return url;
 }
 
-const HOST_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
-const HOST_VALUE = new RegExp(`^${HOST_LABEL}(?:\\.${HOST_LABEL})*$`);
-
-/** Longest host name (RFC 1035 §2.3.4, without the root label's dot). */
-export const MAX_HOST_LENGTH = 253;
-
-/**
- * A host-form variable value (§7.12): `.`-separated labels of 1 to 63 letters, digits and `-`,
- * none starting or ending with `-`, lowercased. `null` otherwise.
- */
-export function hostVariableValue(value: unknown): string | null {
-  return typeof value === "string" && HOST_VALUE.test(value) ? value.toLowerCase() : null;
-}
+// RFC 1035 §2.3.4: labels of at most 63 characters, a name of at most 253.
+const VALUE_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+const HOST_VALUE = new RegExp(`^${VALUE_LABEL}(?:\\.${VALUE_LABEL})*$`);
+const MAX_HOST_LENGTH = 253;
 
 /** The connection's value of `name`; an inherited property is no value. */
 function variableValue(variables: Readonly<Record<string, unknown>>, name: string): unknown {
   return Object.prototype.hasOwnProperty.call(variables, name) ? variables[name] : undefined;
 }
 
-/**
- * Render a URL-valued field for one connection (§7.12) by substitution and concatenation, never
- * by relative resolution. A value without any `{$…}` is a literal URL and renders as itself; a
- * template outside the URL and host forms, or a value its form refuses, renders `null`.
- */
+/** The URL-form variable `name`, then `path` by concatenation, never relative resolution. */
+export function renderUrlVariable(
+  variables: Readonly<Record<string, unknown>>,
+  name: string,
+  path: string,
+): string | null {
+  const url = parseUrlVariableValue(variableValue(variables, name));
+  if (!url) return null;
+  return path === "" ? url.href : url.origin + url.pathname.replace(/\/+$/, "") + path;
+}
+
+/** The host-form variable `name`, lowercased, followed by `domain`; `null` past 253 characters. */
+export function renderHostVariable(
+  variables: Readonly<Record<string, unknown>>,
+  name: string,
+  domain: string,
+): string | null {
+  const label = variableValue(variables, name);
+  if (typeof label !== "string" || !HOST_VALUE.test(label)) return null;
+  const host = label.toLowerCase() + domain;
+  return host.length > MAX_HOST_LENGTH ? null : host;
+}
+
+/** A URL-valued field for one connection; `null` for a template or value its form refuses. */
 export function renderUrlTemplate(
   template: string,
   variables: Readonly<Record<string, string>>,
@@ -105,17 +107,9 @@ export function renderUrlTemplate(
   if (!template.includes("{$")) return template;
   const parsed = parseUrlTemplate(template);
   if (!parsed) return null;
-  const value = variableValue(variables, parsed.name);
-  if (parsed.form === "url") {
-    const url = parseUrlVariableValue(value);
-    if (!url) return null;
-    if (parsed.path === "") return url.href;
-    return url.origin + url.pathname.replace(/\/+$/, "") + parsed.path;
-  }
-  const label = hostVariableValue(value);
-  if (label === null) return null;
-  const host = label + parsed.domain;
-  return host.length > MAX_HOST_LENGTH ? null : `https://${host}${parsed.path}`;
+  if (parsed.form === "url") return renderUrlVariable(variables, parsed.name, parsed.path);
+  const host = renderHostVariable(variables, parsed.name, parsed.domain);
+  return host === null ? null : `https://${host}${parsed.path}`;
 }
 
 /** The variables to blame when {@link renderUrlTemplate} renders `null`; `[]` when it renders. */

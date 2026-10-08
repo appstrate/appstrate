@@ -9,7 +9,6 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
@@ -18,7 +17,6 @@ import {
   getLocalServerRef,
   getRemoteSource,
   renderRemoteSource,
-  getVariablesSchema,
   hasPerConnectionAuthServer,
   getAppstrateConnectMeta,
   authKeysServingSelection,
@@ -245,14 +243,6 @@ describe("renderAuthAuthorizedUris", () => {
     );
     expect(renderAuthAuthorizedUris({}, {}, {})).toEqual([]);
   });
-  it("renders a variable entry from the connection's variables, dropping an invalid value", () => {
-    const forge = { authorized_uris: ["{$variable.base_url}/api/v4/**"] };
-    expect(renderAuthAuthorizedUris(forge, {}, { base_url: "https://forge.example.com/" })).toEqual(
-      ["https://forge.example.com/api/v4/**"],
-    );
-    expect(renderAuthAuthorizedUris(forge, {}, { base_url: "https://x.example/?q" })).toEqual([]);
-    expect(renderAuthAuthorizedUris(forge, {}, {})).toEqual([]);
-  });
 });
 
 describe("runnerEgressFor", () => {
@@ -300,17 +290,6 @@ describe("connection variables (AFPS §7.12)", () => {
       transport: "sse",
     });
     expect(renderRemoteSource(manifest({ kind: "none" }), null)).toBeNull();
-  });
-
-  it("getVariablesSchema reads variables.schema, null when undeclared", () => {
-    const schema: JSONSchemaObject = {
-      type: "object",
-      properties: { base_url: { type: "string" } },
-    };
-    expect(
-      getVariablesSchema({ ...templated, variables: { schema } } as unknown as IntegrationManifest),
-    ).toBe(schema);
-    expect(getVariablesSchema(templated)).toBeNull();
   });
 
   it("hasPerConnectionAuthServer: oauth2 under a templated issuer or remote url", () => {

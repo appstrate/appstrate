@@ -310,7 +310,7 @@ describe("connection variables — credential connections", () => {
     expect(data[0]!.variables).toEqual({ base_url: base });
   });
 
-  it("replaces the variables on reconnect, in the credential's write", async () => {
+  it("refuses a reconnect to another instance, like one to another account", async () => {
     const first = (await (
       await importConnection({ credentials: { api_key: "k1" }, variables: { base_url: base } })
     ).json()) as { id: string };
@@ -320,8 +320,20 @@ describe("connection variables — credential connections", () => {
       variables: { base_url: other },
       connection_id: first.id,
     });
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as { variables: unknown }).variables).toEqual({ base_url: other });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("identity_mismatch");
+    const [row] = await db
+      .select({ variables: integrationConnections.variables })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, first.id));
+    expect(row!.variables).toEqual({ base_url: base });
+
+    const same = await importConnection({
+      credentials: { api_key: "k2" },
+      variables: { base_url: base },
+      connection_id: first.id,
+    });
+    expect(same.status).toBe(200);
   });
 
   it("refuses missing, undeclared, unrenderable and egress-blocked variables", async () => {

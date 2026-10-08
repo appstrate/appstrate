@@ -70,11 +70,7 @@ export const integrationConnections = pgTable(
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     /** Identity claims extracted via the AFPS `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
-    /**
-     * Connection variables (AFPS §7.12) the user submitted, plaintext: non-secret values that
-     * choose the upstream (`{$variable.<name>}`). NULL ⟺ the integration declares no variables.
-     * Written in the same statement as the credential acquired for them.
-     */
+    /** Connection variables (AFPS §7.12), plaintext; NULL ⟺ none declared. */
     variables: jsonb("variables").$type<Record<string, string>>(),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")
@@ -94,11 +90,7 @@ export const integrationConnections = pgTable(
     // by OAuth2Strategy on every connect/reconnect). Enforced at the service
     // layer — a cross-table CHECK on the auth type is not expressible in SQL.
     clientRef: text("client_ref"),
-    /**
-     * RFC 8707 `resource` the connection's token was requested for (authorize + code exchange),
-     * sent again on every refresh (AFPS §8.6). NULL ⟺ none was sent. Written with the token at
-     * each acquisition; the refresh write-back leaves it.
-     */
+    /** RFC 8707 `resource` of the token, resent on refresh (AFPS §8.6); NULL ⟺ none. */
     oauthResource: text("oauth_resource"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
@@ -260,10 +252,8 @@ export const integrationOauthClients = pgTable(
     // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
     // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
-    // The authorization server an auto-provisioned client was registered with, when the auth's
-    // server is chosen per connection (AFPS §7.3: a templated `issuer` or `source.remote.url`).
-    // NULL means the manifest's fixed authorization server. A client is never presented to
-    // another issuer.
+    // Server an auto-provisioned client was registered with when chosen per connection (AFPS
+    // §7.3); NULL = the manifest's fixed server.
     issuer: text("issuer"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -278,10 +268,8 @@ export const integrationOauthClients = pgTable(
       .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
     // At most one auto-provisioned (DCR/CIMD) client per (space, integration,
     // auth, issuer) — replaces the old global UNIQUE for the find-or-create path
-    // while leaving classic custom clients free to be N. `coalesce` makes a NULL
-    // issuer (the manifest's fixed server) one key, as NULLS NOT DISTINCT would,
-    // which drizzle's index builder cannot express; `ioc_issuer_is_auto` keeps
-    // `''` out so the two never collide.
+    // while leaving classic custom clients free to be N. `coalesce` stands in for
+    // NULLS NOT DISTINCT (drizzle cannot express it); `ioc_issuer_is_auto` keeps `''` out.
     uniqueIndex("idx_ioc_one_auto")
       .on(table.spaceId, table.integrationId, table.authKey, sql`coalesce(${table.issuer}, '')`)
       .where(sql`${table.autoProvisioned}`),
