@@ -9,16 +9,17 @@ import { type TokenErrorKind } from "./token-utils.ts";
  * revocation handling is symmetric across the two paths that call the OAuth2
  * token endpoint. The discrimination matters because:
  *
- * - `"revoked"` (HTTP 400 or 401 + `{ "error": "invalid_grant" }` per RFC 6749
- *   §5.2):
- *   the authorization code is dead. The user must restart the OAuth flow.
+ * - `"revoked"` (`{ "error": "invalid_grant" }` per RFC 6749 §5.2, on a 400,
+ *   a 401, or a 2xx without `access_token` — see `readTokenResponse`): the
+ *   authorization code is dead. The user must restart the OAuth flow.
  *   Callers SHOULD surface a structured "please reconnect" message rather than
  *   a generic 400.
  *
  * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, other
- *   OAuth error codes). The authorization code might still be valid on retry
- *   for some classes of failure; the user should be told to retry the request,
- *   not the entire OAuth flow.
+ *   OAuth error codes, a 2xx with neither `access_token` nor `error`). The
+ *   authorization code might still be valid on retry for some classes of
+ *   failure; the user should be told to retry the request, not the entire
+ *   OAuth flow.
  *
  * - `"client_unavailable"`: the OAuth client the flow was started with no
  *   longer resolves (deleted, out of reach, undecryptable), so no exchange was

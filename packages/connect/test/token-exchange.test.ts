@@ -217,12 +217,14 @@ describe("exchangeAuthorizationCode — error classification", () => {
     }
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("transient");
-    expect((err as OAuthCallbackError).message).toContain("non-JSON");
+    expect((err as OAuthCallbackError).message).toBe(
+      "Token exchange failed for '@official/gmail:primary': non-JSON response",
+    );
     // Delete-to-fail: without `{ cause }` the message above is all anyone
     // gets, and an empty 200, a gateway HTML page and truncated JSON are the
-    // same sentence. `response.json()` has consumed the stream by then, so the
-    // `body` parameter built for this cannot be filled in — the SyntaxError is
-    // the only surviving evidence of what the provider actually sent.
+    // same sentence. The read has consumed the stream by then, so the `body`
+    // parameter built for this cannot be filled in — the SyntaxError is the
+    // only surviving evidence of what the provider actually sent.
     expect((err as OAuthCallbackError).cause).toBeInstanceOf(SyntaxError);
     expect((err as OAuthCallbackError).status).toBe(200);
   });
@@ -245,5 +247,60 @@ describe("exchangeAuthorizationCode — error classification", () => {
     // must never be in the human-facing message a generic catcher logs.
     expect((err as OAuthCallbackError).message).not.toContain(MARKER);
     expect((err as OAuthCallbackError).body).toContain(MARKER);
+  });
+});
+
+// Some IdPs answer a failed grant with a 2xx RFC 6749 §5.2 error object. It is
+// classified exactly like the same body on a 400.
+describe("exchangeAuthorizationCode — a 2xx without access_token is a failure", () => {
+  async function exchangeError(store: OAuthStateStore, body: unknown): Promise<OAuthCallbackError> {
+    const { fetch: stub } = recordingFetch(jsonResponse(body, 200));
+    let err: unknown = null;
+    try {
+      await exchangeAuthorizationCode(baseInput(store, { fetchImpl: stub }));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(OAuthCallbackError);
+    return err as OAuthCallbackError;
+  }
+
+  it("classifies 200 + invalid_grant as revoked and deletes state", async () => {
+    const store = memoryStore();
+    await store.set("state-key", {} as OAuthStateRecord, 60);
+    const e = await exchangeError(store, { error: "invalid_grant" });
+    expect(e.kind).toBe("revoked");
+    expect(e.oauthError).toBe("invalid_grant");
+    expect(e.status).toBe(200);
+    expect(await store.get("state-key")).toBeNull();
+  });
+
+  it("classifies 200 + a non-standard error code as transient, naming the code", async () => {
+    const store = memoryStore();
+    await store.set("state-key", {} as OAuthStateRecord, 60);
+    const TOKEN = "ghr_0123456789abcdefABCDEF0123456789abcd";
+    const body = {
+      error: "bad_refresh_token",
+      error_description: `The refresh token ${TOKEN} is invalid`,
+    };
+    const e = await exchangeError(store, body);
+    expect(e.kind).toBe("transient");
+    expect(e.status).toBe(200);
+    expect(e.oauthError).toBe("bad_refresh_token");
+    expect(e.message).toContain("bad_refresh_token");
+    expect(e.message).toContain("[redacted]");
+    expect(e.message).not.toContain(TOKEN);
+    expect(e.oauthErrorDescription).not.toContain(TOKEN);
+    expect(JSON.parse(e.body!)).toEqual(body);
+    // Transient keeps the state row for a retry.
+    expect(await store.get("state-key")).not.toBeNull();
+  });
+
+  it("classifies an empty 200 body as transient", async () => {
+    const e = await exchangeError(memoryStore(), {});
+    expect(e.kind).toBe("transient");
+    expect(e.status).toBe(200);
+    expect(e.oauthError).toBeUndefined();
+    expect(e.message).toContain("access_token");
   });
 });
