@@ -115,6 +115,25 @@ describe("build-model-catalog", () => {
     });
   });
 
+  // An instance serves the `off` it derives: a record whose payload says
+  // otherwise is dropped, not mislabelled. Mid-conversation effort makes Pi
+  // send adaptive thinking at every level, so `off` disables nothing there.
+  it("drops a record whose `off` Pi sends differently from the derived one", async () => {
+    const { off: _off, ...offAllowed } = bundled.thinkingLevelMap!;
+    expect(bundled.compat).toMatchObject({ supportsMidConvoEffort: true });
+    withRecords([{ id: "claude-next" }, { id: "claude-off", thinkingLevelMap: offAllowed }]);
+    const { records, dropped } = await selectCatalogRecords(readChatRecords(dataDir));
+
+    expect(records.map((r) => r.id)).toEqual(["claude-next"]);
+    expect(dropped).toEqual([
+      {
+        provider: "anthropic",
+        id: "claude-off",
+        reason: 'reasoning off: derived "disables", Pi sends "unsent"',
+      },
+    ]);
+  });
+
   it("signs a file an instance accepts whole", async () => {
     withRecords([{ id: "claude-next" }]);
     const built = await build({ now: () => 1_800_000_000_000 });

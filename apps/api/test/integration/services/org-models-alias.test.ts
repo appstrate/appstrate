@@ -14,6 +14,8 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
+import { lookupCatalogModel } from "../../../src/services/model-catalog.ts";
+import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -108,5 +110,11 @@ describe("org-models — aliased flag (DB path)", () => {
     const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
     expect(listed!.generation?.reasoning.levels).toEqual(levels);
     expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.levels).toEqual(levels);
+    // `off` is the backing's: a run on the alias re-originates there.
+    const backingOff = lookupCatalogModel(getModelProvider("deepseek")!, "deepseek-flash")!
+      .generation?.reasoning.off;
+    expect(backingOff).toBeDefined();
+    expect(listed!.generation?.reasoning.off).toBe(backingOff!);
+    expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.off).toBe(backingOff!);
   });
 });

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { loadModel } from "../../../src/services/org-models.ts";
+import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
@@ -132,6 +132,31 @@ describe("loadModel — catalog fallback", () => {
     };
     expect(await piProviderOf("moonshot", "kimi-k2.6")).toBe("moonshotai");
     expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
+  });
+
+  it("says what a gateway model's `off` sends from the Pi model built for its API", async () => {
+    const offOf = async (providerId: string, reasoning: boolean) => {
+      const cred = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId,
+        apiKey: "sk-test",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        modelId: "my-model",
+        reasoning,
+      });
+      const resolved = (await loadModel(ctx.orgId, model.id))!.generation?.reasoning;
+      const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
+        ?.reasoning;
+      expect(listed).toEqual(resolved!);
+      return resolved;
+    };
+    // openai-completions sends no reasoning parameter at `off`; Anthropic disables thinking.
+    expect((await offOf("openai-compatible", true))?.off).toBe("unsent");
+    expect((await offOf("anthropic-compatible", true))?.off).toBe("disables");
+    expect(await offOf("openai-compatible", false)).not.toHaveProperty("off");
   });
 
   // Regression for #544: `org_models.id` is a uuid column. A non-UUID id (e.g.

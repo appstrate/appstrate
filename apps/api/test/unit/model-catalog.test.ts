@@ -140,6 +140,19 @@ describe("toCatalogEntry", () => {
     });
   });
 
+  it("says what level `off` puts on the wire, only for a reasoning model that takes it", () => {
+    const off = (piProvider: string, id: string, api: string) =>
+      toCatalogEntry(record(piProvider, id, api)).generation?.reasoning;
+    // No thinking format: Pi sends no reasoning parameter at `off`.
+    expect(off("opencode-go", "kimi-k2.7-code", "openai-completions")?.off).toBe("unsent");
+    expect(off("mistral", "magistral-medium-latest", "mistral-conversations")?.off).toBe("unsent");
+    // `thinking: { type: "disabled" }`.
+    expect(off("anthropic", "claude-sonnet-4-5", "anthropic-messages")?.off).toBe("disables");
+    // Adaptive thinking takes no `off`; a non-reasoning model has nothing to turn off.
+    expect(off("anthropic", "claude-opus-5", "anthropic-messages")).not.toHaveProperty("off");
+    expect(off("openai", "gpt-4o", "openai-responses")).not.toHaveProperty("off");
+  });
+
   it("carries Pi's long-context price tiers", () => {
     const gpt = record("openai", "gpt-5.5", "openai-responses");
     expect(gpt.cost.tiers?.length).toBeGreaterThan(0);
@@ -222,6 +235,19 @@ describe("catalog invariants over every core provider's offer", () => {
     expect(
       entries
         .filter((e) => e.maxTokens !== null && e.maxTokens >= e.contextWindow)
+        .map((e) => e.key),
+    ).toEqual([]);
+  });
+
+  it("says what `off` sends exactly when a reasoning model takes `off`", () => {
+    expect(
+      entries
+        .filter(
+          (e) =>
+            (e.generation?.reasoning.off !== undefined) !==
+            (e.generation?.reasoning.supported === "supported" &&
+              e.generation.reasoning.levels.off === "supported"),
+        )
         .map((e) => e.key),
     ).toEqual([]);
   });

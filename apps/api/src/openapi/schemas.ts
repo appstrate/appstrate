@@ -13,6 +13,7 @@ import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissi
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import {
   MODEL_REASONING_LEVELS,
+  MODEL_REASONING_OFF_BEHAVIOURS,
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
@@ -337,6 +338,12 @@ export const schemas = {
             propertyNames: {
               enum: [...MODEL_REASONING_LEVELS],
             },
+          },
+          off: {
+            type: "string",
+            enum: [...MODEL_REASONING_OFF_BEHAVIOURS],
+            description:
+              "What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason or does not take `off`. An alias reports its backing model's.",
           },
         },
       },

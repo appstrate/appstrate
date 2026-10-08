@@ -16,6 +16,7 @@ import {
   clampPiReasoningLevel,
   piReasoningLevels,
 } from "@appstrate/runner-pi/pi-model";
+import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   MODEL_INPUT_MODALITIES,
@@ -131,6 +132,9 @@ function projectAliasedGenerationCapabilities(
   ) as ModelGenerationCapabilities["reasoning"]["levels"];
   const temperatureSupported = capabilities?.temperature === "supported";
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
+  // A run on the alias re-originates on the backing, so `off` does what it
+  // does there.
+  const off = reasoningSupported ? capabilities?.reasoning.off : undefined;
 
   // Alias callers cannot inspect the backing model to compensate for an
   // unknown capability: expose only catalog-confirmed support, fail closed on
@@ -149,6 +153,7 @@ function projectAliasedGenerationCapabilities(
         : {}),
       adaptive: null,
       levels: reasoningSupported ? { ...levels } : {},
+      ...(off ? { off } : {}),
     },
   };
 }
@@ -878,16 +883,16 @@ interface GenerationSubject {
 
 /**
  * The controls of a model the catalog has no record of: the reasoning levels Pi
- * takes for the model this platform builds for it ({@link buildPiModel}).
- * Its temperature support stays unknown.
+ * takes, and what its `off` sends, for the model this platform builds for it
+ * ({@link buildPiModel}). Its temperature support stays unknown.
  */
 function unrecordedGeneration({
   apiShape,
   reasoning,
 }: GenerationSubject): ModelGenerationCapabilities {
-  const levels = new Set<string>(
-    piReasoningLevels(buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning })),
-  );
+  const model = buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning });
+  const levels = new Set<string>(piReasoningLevels(model));
+  const off = piReasoningOff(model);
   return {
     temperature: "unknown",
     reasoning: {
@@ -899,6 +904,7 @@ function unrecordedGeneration({
           levels.has(level) ? "supported" : "unsupported",
         ]),
       ),
+      ...(off ? { off } : {}),
     },
   };
 }
