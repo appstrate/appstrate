@@ -8,12 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **`BETTER_AUTH_SECRETS` takes Better Auth's own format, and
-  `BETTER_AUTH_ACTIVE_KID` is no longer read** (#1769). The value is
-  `<version>:<secret>[,<version>:<secret>…]`, current secret first; a JSON
-  value refuses boot. A deployment that ran with a non-default active kid sets
-  `BETTER_AUTH_SECRET` to the secret that was active: its JWKS keys are
-  encrypted under it. Rotation and retiring a secret: `docs/ENV.md`.
+- **`BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>[,…]` format;
+  a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
+  (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
+  secret that was active. Rotation procedure: `docs/ENV.md`.
 
 ### Fixed
 

@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { createHmac } from "node:crypto";
-import { signAuthHmac, verifyAuthHmac } from "../../src/lib/auth-secrets.ts";
+import { authKeyring } from "../../src/lib/auth-secrets.ts";
+import {
+  headersWithAuthoritativePendingClient,
+  readPendingClientCookieFromHeaders,
+} from "../../src/modules/oidc/services/pending-client-cookie.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
 const ENV_KEYS = ["BETTER_AUTH_SECRET", "BETTER_AUTH_SECRETS"] as const;
+type AuthEnv = Record<(typeof ENV_KEYS)[number], string | undefined>;
 
-const SINGLE = "single-secret-32-chars-long-for-hmac";
-const OLD = "old-secret-32-chars-long-for-hmac";
-const NEW = "new-secret-32-chars-long-for-hmac";
+const A = "a-secret-at-least-32-chars-long-for-hmac";
+const B = "b-secret-at-least-32-chars-long-for-hmac";
 
-function hmac(secret: string, payload: string): string {
-  return createHmac("sha256", secret).update(payload).digest("base64url");
-}
-
-function setEnv(vars: Record<(typeof ENV_KEYS)[number], string | undefined>): void {
+function setEnv(vars: AuthEnv): void {
   for (const k of ENV_KEYS) {
     if (vars[k] === undefined) delete process.env[k];
     else process.env[k] = vars[k];
@@ -23,56 +22,35 @@ function setEnv(vars: Record<(typeof ENV_KEYS)[number], string | undefined>): vo
   resetEnvCache();
 }
 
-describe("auth-secrets", () => {
-  let snap: Record<(typeof ENV_KEYS)[number], string | undefined>;
+describe("authKeyring", () => {
+  let snap: AuthEnv;
 
   beforeEach(() => {
-    snap = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as typeof snap;
+    snap = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as AuthEnv;
   });
 
   afterEach(() => {
     setEnv(snap);
   });
 
-  describe("no keyring: BETTER_AUTH_SECRET alone", () => {
-    beforeEach(() => {
-      setEnv({ BETTER_AUTH_SECRET: SINGLE, BETTER_AUTH_SECRETS: undefined });
-    });
-
-    it("signs with BETTER_AUTH_SECRET, as a bare signature", () => {
-      expect(signAuthHmac("payload")).toBe(hmac(SINGLE, "payload"));
-    });
-
-    it("verifies its own signature", () => {
-      expect(verifyAuthHmac("payload", signAuthHmac("payload"))).toBe(true);
-    });
-
-    it("rejects a signature under an unknown secret", () => {
-      expect(verifyAuthHmac("payload", hmac(NEW, "payload"))).toBe(false);
-    });
+  it("is BETTER_AUTH_SECRET alone when no list is set", () => {
+    setEnv({ BETTER_AUTH_SECRET: A, BETTER_AUTH_SECRETS: undefined });
+    expect(authKeyring()).toEqual([A]);
   });
 
-  describe("keyring: BETTER_AUTH_SECRETS", () => {
-    beforeEach(() => {
-      setEnv({ BETTER_AUTH_SECRET: SINGLE, BETTER_AUTH_SECRETS: `2:${NEW},1:${OLD}` });
-    });
+  it("is the BETTER_AUTH_SECRETS values, current first, once a list is set", () => {
+    setEnv({ BETTER_AUTH_SECRET: A, BETTER_AUTH_SECRETS: `2:${B},1:${A}` });
+    expect(authKeyring()).toEqual([B, A]);
+  });
 
-    it("signs with the first keyring secret", () => {
-      expect(signAuthHmac("payload")).toBe(hmac(NEW, "payload"));
-    });
+  it("verifies a cookie signed under [A] with [B, A], not with [B] alone", () => {
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `1:${A}` });
+    const headers = headersWithAuthoritativePendingClient(new Headers(), "oauth_client");
 
-    it("verifies a signature under any keyring secret", () => {
-      expect(verifyAuthHmac("payload", hmac(NEW, "payload"))).toBe(true);
-      expect(verifyAuthHmac("payload", hmac(OLD, "payload"))).toBe(true);
-    });
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `2:${B},1:${A}` });
+    expect(readPendingClientCookieFromHeaders(headers)).toBe("oauth_client");
 
-    it("rejects BETTER_AUTH_SECRET once a keyring is set", () => {
-      expect(verifyAuthHmac("payload", hmac(SINGLE, "payload"))).toBe(false);
-    });
-
-    it("rejects a tampered signature and a signature over another payload", () => {
-      expect(verifyAuthHmac("payload", "AAAA")).toBe(false);
-      expect(verifyAuthHmac("other", hmac(OLD, "payload"))).toBe(false);
-    });
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `2:${B}` });
+    expect(readPendingClientCookieFromHeaders(headers)).toBeNull();
   });
 });

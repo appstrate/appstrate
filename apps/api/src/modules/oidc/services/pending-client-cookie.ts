@@ -24,8 +24,7 @@
  * request that carries it.
  *
  * Security:
- *   - HMAC-SHA256 under the auth keyring (`lib/auth-secrets.ts`) so a client
- *     cannot forge a `clientId`.
+ *   - Signed under the auth keyring so a client cannot forge a `clientId`.
  *   - `HttpOnly` to keep it out of JS.
  *   - `SameSite=Lax` — MUST NOT be `Strict`, otherwise the cookie is dropped
  *     on the cross-site POST → redirect from BA's social callback.
@@ -43,13 +42,15 @@ import { setCookie, deleteCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../../lib/logger.ts";
-import { signAuthHmac, verifyAuthHmac } from "../../../lib/auth-secrets.ts";
+import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
+import { authKeyring } from "../../../lib/auth-secrets.ts";
 import type { AppEnv } from "../../../types/index.ts";
 
 let insecureCookieWarned = false;
 
 const COOKIE_NAME = "oidc_pending_client";
 const COOKIE_MAX_AGE = 10 * 60; // 10 minutes
+export const PENDING_CLIENT_TOKEN_DOMAIN = "oidc-pending-client.v1.";
 
 /**
  * Sign `clientId` + `exp` with HMAC-SHA256 and set the cookie. Safe to call
@@ -108,7 +109,7 @@ export function hasAuthoritativePendingClient(headers: Headers | null): boolean 
 }
 
 /**
- * Build the signed cookie value (`<clientId>.<exp>.<sig>`) — the exact string
+ * Build the signed cookie value — the exact string
  * `issuePendingClientCookie` writes to `Set-Cookie`. Exposed so the
  * server-driven OIDC handlers can mint an AUTHORITATIVE binding to feed into a
  * Better-Auth call (see `headersWithAuthoritativePendingClient`) instead of
@@ -116,9 +117,7 @@ export function hasAuthoritativePendingClient(headers: Headers | null): boolean 
  */
 function buildSignedPendingClientValue(clientId: string): string {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  return `${payload}.${sig}`;
+  return signKeyringToken(PENDING_CLIENT_TOKEN_DOMAIN, { clientId, exp }, authKeyring());
 }
 
 /**
@@ -165,23 +164,20 @@ export function headersWithAuthoritativePendingClient(source: Headers, clientId:
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 function parseAndVerify(raw: string): string | null {
-  // Format: `<clientId>.<exp>.<sig>`. `clientId` (`oauth_` + base64url) and
-  // the base64url `sig` contain no dot, so a well-formed value splits into
-  // exactly 3 parts.
-  const parts = raw.split(".");
-  if (parts.length !== 3) return null;
-  const [clientId, expStr, sig] = parts as [string, string, string];
-  if (!verifyAuthHmac(`${clientId}.${expStr}`, sig)) return null;
-  const exp = Number.parseInt(expStr, 10);
-  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-  return clientId;
+  const payload = verifyKeyringToken<{ clientId?: unknown; exp?: unknown }>(
+    PENDING_CLIENT_TOKEN_DOMAIN,
+    raw,
+    authKeyring(),
+  );
+  if (typeof payload?.clientId !== "string" || typeof payload.exp !== "number") return null;
+  return payload.exp < Math.floor(Date.now() / 1000) ? null : payload.clientId;
 }
 
 /**
  * Minimal cookie-header parser — we can't pull in a heavy dep just to read
  * one cookie out of band. Matches `name=value; name2=value2` format,
  * respects spaces and quoted values (RFC 6265 §5.4). The value is
- * URL-decoded to mirror what hono's `getCookie` does on the context path:
+ * URL-decoded to mirror what hono's `getCookie` does on the context path —
  * Set-Cookie serialization runs every value through `encodeURIComponent`.
  */
 function parseCookieHeader(header: string, name: string): string | null {

@@ -23,8 +23,12 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers } from "@appstrate/db/schema";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "../../../auth/signup-guard.ts";
-import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
-import { headersWithAuthoritativePendingClient } from "../../../services/pending-client-cookie.ts";
+import { signKeyringToken } from "@appstrate/afps-shared/signed-token";
+import { authKeyring } from "../../../../../lib/auth-secrets.ts";
+import {
+  headersWithAuthoritativePendingClient,
+  PENDING_CLIENT_TOKEN_DOMAIN,
+} from "../../../services/pending-client-cookie.ts";
 
 // The headers the hosted register route hands to Better Auth: its own mark,
 // and the pending-client cookie it re-minted. The cookie is read only under
@@ -39,9 +43,9 @@ function markedHeadersWithCookie(clientId: string, cookie: string): Headers {
   return headers;
 }
 
-function expiredCookieHeader(clientId: string, sig = "tampered"): Headers {
-  const exp = Math.floor(Date.now() / 1000) - 60; // past
-  return markedHeadersWithCookie(clientId, `${clientId}.${exp}.${sig}`);
+function badSignatureCookieHeader(clientId: string, sig: string): Headers {
+  const body = Buffer.from(JSON.stringify({ clientId, exp: 0 })).toString("base64url");
+  return markedHeadersWithCookie(clientId, `${body}.${sig}`);
 }
 
 describe("oidcBeforeSignupGuard + pending-client cookie", () => {
@@ -96,7 +100,7 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     await expect(
       oidcBeforeSignupGuard({
         user: { email: "bad@example.com" },
-        headers: expiredCookieHeader(closedOrgClientId, "notasignature"),
+        headers: badSignatureCookieHeader(closedOrgClientId, "notasignature"),
       }),
     ).resolves.toBeUndefined();
   });
@@ -106,9 +110,12 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     // still rejects it because the expiry check runs after signature
     // verification.
     const exp = Math.floor(Date.now() / 1000) - 60;
-    const payload = `${closedOrgClientId}.${exp}`;
-    const sig = signAuthHmac(payload);
-    const headers = markedHeadersWithCookie(closedOrgClientId, `${payload}.${sig}`);
+    const token = signKeyringToken(
+      PENDING_CLIENT_TOKEN_DOMAIN,
+      { clientId: closedOrgClientId, exp },
+      authKeyring(),
+    );
+    const headers = markedHeadersWithCookie(closedOrgClientId, token);
     await expect(
       oidcBeforeSignupGuard({ user: { email: "stale@example.com" }, headers }),
     ).resolves.toBeUndefined();

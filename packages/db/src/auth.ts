@@ -746,8 +746,7 @@ function buildAuth(options: CreateAuthOptions) {
 
     baseURL: env.APP_URL,
     basePath: "/api/auth",
-    // With a keyring, Better Auth encrypts/signs with its first entry and
-    // keeps `secret` to decrypt data written before the keyring existed.
+    // `secrets` signs and encrypts; `secret` decrypts data written before it.
     secret: env.BETTER_AUTH_SECRET,
     secrets: env.BETTER_AUTH_SECRETS,
 

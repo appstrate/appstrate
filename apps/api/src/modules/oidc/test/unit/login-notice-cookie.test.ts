@@ -7,8 +7,8 @@
  * The cookie helpers need a Hono `Context`, so we drive them through a minimal
  * in-process Hono app (`app.request()`, no port/DB) and inspect the emitted
  * `Set-Cookie` headers. Tamper / expiry / garbage cases build the raw cookie
- * value from the same signing building blocks (`signAuthHmac`) the service
- * uses, then send it back on the `Cookie` header.
+ * value with the same codec and keyring the service uses, then send it back
+ * on the `Cookie` header.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -17,9 +17,11 @@ import {
   issueLoginNoticeCookie,
   readAndClearLoginNoticeCookie,
   buildSignedLoginNoticeValue,
+  LOGIN_NOTICE_TOKEN_DOMAIN,
   type LoginNotice,
 } from "../../services/login-notice-cookie.ts";
-import { signAuthHmac } from "../../../../lib/auth-secrets.ts";
+import { signKeyringToken } from "@appstrate/afps-shared/signed-token";
+import { authKeyring } from "../../../../lib/auth-secrets.ts";
 import type { AppEnv } from "../../../../types/index.ts";
 
 const COOKIE_NAME = "oidc_login_notice";
@@ -107,12 +109,12 @@ describe("login-notice-cookie", () => {
 
   it("returns null for an expired exp (verified sig, past timestamp)", async () => {
     const app = makeApp();
-    const encoded = Buffer.from(JSON.stringify({ code: "login_link_expired" }), "utf8").toString(
-      "base64url",
-    );
     const exp = Math.floor(Date.now() / 1000) - 5;
-    const sig = signAuthHmac(`${encoded}.${exp}`);
-    const raw = `${encoded}.${exp}.${sig}`;
+    const raw = signKeyringToken(
+      LOGIN_NOTICE_TOKEN_DOMAIN,
+      { code: "login_link_expired", exp },
+      authKeyring(),
+    );
     const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${raw}`);
     expect(notice).toBeNull();
   });
@@ -128,12 +130,13 @@ describe("login-notice-cookie", () => {
   it("returns null when the payload decodes but has the wrong shape", async () => {
     const app = makeApp();
     // Valid sig + exp, but the JSON payload uses an unknown code.
-    const encoded = Buffer.from(JSON.stringify({ code: "something_else" }), "utf8").toString(
-      "base64url",
-    );
     const exp = Math.floor(Date.now() / 1000) + 60;
-    const sig = signAuthHmac(`${encoded}.${exp}`);
-    const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${encoded}.${exp}.${sig}`);
+    const raw = signKeyringToken(
+      LOGIN_NOTICE_TOKEN_DOMAIN,
+      { code: "something_else", exp },
+      authKeyring(),
+    );
+    const { notice } = await readWithCookie(app, `${COOKIE_NAME}=${raw}`);
     expect(notice).toBeNull();
   });
 

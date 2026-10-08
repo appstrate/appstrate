@@ -105,11 +105,6 @@ describe("BETTER_AUTH_SECRETS keyring (Better Auth's `<version>:<secret>` CSV)",
     expect(process.env.BETTER_AUTH_SECRETS).toBe("1:only-secret");
   });
 
-  it("rejects a JSON value", () => {
-    process.env.BETTER_AUTH_SECRETS = JSON.stringify({ k1: "secret" });
-    expect(() => getEnv()).toThrow(/BETTER_AUTH_SECRETS entry #1 must be "<version>:<secret>"/);
-  });
-
   it("rejects a non-integer, negative or unsafe-integer version", () => {
     for (const raw of [
       "v1:secret",

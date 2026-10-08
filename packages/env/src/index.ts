@@ -140,21 +140,7 @@ export const envSchema = z
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-    /**
-     * Auth secret keyring, Better Auth's format: `<version>:<secret>[,…]`,
-     * current secret FIRST, versions unique non-negative integers.
-     * The first secret encrypts/signs; every listed one decrypts/verifies
-     * Better Auth's at-rest data (JWKS private keys, tagged `$ba$<version>$`)
-     * and our HMAC cookies (`apps/api/src/lib/auth-secrets.ts`). What Better
-     * Auth signs with the current secret only (session cookie, in-flight
-     * social sign-in state, email verification links) is invalidated by any
-     * rotation. `BETTER_AUTH_SECRET` still decrypts data written before the
-     * list existed: leave it unchanged when introducing the list.
-     * Rotate: prepend a new version + restart. JWKS keys are never re-keyed,
-     * so to retire a version (or a leaked `BETTER_AUTH_SECRET`) delete the
-     * `jwks` rows: the next signature mints a key under the current secret,
-     * and outstanding JWTs / CLI tokens stop verifying (sign in again).
-     */
+    /** Auth secret keyring `<version>:<secret>[,…]`, current first; see docs/ENV.md. */
     BETTER_AUTH_SECRETS: z
       .string()
       .optional()
