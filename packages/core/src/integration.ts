@@ -37,10 +37,12 @@ import {
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
   credentialTemplateRefs,
-  isHostUnboundedUriPattern,
-  parseUrlFormPattern,
   unsupportedTemplateExpressions,
 } from "@appstrate/afps-shared/credential-template";
+import {
+  isHostUnboundedUriPattern,
+  parseUrlFormPattern,
+} from "@appstrate/afps-shared/authorized-uris";
 import {
   injectsHttpCredential,
   isBareAuthSchemePrefix,

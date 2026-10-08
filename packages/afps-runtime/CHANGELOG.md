@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, `AUTHORIZED_URIS_MISMATCH`,
   `AUTHORIZED_URIS_EMPTY`.
 
+### Removed — `authorized_uris` rules moved to afps-shared (#1763, BREAKING)
+
+- `matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`, `compileEgressPolicy`
+  and the type `EgressPolicy` are no longer exported from `./resolvers`:
+  import them from `@appstrate/afps-shared/authorized-uris`.
+
 ### Fixed — a sticky cookie expires (#1778)
 
 - `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at

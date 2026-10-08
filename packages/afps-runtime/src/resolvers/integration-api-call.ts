@@ -43,7 +43,7 @@ import {
   isReproducibleBody,
   type ApiCallFn,
 } from "./http-call-core.ts";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import {
   apiCallToolNameForAuth,
   assertUniqueApiToolAuthTokens,

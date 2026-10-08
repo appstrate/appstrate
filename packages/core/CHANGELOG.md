@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Requires `@appstrate/afps-shared` `^0.11.0`** (was `^0.10.1`): the
+  `authorized_uris` rules moved to its `./authorized-uris` subpath. No core
+  export changes. (#1763)
+
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration
   binds in a run.

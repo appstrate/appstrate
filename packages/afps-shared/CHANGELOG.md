@@ -14,6 +14,32 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-08
+
+Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new
+subpath (core raises its range to `^0.11.0`).
+
+### Added
+
+- **`./authorized-uris`**: the `authorized_uris` rules in one module —
+  `AuthorizedUriPattern`, `parseAuthorizedUriPattern`, `canonicalUrl`,
+  `parseUrlFormPattern`, `isHostUnboundedUriPattern`, `renderAuthorizedUris`,
+  `unrenderableAuthorizedUriFields`, `UnrenderableUriField`, and the matcher
+  and egress policy formerly in `@appstrate/afps-runtime`
+  (`matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`,
+  `compileEgressPolicy`, `EgressPolicy`). (#1763)
+- **`substituteCredentialRefs`** (`./credential-template`): each
+  `{$credential.<field>}` to its value, a missing or inherited field empty,
+  any other `{$…}` left as is. (#1763)
+
+### Removed
+
+- **`AuthorizedUriPattern`**, **`parseAuthorizedUriPattern`**,
+  **`canonicalUrl`**, **`parseUrlFormPattern`**,
+  **`isHostUnboundedUriPattern`**, **`renderAuthorizedUris`**,
+  **`unrenderableAuthorizedUriFields`** and **`UnrenderableUriField`** from
+  `./credential-template`: import them from `./authorized-uris`. (#1763)
+
 ## [0.10.1] — 2026-10-07
 
 ### Security

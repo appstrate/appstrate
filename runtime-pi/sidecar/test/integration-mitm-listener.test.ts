@@ -31,7 +31,7 @@ import {
 } from "@appstrate/connect";
 import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
-import { compileEgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,

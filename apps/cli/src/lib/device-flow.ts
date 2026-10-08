@@ -138,10 +138,7 @@ export async function startDeviceFlow(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
-  }
+  if (!res.ok) throw await endpointError(res, "Device authorization endpoint");
   const json = (await res.json()) as {
     device_code: string;
     user_code: string;
@@ -285,13 +282,13 @@ export async function pollDeviceFlow(
       };
     }
 
-    const err = await parseErrorBody(res);
-    const code = err.error ?? "invalid_request";
-    if (code === "authorization_pending") {
+    const err = await endpointError(res, "Token endpoint");
+    if (!(err instanceof DeviceFlowError)) throw err;
+    if (err.code === "authorization_pending") {
       // Keep the current interval.
       continue;
     }
-    if (code === "slow_down") {
+    if (err.code === "slow_down") {
       // RFC 8628 §3.5 — bump by at least 5 seconds. BA's plugin already
       // enforces the minimum server-side, so a fixed +5s bump here is
       // friendly to both sides.
@@ -299,7 +296,7 @@ export async function pollDeviceFlow(
       continue;
     }
     // Any other code is terminal.
-    throw new DeviceFlowError(code, err.error_description, res.status);
+    throw err;
   }
 
   throw new DeviceFlowError(
@@ -316,18 +313,14 @@ export async function pollDeviceFlow(
  * single-use — a second exchange of the same plaintext triggers the
  * server-side reuse-detection sweep that revokes the whole family).
  *
- * On any non-2xx response, throws `DeviceFlowError(code, description,
- * status)` — callers distinguish recoverable from terminal states:
- *   - `invalid_grant`: refresh token expired, revoked, or already
- *     rotated (replay). The CLI must clear local credentials and
- *     prompt `appstrate login`.
- *   - transient HTTP errors (network, 5xx): surfaced so the caller can
- *     decide to retry or fall through to re-auth.
+ * A non-2xx throws via `endpointError`; `invalid_grant` means the stored session
+ * is gone. `signal` bounds the exchange, body included.
  */
 export async function refreshCliTokens(
   instance: string,
   clientId: string,
   refreshToken: string,
+  signal?: AbortSignal,
 ): Promise<DeviceTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -341,11 +334,9 @@ export async function refreshCliTokens(
       "User-Agent": CLI_USER_AGENT,
     },
     body,
+    signal,
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
-  }
+  if (!res.ok) throw await endpointError(res, "Token endpoint");
   const json = (await res.json()) as {
     access_token: string;
     refresh_token?: string;
@@ -368,12 +359,11 @@ export async function refreshCliTokens(
  * Server-side revocation of a refresh-token family. Called on
  * `appstrate logout` before local credential cleanup.
  *
- * Contract: throws `DeviceFlowError` on any non-2xx response (network
- * error, 4xx, 5xx). Callers that want best-effort revocation (e.g.
- * `logout.ts`) MUST wrap the call in try/catch and proceed with local
- * cleanup on failure — revocation state is advisory from the client's
- * perspective, but surfacing the error at the call site lets the
- * command render a clear warning rather than silently skipping it.
+ * Contract: throws on a network error or any non-2xx response. Callers that
+ * want best-effort revocation (e.g. `logout.ts`) MUST wrap the call in
+ * try/catch and proceed with local cleanup on failure — revocation state is
+ * advisory from the client's perspective, but surfacing the error at the call
+ * site lets the command render a clear warning rather than silently skipping it.
  *
  * The 200 body (`{ revoked: boolean }`) is intentionally ignored —
  * `revoked: false` just means the token was unknown or client-mismatched
@@ -397,10 +387,17 @@ export async function revokeCliRefreshToken(
     },
     body,
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
+  if (!res.ok) throw await endpointError(res, "Revocation endpoint");
+}
+
+/** An OAuth error body as a `DeviceFlowError`; anything else (a proxy's 502) as a plain `Error`. */
+async function endpointError(res: Response, endpoint: string): Promise<Error> {
+  const err = await parseErrorBody(res);
+  if (typeof err.error !== "string") {
+    const detail = typeof err.error_description === "string" ? `: ${err.error_description}` : "";
+    return new Error(`${endpoint} returned HTTP ${res.status}${detail}`);
   }
+  return new DeviceFlowError(err.error, err.error_description, res.status);
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {
@@ -408,7 +405,10 @@ async function parseErrorBody(res: Response): Promise<RawErrorBody> {
     const parsed = (await res.json()) as RawErrorBody;
     if (parsed && typeof parsed === "object") return parsed;
     return {};
-  } catch {
+  } catch (err) {
+    // The caller's deadline, not an unreadable body.
+    const name = (err as { name?: unknown } | null)?.name;
+    if (name === "TimeoutError" || name === "AbortError") throw err;
     return {};
   }
 }

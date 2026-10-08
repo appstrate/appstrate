@@ -963,9 +963,7 @@ async function buildInteractiveRemoteInputs(
       orgId: profile.orgId,
     };
   } catch (err) {
-    if (err instanceof AuthError) {
-      throw new ResolverConfigError(err.message, "Run `appstrate login` to re-authenticate");
-    }
+    if (err instanceof AuthError) throw new ResolverConfigError(err.message);
     throw err;
   }
 }

@@ -10,7 +10,7 @@
  */
 
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
+import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
 
 import {
   extractIdentity,

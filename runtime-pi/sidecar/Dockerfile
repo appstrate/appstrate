@@ -52,9 +52,9 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
         --no-progress
 
 # Workspace sources consumed at `bun build --compile` time:
-#   - @appstrate/connect/proxy-primitives     shared URL matchers + header filter
-#   - @appstrate/afps-runtime/resolvers       `matchesAuthorizedUriSpec`, re-exported
-#                                             by proxy-primitives
+#   - @appstrate/connect/proxy-primitives     shared header filter + credential injection
+#   - @appstrate/afps-runtime/resolvers       api_call engine + delivery helpers
+#   - @appstrate/afps-shared/authorized-uris  `authorized_uris` matcher + egress policy
 #   - @appstrate/mcp-transport                MCP adapter on the official SDK,
 #                                             used by mcp.ts to expose `tools/*`
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,

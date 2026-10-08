@@ -227,9 +227,38 @@ export function useIntegrationAgentResolution(
   return useQuery({
     ...options,
     enabled: options.enabled && !!integrationId,
-    select: (data) =>
-      data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null,
+    select: (data) => resolutionOf(data, integrationId),
   });
+}
+
+type AgentConnectionReadiness =
+  paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
+
+/** One integration's verdict out of the bulk readiness payload. */
+function resolutionOf(data: AgentConnectionReadiness, integrationId: string | undefined) {
+  return (
+    data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
+  );
+}
+
+/**
+ * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * it NOW, for a handler running after something already awaited the readiness
+ * refetch (the connect popup does): the fresh value, without a second request.
+ * Throws when that refetch failed — the cache then still holds the old verdict.
+ */
+export function useReadIntegrationResolution(
+  integrationId: string,
+  agentPackageId: string,
+  version?: string,
+) {
+  const qc = useQueryClient();
+  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version);
+  return () => {
+    const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
+    if (state?.status === "error") throw state.error;
+    return state?.data ? resolutionOf(state.data, integrationId) : null;
+  };
 }
 
 /**

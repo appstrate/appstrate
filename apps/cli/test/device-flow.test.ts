@@ -491,6 +491,67 @@ describe("refreshCliTokens", () => {
   });
 });
 
+describe("a non-2xx answer with no OAuth error body", () => {
+  const badGateway = (): Response =>
+    new Response("<html>Bad Gateway</html>", {
+      status: 502,
+      headers: { "Content-Type": "text/html" },
+    });
+
+  for (const [name, call, endpoint] of [
+    [
+      "startDeviceFlow",
+      () => startDeviceFlow("https://app", "c", "openid"),
+      "Device authorization",
+    ],
+    [
+      "pollDeviceFlow",
+      () => pollDeviceFlow("https://app", "dc", "c", { interval: 0, expiresIn: 60 }),
+      "Token",
+    ],
+    ["refreshCliTokens", () => refreshCliTokens("https://app", "c", "x"), "Token"],
+    ["revokeCliRefreshToken", () => revokeCliRefreshToken("https://app", "c", "r"), "Revocation"],
+  ] as const) {
+    it(`${name}: is a plain Error naming the status, never an OAuth verdict`, async () => {
+      installFetch(async () => badGateway());
+      const error = await (call() as Promise<unknown>).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(DeviceFlowError);
+      expect((error as Error).message).toBe(`${endpoint} endpoint returned HTTP 502`);
+    });
+  }
+
+  it("keeps the error_description of a body that carries no OAuth error code", async () => {
+    installFetch(async () => jsonResponse(503, { error_description: "Down for maintenance" }));
+    await expect(refreshCliTokens("https://app", "c", "x")).rejects.toThrow(
+      "Token endpoint returned HTTP 503: Down for maintenance",
+    );
+  });
+
+  it("an abort while reading the error body surfaces as the timeout, not as the status", async () => {
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+    installFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(timeout);
+            },
+          }),
+          { status: 502 },
+        ),
+    );
+    const error = await refreshCliTokens("https://app", "c", "x").then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect((error as Error).name).toBe("TimeoutError");
+  });
+});
+
 describe("revokeCliRefreshToken", () => {
   it("posts the refresh token + client_id to /api/auth/cli/revoke", async () => {
     let capturedUrl: string | undefined;

@@ -6,7 +6,8 @@
  * sidecar (`runtime-pi/sidecar/app.ts`). The route speaks the
  * X-Integration-Id/X-Target HTTP protocol, the sidecar the MCP `api_call`
  * tool (it strips those headers); neither relays upstream `Set-Cookie` to the
- * caller, and both share the AFPS spec-compliant URL allowlist matcher.
+ * caller, and both match the AFPS URL allowlist with
+ * `@appstrate/afps-shared/authorized-uris`.
  *
  * The same argument brings the LLM-stream idle bound here
  * ({@link withIdleBound}, {@link STREAM_IDLE},
@@ -37,14 +38,6 @@ import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 export function substituteVars(input: string, credentials: Record<string, string>): string {
   return substituteVarsCore(input, credentials, { keepUnresolved: true });
 }
-
-/**
- * AFPS spec-compliant URL allowlist matcher. Re-exported from
- * `@appstrate/afps-runtime/resolvers` so the credential-proxy route,
- * the sidecar, and the in-bundle `http-call-core` all enforce the exact
- * same glob semantics by construction.
- */
-export { matchesAuthorizedUriSpec } from "@appstrate/afps-runtime/resolvers";
 
 /**
  * Payload produced by the platform's DB-backed integration credential

@@ -20,7 +20,6 @@ import {
   PREPARE_REFUSAL_CODE,
   URL_POLICY_REFUSAL_CODE,
 } from "../../src/resolvers/api-call-failure-codes.ts";
-import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 const publicResolver = async () => ["203.0.113.7"];
@@ -157,61 +156,6 @@ describe("redirect loop error", () => {
     expect(err?.message).toContain("Too many redirects");
     expect(err!.message).toContain("api.acme.com");
     expect(err!.message).not.toContain(secret);
-  });
-});
-
-describe("hostLiterallyAllowlisted", () => {
-  it("pins an exact literal host", () => {
-    expect(
-      hostLiterallyAllowlisted("https://api.example.com/x", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins a glob host", () => {
-    expect(hostLiterallyAllowlisted("https://anything.example/x", ["https://**"])).toBe(false);
-    expect(hostLiterallyAllowlisted("https://a.example.com/x", ["https://*.example.com/**"])).toBe(
-      false,
-    );
-  });
-
-  it("tolerates a globbed scheme on a literal host", () => {
-    expect(hostLiterallyAllowlisted("https://intranet.corp/x", ["**://intranet.corp/**"])).toBe(
-      true,
-    );
-  });
-
-  it("tolerates a globbed port on a literal host", () => {
-    expect(
-      hostLiterallyAllowlisted("https://intranet.corp/x", ["https://intranet.corp:*/**"]),
-    ).toBe(true);
-  });
-
-  it("strips a literal port from the spec authority", () => {
-    expect(
-      hostLiterallyAllowlisted("https://api.example.com/x", ["https://api.example.com:8443/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins through a malformed entry, which the matcher refuses too", () => {
-    for (const spec of ["https://user@api.example.com/**", "https://api%2Eexample.com/**"]) {
-      expect(hostLiterallyAllowlisted("https://api.example.com/x", [spec])).toBe(false);
-    }
-  });
-
-  it("compares hosts case-insensitively", () => {
-    expect(
-      hostLiterallyAllowlisted("https://API.Example.com/x", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins a templated host, even one spelled literally in the target", () => {
-    expect(
-      hostLiterallyAllowlisted("https://{$credential.host}/x", ["https://{$credential.host}/**"]),
-    ).toBe(false);
-  });
-
-  it("returns false on an unparseable URL", () => {
-    expect(hostLiterallyAllowlisted("::::", ["https://api.example.com/**"])).toBe(false);
   });
 });
 

@@ -19,7 +19,10 @@ import {
   assertHttpFieldValue,
   InvalidHeaderValueError,
 } from "@appstrate/afps-shared/delivery-http";
-import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
+import {
+  hostLiterallyAllowlisted,
+  matchesAuthorizedUriSpec,
+} from "@appstrate/afps-shared/authorized-uris";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 import { ENGINE_FAILURE_CODE } from "./api-call-failure-codes.ts";
 
