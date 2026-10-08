@@ -26,7 +26,7 @@ const app = getTestApp({ modules: [] });
 const PASSWORD = "TestPassword123!";
 const NEW_PASSWORD = "BrandNewPassword456!";
 
-const { post: postAuth, signIn, profileStatus } = authClientFor(app);
+const { post: postAuth, signIn, profileStatus, resetToken } = authClientFor(app);
 
 // Core alone, as on an instance whose `MODULES` omits `oidc`.
 restoreAfterSuite(_authHookSlotsForTesting.credentialChange);
@@ -186,17 +186,6 @@ describe("password reset links (SMTP on)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
-
-  async function resetToken(email: string): Promise<string> {
-    const [mail] = await captureMails(async () => {
-      const res = await postAuth("/request-password-reset", {
-        email,
-        redirectTo: "/reset-password",
-      });
-      expect(res.status).toBe(200);
-    });
-    return firstLink(mail!).pathname.split("/").pop()!;
-  }
 
   it("a reset ends every session of the account and spends the other links", async () => {
     const { id, email, a, b } = await twoBrowsers();

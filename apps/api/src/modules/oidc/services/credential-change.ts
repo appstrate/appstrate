@@ -12,17 +12,15 @@ import { deviceCode, oauthAccessToken, oauthRefreshToken } from "@appstrate/db/s
 import { revokeAllFamiliesForUser } from "./cli-tokens.ts";
 
 export async function revokeOidcAccessAfterCredentialChange(userId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.delete(deviceCode).where(eq(deviceCode.userId, userId));
-    const revokedAt = new Date();
-    await tx
-      .update(oauthRefreshToken)
-      .set({ revoked: revokedAt })
-      .where(and(eq(oauthRefreshToken.userId, userId), isNull(oauthRefreshToken.revoked)));
-    await tx
-      .update(oauthAccessToken)
-      .set({ revoked: revokedAt })
-      .where(and(eq(oauthAccessToken.userId, userId), isNull(oauthAccessToken.revoked)));
-    await revokeAllFamiliesForUser(userId, "password_changed", tx);
-  });
+  await db.delete(deviceCode).where(eq(deviceCode.userId, userId));
+  const revokedAt = new Date();
+  await db
+    .update(oauthRefreshToken)
+    .set({ revoked: revokedAt })
+    .where(and(eq(oauthRefreshToken.userId, userId), isNull(oauthRefreshToken.revoked)));
+  await db
+    .update(oauthAccessToken)
+    .set({ revoked: revokedAt })
+    .where(and(eq(oauthAccessToken.userId, userId), isNull(oauthAccessToken.revoked)));
+  await revokeAllFamiliesForUser(userId, "password_changed");
 }

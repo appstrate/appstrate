@@ -34,29 +34,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and unredeemed model-provider pairing tokens; with the OIDC module, also its
   OAuth refresh and access tokens (`offline_access` included), CLI sessions
   (`revoked_reason: password_changed`) and device codes. The session that made
-  the change stays signed in. A reset (`/api/auth/reset-password` or the hosted
-  `/api/oauth/reset-password` page) does the same and ends every session. The
-  "password changed" email leaves after the revocation. If revoking fails once
+  the change stays signed in; a reset (`/api/auth/reset-password` or the hosted
+  `/api/oauth/reset-password` page) ends every session. If revoking fails once
   the password is written, the request answers
-  `500 credential_change_revocation_failed` and the pages say so. Deliberately
-  not ended:
-  - API keys, which act as their creator rather than as a session: review them
-    in the settings after a reset;
-  - SSE streams already open;
-  - linked sign-in methods (a social account linked from another session stays
-    linked): review them in the security settings after a reset;
-  - emailed verification and change-email links, signed tokens with nothing
-    stored. A verified account's change of address is approved from its current
-    address first; an unverified account's link goes straight to the new address
-    and signs in when opened, for up to one hour;
-  - a first password set on a social-only account
-    (`POST /api/profile/password`), which replaces nothing;
-  - an OAuth access token already issued as a JWT, valid until it expires (one
-    hour by default);
-  - with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), a revoked
-    session whose cached copy has not expired: it passes every authentication
-    check until then (approve a device code, create an API key, link an
-    account).
+  `500 credential_change_revocation_failed`. What is deliberately not ended
+  (API keys, linked accounts, …) is listed in `SECURITY.md`.
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

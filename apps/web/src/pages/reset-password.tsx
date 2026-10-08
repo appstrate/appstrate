@@ -25,6 +25,7 @@ export function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [state, setState] = useState<"form" | "submitting" | "success">("form");
   const [error, setError] = useState<string | null>(null);
+  const [revocationFailed, setRevocationFailed] = useState(false);
 
   if (!token) {
     return (
@@ -64,9 +65,9 @@ export function ResetPasswordPage() {
       setState("success");
     } catch (err) {
       // The password is written and the link spent: not an invalid link.
-      const revocationFailed =
-        err instanceof ApiError && err.code === "credential_change_revocation_failed";
-      setError(revocationFailed ? errorMessage(err) : t("resetPassword.invalidToken"));
+      const failed = err instanceof ApiError && err.code === "credential_change_revocation_failed";
+      setRevocationFailed(failed);
+      setError(failed ? errorMessage(err) : t("resetPassword.invalidToken"));
       setState("form");
     }
   };
@@ -123,6 +124,14 @@ export function ResetPasswordPage() {
             />
           </div>
           {error && <p className="text-destructive text-sm">{error}</p>}
+          {revocationFailed && (
+            <Link
+              to="/forgot-password"
+              className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
+            >
+              {t("resetPassword.requestNew")}
+            </Link>
+          )}
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("resetPassword.submit")}
           </Button>

@@ -20,6 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { getAuth, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { db } from "./db.ts";
+import { captureMails, firstLink } from "./smtp.ts";
 import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -356,6 +357,15 @@ export function authClientFor(app: {
     /** 200 while the session lives, 401 once it has ended. */
     profileStatus: async (cookie: string): Promise<number> =>
       (await app.request("/api/profile", { headers: { Cookie: cookie } })).status,
+    /** The token of a reset link mailed to `email` (SMTP on). */
+    resetToken: async (email: string): Promise<string> => {
+      const [mail] = await captureMails(async () => {
+        const res = await post("/request-password-reset", { email, redirectTo: "/reset-password" });
+        if (!res.ok) throw new Error(`request-password-reset answered ${res.status}`);
+      });
+      if (!mail) throw new Error(`no reset link mailed to ${email}`);
+      return firstLink(mail).pathname.split("/").pop()!;
+    },
   };
 }
 

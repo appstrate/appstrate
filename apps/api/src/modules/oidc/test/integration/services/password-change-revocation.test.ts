@@ -10,8 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { _authHookSlotsForTesting } from "@appstrate/db/auth";
-import { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "@appstrate/db/credential-change";
+import { _authHookSlotsForTesting, CREDENTIAL_CHANGE_REVOCATION_FAILED } from "@appstrate/db/auth";
 import { deviceCode, oauthAccessToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -22,11 +21,7 @@ import {
   sessionCookieOf,
 } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
-import {
-  enableSmtpForSuite,
-  captureMails,
-  firstLink,
-} from "../../../../../../test/helpers/smtp.ts";
+import { enableSmtpForSuite } from "../../../../../../test/helpers/smtp.ts";
 import {
   registerProtectedResourceFamily,
   resetProtectedResources,
@@ -56,7 +51,7 @@ afterAll(() => {
   restoreProtectedResources(protectedResourcesSnapshot);
 });
 
-const { post: postAuth, signIn, profileStatus } = authClientFor(app);
+const { post: postAuth, signIn, profileStatus, resetToken } = authClientFor(app);
 
 function base64url(bytes: Uint8Array): string {
   let binary = "";
@@ -302,14 +297,6 @@ async function expectTokensRevoked(access: SignedInEverywhere): Promise<void> {
   expect(opaque?.revoked).toBeInstanceOf(Date);
 }
 
-async function resetToken(email: string): Promise<string> {
-  const [mail] = await captureMails(async () => {
-    const res = await postAuth("/request-password-reset", { email, redirectTo: "/reset-password" });
-    expect(res.status).toBe(200);
-  });
-  return firstLink(mail!).pathname.split("/").pop()!;
-}
-
 /** Reset `email`'s password on the hosted page of a space client with its own transport. */
 async function resetOnHostedPage(spaceId: string, email: string): Promise<Response> {
   const client = await createClient({
@@ -466,7 +453,7 @@ describe("a password change or reset revokes the account's other access", () => 
       await expectRevocationFailed(res);
     });
 
-    it("the hosted page says the password changed and asks for a new link", async () => {
+    it("the hosted page says the password changed and links to a new reset", async () => {
       const user = await createTestUser({ emailVerified: true, password: PASSWORD });
       const { defaultSpaceId } = await createTestOrg(user.id);
 
@@ -475,7 +462,8 @@ describe("a password change or reset revokes the account's other access", () => 
       expect(res.status).toBe(500);
       const page = await res.text();
       expect(page).toContain("Mot de passe modifié");
-      expect(page).toContain("Demandez un nouveau lien de réinitialisation");
+      expect(page).toContain("Demandez un nouveau lien pour terminer");
+      expect(page).toContain('href="/api/oauth/forgot-password?');
     });
   });
 });

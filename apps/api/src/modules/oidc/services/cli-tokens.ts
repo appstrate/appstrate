@@ -777,13 +777,12 @@ export async function revokeFamilyForUser(params: {
 export async function revokeAllFamiliesForUser(
   userId: string,
   reason: "user_revoked_all" | "password_changed",
-  executor: DbOrTx = db,
 ): Promise<{ revokedCount: number }> {
   // Count families that will be touched BEFORE the UPDATE, so the return
   // value matches "number of devices signed out" rather than "number of
   // rows touched" (rotation rows would inflate the latter into something
   // that doesn't reflect user-visible state).
-  const heads = await executor
+  const heads = await db
     .select({ familyId: cliRefreshToken.familyId })
     .from(cliRefreshToken)
     .where(
@@ -794,7 +793,7 @@ export async function revokeAllFamiliesForUser(
       ),
     );
   if (heads.length === 0) return { revokedCount: 0 };
-  await executor
+  await db
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: reason })
     .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));

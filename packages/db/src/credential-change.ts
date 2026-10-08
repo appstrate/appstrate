@@ -19,9 +19,11 @@ interface SessionStore {
 // capped at 100 (`defaultFindManyLimit`); the delete itself is not capped.
 const SESSION_DELETE_BATCH = 100;
 
-/** The OIDC module's half: `apps/api/src/modules/oidc/services/credential-change.ts`. */
+/**
+ * Single occupant: the OIDC module installs its half at `init()`
+ * (`apps/api/src/modules/oidc/services/credential-change.ts`).
+ */
 export const credentialChangeHook = hookSlot<(userId: string) => Promise<void>>();
-export const setCredentialChangeHook = credentialChangeHook.set;
 
 async function endOtherSessions(
   sessions: SessionStore,

@@ -74,8 +74,11 @@ import { syncInstanceClientsFromEnv } from "./services/instance-client-sync.ts";
 import { oidcRealmResolver } from "./services/oidc-realm-resolver.ts";
 import { bindIssuedMagicLink } from "./services/oauth-transaction-binding.ts";
 import { toMagicLinkConfirmUrl } from "./pages/magic-link-confirm.ts";
-import { setRealmResolver, setMagicLinkIssuedHook } from "@appstrate/db/auth";
-import { setCredentialChangeHook } from "@appstrate/db/credential-change";
+import {
+  setCredentialChangeHook,
+  setMagicLinkIssuedHook,
+  setRealmResolver,
+} from "@appstrate/db/auth";
 import { revokeOidcAccessAfterCredentialChange } from "./services/credential-change.ts";
 import { setRunnerResolver } from "../../lib/runner-resolver.ts";
 import { lookupCliDeviceName } from "./services/cli-tokens.ts";

@@ -30,6 +30,8 @@ import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./credential-change.ts";
 import { hookSlot } from "./hook-slot.ts";
 
+export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
+
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
  * the platform signup gate to let invited users complete signup even when
@@ -270,6 +272,7 @@ type MagicLinkIssuedHook = (info: MagicLinkIssuedInfo) => Promise<string>;
 const magicLinkIssuedHook = hookSlot<MagicLinkIssuedHook>();
 
 export const setMagicLinkIssuedHook = magicLinkIssuedHook.set;
+export const setCredentialChangeHook = credentialChangeHook.set;
 
 /** Test-only: every injection slot, each with its `swapForTesting` (null = no module). */
 export const _authHookSlotsForTesting = {
