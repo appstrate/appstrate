@@ -30,6 +30,7 @@ import {
   invalidateIntegrationQueries,
   useIntegrationAgentResolution,
   useIntegrationRunBlocking,
+  useReadIntegrationResolution,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
   type IntegrationManifestView,
@@ -53,9 +54,8 @@ import {
   toggleCapped,
   unavailableConnectionIds,
 } from "../../lib/connection-set";
-import { client } from "../../api/client";
-import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
-import { isVersioned } from "../../lib/version-selector";
+import { packageDetailPath } from "../../lib/package-paths";
+import { toastError } from "../../lib/mutation-error";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { useCanReach } from "../../hooks/use-can-reach";
@@ -148,6 +148,7 @@ export function IntegrationConnectionPicker({
   // Authoritative run-blocking flag for this integration (run semantics) — same
   // bulk query as the launch badge, selected per-integration.
   const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
+  const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
@@ -330,8 +331,9 @@ export function IntegrationConnectionPicker({
       } catch {
         return false;
       }
+      // Only a pin write moves the server's verdict; an override is a form value.
+      await refresh();
     }
-    await refresh();
     setDraft(null);
     return true;
   };
@@ -354,7 +356,7 @@ export function IntegrationConnectionPicker({
     // integration detail page is the surface that connects at defaults).
     // Non-OAuth auths resolve to an empty set and connect at their fixed creds.
     const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
-    await openPopup({
+    const settled = await openPopup({
       packageId: integrationId,
       authKey,
       ...(scopes.length ? { scopes } : {}),
@@ -364,24 +366,16 @@ export function IntegrationConnectionPicker({
       ...(isRenew ? {} : { forceAccountSelect: true }),
       ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
     });
-    if (isRenew) {
-      await refresh();
+    // A settled popup has refetched the readiness verdict: read it, never ask again.
+    if (!settled || isRenew) return;
+    let added: IntegrationCandidate | undefined;
+    try {
+      added = readResolution()?.candidates.find((c) => !before.has(c.id));
+    } catch (err) {
+      toastError(err);
       return;
     }
-    const { data: fresh } = await client.GET("/api/agents/{scope}/{name}/connection-readiness", {
-      params: {
-        path: splitPackageRef(agentPackageId),
-        ...(isVersioned(version) ? { query: { version } } : {}),
-      },
-    });
-    const freshCandidates = fresh?.integrations.find(
-      (i) => i.integration_package_id === integrationId,
-    )?.resolution.candidates;
-    const added = freshCandidates?.find((c) => !before.has(c.id));
-    if (!added) {
-      await refresh();
-      return;
-    }
+    if (!added) return;
     const placed = placeCreatedConnection({
       explicitIds,
       checkedIds,
@@ -392,7 +386,6 @@ export function IntegrationConnectionPicker({
       return;
     }
     // The menu closed on the connect click; reopen it on the new tick so "Valider" is at hand.
-    await refresh();
     setDraft(placed.draft);
     setOpen(true);
   };

@@ -40,6 +40,8 @@ const POPUP_FEATURES = "width=600,height=700";
  * closes (cancel fallback) and rejects on timeout / kickoff failure. A success
  * does not close the popup: completion pages close themselves, and one that
  * shows an install block (SSH) stays open until the user dismisses it.
+ * `openPopup` resolves `true` once the popup settled AND the integration caches
+ * were refetched, `false` after a failure it already toasted.
  */
 export function useHostedConnectPopup() {
   const { t } = useTranslation("settings");
@@ -53,7 +55,7 @@ export function useHostedConnectPopup() {
       scopes?: string[];
       forceAccountSelect?: boolean;
       connectionId?: string;
-    }) => {
+    }): Promise<boolean> => {
       try {
         // Open the popup synchronously (some browsers block popups opened inside
         // async callbacks), mint the session, point the popup at connect_url,
@@ -147,24 +149,26 @@ export function useHostedConnectPopup() {
         // (status cards, pickers, the connections page) reflects the new
         // connection without waiting for a window-focus refetch.
         await invalidateIntegrationQueries(qc);
+        return true;
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
           toast.error(t("integration.popup.blocked"));
-          return;
+          return false;
         }
         if (err instanceof Error && err.message === "connect_timeout") {
           toast.error(t("integration.popup.timeout"));
-          return;
+          return false;
         }
         // The space's admin gate: retrying cannot help, so the reason is the message.
         if (err instanceof ApiError && err.code === "connection_blocked_by_admin") {
           toastError(err);
-          return;
+          return false;
         }
         // Mint failure (e.g. portal not configured / 5xx), network error, or any
         // other unexpected throw: surface a generic toast here so callers never
         // have to handle a rejected openPopup() — the cache stays untouched.
         toast.error(t("integration.popup.failed"));
+        return false;
       }
     },
     [initiateConnect, qc, t],

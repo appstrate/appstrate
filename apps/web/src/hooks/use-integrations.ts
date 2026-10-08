@@ -232,6 +232,32 @@ export function useIntegrationAgentResolution(
   });
 }
 
+type AgentConnectionReadiness =
+  paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
+
+/**
+ * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * it NOW, for a handler running after something already awaited the readiness
+ * refetch (the connect popup does): the fresh value, without a second request.
+ * Throws when that refetch failed — the cache then still holds the old verdict.
+ */
+export function useReadIntegrationResolution(
+  integrationId: string,
+  agentPackageId: string,
+  version?: string,
+) {
+  const qc = useQueryClient();
+  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version);
+  return () => {
+    const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
+    if (state?.status === "error") throw state.error;
+    return (
+      state?.data?.integrations.find((i) => i.integration_package_id === integrationId)
+        ?.resolution ?? null
+    );
+  };
+}
+
 /**
  * Whether a given integration would block the next run (run semantics — inert
  * optional integrations are NOT blocking, inert required ones ARE). Selected

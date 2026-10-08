@@ -5,16 +5,21 @@
  * unshared by its owner), or on an auth serving none of the selected tools. The
  * server keeps refusing the set — it never binds what is left — so the picker
  * must say so, instead of showing the survivors as if they were the whole
- * selection.
+ * selection. Plus how the picker reads the connection a connect popup created.
  */
 
 import { describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { $api, type components } from "../../../api/client.ts";
+import { ApiError } from "../../../api/errors.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
-import type { IntegrationManifestView } from "../../../hooks/use-integrations.ts";
+import {
+  invalidateIntegrationQueries,
+  useReadIntegrationResolution,
+  type IntegrationManifestView,
+} from "../../../hooks/use-integrations.ts";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 
 await i18nReady;
@@ -69,22 +74,27 @@ function resolution(overrides: Partial<Resolution>): Resolution {
 
 type Persistence = Parameters<typeof IntegrationConnectionPicker>[0]["persistence"];
 
-/** Seed the one readiness query the picker reads, under the key it builds. */
-function renderPicker(res: Resolution, runBlocking: boolean, persistence?: Persistence): string {
-  const qc = new QueryClient();
-  const { queryKey } = $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
-    params: {
-      path: { scope: "@acme", name: "ops" },
-      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
-    },
-  });
-  qc.setQueryData(queryKey, {
+/** The one readiness query the picker reads, under the key it builds. */
+const READINESS_KEY = $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
+  params: {
+    path: { scope: "@acme", name: "ops" },
+    header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+  },
+}).queryKey;
+
+function readiness(res: Resolution, runBlocking = false) {
+  return {
     blocks_run: runBlocking,
     errors: [],
     integrations: [
       { integration_package_id: INTEGRATION, run_blocking: runBlocking, resolution: res },
     ],
-  });
+  };
+}
+
+function renderPicker(res: Resolution, runBlocking: boolean, persistence?: Persistence): string {
+  const qc = new QueryClient();
+  qc.setQueryData(READINESS_KEY, readiness(res, runBlocking));
   return render(
     <IntegrationConnectionPicker
       integrationId={INTEGRATION}
@@ -148,44 +158,11 @@ describe("IntegrationConnectionPicker — a stored member is gone", () => {
   });
 
   it("warns in override mode too — a schedule would fail at every fire", () => {
-    const html = render(
-      <IntegrationConnectionPicker
-        integrationId={INTEGRATION}
-        agentPackageId={AGENT}
-        manifest={MANIFEST}
-        authStatuses={[]}
-        agentTools={undefined}
-        agentScopes={undefined}
-        persistence={{ mode: "override", value: [DB, GONE], onChange: () => {} }}
-      />,
-      {
-        queryClient: (() => {
-          const qc = new QueryClient();
-          const { queryKey } = $api.queryOptions(
-            "get",
-            "/api/agents/{scope}/{name}/connection-readiness",
-            {
-              params: {
-                path: { scope: "@acme", name: "ops" },
-                header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
-              },
-            },
-          );
-          qc.setQueryData(queryKey, {
-            blocks_run: false,
-            errors: [],
-            integrations: [
-              {
-                integration_package_id: INTEGRATION,
-                run_blocking: false,
-                resolution: resolution({}),
-              },
-            ],
-          });
-          return qc;
-        })(),
-      },
-    );
+    const html = renderPicker(resolution({}), false, {
+      mode: "override",
+      value: [DB, GONE],
+      onChange: () => {},
+    });
     expect(html).toContain(WARNING);
     expect(html).toContain("text-amber-600");
   });
@@ -361,5 +338,80 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).not.toContain(t("connectLabel"));
     expect(html).not.toContain(`member-pick-${INTEGRATION}`);
     expect(html).not.toContain(`member-pick-locked-${INTEGRATION}`);
+  });
+});
+
+describe("useReadIntegrationResolution — the verdict after a connect popup", () => {
+  const ADDED = "44444444-4444-4444-8444-444444444444";
+  type Readiness = ReturnType<typeof readiness>;
+  type Reader = ReturnType<typeof useReadIntegrationResolution>;
+
+  /** The readiness query mounted as the picker holds it: active, each fetch answered in turn. */
+  async function mountReadiness(qc: QueryClient, answers: Array<() => Promise<Readiness>>) {
+    let asked = 0;
+    const observer = new QueryObserver(qc, {
+      queryKey: READINESS_KEY,
+      queryFn: () => answers[asked++]!(),
+      retry: false,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { asked: () => asked, unsubscribe };
+  }
+
+  function Probe({ onReader }: { onReader: (read: Reader) => void }) {
+    onReader(useReadIntegrationResolution(INTEGRATION, AGENT));
+    return null;
+  }
+
+  function captureReader(qc: QueryClient): Reader {
+    const readers: Reader[] = [];
+    render(<Probe onReader={(read) => readers.push(read)} />, { queryClient: qc });
+    return readers[0]!;
+  }
+
+  it("reads the created connection off the one refetch the popup awaited", async () => {
+    const qc = new QueryClient();
+    const mounted = await mountReadiness(qc, [
+      async () => readiness(resolution({})),
+      async () =>
+        readiness(
+          resolution({
+            candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")],
+          }),
+        ),
+    ]);
+    const read = captureReader(qc);
+    expect(read()?.candidates.map((c) => c.id)).not.toContain(ADDED);
+
+    // What `openPopup` awaits before it resolves.
+    await invalidateIntegrationQueries(qc);
+
+    expect(read()?.candidates.map((c) => c.id)).toContain(ADDED);
+    // The mount, then the popup's refetch: reading asks nothing more.
+    expect(mounted.asked()).toBe(2);
+    mounted.unsubscribe();
+  });
+
+  it("throws a failed refetch instead of passing the stale verdict off as unchanged", async () => {
+    const qc = new QueryClient();
+    const failure = new ApiError("internal_error", "boom", 500);
+    const mounted = await mountReadiness(qc, [
+      async () => readiness(resolution({})),
+      () => Promise.reject(failure),
+    ]);
+    const read = captureReader(qc);
+
+    // The popup's await never rejects: the failure is only in the query state.
+    await expect(invalidateIntegrationQueries(qc)).resolves.toBeUndefined();
+
+    let thrown: unknown;
+    try {
+      read();
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBe(failure);
+    mounted.unsubscribe();
   });
 });
