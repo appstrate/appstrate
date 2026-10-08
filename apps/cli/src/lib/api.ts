@@ -12,6 +12,9 @@
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
  *
+ * Both go through `refreshAccessToken`, which serializes rotations within
+ * the process and across processes (the refresh token is single-use).
+ *
  * Inject `X-Org-Id` + `X-Space-Id` when the profile is pinned to a
  * specific organization / space — matches the dashboard SPA's
  * header contract (`apps/web/src/lib/api.ts`) so routes that use
@@ -19,8 +22,10 @@
  * the CLI.
  */
 
+import { join } from "node:path";
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
-import { getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
+import { getConfigDir, getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
+import { withFileLock } from "./file-lock.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
@@ -36,48 +41,38 @@ import { CLI_CLIENT_ID } from "./cli-client.ts";
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
 
 /**
- * Per-profile in-flight refresh dedup.
+ * Bounds the wait for another process's refresh. The holder makes one HTTP
+ * call, so a longer wait means it hung: give up with `FileLockBusyError`,
+ * which leaves the stored credentials for the next command.
+ */
+const REFRESH_LOCK_TIMEOUT_MS = 30_000;
+
+/**
+ * Below the lock's 500 ms default: the critical section is one HTTP call, and
+ * every process that lost the race waits on it before its own command runs.
+ */
+const REFRESH_LOCK_POLL_MS = 100;
+
+/**
+ * One lock for every profile: serializing refreshes of different profiles
+ * costs a round-trip at worst, and a profile name never has to become a path.
+ * In the config dir, beside `credentials.json`, because it guards credentials.
+ */
+export function getRefreshLockPath(): string {
+  return join(getConfigDir(), "token-refresh.lock");
+}
+
+/**
+ * Per-profile in-flight refresh dedup, in front of the cross-process lock.
  *
  * When a CLI invocation issues parallel API calls (batch operations,
  * SSE + REST, stream + poll), each call independently resolves the
- * access token and can independently react to a 401. Without this
- * mutex, two callers would read the same plaintext refresh token from
- * the keyring and POST it concurrently to `/cli/token`: the server
- * rotates the first, marks it `used_at`, and the second trips the
- * RFC 6819 §5.2.2.3 reuse-detection branch that revokes the ENTIRE
- * family — booting the legitimate user for what is effectively our
- * own race.
- *
- * Sharing a single `Promise<string>` per profile collapses all
- * concurrent refreshes for that profile into a single server round-
- * trip: every caller observes the same rotated access token. The
+ * access token and can independently react to a 401. Sharing a single
+ * `Promise<string>` per profile collapses all concurrent refreshes for
+ * that profile into one lock acquisition and at most one server
+ * round-trip: every caller observes the same rotated access token. The
  * entry is cleared in `.finally()` so the next bona-fide rotation
  * (15 min later) starts fresh.
- *
- * ## Known limitation — cross-process races (PR #191 review)
- *
- * This mutex is in-process only. Two CLI invocations running in
- * PARALLEL PROCESSES (e.g. `xargs -P N appstrate …`, concurrent CI
- * jobs sharing a keyring, a user running two commands in separate
- * shells) each maintain their own empty `inFlightRefresh` map. If
- * both enter their proactive-refresh window at the same time, each
- * reads the same plaintext refresh token from the keyring and POSTs
- * it to `/cli/token` — one wins, the other trips reuse detection,
- * and the family gets revoked (RFC 6819 §5.2.2.3). The legitimate
- * user is then booted and has to re-run `appstrate login`.
- *
- * A file lock around the resolve+save sequence in `loadTokens` /
- * `saveTokens` (advisory `flock()` on the fallback file, or
- * process-local locking on the keyring entry) would close this
- * window. Left as a follow-up because:
- *   1. The common CLI use case is sequential — each command finishes
- *      before the next starts.
- *   2. When it does fire, the user sees a clean re-auth prompt (the
- *      reactive 401 branch wipes local credentials), not a silent
- *      security incident.
- *   3. The family revocation IS the correct defense if the token was
- *      ever actually leaked; degrading to "accept predecessor" would
- *      trade cross-process ergonomics for a real replay window.
  */
 const inFlightRefresh = new Map<string, Promise<string>>();
 
@@ -168,7 +163,7 @@ interface AuthContext {
  * body-stream semantics and would be broken by `apiFetchRaw`'s reactive
  * 401 retry (which replays a body that may have already been consumed).
  *
- * All the silent-refresh machinery (per-profile mutex, proactive margin,
+ * All the silent-refresh machinery (refresh locks, proactive margin,
  * keyring scrub on invalid_grant) is reused — this is purely a composer
  * over the existing internals.
  */
@@ -235,22 +230,54 @@ export async function resolveApiKeyAuthContext(
   }
 }
 
+function noCredentials(profileName: string): AuthError {
+  return new AuthError(
+    `No credentials for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
+  );
+}
+
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
   const tokens = await loadTokens(profileName);
-  if (!tokens) {
-    throw new AuthError(
-      `No credentials for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
-    );
-  }
+  if (!tokens) throw noCredentials(profileName);
   const now = Date.now();
   const needsRefresh = tokens.expiresAt - now <= ACCESS_TOKEN_REFRESH_MARGIN_MS;
   if (!needsRefresh) {
     return tokens.accessToken;
   }
-  // Access token expired or imminent. Try refresh — dedup via the
-  // per-profile mutex so parallel callers don't race the refresh
-  // token against server-side reuse detection.
-  return withRefreshLock(profileName, () => doRefresh(profileName, profile, tokens));
+  return refreshAccessToken(profileName, profile, tokens);
+}
+
+/**
+ * Rotate the pair the caller read (`seen`) and return the new access token.
+ *
+ * A refresh token is single-use: presenting one twice trips RFC 6819
+ * §5.2.2.3 reuse detection, which revokes the whole family and logs the
+ * user out. Concurrent `appstrate` processes are routine — Claude Code runs
+ * `code sync` in the background at every session start, beside whatever
+ * else is calling the CLI — so read → refresh → save runs under a `flock(2)`
+ * every process shares. Serializing the HTTP calls alone is not enough: a
+ * process that read the pair before waiting would still present the stale
+ * token. So the pair is re-read under the lock, and a refresh token other
+ * than `seen` means another process rotated meanwhile: its access token is
+ * the answer, with no call to the server.
+ *
+ * Where `flock` is unavailable the lock fails open silently: the user cannot
+ * act on a warning about refreshes they never asked for.
+ */
+function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
+  return withRefreshLock(profileName, () =>
+    withFileLock(
+      getRefreshLockPath(),
+      "token refresh",
+      async () => {
+        const current = await loadTokens(profileName);
+        if (!current) throw noCredentials(profileName);
+        if (current.refreshToken !== seen.refreshToken) return current.accessToken;
+        return doRefresh(profileName, profile, current);
+      },
+      { timeoutMs: REFRESH_LOCK_TIMEOUT_MS, pollMs: REFRESH_LOCK_POLL_MS, warnUnlocked: false },
+    ),
+  );
 }
 
 async function doRefresh(profileName: string, profile: Profile, tokens: Tokens): Promise<string> {
@@ -370,15 +397,14 @@ export async function apiFetchRaw(
   // If a parallel caller already rotated the token between our initial
   // resolve and this 401, the keyring now holds a newer access token.
   // Retry with it first — we'd otherwise burn a refresh-token rotation
-  // for nothing, and in edge timing could even race the mutex into
-  // unnecessary network calls.
+  // for nothing.
   if (stored.accessToken !== token) {
     const retry = await doFetch(stored.accessToken);
     if (retry.status !== 401) return retry;
   }
   let rotated: string;
   try {
-    rotated = await withRefreshLock(profileName, () => doRefresh(profileName, profile, stored));
+    rotated = await refreshAccessToken(profileName, profile, stored);
   } catch {
     // doRefresh already wiped credentials on terminal failures and
     // surfaces an AuthError — return the original 401 so the caller

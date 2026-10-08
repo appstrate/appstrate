@@ -18,10 +18,20 @@
  *      the next invocation hits the "not logged in" branch instead of
  *      retrying.
  *   5. Transient refresh failures (network, 5xx) preserve local state.
+ *   6. A refresh re-reads the stored pair under the cross-process lock: a
+ *      pair another process rotated meanwhile is used as is, never
+ *      redeemed again. The multi-process proof is
+ *      `token-refresh-lock.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { saveTokens, loadTokens } from "../src/lib/keyring.ts";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
+import {
+  saveTokens,
+  loadTokens,
+  _setKeyringFactoryForTesting,
+  type Tokens,
+} from "../src/lib/keyring.ts";
+import { FileLockBusyError, withFileLock } from "../src/lib/file-lock.ts";
 // Imported directly for the one test that needs a profile with NO stored
 // tokens — the shared seed always writes a pair.
 import { setProfile } from "../src/lib/config.ts";
@@ -30,6 +40,7 @@ import {
   explicitApiKey,
   resolveApiKeyTarget,
   AuthError,
+  getRefreshLockPath,
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
 } from "../src/lib/api.ts";
@@ -92,6 +103,36 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function peerRotatedTokens(): Tokens {
+  return {
+    accessToken: "peer-access",
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    refreshToken: "peer-refresh",
+    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+}
+
+/**
+ * Another process rotates the stored pair right after this process's `nth`
+ * read of it: the window between reading the pair and taking the refresh lock.
+ */
+function rotateByPeerAfterRead(nth: number, peer: Tokens): void {
+  let reads = 0;
+  _setKeyringFactoryForTesting((profile) => ({
+    setPassword(value: string): void {
+      keyring.store.set(profile, value);
+    },
+    getPassword(): string | null {
+      const value = keyring.store.get(profile) ?? null;
+      if (++reads === nth) keyring.store.set(profile, JSON.stringify(peer));
+      return value;
+    },
+    deletePassword(): void {
+      keyring.store.delete(profile);
+    },
+  }));
 }
 
 describe("apiFetchRaw (issue #165) — proactive refresh", () => {
@@ -280,6 +321,7 @@ describe("apiFetchRaw — reactive refresh on 401", () => {
     ]);
     // Retry carried the fresh bearer.
     expect(fetchCalls[2]!.auth).toBe("Bearer access-2");
+    expect((await loadTokens("default"))?.refreshToken).toBe("refresh-2");
   });
 
   it("returns the original 401 when rotation itself fails (so caller can decide)", async () => {
@@ -472,6 +514,91 @@ describe("apiFetchRaw — concurrent refresh dedup (PR #191 review)", () => {
     // We should have retried with the peer's rotated token WITHOUT
     // spending a second rotate call of our own.
     expect(rotateCalls).toBe(0);
+  });
+});
+
+describe("apiFetchRaw — a peer process rotated first (issue #1806)", () => {
+  // The token endpoint answers what the server does to a second redemption of
+  // a refresh token: reuse detected, family revoked.
+  const reuseDetected = (): Response => jsonResponse(400, { error: "invalid_grant" });
+
+  it("proactive: uses the peer's access token instead of redeeming the stale refresh token", async () => {
+    await seedProfile("default", {
+      access: "expired",
+      accessExpiresIn: -60_000,
+      refresh: "stale-refresh",
+    });
+    rotateByPeerAfterRead(1, peerRotatedTokens());
+    installFetch(async (url) =>
+      url.endsWith("/api/auth/cli/token") ? reuseDetected() : jsonResponse(200, { ok: true }),
+    );
+
+    const res = await apiFetchRaw("default", "/api/data");
+    expect(res.status).toBe(200);
+    expect(fetchCalls.map((c) => c.url)).toEqual(["https://app.example.com/api/data"]);
+    expect(fetchCalls[0]!.auth).toBe("Bearer peer-access");
+    expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
+  });
+
+  it("reactive 401: uses the peer's access token instead of redeeming the stale refresh token", async () => {
+    await seedProfile("default", {
+      access: "access-1",
+      accessExpiresIn: 5 * 60 * 1000, // fresh — the refresh comes from the 401
+      refresh: "refresh-1",
+    });
+    // Read 1 resolves the bearer, read 2 is the 401 branch's own; the peer
+    // lands after that one, so only the read under the lock can see it.
+    rotateByPeerAfterRead(2, peerRotatedTokens());
+    installFetch(async (url, init) => {
+      if (url.endsWith("/api/auth/cli/token")) return reuseDetected();
+      const auth = (init?.headers as Record<string, string>).Authorization;
+      return auth === "Bearer peer-access"
+        ? jsonResponse(200, { ok: true })
+        : jsonResponse(401, { error: "invalid_token" });
+    });
+
+    const res = await apiFetchRaw("default", "/api/data");
+    expect(res.status).toBe(200);
+    // The rejected request, then its retry: no call to the token endpoint.
+    expect(fetchCalls.map((c) => c.auth)).toEqual(["Bearer access-1", "Bearer peer-access"]);
+    expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
+  });
+});
+
+describe("apiFetchRaw — refresh lock held by another process", () => {
+  it("gives up past the lock timeout without redeeming the token or touching the credentials", async () => {
+    await seedProfile("default", { access: "expired", accessExpiresIn: -60_000, refresh: "r" });
+    installFetch(async () => jsonResponse(200, {}));
+
+    // The other process's refresh hung, holding the lock.
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const holder = withFileLock(getRefreshLockPath(), "test holder", async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+
+    // Jump the clock past whatever deadline the waiter computes rather than
+    // sit out the real timeout; the next poll then gives up.
+    const clock = setInterval(() => setSystemTime(new Date(Date.now() + 60_000)), 10);
+    let error: unknown;
+    try {
+      error = await apiFetchRaw("default", "/api/data").then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    } finally {
+      clearInterval(clock);
+      setSystemTime();
+      release.resolve();
+      await holder;
+    }
+
+    expect(error).toBeInstanceOf(FileLockBusyError);
+    expect((error as FileLockBusyError).label).toBe("token refresh");
+    expect(fetchCalls).toHaveLength(0);
+    expect((await loadTokens("default"))?.refreshToken).toBe("r");
   });
 });
 
