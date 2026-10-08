@@ -29,7 +29,7 @@ import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
-import { clearStaleAuthCookies } from "./auth-cookies.ts";
+import { appendSetCookies, clearStaleAuthCookies, readSessionWithCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
@@ -287,60 +287,70 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     }
 
     // Fallback: cookie session
-    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const { session, setCookies } = await readSessionWithCookies(c);
     if (!session?.user) {
       // Bury the stale BA cookie before bouncing the request. Without this,
       // a cookie left behind by a redeploy (rotated `BETTER_AUTH_SECRET`,
       // wiped `session` rows, …) keeps re-arriving on every subsequent
       // request and the SPA loops between `/login` and `/auth/callback`
-      // with no surfaceable error.
+      // with no surfaceable error. BA itself clears nothing when the
+      // signature fails, so its own (deletion-only) cookies are not
+      // forwarded here: this helper is the one that buries them.
       clearStaleAuthCookies(c);
       throw unauthorized("Invalid or missing session");
     }
 
-    // Appstrate-User rejection under cookie auth is enforced centrally by the
-    // auth-conditional header guard below (see AUTH_CONDITIONAL_HEADERS), so it
-    // cannot drift per-branch the way it previously did.
+    // Better Auth's refresh cookie is appended AFTER `next()`, whatever exits
+    // this branch: `c.header` on a finalized response rewrites it, so the
+    // cookie reaches hand-built and immutable-header responses as well as
+    // `c.json` and the error handler's.
+    try {
+      // Appstrate-User rejection under cookie auth is enforced centrally by the
+      // auth-conditional header guard below (see AUTH_CONDITIONAL_HEADERS), so it
+      // cannot drift per-branch the way it previously did.
 
-    c.set("user", {
-      id: session.user.id,
-      email: session.user.email ?? "",
-      name: session.user.name ?? "",
-    });
-    c.set("authMethod", "session");
-    c.set("principalKind", "user");
-    // Resolve the user's realm so the realm guard middleware below can
-    // reject cookie sessions minted for a non-platform audience (OIDC
-    // end-users) from hitting platform routes. The realm is denormalized
-    // onto the session row at create time (`databaseHooks.session.create
-    // .before` + `session.additionalFields.realm` in packages/db/src/
-    // auth.ts), so `getSession` returns it with the declared additionalField
-    // — read it from there instead of re-querying the user table on every
-    // session-backed request.
-    //
-    // `cookieCache` is an operator knob
-    // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
-    // defaulting to off. Nothing here depends on which way it is set — the
-    // cached cookie carries the same declared fields — and the fallback
-    // below is what keeps the read correct either way.
-    //
-    // Fall back to the user-table lookup only
-    // when the field is absent (sessions created before the
-    // denormalization shipped, or a BA version stripping undeclared
-    // output fields) so audience enforcement never silently degrades.
-    const sessionRealm = (session.session as { realm?: unknown }).realm;
-    if (typeof sessionRealm === "string") {
-      c.set("sessionRealm", sessionRealm);
-    } else {
-      const [userRow] = await db
-        .select({ realm: userTable.realm })
-        .from(userTable)
-        .where(eq(userTable.id, session.user.id))
-        .limit(1);
-      if (userRow) c.set("sessionRealm", userRow.realm);
+      c.set("user", {
+        id: session.user.id,
+        email: session.user.email ?? "",
+        name: session.user.name ?? "",
+      });
+      c.set("authMethod", "session");
+      c.set("principalKind", "user");
+      // Resolve the user's realm so the realm guard middleware below can
+      // reject cookie sessions minted for a non-platform audience (OIDC
+      // end-users) from hitting platform routes. The realm is denormalized
+      // onto the session row at create time (`databaseHooks.session.create
+      // .before` + `session.additionalFields.realm` in packages/db/src/
+      // auth.ts), so `getSession` returns it with the declared additionalField
+      // — read it from there instead of re-querying the user table on every
+      // session-backed request.
+      //
+      // `cookieCache` is an operator knob
+      // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
+      // defaulting to off. Nothing here depends on which way it is set — the
+      // cached cookie carries the same declared fields — and the fallback
+      // below is what keeps the read correct either way.
+      //
+      // Fall back to the user-table lookup only
+      // when the field is absent (sessions created before the
+      // denormalization shipped, or a BA version stripping undeclared
+      // output fields) so audience enforcement never silently degrades.
+      const sessionRealm = (session.session as { realm?: unknown }).realm;
+      if (typeof sessionRealm === "string") {
+        c.set("sessionRealm", sessionRealm);
+      } else {
+        const [userRow] = await db
+          .select({ realm: userTable.realm })
+          .from(userTable)
+          .where(eq(userTable.id, session.user.id))
+          .limit(1);
+        if (userRow) c.set("sessionRealm", userRow.realm);
+      }
+
+      await next();
+    } finally {
+      appendSetCookies(c, setCookies);
     }
-
-    return next();
   });
 
   // Auth-conditional header policy (see AUTH_CONDITIONAL_HEADERS). A known

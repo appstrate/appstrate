@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Helper for clearing stale Better Auth session cookies.
+ * Better Auth session cookies on server-side session reads: forwarding what
+ * Better Auth emits (`readSessionWithCookies`) and clearing a stale cookie it
+ * leaves behind (`clearStaleAuthCookies`).
  *
  * When `getAuth().api.getSession(...)` returns no user even though the request
  * carries a Better Auth session cookie (signature invalid after secret
@@ -25,6 +27,42 @@ import { deleteCookie } from "hono/cookie";
 import { getCookies } from "better-auth/cookies";
 import { getAuth } from "@appstrate/db/auth";
 import type { AppEnv } from "../types/index.ts";
+
+/**
+ * Read the Better Auth session of `c`'s request with the `Set-Cookie` values
+ * Better Auth emitted. Every server-side session read that answers a browser
+ * request goes through here, and the caller appends `setCookies` to its
+ * response.
+ *
+ * Once the row is older than `updateAge`, `getSession` extends `expiresAt` in
+ * the DB and re-issues the session cookie with a fresh Max-Age. Dropping that
+ * header extends the row but not the cookie, so the browser loses the session
+ * `expiresIn` after sign-in however active the user is.
+ */
+export async function readSessionWithCookies(c: Context) {
+  const { headers, response } = await getAuth().api.getSession({
+    headers: c.req.raw.headers,
+    returnHeaders: true,
+  });
+  return { session: response, setCookies: headers.getSetCookie() };
+}
+
+/**
+ * Append `setCookies` to `c`'s response. Before the response exists, only
+ * responses built from the context carry it (`c.json`, `c.html`,
+ * `c.redirect`, `streamSSE`, the error handler); once it is finalized,
+ * `c.header` rewrites whatever the handler returned, hand-built included.
+ */
+export function appendSetCookies(c: Context, setCookies: readonly string[]): void {
+  for (const cookie of setCookies) c.header("Set-Cookie", cookie, { append: true });
+}
+
+/** `readSessionWithCookies` for a handler: forwards the cookies before it responds. */
+export async function getSessionForwardingCookies(c: Context) {
+  const { session, setCookies } = await readSessionWithCookies(c);
+  appendSetCookies(c, setCookies);
+  return session;
+}
 
 /**
  * Send `Set-Cookie: …; Max-Age=0` for every Better Auth cookie we manage so

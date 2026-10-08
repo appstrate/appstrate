@@ -34,6 +34,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
+import { getSessionForwardingCookies } from "../../lib/auth-cookies.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
@@ -119,7 +120,6 @@ import {
 } from "./pages/activate.ts";
 import { SOCIAL_SIGN_IN_SCRIPT } from "./pages/social-sign-in-script.ts";
 import { LOGIN_EXPIRY_SCRIPT } from "./pages/login-expiry-script.ts";
-import { getAuth } from "@appstrate/db/auth";
 import { oauthClient, deviceCode } from "@appstrate/db/schema";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2334,7 +2334,7 @@ export function createOidcRouter() {
       return c.html(page.value);
     }
 
-    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionForwardingCookies(c);
     if (!session) {
       const returnTo = `/activate?user_code=${encodeURIComponent(rawUserCode)}`;
       return c.redirect(`/auth/login?returnTo=${encodeURIComponent(returnTo)}`, 302);
@@ -2459,7 +2459,7 @@ export function createOidcRouter() {
     // userId and clientId even after the approve mutates state. This is
     // purely observational — the realm/level guard is enforced by
     // `oidcGuardsPlugin.hooks.before` when `deviceApprove` fires.
-    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const session = await getSessionForwardingCookies(c);
     const [codeRow] = await db
       .select({ clientId: deviceCode.clientId })
       .from(deviceCode)
@@ -2552,9 +2552,7 @@ export function createOidcRouter() {
       });
     }
 
-    const denySession = await getAuth()
-      .api.getSession({ headers: c.req.raw.headers })
-      .catch(() => null);
+    const denySession = await getSessionForwardingCookies(c).catch(() => null);
     const [denyCodeRow] = await db
       .select({ clientId: deviceCode.clientId })
       .from(deviceCode)
