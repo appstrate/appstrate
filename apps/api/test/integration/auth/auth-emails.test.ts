@@ -6,11 +6,16 @@
  * that the link does what the message says.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { _authHookSlotsForTesting } from "@appstrate/db/auth";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import type { Transporter } from "nodemailer";
+import {
+  _authHookSlotsForTesting,
+  _authLoggerForTesting,
+  withSmtpOverride,
+} from "@appstrate/db/auth";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { eq } from "drizzle-orm";
-import { user as userTable } from "@appstrate/db/schema";
+import { profiles, user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -35,6 +40,10 @@ function postAuth(path: string, body: unknown, cookie?: string): Promise<Respons
       body: JSON.stringify(body),
     }),
   );
+}
+
+async function speaksEnglish(userId: string): Promise<void> {
+  await db.update(profiles).set({ language: "en" }).where(eq(profiles.id, userId));
 }
 
 describe("platform auth e-mails (SMTP on)", () => {
@@ -74,6 +83,18 @@ describe("platform auth e-mails (SMTP on)", () => {
 
       expect(link.pathname).toBe("/magic-link/confirm");
       expect(link.searchParams.get("token")).toBeTruthy();
+    });
+
+    it("is written in the language of the account the address belongs to", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      await speaksEnglish(account.id);
+
+      const mails = await captureMails(() =>
+        postAuth("/sign-in/magic-link", { email: account.email, callbackURL: "/" }),
+      );
+
+      expect(mails).toHaveLength(1);
+      expect(mails[0]!.subject).toBe("Your sign-in link");
     });
 
     it("signs in when the page hands its query to the verify endpoint, once", async () => {
@@ -397,6 +418,49 @@ describe("platform auth e-mails (SMTP on)", () => {
       expect(mails).toHaveLength(1);
       expect(mails[0]!.to).toBe(account.email);
       expect(mails[0]!.subject).toBe("Votre mot de passe a été modifié");
+    });
+  });
+
+  describe("delivery", () => {
+    function requestReset(email: string): Promise<Response> {
+      return postAuth("/request-password-reset", { email, redirectTo: "/reset-password" });
+    }
+
+    it("is written in the account's language", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      await speaksEnglish(account.id);
+
+      const mails = await captureMails(() => requestReset(account.email));
+
+      expect(mails).toHaveLength(1);
+      expect(mails[0]!.subject).toBe("Reset your password");
+    });
+
+    it("a refused mail changes no answer, and the failure is logged", async () => {
+      const account = await createTestUser({ emailVerified: true });
+      const delivered = await requestReset(account.email);
+      const refusing = {
+        sendMail: async () => {
+          throw new Error("SMTP unreachable");
+        },
+      } as unknown as Transporter;
+      const warn = spyOn(_authLoggerForTesting, "warn").mockImplementation(() => {});
+      try {
+        const refused = await withSmtpOverride(
+          { transport: refusing, fromAddress: "refusing@appstrate.test", fromName: null },
+          () => requestReset(account.email),
+        );
+
+        expect(refused.status).toBe(delivered.status);
+        expect(await refused.json()).toEqual(await delivered.json());
+        expect(warn).toHaveBeenCalledWith("auth: auth e-mail not sent", {
+          template: "reset-password",
+          error: "SMTP unreachable",
+        });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain(account.email);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

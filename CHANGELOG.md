@@ -190,6 +190,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   token issuance and OIDC tokens no longer fail once the secret changes.
 - **A session stays alive while it is used** instead of expiring 7 days after
   sign-in.
+- **Auth e-mails follow the account's language, and a send failure is
+  logged** (#1764). Sign-in links, verification, password reset and change,
+  address change and sign-up on an existing account are written in the
+  account's profile language, French when the address has no account. A mail
+  the transport refuses now logs a warning, `auth: auth e-mail not sent`,
+  naming the template; the flow still answers as before.
 
 ## [1.0.0-beta.65] - 2026-10-07
 
