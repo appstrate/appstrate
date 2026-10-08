@@ -33,7 +33,7 @@ for await (const file of new Bun.Glob('**/*.mdx').scan(CONTENT)) {
 
 // 2. Links and anchors
 const decode = (value: string) => {
-  const unescaped = value.replaceAll('&amp;', '&').replaceAll('&quot;', '"').replaceAll('&#x27;', "'");
+  const unescaped = value.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&');
   try {
     return decodeURIComponent(unescaped);
   } catch {

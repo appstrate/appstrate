@@ -43,7 +43,7 @@ function toMdx(markdown: string): string {
         .map((part) =>
           part.startsWith('`')
             ? part
-            : part.replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/<(?![a-zA-Z/!])/g, '&lt;'),
+            : part.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/<(?![a-zA-Z/!])/g, '&lt;'),
         )
         .join('');
     })
