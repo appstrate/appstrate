@@ -54,6 +54,27 @@ export interface PlatformPromptSchema {
   required?: readonly string[];
 }
 
+/**
+ * Why a declared integration is unavailable in a run, as the agent reads it in the
+ * "Unavailable Integrations" section — one wording for every host that renders it.
+ */
+export const UNAVAILABLE_INTEGRATION_REASONS = {
+  unbound: "no connection is bound to this run",
+  not_active: "it is switched off in this space",
+  not_found: "its package does not exist",
+  not_integration: "the declared package is not an integration",
+  invalid_manifest: "its manifest is invalid",
+  remote_source_invalid: "its server address is invalid",
+  remote_url_unrenderable: "its server address cannot be built from the connection",
+  remote_url_blocked: "its server address is blocked",
+  local_server_ref_missing: "its server package is missing",
+  mcp_server_unresolved: "its server package cannot be found",
+  mcp_server_not_runnable: "its server package cannot run",
+  no_delivery: "the connection's credentials cannot be delivered",
+  bound_set_incomplete: "another connection bound with it failed to start",
+  resolve_error: "it failed to start",
+} as const;
+
 export interface PlatformPromptOptions {
   /** Raw prompt template from the bundle's root package (`prompt.md`). */
   template: string;
@@ -105,7 +126,10 @@ export interface PlatformPromptOptions {
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
-  /** Declared integrations this run starts without, one per id, with a human-readable reason. */
+  /**
+   * Declared integrations this run starts without, one per id, with a human-readable reason
+   * (worded from {@link UNAVAILABLE_INTEGRATION_REASONS}).
+   */
   unavailableIntegrations?: ReadonlyArray<{ id: string; reason: string }>;
 
   /** Input schema — drives the `## User Input` section. */

@@ -107,14 +107,26 @@ describe("MCP server instructions — connect bullet", () => {
       // An explicit `[]` and an inactive integration warn too, without a connect target.
       expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
       expect(bullet).toContain("`integration_not_active`");
-      // Whether a link is minted is the platform's call: read it off the response, never assume one.
-      expect(bullet).toMatch(/a `connect_url` only when the response carries one/);
       expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
       // Another member's schedule: the caller must not learn what their connections lack.
       expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);
     }
+    // Only the chat keeps the link on a started run's warnings; elsewhere it is minted on request.
+    expect(chat).toMatch(/a `connect_url` only when the response carries one/);
     expect(chat).toMatch(/connect button from the warning's `connect_url`; do NOT paste/);
-    expect(external).toMatch(/giving the caller the warning's `connect_url`/);
+    expect(external).toMatch(/a warning here never carries a `connect_url`/);
+    expect(external).toMatch(
+      /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
+    );
+    expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
+  });
+
+  it("names the layers a `required_integration_unbound` comes from and what clears it", () => {
+    const bullet = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- Code `required_integration_unbound`"));
+    expect(bullet).toContain("a stored schedule's `connection_overrides`");
+    expect(bullet).toContain("a run override outranks a member pin, not an admin pin");
   });
 });
 

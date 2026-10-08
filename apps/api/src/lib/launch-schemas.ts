@@ -118,24 +118,37 @@ export function assertConnectionOverridesAllowed(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
 ): void {
+  const first = connectionOverrideRefusals(manifest, overrides)[0];
+  if (first) throw first.error;
+}
+
+/** Every key {@link assertConnectionOverridesAllowed} refuses, with its 400 — undeclared first. */
+export function connectionOverrideRefusals(
+  manifest: Record<string, unknown>,
+  overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
+): { key: string; error: ApiError }[] {
+  if (!overrides) return [];
   const declared = parseManifestIntegrations(manifest);
-  assertKeysDeclared(
-    "connection_overrides",
-    new Set(declared.map((entry) => entry.id)),
-    overrides,
-    "integration dependency",
-  );
-  const emptiedRequired = declared.find(
-    (entry) => entry.required === true && overrides?.[entry.id]?.length === 0,
-  );
-  if (emptiedRequired === undefined) return;
-  throw new ApiError({
-    status: 400,
-    code: "invalid_request",
-    title: "Bad Request",
-    detail: `\`connection_overrides["${emptiedRequired.id}"]\` is empty, but the agent marks this integration \`required\` — name at least one connection, or omit the key`,
-    param: "connection_overrides",
-  });
+  const ids = new Set(declared.map((entry) => entry.id));
+  const undeclared = Object.keys(overrides)
+    .filter((key) => !ids.has(key))
+    .map((key) => ({
+      key,
+      error: undeclaredKeyError("connection_overrides", key, "integration dependency"),
+    }));
+  const emptiedRequired = declared
+    .filter((entry) => entry.required === true && overrides[entry.id]?.length === 0)
+    .map((entry) => ({
+      key: entry.id,
+      error: new ApiError({
+        status: 400,
+        code: "invalid_request",
+        title: "Bad Request",
+        detail: `\`connection_overrides["${entry.id}"]\` is empty, but the agent marks this integration \`required\` — name at least one connection, or omit the key`,
+        param: "connection_overrides",
+      }),
+    }));
+  return [...undeclared, ...emptiedRequired];
 }
 
 function assertKeysDeclared(
@@ -146,12 +159,19 @@ function assertKeysDeclared(
 ): void {
   if (!overrides) return;
   const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
-  if (unknownKey === undefined) return;
-  throw new ApiError({
+  if (unknownKey !== undefined) throw undeclaredKeyError(field, unknownKey, noun);
+}
+
+function undeclaredKeyError(
+  field: "dependency_overrides" | "connection_overrides",
+  key: string,
+  noun: string,
+): ApiError {
+  return new ApiError({
     status: 400,
     code: "invalid_request",
     title: "Bad Request",
-    detail: `\`${field}["${unknownKey}"]\` is not a declared ${noun} of this agent`,
+    detail: `\`${field}["${key}"]\` is not a declared ${noun} of this agent`,
     param: field,
   });
 }

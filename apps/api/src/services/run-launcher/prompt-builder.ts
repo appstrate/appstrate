@@ -31,6 +31,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  UNAVAILABLE_INTEGRATION_REASONS,
   type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
@@ -136,22 +137,7 @@ export async function buildPlatformSystemPrompt(
 }
 
 /** A drop as the agent reads it; the raw reason stays in the run log. */
-const DROP_REASON_TEXT: Record<IntegrationDropReason, string> = {
-  unbound: "no connection is bound to this run",
-  not_active: "it is switched off in this space",
-  not_found: "its package does not exist",
-  not_integration: "the declared package is not an integration",
-  invalid_manifest: "its manifest is invalid",
-  remote_source_invalid: "its server address is invalid",
-  remote_url_unrenderable: "its server address cannot be built from the connection",
-  remote_url_blocked: "its server address is blocked",
-  local_server_ref_missing: "its server package is missing",
-  mcp_server_unresolved: "its server package cannot be found",
-  mcp_server_not_runnable: "its server package cannot run",
-  no_delivery: "the connection's credentials cannot be delivered",
-  bound_set_incomplete: "another connection bound with it failed to start",
-  resolve_error: "it failed to start",
-};
+const DROP_REASON_TEXT: Record<IntegrationDropReason, string> = UNAVAILABLE_INTEGRATION_REASONS;
 
 /** One entry per integration id, its causes joined (a set drops one entry per connection). */
 function unavailableIntegrationsOf(

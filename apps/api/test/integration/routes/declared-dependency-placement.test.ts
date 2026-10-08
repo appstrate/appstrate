@@ -68,7 +68,7 @@ async function readiness(): Promise<string[]> {
     agent: agent!,
     orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
-    actor: null,
+    actor: { type: "user", id: ctx.user.id },
   });
   return errors.filter((e) => e.code === "missing_skill").map((e) => e.field);
 }
@@ -194,7 +194,7 @@ describe("readiness — the gate every run origin passes", () => {
       agent: ghost,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
     const ghostMessage = errors.find((e) => e.code === "missing_skill")!.message;
 
@@ -202,7 +202,7 @@ describe("readiness — the gate every run origin passes", () => {
       agent: agent!,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
     const hiddenMessage = hiddenErrors.find((e) => e.code === "missing_skill")!.message;
 
@@ -231,7 +231,7 @@ describe("the anchor is the declaring agent's HOME, not the launching space", ()
       // The launching space, which holds no offer for the SKILL — only for the
       // agent that declares it.
       spaceId: recipient.id,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
 
     expect(errors.filter((e) => e.code === "missing_skill")).toEqual([]);

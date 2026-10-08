@@ -22,7 +22,7 @@ beforeEach(truncateAll);
 const WARNING = {
   field: "integrations.@idem-review/svc",
   code: "integration_unbound",
-  title: "Integration Not Connected — Run Proceeds Without It",
+  title: "Integration Not Bound — Run Proceeds Without It",
   message: "Integration '@idem-review/svc' has no connection accessible to this actor.",
 };
 

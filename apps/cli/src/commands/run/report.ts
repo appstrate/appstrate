@@ -26,7 +26,7 @@
  */
 
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
-import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import { connectionRefusalLines } from "./launch-warnings.ts";
 
@@ -225,8 +225,8 @@ export async function startReportSession(
 
 /** The agent-facing reason per warning code, worded as the platform's own prompt words it. */
 const UNAVAILABLE_REASON: Record<string, string> = {
-  integration_unbound: "no connection is bound to this run",
-  integration_not_active: "it is switched off in this space",
+  integration_unbound: UNAVAILABLE_INTEGRATION_REASONS.unbound,
+  integration_not_active: UNAVAILABLE_INTEGRATION_REASONS.not_active,
 };
 
 /**

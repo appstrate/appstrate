@@ -147,6 +147,8 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         source: "fallback_auto",
         error_code: null,
         warning_code: null,
+        required_auth_key: null,
+        available_auth_keys: [],
         resolved_connection_ids: [id],
       });
     });
@@ -274,6 +276,8 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         source: null,
         error_code: null,
         warning_code: "integration_unbound",
+        required_auth_key: null,
+        available_auth_keys: [],
         resolved_connection_ids: [],
         admin_pinned_connection_ids: null,
         member_pinned_connection_ids: null,
@@ -285,9 +289,12 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       await seedConnection({ authKey: "primary" });
       const entry = await entryOf();
       expect(entry.run_blocking).toBe(false);
+      // Not « not connected »: the actor has a connection, on the wrong auth.
       expect(entry.resolution).toMatchObject({
         error_code: null,
         warning_code: "integration_unbound",
+        required_auth_key: "backup",
+        available_auth_keys: ["primary"],
         resolved_connection_ids: [],
       });
     });

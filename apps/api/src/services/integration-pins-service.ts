@@ -733,6 +733,8 @@ async function resolveAgentIntegrationPick(args: {
     source: resolved?.[0]?.source ?? err?.source ?? null,
     error_code: err?.code ?? null,
     warning_code: warning?.code ?? null,
+    required_auth_key: warning?.requiredAuthKey ?? null,
+    available_auth_keys: warning?.availableAuthKeys ?? [],
     // A set that failed its health check is still the set the layer binds.
     resolved_connection_ids: resolved
       ? resolved.map((r) => r.connectionId)

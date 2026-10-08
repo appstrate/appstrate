@@ -224,11 +224,18 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
-/** A launch body as the idempotency cache keeps it: `warnings` without connect links. */
+/**
+ * A launch body as the idempotency cache keeps it: the 201's `warnings` and the
+ * 409's `errors` without connect links.
+ */
 function storedLaunchBody(body: string): string {
-  const parsed = JSON.parse(body) as { warnings?: ResolutionFieldError[] };
-  if (!Array.isArray(parsed.warnings)) return body;
-  return JSON.stringify({ ...parsed, warnings: withoutConnectOffers(parsed.warnings) });
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+  const stripped = { ...parsed };
+  for (const key of ["warnings", "errors"] as const) {
+    const items = parsed[key];
+    if (Array.isArray(items)) stripped[key] = withoutConnectOffers(items as ResolutionFieldError[]);
+  }
+  return JSON.stringify(stripped);
 }
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });

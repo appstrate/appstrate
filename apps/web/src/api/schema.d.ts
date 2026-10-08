@@ -5769,6 +5769,10 @@ export interface components {
              * @enum {string|null}
              */
             warning_code: "integration_unbound" | "integration_not_active" | null;
+            /** @description The warning's `required_auth_key`: the auth the agent requires when the actor's connections are all on other auths. `null` otherwise. */
+            required_auth_key: string | null;
+            /** @description The warning's `available_auth_keys`: the auths the actor's connections use instead. Empty otherwise. */
+            available_auth_keys: string[];
             /** @description The set the next run binds — empty when it binds none. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty on any other error. */
             resolved_connection_ids: string[];
             /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */

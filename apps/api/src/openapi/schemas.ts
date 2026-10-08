@@ -1924,6 +1924,8 @@ export const schemas = {
       "source",
       "error_code",
       "warning_code",
+      "required_auth_key",
+      "available_auth_keys",
       "resolved_connection_ids",
       "resolved_missing_scopes",
       "admin_pinned_connection_ids",
@@ -1951,6 +1953,17 @@ export const schemas = {
         enum: [...CONNECTION_RESOLUTION_WARNING_CODES, null],
         description:
           "Why the next run would start without this integration — the code of its launch `warnings[]` item. `null` when the resolver emits no warning for it.",
+      },
+      required_auth_key: {
+        type: ["string", "null"],
+        description:
+          "The warning's `required_auth_key`: the auth the agent requires when the actor's connections are all on other auths. `null` otherwise.",
+      },
+      available_auth_keys: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The warning's `available_auth_keys`: the auths the actor's connections use instead. Empty otherwise.",
       },
       resolved_connection_ids: {
         type: "array",

@@ -1952,6 +1952,28 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     });
   });
 
+  it("non-required, only a non-serving connection: the warning names the serving-auth cause", () => {
+    const b = conn({ authKey: "pat", label: "spare" });
+    const result = resolveConnections({
+      requirements: [selecting(serverlessManifest(), ["api_call__oauth"])],
+      accessibleConnections: [b],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved).toEqual({ [INTEG]: [] });
+    expect(result.warnings).toEqual([
+      {
+        integrationId: INTEG,
+        code: "integration_unbound",
+        authKey: "oauth",
+        message: `Integration '${INTEG}' has no connection accessible to this actor on an auth that exposes the agent's selected tools; the run proceeds without it.`,
+      },
+    ]);
+    expect(translateResolutionError(result.warnings[0]!).title).toBe(
+      "Integration Not Bound — Run Proceeds Without It",
+    );
+  });
+
   it("names no connect target when the lone serving auth is not oauth2", () => {
     const result = resolveConnections({
       requirements: [{ ...selecting(serverlessManifest(), ["api_call__pat"]), required: true }],
@@ -2278,13 +2300,23 @@ describe("resolveConnections — integration switched off in the space", () => {
     expect(connectOfferTarget(wire)).toBeNull();
   });
 
-  it("warns for an inert non-required integration too: the spawn drops it all the same", () => {
+  it("an inert non-required integration says nothing, as it does when active", () => {
     const result = resolveConnections({
       requirements: [{ ...req(oauth2Manifest()), hasSelectedTools: false }],
       accessibleConnections: [],
       pins: [],
       ...inactive,
     });
-    expect(result.warnings.map((w) => w.code)).toEqual(["integration_not_active"]);
+    expect(result).toEqual({ resolved: {}, errors: [], warnings: [] });
+  });
+
+  it("a required integration with nothing selected is still judged: `integration_not_active`", () => {
+    const result = resolveConnections({
+      requirements: [{ ...requiredReq(oauth2Manifest()), hasSelectedTools: false }],
+      accessibleConnections: [],
+      pins: [],
+      ...inactive,
+    });
+    expect(result.errors.map((e) => e.code)).toEqual(["integration_not_active"]);
   });
 });

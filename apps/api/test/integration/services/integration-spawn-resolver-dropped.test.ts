@@ -69,7 +69,9 @@ function integManifest(serverName: string): Record<string, unknown> {
   }) as unknown as Record<string, unknown>;
 }
 
-function agentManifest(): Record<string, unknown> {
+function agentManifest(
+  config: Record<string, unknown> = { tools: ["search"] },
+): Record<string, unknown> {
   return {
     schema_version: "0.2",
     type: "agent",
@@ -77,7 +79,7 @@ function agentManifest(): Record<string, unknown> {
     version: "1.0.0",
     display_name: "Agent",
     dependencies: { integrations: { [INTEG]: "^1.0.0" } },
-    integrations_configuration: { [INTEG]: { tools: ["search"] } },
+    integrations_configuration: { [INTEG]: config },
   };
 }
 
@@ -270,6 +272,44 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
 
     expect(specs).toHaveLength(0);
     expect(dropped).toEqual([{ integrationId: INTEG, reason: "unbound" }]);
+  });
+
+  it("reports `unbound` for `[]` on an integration exposing no tool (bound for its scopes)", async () => {
+    await seedIntegration();
+    await seedConnection();
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest({ tools: [], scopes: ["search.read"] }),
+      resolvedConnections: { [INTEG]: [] },
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toEqual([{ integrationId: INTEG, reason: "unbound" }]);
+  });
+
+  it("drops nothing for an inert integration switched off in the space", async () => {
+    await seedServer();
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: integManifest(SERVER),
+    });
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest({ tools: [] }),
+      resolvedConnections: null,
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toEqual([]);
   });
 
   it("reports `resolve_error` — never a live pick — when the snapshot has no entry for an integration that exposes tools", async () => {

@@ -174,7 +174,7 @@ export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
   spaceId: string;
   orgId: string;
-  actor: Actor | null;
+  actor: Actor;
   launchOverrides?: LaunchOverrides | null;
   /**
    * The run's `dependency_overrides` — forwarded so the seeding below resolves

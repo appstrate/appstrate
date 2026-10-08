@@ -53,7 +53,7 @@ import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadiness } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
-import { assertConnectionOverridesAllowed } from "../lib/launch-schemas.ts";
+import { connectionOverrideRefusals } from "../lib/launch-schemas.ts";
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
@@ -88,7 +88,7 @@ type Mode = "fail-fast" | "accumulate";
 export async function runInlinePreflight(params: {
   orgId: string;
   spaceId: string;
-  actor: Actor | null;
+  actor: Actor;
   body: InlineRunBody;
   mode?: Mode;
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
@@ -204,17 +204,27 @@ export async function runInlinePreflight(params: {
   }
 
   // ----- 1c. `connection_overrides` keys against the declared integrations -----
+  // A refused key is left out of readiness, which would report its `[]` again.
+  let readinessOverrides = body.connection_overrides;
   if (manifest) {
-    try {
-      assertConnectionOverridesAllowed(
-        manifest as unknown as Record<string, unknown>,
-        body.connection_overrides,
+    const refusals = connectionOverrideRefusals(
+      manifest as unknown as Record<string, unknown>,
+      body.connection_overrides,
+    );
+    if (refusals.length > 0) {
+      if (mode === "fail-fast") throw refusals[0]!.error;
+      push(
+        refusals.map(({ error }) => ({
+          field: "connection_overrides",
+          code: error.code,
+          title: error.title,
+          message: error.message,
+        })),
       );
-    } catch (err) {
-      if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
-      push([
-        { field: "connection_overrides", code: err.code, title: err.title, message: err.message },
-      ]);
+      const refused = new Set(refusals.map((r) => r.key));
+      readinessOverrides = Object.fromEntries(
+        Object.entries(body.connection_overrides ?? {}).filter(([key]) => !refused.has(key)),
+      );
     }
   }
 
@@ -270,6 +280,7 @@ export async function runInlinePreflight(params: {
   let warnings: ResolutionFieldError[] = [];
   if (manifest) {
     const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
+    const readinessLaunch = toLaunchOverrides(readinessOverrides, "run_override");
 
     // Readiness is the single source of truth for prompt emptiness — stage 1's
     // structural check only covers prompt type and byte size, not emptiness.
@@ -282,7 +293,7 @@ export async function runInlinePreflight(params: {
         spaceId,
         actor,
         manifestCache,
-        ...(launchOverrides ? { launchOverrides } : {}),
+        ...(readinessLaunch ? { launchOverrides: readinessLaunch } : {}),
         ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
     } else {
@@ -292,7 +303,7 @@ export async function runInlinePreflight(params: {
         spaceId,
         actor,
         manifestCache,
-        ...(launchOverrides ? { launchOverrides } : {}),
+        ...(readinessLaunch ? { launchOverrides: readinessLaunch } : {}),
       });
       push(readiness.errors);
       warnings = readiness.warnings;

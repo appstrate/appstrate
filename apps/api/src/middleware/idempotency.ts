@@ -131,12 +131,13 @@ export function idempotency(
     // Hono's HonoRequest wraps c.req.raw — replacing it lets downstream re-read the body.
     (c.req as { raw: Request }).raw = freshRequest;
 
+    // Hono's compose turns an `Error` thrown downstream into `c.res` through
+    // the app's `onError` before `next()` returns, so a thrown 4xx `ApiError`
+    // is cached below like a returned one (hence `storedBody`). This catch only
+    // sees what compose rethrows; release the lock so the client can retry.
     try {
       await next();
     } catch (err) {
-      // On thrown error (including ApiError 4xx), release the lock so client can retry.
-      // Thrown errors don't produce a c.res — they go through errorHandler which builds
-      // a new Response. We can't cache that here, so releasing is the safe choice.
       try {
         await releaseIdempotencyLock(orgId, spaceId, key);
       } catch {

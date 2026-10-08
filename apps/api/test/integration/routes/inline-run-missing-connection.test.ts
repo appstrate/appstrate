@@ -347,6 +347,8 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         } else {
           const item = body.errors!.find((e) => e.field === "connection_overrides");
           expect(item?.message).toContain(INTEGRATION);
+          // Reported once: readiness judges the launch without the refused key.
+          expect(body.errors!.map((e) => e.field)).toEqual(["connection_overrides"]);
         }
         expect(await db.select().from(runs)).toHaveLength(0);
       },
@@ -584,6 +586,49 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         expect(warning).not.toHaveProperty("packageId");
       }
       expect(await db.select().from(runs)).toHaveLength(1);
+    });
+
+    it("keeps no connect link in the cached 409 an Idempotency-Key replays", async () => {
+      await seedOauthIntegration();
+      const admin = await memberContext(ctx, "admin");
+      const key = crypto.randomUUID();
+      const field = `integrations.${OAUTH_INTEGRATION}`;
+      const body = JSON.stringify({
+        manifest: inlineManifest([OAUTH_INTEGRATION], { required: [OAUTH_INTEGRATION] }),
+        prompt: "do the thing",
+      });
+      const launchAs = (who: TestContext, headers: Record<string, string>) =>
+        app.request("/api/runs/inline", {
+          method: "POST",
+          headers: {
+            ...authHeaders(who),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            ...headers,
+          },
+          body,
+        });
+      const errorOf = async (res: Response) =>
+        ((await res.json()) as ProblemDetails).errors!.find((e) => e.field === field)!;
+
+      const original = await launchAs(ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(original.status).toBe(409);
+      expect((await errorOf(original)).connect_url).toStartWith("http");
+
+      for (const [who, headers] of [
+        [admin, {}],
+        [ctx, {}],
+      ] as const) {
+        const replay = await launchAs(who, headers);
+        expect(replay.status).toBe(409);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+        const err = await errorOf(replay);
+        expect(err).toMatchObject({ code: "not_connected", auth_key: "primary" });
+        expect(err).not.toHaveProperty("connect_url");
+        expect(err).not.toHaveProperty("expiresAt");
+        expect(err).not.toHaveProperty("packageId");
+      }
+      expect(await db.select().from(runs)).toHaveLength(0);
     });
 
     it("never mints on /inline/validate, header or not", async () => {

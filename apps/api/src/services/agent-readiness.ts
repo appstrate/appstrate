@@ -31,13 +31,8 @@ interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
   spaceId: string;
-  /**
-   * Actor whose integration connections we validate. Run kickoff paths
-   * pass an actor so missing or under-scoped connections produce a 409
-   * before the run is created. `null` skips integration gating — callers
-   * that resolve the actor from request context may not have one.
-   */
-  actor: Actor | null;
+  /** Actor whose integration connections we validate. */
+  actor: Actor;
   /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
   /**
@@ -106,8 +101,6 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
   const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
-  const resolutionErrors: ConnectionResolutionError[] = [];
-  let warnings: ResolutionFieldError[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -163,23 +156,23 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     if (!result.ok) errors.push(manifestFailureError(id, result.failure));
   }
 
-  if (actor) {
-    const resolution = await resolveConnectionsForRun({
-      agentManifest: manifest as Record<string, unknown>,
-      packageId: agent.id,
-      actor,
-      scope: { orgId, spaceId },
-      ...(launchOverrides ? { launchOverrides } : {}),
-      ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
-    });
-    for (const e of resolution.errors) {
-      errors.push(translateResolutionError(e));
-    }
-    resolutionErrors.push(...resolution.errors);
-    warnings = resolution.warnings.map(translateResolutionError);
+  const resolution = await resolveConnectionsForRun({
+    agentManifest: manifest as Record<string, unknown>,
+    packageId: agent.id,
+    actor,
+    scope: { orgId, spaceId },
+    ...(launchOverrides ? { launchOverrides } : {}),
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+  });
+  for (const e of resolution.errors) {
+    errors.push(translateResolutionError(e));
   }
 
-  return { errors, resolutionErrors, warnings };
+  return {
+    errors,
+    resolutionErrors: resolution.errors,
+    warnings: resolution.warnings.map(translateResolutionError),
+  };
 }
 
 /**
@@ -201,22 +194,19 @@ export async function validateAgentReadiness(
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   if (integrationErrors.length > 0) {
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
-    // notification before we throw. Integration errors only accumulate when
-    // an actor was present, so the guard narrows the type for the payload.
-    if (params.actor) {
-      void emitEvent("onRunConnectionMissing", {
-        orgId: params.orgId,
-        spaceId: params.spaceId,
-        packageId: params.agent.id,
-        actor: { type: params.actor.type, id: params.actor.id },
-        errors: integrationErrors.map((e) => ({
-          field: e.field,
-          code: e.code,
-          message: e.message,
-          ...(e.title ? { title: e.title } : {}),
-        })),
-      });
-    }
+    // notification before we throw.
+    void emitEvent("onRunConnectionMissing", {
+      orgId: params.orgId,
+      spaceId: params.spaceId,
+      packageId: params.agent.id,
+      actor: { type: params.actor.type, id: params.actor.id },
+      errors: integrationErrors.map((e) => ({
+        field: e.field,
+        code: e.code,
+        message: e.message,
+        ...(e.title ? { title: e.title } : {}),
+      })),
+    });
     // Mint the connect links LAST — strictly after the webhook projection
     // above, which must never carry a bearer capability off-platform.
     throw missingIntegrationConnection(await withConnectOffers(params, integrationErrors));
@@ -236,7 +226,7 @@ async function withConnectOffers(
   params: AgentReadinessParams,
   items: ResolutionFieldError[],
 ): Promise<ResolutionFieldError[]> {
-  if (!params.connectOffers || !params.actor || items.length === 0) return items;
+  if (!params.connectOffers || items.length === 0) return items;
   return attachConnectOffers({
     errors: items,
     scope: { orgId: params.orgId, spaceId: params.spaceId },

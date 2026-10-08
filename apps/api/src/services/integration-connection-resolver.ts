@@ -137,6 +137,15 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       ?.connectionIds ?? null;
 
   for (const req of input.requirements) {
+    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
+    if (
+      !req.required &&
+      !req.hasSelectedTools &&
+      req.agentScopes.length === 0 &&
+      !req.hasRequiredAuth &&
+      !input.includeInert
+    )
+      continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       const item = { integrationId: req.integrationId, code: "integration_not_active" as const };
       const notActive = `Integration '${req.integrationId}' is not active in this space`;
@@ -149,15 +158,6 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       }
       continue;
     }
-    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
-    if (
-      !req.required &&
-      !req.hasSelectedTools &&
-      req.agentScopes.length === 0 &&
-      !req.hasRequiredAuth &&
-      !input.includeInert
-    )
-      continue;
 
     const auth = authFilterOf(req);
 
@@ -488,6 +488,9 @@ function unboundOf(args: ResolveOneArgs, serving: ConnectionRow[]): ResolveOneRe
     detail = { candidateConnections: serving.map((c) => candidateOf(args, c)) };
     why =
       "has only connections shared by other members, never bound implicitly — choose one (member pin or run override) or connect your own";
+  } else if (args.candidates.length > 0) {
+    why =
+      "has no connection accessible to this actor on an auth that exposes the agent's selected tools";
   }
   return {
     kind: "unbound",
@@ -866,7 +869,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
   required_integration_unbound: "Required Integration Bound To No Connection",
   integration_not_active: "Integration Not Active",
-  integration_unbound: "Integration Not Connected — Run Proceeds Without It",
+  integration_unbound: "Integration Not Bound — Run Proceeds Without It",
 };
 
 async function buildRequirement(

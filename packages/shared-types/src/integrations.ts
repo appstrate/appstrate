@@ -265,6 +265,10 @@ export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
   error_code: ConnectionResolutionErrorCode | null;
   warning_code: ConnectionResolutionWarningCode | null;
+  /** The warning's `required_auth_key`: the auth the agent requires, when the actor's connections use others. */
+  required_auth_key: string | null;
+  /** The warning's `available_auth_keys`: the auths those connections use; else empty. */
+  available_auth_keys: string[];
   /** The set the next run binds (the whole failing set when a member fails its health check). */
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */

@@ -352,15 +352,21 @@ async function resolveOne(
   // api_call filter (below) and the sidecar `toolAllowlist` (Phase 3) so the
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
+  const wildcardSelection = isToolsWildcard(effectiveSelection);
+  const exposesTools = wildcardSelection || !!effectiveSelection?.length;
 
   // (b) Active in the space
   if (!(await isIntegrationActive(integrationId, spaceId))) {
+    // Inert (no verdict, no tool): nothing would start, switched on or off.
+    if (!boundConnections && !exposesTools) return { specs: [], drops: [] };
     logger.info("integration not active in space; skipping", {
       integrationId,
       spaceId,
     });
     return drop("not_active");
   }
+  // `[]`: the cascade bound none on purpose — the run starts without it, tools or none.
+  if (boundConnections?.length === 0) return drop("unbound");
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
   // AND httpDeliveryAuths from delivery.http (Phase 1.5).
@@ -378,10 +384,6 @@ async function resolveOne(
   // privilege: the catch-all tool is never auto-granted). `authorized_uris`
   // come from each api_call auth. Each api_call belongs to ONE auth: a spec
   // keeps only its connection's (below).
-  const wildcardSelection = isToolsWildcard(effectiveSelection);
-  const exposesTools = wildcardSelection || !!effectiveSelection?.length;
-  // `[]`: the cascade bound none on purpose — no server or credentials to resolve.
-  if (exposesTools && boundConnections?.length === 0) return drop("unbound");
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
     (cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -551,7 +553,7 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
-  if (!boundConnections?.length) {
+  if (!boundConnections) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
     if (!exposesTools) return { specs: [], drops: [] };
     throw new Error(
