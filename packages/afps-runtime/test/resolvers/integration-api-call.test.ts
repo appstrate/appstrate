@@ -550,6 +550,38 @@ describe("LocalIntegrationResolver", () => {
     expect(sent!.aborted).toBe(true);
   });
 
+  it("rethrows the caller's own abort untouched, not as an api_call failure", async () => {
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const toolAbort = new AbortController();
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: ((_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal!.addEventListener("abort", () => reject(init.signal!.reason));
+          toolAbort.abort();
+        })) as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const { ctx } = makeCtx();
+    const err = await tools[0]!
+      .execute(
+        { method: "GET", target: "https://api.acme.com/v1/me" },
+        { ...ctx, signal: toolAbort.signal },
+      )
+      .then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+    expect(err).toBe(toolAbort.signal.reason);
+    expect(err?.name).toBe("AbortError");
+  });
+
   it("injects oauth2 Bearer by default and substitutes {{var}} in the URL", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});

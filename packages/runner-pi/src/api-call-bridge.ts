@@ -191,9 +191,10 @@ function makeApiCallExtension(
             ...(code ? { code } : {}),
             timestamp: Date.now(),
           });
-          // Pi hands the model a thrown error's message: lead it with the sidecar's status line.
+          // Pi hands the model a thrown error's message: the sidecar's status line, then the
+          // message, joined as `piToolResultOrThrow` joins the sidecar's text blocks.
           if (code) {
-            throw new Error(`${apiCallStatusLine(0, code)} ${(err as Error).message}`, {
+            throw new Error(`${apiCallStatusLine(0, code)}\n${(err as Error).message}`, {
               cause: err,
             });
           }

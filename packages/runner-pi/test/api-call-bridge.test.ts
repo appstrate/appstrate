@@ -147,7 +147,7 @@ describe("buildApiCallExtensionFactory", () => {
       (e: unknown) => e,
     );
     expect((thrown as Error).message).toBe(
-      "[api_call status=0 code=blocked_target] blocked network range",
+      "[api_call status=0 code=blocked_target]\nblocked network range",
     );
     expect(events[1]).toMatchObject({
       type: "api_call.failed",

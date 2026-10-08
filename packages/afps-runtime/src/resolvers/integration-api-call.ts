@@ -548,6 +548,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         });
         res = result.response;
       } catch (err) {
+        // The caller cancelled: its own abort, not an outcome of the call.
+        if (ctx.signal?.aborted) throw err;
         // No `cause`: Bun's error keeps the full URL (a redirect's `?token=…`) on `.path`.
         const { code, message, redirect, systemCode } = classifyApiCallFailure(err);
         throw apiCallFailure(code, `Integration ${meta.name}: ${message}`, meta, req.target, {

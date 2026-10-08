@@ -26,7 +26,7 @@
  *   2. Honour `responseMode.toFile`. The sidecar has no workspace mount, so
  *      (like `body.fromFile`) this is resolved runtime-side: materialise the
  *      response body to the requested workspace path and hand the agent a
- *      `{ kind: "file", path, size, status }` descriptor instead of the bytes
+ *      `{ kind: "file", path, size, status, code? }` descriptor instead of the bytes
  *      — keeping large responses out of the model context with a
  *      deterministic, agent-chosen path.
  *
