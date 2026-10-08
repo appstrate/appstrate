@@ -74,8 +74,7 @@ describe("POST /api/runs/inline/validate", () => {
   it("returns 200 { valid: true } on a valid manifest + prompt", async () => {
     const res = await post({ manifest: validManifest(), prompt: "do something" });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { valid: boolean };
-    expect(body.valid).toBe(true);
+    expect(await res.json()).toEqual({ valid: true, warnings: [] });
   });
 
   it("accepts a manifest with no display_name (defaulted from name)", async () => {
@@ -447,17 +446,19 @@ describe("POST /api/runs/inline/validate", () => {
     it("raises no selection error when the catalog declares everything picked", async () => {
       // Discriminating control: the gate refuses what is OUTSIDE the catalog,
       // not every manifest that names an integration. What remains is the
-      // readiness verdict — no connection was seeded — and its `required_scopes`
-      // is the selection relayed verbatim, which is exactly the value the
-      // connect kickoff will accept.
+      // readiness verdict — no connection was seeded, and the integration is
+      // not required, so a warning — and its `required_scopes` is the selection
+      // relayed verbatim, which is exactly the value the connect kickoff will accept.
       await seedIntegration();
       const res = await validate(manifestSelecting({ tools: ["search"], scopes: ["search.read"] }));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        errors?: { code: string; required_scopes?: string[] }[];
+        valid: boolean;
+        warnings: { code: string; required_scopes?: string[] }[];
       };
-      expect(body.errors?.map((e) => e.code)).toEqual(["not_connected"]);
-      expect(body.errors?.[0]?.required_scopes).toEqual(["search.read"]);
+      expect(body.valid).toBe(true);
+      expect(body.warnings.map((e) => e.code)).toEqual(["integration_unbound"]);
+      expect(body.warnings[0]?.required_scopes).toEqual(["search.read"]);
     });
 
     it("does NOT insert a shadow row when the selection is refused", async () => {
@@ -520,11 +521,12 @@ describe("POST /api/runs/inline/validate", () => {
         await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PINNED);
       }
 
+      /** Required, so nothing connected stays a readiness error on both routes. */
       function agentSelecting(tools: string[]) {
         return {
           ...validManifest(),
           dependencies: { skills: {}, integrations: { [PINNED]: "^1.0.0" } },
-          integrations_configuration: { [PINNED]: { tools } },
+          integrations_configuration: { [PINNED]: { tools, required: true } },
         };
       }
 

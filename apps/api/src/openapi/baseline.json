@@ -1108,7 +1108,7 @@
         "operationId": "getAgentConnectionReadiness",
         "tags": ["Agents"],
         "summary": "Bulk integration connection readiness for an agent",
-        "description": "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`), so the Connexions tab and the launch badge share one source of truth.",
+        "description": "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: it reads `run_blocking: false` with an empty `resolution.resolved_connection_ids` — the launch reports it in `warnings`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1892,15 +1892,16 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so are a key that names no integration the agent declares and `[]` on an integration it marks `required` (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
                         "type": "string",
                         "format": "uuid"
                       },
-                      "minItems": 1,
-                      "maxItems": 20
+                      "minItems": 0,
+                      "maxItems": 20,
+                      "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                     }
                   },
                   "dependency_overrides": {
@@ -1926,7 +1927,7 @@
         },
         "responses": {
           "201": {
-            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed.",
+            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -1947,7 +1948,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Run"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
+                    }
+                  ]
                 },
                 "example": {
                   "id": "run_cm1abc123def456",
@@ -2006,7 +2014,8 @@
                   "file_counts": {
                     "input": 0,
                     "output": 0
-                  }
+                  },
+                  "warnings": []
                 }
               }
             }
@@ -2043,7 +2052,7 @@
             "description": "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`."
           },
           "409": {
-            "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`)",
+            "description": "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration: a `required` one with nothing to bind, a bound set that cannot serve, or an open choice, `must_choose_connection` items carrying `candidate_connections`; a non-required one with nothing to bind is a 201 `warnings[]` item instead)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2331,15 +2340,16 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so are a key that names no integration the agent declares and `[]` on an integration it marks `required` (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
                         "type": "string",
                         "format": "uuid"
                       },
-                      "minItems": 1,
-                      "maxItems": 20
+                      "minItems": 0,
+                      "maxItems": 20,
+                      "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                     }
                   },
                   "modelId": {
@@ -2375,7 +2385,7 @@
         },
         "responses": {
           "201": {
-            "description": "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`).",
+            "description": "Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`) plus the launch's `warnings`.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2396,7 +2406,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Run",
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
+                    }
+                  ],
                   "description": "The created run resource — same shape as `GET /runs/{id}`. `packageId` is the shadow package id (reserved `@inline/r-<uuid>` scope, hidden from catalog queries)."
                 },
                 "example": {
@@ -2460,7 +2477,8 @@
                     "schema_version": "0.3",
                     "dependencies": {}
                   },
-                  "inline_prompt": "Summarize the attached file in three bullet points."
+                  "inline_prompt": "Summarize the attached file in three bullet points.",
+                  "warnings": []
                 }
               }
             }
@@ -2551,7 +2569,7 @@
         "operationId": "validateInlineRun",
         "tags": ["Runs"],
         "summary": "Validate an inline manifest without firing a run",
-        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
+        "description": "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true, warnings }` on success (`warnings`: the integrations the run would start without), `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2599,8 +2617,9 @@
                         "type": "string",
                         "format": "uuid"
                       },
-                      "minItems": 1,
-                      "maxItems": 20
+                      "minItems": 0,
+                      "maxItems": 20,
+                      "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                     },
                     "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Same array shape and same bounds as on the launch surfaces."
                   },
@@ -2640,18 +2659,26 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": ["valid"],
-                  "properties": {
-                    "valid": {
-                      "type": "boolean",
-                      "enum": [true],
-                      "description": "Always `true` on 200 — validation failures are reported as `400` problem+json with the accumulated error list."
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "required": ["valid"],
+                      "properties": {
+                        "valid": {
+                          "type": "boolean",
+                          "enum": [true],
+                          "description": "Always `true` on 200 — validation failures are reported as `400` problem+json with the accumulated error list."
+                        }
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
                     }
-                  }
+                  ]
                 },
                 "example": {
-                  "valid": true
+                  "valid": true,
+                  "warnings": []
                 }
               }
             }
@@ -3364,34 +3391,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Operation envelope (not the run resource): the one-time sink credentials plus the created run's `id`. Fetch the resource itself via `GET /runs/{id}`.",
-                  "required": ["id", "url", "finalize_url", "secret", "expiresAt"],
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "description": "The created run's id."
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "description": "Operation envelope (not the run resource): the one-time sink credentials plus the created run's `id`. Fetch the resource itself via `GET /runs/{id}`.",
+                      "required": ["id", "url", "finalize_url", "secret", "expiresAt"],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The created run's id."
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Absolute URL for `HttpSink.url`."
+                        },
+                        "finalize_url": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "Absolute URL for `HttpSink.finalizeUrl`."
+                        },
+                        "secret": {
+                          "type": "string",
+                          "description": "32-byte ephemeral secret, base64url-encoded. Returned once and never retrievable afterwards."
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "ISO-8601. Events posted after this timestamp reject with 410."
+                        }
+                      }
                     },
-                    "url": {
-                      "type": "string",
-                      "format": "uri",
-                      "description": "Absolute URL for `HttpSink.url`."
-                    },
-                    "finalize_url": {
-                      "type": "string",
-                      "format": "uri",
-                      "description": "Absolute URL for `HttpSink.finalizeUrl`."
-                    },
-                    "secret": {
-                      "type": "string",
-                      "description": "32-byte ephemeral secret, base64url-encoded. Returned once and never retrievable afterwards."
-                    },
-                    "expiresAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "description": "ISO-8601. Events posted after this timestamp reject with 410."
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -4894,15 +4928,16 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..20 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`).",
+                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required` (400 `invalid_request`, `param: connection_overrides`).",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
                         "type": "string",
                         "format": "uuid"
                       },
-                      "minItems": 1,
-                      "maxItems": 20
+                      "minItems": 0,
+                      "maxItems": 20,
+                      "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                     }
                   },
                   "dependency_overrides": {
@@ -4941,7 +4976,7 @@
         },
         "responses": {
           "201": {
-            "description": "Schedule created",
+            "description": "Schedule created, plus `warnings`: the integrations its fires would start without, judged for its actor.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4953,7 +4988,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Schedule"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Schedule"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
+                    }
+                  ]
                 },
                 "example": {
                   "id": "sched_cm1abc456def789",
@@ -4985,7 +5027,8 @@
                   "actor_type": "user",
                   "running_runs": 0,
                   "unread_count": 0,
-                  "last_run_number": 0
+                  "last_run_number": 0,
+                  "warnings": []
                 }
               }
             }
@@ -5012,7 +5055,7 @@
             "description": "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`)."
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5188,15 +5231,16 @@
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
-                    "description": "Per-integration connection sets frozen on the schedule, one array of 1..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`.",
+                    "description": "Per-integration connection sets frozen on the schedule, one array of 0..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare, or `[]` on an integration it marks `required`, is a 400 `invalid_request`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
                         "type": "string",
                         "format": "uuid"
                       },
-                      "minItems": 1,
-                      "maxItems": 20
+                      "minItems": 0,
+                      "maxItems": 20,
+                      "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                     }
                   },
                   "dependency_overrides": {
@@ -5235,7 +5279,7 @@
         },
         "responses": {
           "200": {
-            "description": "Schedule updated",
+            "description": "Schedule updated, plus `warnings`: the integrations its fires would start without, judged for its actor — empty while the schedule is disabled.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5247,7 +5291,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Schedule"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Schedule"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LaunchWarnings"
+                    }
+                  ]
                 }
               }
             }
@@ -5273,7 +5324,7 @@
             "$ref": "#/components/responses/NoPublishedVersion"
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5735,7 +5786,8 @@
                             "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
                           },
                           "required": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "description": "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`."
                           },
                           "scopes": {
                             "type": "array",
@@ -7986,7 +8038,8 @@
                             "description": "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`."
                           },
                           "required": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "description": "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`."
                           },
                           "scopes": {
                             "type": "array",
@@ -8372,9 +8425,9 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "minItems": 1,
+                    "minItems": 0,
                     "maxItems": 20,
-                    "description": "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it."
+                    "description": "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it."
                   }
                 },
                 "additionalProperties": false
@@ -8403,7 +8456,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively)."
+            "description": "Refused: more than 20 ids, or a repeated id (compared case-insensitively), or `[]` for an integration the agent marks `required` (`invalid_request`, `param: connection_ids`)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8521,7 +8574,8 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 20
+                      "maxItems": 20,
+                      "description": "A connection set of 1 or more ids. An org default cannot bind none: deactivate the integration in the space instead."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -8594,7 +8648,7 @@
                     },
                     "minItems": 1,
                     "maxItems": 20,
-                    "description": "The WHOLE default set — this write replaces it."
+                    "description": "The WHOLE default set (1 or more ids) — this write replaces it."
                   },
                   "enforce": {
                     "type": "boolean",
@@ -8639,7 +8693,8 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 20
+                      "maxItems": 20,
+                      "description": "A connection set of 1 or more ids. An org default cannot bind none: deactivate the integration in the space instead."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -13547,8 +13602,9 @@
                               "type": "string",
                               "format": "uuid"
                             },
-                            "minItems": 1,
-                            "maxItems": 20
+                            "minItems": 0,
+                            "maxItems": 20,
+                            "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                           }
                         }
                       }
@@ -13578,7 +13634,7 @@
         "operationId": "upsertMyIntegrationPin",
         "tags": ["Profile"],
         "summary": "Pin connections for the caller's runs of an agent",
-        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.",
+        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none, so the run starts without the integration; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -13621,8 +13677,9 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "minItems": 1,
-                    "maxItems": 20
+                    "minItems": 0,
+                    "maxItems": 20,
+                    "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
                   }
                 },
                 "additionalProperties": false
@@ -13643,7 +13700,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively)."
+            "description": "Refused: more than 20 ids, or a repeated id (compared case-insensitively), or `[]` for an integration the agent marks `required` (`invalid_request`, `param: connection_ids`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -28166,7 +28223,7 @@
         "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
-        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `integration_unbound` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
         "schema": {
           "type": "string",
           "enum": ["1"]
@@ -28312,7 +28369,7 @@
           },
           "code": {
             "type": "string",
-            "description": "On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool` — the extras below are keyed on it — or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code."
+            "description": "On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool`, `required_integration_unbound` — the extras below are keyed on it — or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's `warnings[]` item, one of `integration_unbound` (see LaunchWarnings). On any other validation item, the validator's own code."
           },
           "message": {
             "type": "string"
@@ -28348,7 +28405,7 @@
                 }
               }
             },
-            "description": "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`."
+            "description": "Populated on `must_choose_connection`, and on `integration_unbound` when only connections other members share serve — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`."
           },
           "connection_id": {
             "type": "string",
@@ -28370,27 +28427,27 @@
             "items": {
               "type": "string"
             },
-            "description": "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them."
+            "description": "Populated on the codes a connect flow can clear (`not_connected`, `integration_unbound`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them."
           },
           "auth_key": {
             "type": "string",
-            "description": "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`)."
+            "description": "Populated on the codes a connect flow can clear (`not_connected`, `integration_unbound`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`)."
           },
           "required_auth_key": {
             "type": "string",
-            "description": "Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change."
+            "description": "Populated on `auth_key_mismatch`, its `integration_unbound` counterpart, and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change."
           },
           "available_auth_keys": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
+            "description": "Populated on `auth_key_mismatch` and its `integration_unbound` counterpart. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
           },
           "connect_url": {
             "type": "string",
             "format": "uri",
-            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
+            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` / `integration_unbound` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
           },
           "expiresAt": {
             "type": "string",
@@ -28450,6 +28507,32 @@
             "description": "Field-level validation errors",
             "items": {
               "$ref": "#/components/schemas/ResolutionFieldError"
+            }
+          }
+        }
+      },
+      "LaunchWarnings": {
+        "type": "object",
+        "required": ["warnings"],
+        "properties": {
+          "warnings": {
+            "type": "array",
+            "description": "Declared integrations the run starts without — a non-required integration (`integrations_configuration.<id>.required` absent or false) with nothing usable to bind: no connection on a serving auth, only connections other members share (`candidate_connections`, never bound without a pick), or only connections on another auth (`required_auth_key` + `available_auth_keys`). The run still starts, and its agent is told the integration is unavailable. Always present, empty when nothing is missing. A `required: true` integration in the same state refuses the launch instead (409 `not_connected` / `auth_key_mismatch`). With `X-Appstrate-Connect-Offers` an item carries `connect_url` exactly as a `not_connected` 409 item does.",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ResolutionFieldError"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": ["integration_unbound"]
+                    }
+                  }
+                }
+              ]
             }
           }
         }
@@ -29153,6 +29236,14 @@
                         "type": "string"
                       },
                       "description": "Niveau 2 explicit scope escape hatch (optional)"
+                    },
+                    "auth_key": {
+                      "type": "string",
+                      "description": "AFPS §4.4 — which of the integration's `auths` the agent uses (optional; absent lets any serving auth bind)."
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "description": "AFPS §4.4 — `true`: a run refuses to start unless a connection binds. Absent or `false`: the run starts without it, reported in the launch response's `warnings`."
                     }
                   }
                 }
@@ -29769,15 +29860,16 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.",
+            "description": "Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration (`[]` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.",
             "additionalProperties": {
               "type": "array",
               "items": {
                 "type": "string",
                 "format": "uuid"
               },
-              "minItems": 1,
-              "maxItems": 20
+              "minItems": 0,
+              "maxItems": 20,
+              "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
             }
           },
           "dependency_overrides": {
@@ -29962,15 +30054,16 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..20 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.",
+            "description": "Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 0..20 per integration (`[]` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.",
             "additionalProperties": {
               "type": "array",
               "items": {
                 "type": "string",
                 "format": "uuid"
               },
-              "minItems": 1,
-              "maxItems": 20
+              "minItems": 0,
+              "maxItems": 20,
+              "description": "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`."
             }
           },
           "dependency_overrides": {
@@ -30655,7 +30748,7 @@
               "fallback_auto",
               null
             ],
-            "description": "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too)."
+            "description": "The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`), when the integration resolves to none (`[]` — an explicit-none layer, or a non-required integration with nothing to bind) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too)."
           },
           "error_code": {
             "type": ["string", "null"],
@@ -30670,9 +30763,10 @@
               "auth_key_mismatch",
               "auth_serves_no_selected_tool",
               "auth_key_serves_no_selected_tool",
+              "required_integration_unbound",
               null
             ],
-            "description": "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict."
+            "description": "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (an empty set included: a non-required integration the run starts without), and when there is no verdict."
           },
           "resolved_connection_ids": {
             "type": "array",
@@ -30680,7 +30774,7 @@
               "type": "string"
             },
             "maxItems": 20,
-            "description": "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise."
+            "description": "The set the next run binds — empty when it binds none. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty on any other error."
           },
           "resolved_missing_scopes": {
             "type": "array",
@@ -30690,18 +30784,20 @@
             "description": "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise."
           },
           "admin_pinned_connection_ids": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
               "type": "string"
             },
-            "maxItems": 20
+            "maxItems": 20,
+            "description": "`null` when no admin pin exists; `[]` when it pins none."
           },
           "member_pinned_connection_ids": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
               "type": "string"
             },
-            "maxItems": 20
+            "maxItems": 20,
+            "description": "`null` when the caller has no member pin; `[]` when it pins none."
           },
           "org_default_connection_ids": {
             "type": "array",
@@ -30819,6 +30915,7 @@
                         "auth_key_mismatch",
                         "auth_serves_no_selected_tool",
                         "auth_key_serves_no_selected_tool",
+                        "required_integration_unbound",
                         "agent_not_active"
                       ]
                     }
@@ -30831,14 +30928,18 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["integration_package_id", "run_blocking", "resolution"],
+              "required": ["integration_package_id", "required", "run_blocking", "resolution"],
               "properties": {
                 "integration_package_id": {
                   "type": "string"
                 },
+                "required": {
+                  "type": "boolean",
+                  "description": "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here."
+                },
                 "run_blocking": {
                   "type": "boolean",
-                  "description": "True iff this integration is one of the run-blocking `errors`."
+                  "description": "True iff this integration is one of the run-blocking `errors`. A non-required integration the run would start without is not blocking: `run_blocking` false, `resolution.error_code` null and `resolution.resolved_connection_ids` empty."
                 },
                 "resolution": {
                   "$ref": "#/components/schemas/IntegrationAgentResolution"
@@ -30938,9 +31039,9 @@
               "type": "string",
               "format": "uuid"
             },
-            "minItems": 1,
+            "minItems": 0,
             "maxItems": 20,
-            "description": "The whole pinned set, in the order it was written. A write replaces it."
+            "description": "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it."
           },
           "createdAt": {
             "type": "string",
@@ -31926,7 +32027,7 @@
         }
       },
       "RunAdmissionConflict": {
-        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration has no usable connection for the caller: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`.",
+        "description": "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`) — a `required` one with nothing to bind (`not_connected`, `required_integration_unbound`, …), a bound set that cannot serve, or an open choice, whose `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. A non-required integration with nothing to bind does not block: it is a `warnings[]` item of the success response.",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"
@@ -31961,7 +32062,7 @@
                 }
               },
               "missingIntegrationConnection": {
-                "summary": "A declared integration has no usable connection",
+                "summary": "A required integration has no usable connection",
                 "value": {
                   "type": "https://docs.appstrate.dev/errors/missing-integration-connection",
                   "title": "Missing Integration Connection",

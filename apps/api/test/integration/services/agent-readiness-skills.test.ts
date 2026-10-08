@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { collectAgentReadinessErrors } from "../../../src/services/agent-readiness.ts";
+import { collectAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
@@ -45,7 +45,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   /** Readiness with no actor — integration gating off, skills gate on. */
   async function skillErrors(agent: LoadedPackage): Promise<string[]> {
-    const errors = await collectAgentReadinessErrors({
+    const { errors } = await collectAgentReadiness({
       agent,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,

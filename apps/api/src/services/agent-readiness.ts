@@ -20,9 +20,12 @@ import {
 } from "./integration-service.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
-import type { ConnectionResolutionError } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionError,
+  ConnectionResolutionWarning,
+} from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
@@ -51,21 +54,13 @@ interface AgentReadinessParams {
    * Opt-in relay for the run-kickoff connect link (#1207) — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    *
-   * Read by the THROWING wrapper only: `collectAgentReadinessErrors` ignores
-   * it, so its one direct caller (the dry-run validator, via the accumulate
-   * branch of `inline-run-preflight.ts`) stays link-free by passing none — not
-   * by anything this function does.
+   * Read by the THROWING wrapper only: `collectAgentReadiness` ignores it, so
+   * the dry-run validator (the accumulate branch of `inline-run-preflight.ts`)
+   * stays link-free by passing none — not by anything this function does.
    */
   connectOffers?: ConnectOfferPolicy | null;
 }
 
-/**
- * Collect every readiness error as structured field entries (non-throwing).
- *
- * Single source of truth for readiness checks — the throwing wrapper
- * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration activation → integration connections.
- */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
  * error. The `integrations.` field prefix routes it into the 409 envelope
@@ -108,21 +103,26 @@ function manifestFailureError(
   }
 }
 
-export async function collectAgentReadinessErrors(
-  params: AgentReadinessParams,
-): Promise<ValidationFieldError[]> {
-  return (await collectAgentReadiness(params)).errors;
-}
-
-/** {@link collectAgentReadinessErrors} plus the resolver errors, whose `source` the wire drops. */
+/**
+ * Collect every readiness error as structured field entries (non-throwing), and the
+ * non-blocking `integration_unbound` warnings. Resolver items also come back as produced
+ * (`source`, which the wire drops, and the actor's full detail).
+ *
+ * Single source of truth for readiness checks — the throwing wrapper
+ * `validateAgentReadiness` delegates to this. Fail-fast sequence:
+ * prompt → skills → integration activation → integration connections.
+ */
 export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
   errors: ValidationFieldError[];
   resolutionErrors: ConnectionResolutionError[];
+  warnings: ResolutionFieldError[];
+  resolutionWarnings: ConnectionResolutionWarning[];
 }> {
   const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
   const resolutionErrors: ConnectionResolutionError[] = [];
+  const resolutionWarnings: ConnectionResolutionWarning[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -269,20 +269,30 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
       errors.push(translateResolutionError(e));
     }
     resolutionErrors.push(...resolution.errors);
+    resolutionWarnings.push(...resolution.warnings);
   }
 
-  return { errors, resolutionErrors };
+  return {
+    errors,
+    resolutionErrors,
+    warnings: resolutionWarnings.map(translateResolutionError),
+    resolutionWarnings,
+  };
 }
 
 /**
  * Validate that an agent is ready for a run. Delegates to
- * `collectAgentReadinessErrors` and throws the first error, preserving the
+ * `collectAgentReadiness` and throws the first error, preserving the
  * historical fail-fast contract (single ApiError with the original code and
- * human-readable title carried on the field entry).
+ * human-readable title carried on the field entry). On success returns the
+ * launch response's `warnings`, connect links attached under the same opt-in
+ * as the 409's.
  */
-export async function validateAgentReadiness(params: AgentReadinessParams): Promise<void> {
-  const errors = await collectAgentReadinessErrors(params);
-  if (errors.length === 0) return;
+export async function validateAgentReadiness(
+  params: AgentReadinessParams,
+): Promise<ResolutionFieldError[]> {
+  const { errors, warnings } = await collectAgentReadiness(params);
+  if (errors.length === 0) return withConnectOffers(params, warnings);
 
   // Integration errors get their own 409 envelope with every integration
   // failure populated on `errors[]` so the dashboard's MissingConnections
@@ -307,19 +317,8 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
       });
     }
     // Mint the connect links LAST — strictly after the webhook projection
-    // above, which must never carry a bearer capability off-platform, and only
-    // for a caller that opted in and holds `integrations:connect`.
-    const responseErrors =
-      params.connectOffers && params.actor
-        ? await attachConnectOffers({
-            errors: integrationErrors,
-            scope: { orgId: params.orgId, spaceId: params.spaceId },
-            actor: params.actor,
-            policy: params.connectOffers,
-            ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
-          })
-        : integrationErrors;
-    throw missingIntegrationConnection(responseErrors);
+    // above, which must never carry a bearer capability off-platform.
+    throw missingIntegrationConnection(await withConnectOffers(params, integrationErrors));
   }
 
   const first = errors[0]!;
@@ -328,5 +327,20 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     code: first.code,
     title: first.title ?? first.code,
     detail: first.message,
+  });
+}
+
+/** Connect links on `items`, only for a caller that opted in and holds `integrations:connect`. */
+async function withConnectOffers(
+  params: AgentReadinessParams,
+  items: ResolutionFieldError[],
+): Promise<ResolutionFieldError[]> {
+  if (!params.connectOffers || !params.actor || items.length === 0) return items;
+  return attachConnectOffers({
+    errors: items,
+    scope: { orgId: params.orgId, spaceId: params.spaceId },
+    actor: params.actor,
+    policy: params.connectOffers,
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
 }

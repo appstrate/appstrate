@@ -41,7 +41,7 @@ import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -159,7 +159,7 @@ interface RunPipelineParams {
  * Validate agent readiness against the PINNED integration manifests.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  *
- * Returns nothing: readiness is a gate, and the per-space run settings
+ * Returns the launch response's `warnings`. The per-space run settings
  * (model, generation config, proxy) are read by each origin from the
  * `SpacePackageSettings` row it already loaded to resolve the input
  * layers — projecting them back through here only duplicated that read.
@@ -196,7 +196,7 @@ export async function resolveRunPreflight(params: {
    * request and no human to hand a link to, so it passes nothing.
    */
   connectOffers?: ConnectOfferPolicy | null;
-}): Promise<void> {
+}): Promise<ResolutionFieldError[]> {
   const { agent, spaceId, orgId, actor } = params;
 
   // --- Seed the manifest memo with the PINNED integration manifests ---
@@ -248,7 +248,7 @@ export async function resolveRunPreflight(params: {
     manifestCache: params.manifestCache,
   });
 
-  await validateAgentReadiness({
+  return validateAgentReadiness({
     agent,
     orgId,
     spaceId,
@@ -454,6 +454,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // state (connection deleted / pin shifted). Either way the caller
   // needs structured feedback, not a silent fallback. The cascade reads the
   // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
+  // Its warnings repeat the preflight's, already returned.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   let connectionsMs = 0;
   // An actor-less run leaves the connection snapshot null (nothing to pin).

@@ -13,9 +13,9 @@
  * as the only receipt. The three cases below are exactly the three the schema
  * did not gate:
  *
- *  - a `connection_overrides` entry that the resolver would silently skip — an
- *    empty id inside the set, or an empty set — so each fire falls through to
- *    actor-fallback or dies with a 409 `must_choose_connection`;
+ *  - a `connection_overrides` entry the resolver cannot honour — an empty id
+ *    inside the set, or an empty set (explicit none) on an integration the
+ *    agent marks `required`, which would fail every fire;
  *  - an unknown field — stripped without a trace where the other launch bodies
  *    are `.strict()`;
  *  - a `dependency_overrides` value the resolver rejects (`"latest"`) — the
@@ -150,14 +150,52 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     }
   });
 
-  it("rejects an EMPTY connection_overrides set with 400", async () => {
-    // An empty set reads as "this layer has no opinion" at the resolver, so the
-    // frozen pin would be skipped in silence on every fire.
+  it("freezes an EMPTY connection_overrides set on a non-required integration (explicit none)", async () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",
       connection_overrides: { [INTEGRATION]: [] },
     });
-    await expectRejectedField(res, `connection_overrides.${INTEGRATION}`);
+    expect(res.status, await res.clone().text()).toBe(201);
+    const created = (await res.json()) as { id: string; warnings: unknown[] };
+    // A deliberate none is not something the fire would miss.
+    expect(created.warnings).toEqual([]);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+  });
+
+  it("rejects an EMPTY connection_overrides set on a required integration with 400", async () => {
+    const required = "@schedbodyorg/required-agent";
+    await seedSchedulableAgent({
+      id: required,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        name: required,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Required Integration Agent",
+        author: "tester",
+        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
+      },
+    });
+
+    const res = await app.request(`/api/agents/${required}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cron_expression: "0 9 * * 1-5",
+        connection_overrides: { [INTEGRATION]: [] },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.param).toBe("connection_overrides");
+    expect(problem.detail).toContain(INTEGRATION);
+    expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
   it("rejects a string where a set belongs", async () => {
@@ -333,11 +371,7 @@ describe("PATCH /api/schedules/:id — body validation", () => {
     }
   });
 
-  it("rejects an EMPTY connection_overrides set and a string where a set belongs", async () => {
-    await expectRejectedField(
-      await put({ connection_overrides: { "@acme/gmail": [] } }),
-      "connection_overrides.@acme/gmail",
-    );
+  it("rejects a string where a set belongs", async () => {
     await expectRejectedField(
       await put({ connection_overrides: { "@acme/gmail": "conn_1" } }),
       "connection_overrides.@acme/gmail",

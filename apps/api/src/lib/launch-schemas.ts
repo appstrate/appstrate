@@ -111,18 +111,33 @@ export function assertDependencyOverrideKeysDeclared(
 
 /**
  * The same refusal for a `connection_overrides` KEY the EFFECTIVE manifest does not
- * declare: the resolver would drop it and bind a lower cascade layer instead.
+ * declare: the resolver would drop it and bind a lower cascade layer instead. An
+ * explicit `[]` (bind none) on an integration the manifest marks `required` is
+ * refused here too, rather than answering every launch with
+ * `required_integration_unbound`.
  */
-export function assertConnectionOverrideKeysDeclared(
+export function assertConnectionOverridesAllowed(
   manifest: Record<string, unknown>,
-  overrides: Readonly<Record<string, unknown>> | null | undefined,
+  overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
 ): void {
+  const declared = parseManifestIntegrations(manifest);
   assertKeysDeclared(
     "connection_overrides",
-    new Set(parseManifestIntegrations(manifest).map((entry) => entry.id)),
+    new Set(declared.map((entry) => entry.id)),
     overrides,
     "integration dependency",
   );
+  const emptiedRequired = declared.find(
+    (entry) => entry.required === true && overrides?.[entry.id]?.length === 0,
+  );
+  if (emptiedRequired === undefined) return;
+  throw new ApiError({
+    status: 400,
+    code: "invalid_request",
+    title: "Bad Request",
+    detail: `\`connection_overrides["${emptiedRequired.id}"]\` is empty, but the agent marks this integration \`required\` — name at least one connection, or omit the key`,
+    param: "connection_overrides",
+  });
 }
 
 function assertKeysDeclared(

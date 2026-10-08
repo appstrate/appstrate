@@ -222,9 +222,12 @@ export const responses = {
       "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
       "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
       "so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — " +
-      "a declared integration has no usable connection for the caller: `errors[]` carries one item " +
-      "per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists " +
-      "`candidate_connections` to pick from via `connection_overrides`.",
+      "a declared integration blocks the launch: `errors[]` carries one item per integration " +
+      "(`field: integrations.<id>`) — a `required` one with nothing to bind (`not_connected`, " +
+      "`required_integration_unbound`, …), a bound set that cannot serve, or an open choice, whose " +
+      "`must_choose_connection` item lists `candidate_connections` to pick from via " +
+      "`connection_overrides`. A non-required integration with nothing to bind does not block: " +
+      "it is a `warnings[]` item of the success response.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -254,7 +257,7 @@ export const responses = {
             },
           },
           missingIntegrationConnection: {
-            summary: "A declared integration has no usable connection",
+            summary: "A required integration has no usable connection",
             value: {
               type: "https://docs.appstrate.dev/errors/missing-integration-connection",
               title: "Missing Integration Connection",

@@ -97,7 +97,8 @@ export const parameters = {
     required: false,
     description:
       "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
-      "item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
+      "item of a 409 `missing_integration_connection`, and each `integration_unbound` item of a " +
+      "launch response's `warnings`, also carries a ready-to-open `connect_url` " +
       "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
       "connect card or hand the link to that human.",
     schema: { type: "string", enum: ["1"] },

@@ -15,18 +15,22 @@
  *   4. integration_pins (user_id = actor.id)     → member preference
  *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
- *      → none = not_connected, exactly one OWN = auto, else must_choose
+ *      → exactly one OWN = auto, two or more = must_choose; no own row =
+ *        not_connected / must_choose when `required`, else bound to none + warning
+ *
+ * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   resolveConnections as resolveConnectionsPure,
+  runConnectionsOutcome,
   servingCandidates,
   translateResolutionError,
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
 import { connectOfferTarget } from "../../../src/services/connect/preflight-connect-offer.ts";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { ConnectionResolutionSource, IntegrationManifest } from "@appstrate/core/integration";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -169,7 +173,13 @@ function req(
     hasSelectedTools: true,
     agentTools,
     agentScopes,
+    required: false,
   };
+}
+
+/** {@link req} for an agent that marks the integration `required`: no run without it. */
+function requiredReq(...args: Parameters<typeof req>): IntegrationRequirement {
+  return { ...req(...args), required: true };
 }
 
 // ─────────────────────────── Cascade tests ────────────────────────────────────
@@ -418,91 +428,118 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
   const DEAD = { needsReconnection: true };
 
-  /** Bind `rows[bind]`, or raise `error` — on `rows[on]` when the error names a connection. */
+  /**
+   * Bind `rows[bind]`, raise `error` — on `rows[on]` when the error names a connection — or
+   * bind none with an `integration_unbound` warning offering `rows[unbound]`.
+   */
   type Verdict =
     | { bind: number }
-    | { error: "not_connected" | "must_choose_connection" | "needs_reconnection"; on?: number };
+    | { error: "not_connected" | "must_choose_connection" | "needs_reconnection"; on?: number }
+    | { unbound: number[] };
 
-  const cases: { name: string; rows: () => ConnectionRow[]; verdict: Verdict }[] = [
+  /** `verdict` holds for a required integration; `optional`, when set, for a non-required one. */
+  const cases: {
+    name: string;
+    rows: () => ConnectionRow[];
+    verdict: Verdict;
+    optional?: Verdict;
+  }[] = [
     {
-      name: "own 0, shared 0 → not_connected",
+      name: "own 0, shared 0",
       rows: () => [],
       verdict: { error: "not_connected" },
+      optional: { unbound: [] },
     },
     {
-      name: "own 0, shared 1 → must_choose (a colleague's account is never picked for you)",
+      name: "own 0, shared 1 (a colleague's account is never picked for you)",
       rows: () => [shared()],
       verdict: { error: "must_choose_connection" },
+      optional: { unbound: [0] },
     },
     {
-      name: "own 0, shared 2 → must_choose",
+      name: "own 0, shared 2",
       rows: () => [shared(), shared({ authKey: "pat" })],
       verdict: { error: "must_choose_connection" },
+      optional: { unbound: [0, 1] },
     },
-    { name: "own 1 → binds it", rows: () => [own()], verdict: { bind: 0 } },
+    { name: "own 1", rows: () => [own()], verdict: { bind: 0 } },
+    { name: "own 1 + shared 1 (the own one)", rows: () => [shared(), own()], verdict: { bind: 1 } },
     {
-      name: "own 1 + shared 1 → binds the own one",
-      rows: () => [shared(), own()],
-      verdict: { bind: 1 },
-    },
-    {
-      name: "own 1 dead → needs_reconnection on it",
+      name: "own 1 dead",
       rows: () => [own(DEAD)],
       verdict: { error: "needs_reconnection", on: 0 },
     },
     {
-      name: "own 1 dead + shared 1 live → needs_reconnection on the own one, no switch",
+      name: "own 1 dead + shared 1 live (no switch)",
       rows: () => [shared(), own(DEAD)],
       verdict: { error: "needs_reconnection", on: 1 },
     },
     {
-      name: "own 2 (any auth shape) → must_choose",
+      name: "own 2 (any auth shape)",
       rows: () => [own(), own({ authKey: "pat" })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2, one dead → must_choose (the dead one counts)",
+      name: "own 2, one dead (the dead one counts)",
       rows: () => [own(DEAD), own({ authKey: "pat" })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2, both dead → must_choose",
+      name: "own 2, both dead",
       rows: () => [own(DEAD), own({ authKey: "pat", ...DEAD })],
       verdict: { error: "must_choose_connection" },
     },
   ];
 
-  for (const { name, rows: build, verdict } of cases) {
-    it(name, () => {
-      const rows = build();
-      const result = resolveConnections({
-        requirements: [req(oauth2Manifest())],
-        accessibleConnections: rows,
-        pins: [],
-      });
-      if ("bind" in verdict) {
-        const bound = rows[verdict.bind]!;
-        expect(result.errors).toEqual([]);
-        expect(result.resolved[INTEG]).toEqual([
-          {
-            connectionId: bound.id,
-            source: "fallback_auto",
-            label: bound.label,
-            accountId: "acc_x",
-          },
-        ]);
-      } else {
-        expect(result.resolved[INTEG]).toBeUndefined();
-        expect(result.errors.map((e) => e.code)).toEqual([verdict.error]);
-        if (verdict.on !== undefined) {
-          expect(result.errors[0]!.connectionId).toBe(rows[verdict.on]!.id);
-          expect(result.errors[0]!.source).toBe("fallback_auto");
+  const outcome = (v: Verdict) =>
+    "bind" in v ? "binds it" : "error" in v ? v.error : "binds none + integration_unbound";
+
+  for (const { name, rows: build, verdict: requiredVerdict, optional } of cases) {
+    for (const required of [true, false]) {
+      const verdict = required ? requiredVerdict : (optional ?? requiredVerdict);
+      it(`${required ? "required" : "non-required"}: ${name} → ${outcome(verdict)}`, () => {
+        const rows = build();
+        const result = resolveConnections({
+          requirements: [{ ...req(oauth2Manifest()), required }],
+          accessibleConnections: rows,
+          pins: [],
+        });
+        if ("bind" in verdict) {
+          const bound = rows[verdict.bind]!;
+          expect(result.errors).toEqual([]);
+          expect(result.warnings).toEqual([]);
+          expect(result.resolved[INTEG]).toEqual([
+            {
+              connectionId: bound.id,
+              source: "fallback_auto",
+              label: bound.label,
+              accountId: "acc_x",
+            },
+          ]);
+        } else if ("unbound" in verdict) {
+          expect(result.errors).toEqual([]);
+          expect(result.resolved[INTEG]).toEqual([]);
+          expect(result.warnings).toHaveLength(1);
+          const warning = result.warnings[0]!;
+          expect(warning).toMatchObject({ integrationId: INTEG, code: "integration_unbound" });
+          // A shared row is offered, never bound.
+          expect(warning.candidateConnections?.map((c) => c.id)).toEqual(
+            verdict.unbound.length > 0 ? verdict.unbound.map((i) => rows[i]!.id) : undefined,
+          );
         } else {
-          // Nothing was bound, so no layer is named.
-          expect(result.errors[0]!.source).toBeUndefined();
+          expect(result.resolved[INTEG]).toBeUndefined();
+          expect(result.warnings).toEqual([]);
+          expect(result.errors.map((e) => e.code)).toEqual([verdict.error]);
+          if (verdict.on !== undefined) {
+            expect(result.errors[0]!.connectionId).toBe(rows[verdict.on]!.id);
+            expect(result.errors[0]!.source).toBe("fallback_auto");
+          } else {
+            // Nothing was bound, so no layer is named.
+            expect(result.errors[0]!.source).toBeUndefined();
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   it("a colleague sharing a connection does not move a run that auto-bound my own", () => {
@@ -544,7 +581,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   it("an end-user with only a member's shared connection must choose — never bound to it", () => {
     const memberShared = shared();
     const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
+      requirements: [requiredReq(oauth2Manifest())],
       accessibleConnections: [memberShared],
       pins: [],
       actorUserId: null,
@@ -554,6 +591,29 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     expect(result.errors[0]!.code).toBe("must_choose_connection");
     expect(result.errors[0]!.message).toContain("shared by other members");
     expect(result.errors[0]!.candidateConnections).toEqual([
+      {
+        id: memberShared.id,
+        label: memberShared.label,
+        accountId: "acc_x",
+        ownedByActor: false,
+        needsReconnection: false,
+      },
+    ]);
+  });
+
+  it("a non-required integration offers an end-user a member's shared connection, never binding it", () => {
+    const memberShared = shared();
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [memberShared],
+      pins: [],
+      actorUserId: null,
+      actorEndUserId: END_USER,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toEqual([]);
+    expect(result.warnings[0]!.message).toContain("shared by other members");
+    expect(result.warnings[0]!.candidateConnections).toEqual([
       {
         id: memberShared.id,
         label: memberShared.label,
@@ -715,6 +775,7 @@ describe("resolveConnections — multi-integration", () => {
           hasSelectedTools: true,
           agentTools: [],
           agentScopes: [],
+          required: false,
         },
       ],
       accessibleConnections: [c1, c2],
@@ -737,6 +798,7 @@ describe("resolveConnections — multi-integration", () => {
           hasSelectedTools: true,
           agentTools: [],
           agentScopes: [],
+          required: true,
         },
       ],
       accessibleConnections: [c1],
@@ -769,6 +831,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
           hasSelectedTools: false,
           agentTools: [],
           agentScopes: [],
+          required: true,
         },
       ],
       accessibleConnections: [],
@@ -778,18 +841,21 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     expect(result.errors).toEqual([]);
   });
 
+  function requiredAuthReq(required: boolean): IntegrationRequirement {
+    return {
+      integrationId: INTEG,
+      manifest: requiredOauth2Manifest(),
+      hasSelectedTools: false,
+      hasRequiredAuth: true,
+      agentTools: [],
+      agentScopes: [],
+      required,
+    };
+  }
+
   it("blocks an inert integration whose manifest declares a required auth (no connection)", () => {
     const result = resolveConnections({
-      requirements: [
-        {
-          integrationId: INTEG,
-          manifest: requiredOauth2Manifest(),
-          hasSelectedTools: false,
-          hasRequiredAuth: true,
-          agentTools: [],
-          agentScopes: [],
-        },
-      ],
+      requirements: [requiredAuthReq(true)],
       accessibleConnections: [],
       pins: [],
     });
@@ -798,19 +864,21 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     expect(result.errors[0]).toMatchObject({ integrationId: INTEG, code: "not_connected" });
   });
 
+  it("a required auth makes a NON-required integration active, so it binds none with a warning", () => {
+    const result = resolveConnections({
+      requirements: [requiredAuthReq(false)],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved).toEqual({ [INTEG]: [] });
+    expect(result.warnings.map((w) => w.code)).toEqual(["integration_unbound"]);
+  });
+
   it("auto-resolves an inert required-auth integration when one healthy connection exists", () => {
     const c = conn({});
     const result = resolveConnections({
-      requirements: [
-        {
-          integrationId: INTEG,
-          manifest: requiredOauth2Manifest(),
-          hasSelectedTools: false,
-          hasRequiredAuth: true,
-          agentTools: [],
-          agentScopes: [],
-        },
-      ],
+      requirements: [requiredAuthReq(false)],
       accessibleConnections: [c],
       pins: [],
     });
@@ -1080,13 +1148,14 @@ describe("resolveConnections — org default", () => {
 // ─────────────────────── AFPS §4.1 `auth_key` ─────────────────────────────
 
 describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
-  function reqWithAuthKey(authKey: string): IntegrationRequirement {
+  function reqWithAuthKey(authKey: string, required = true): IntegrationRequirement {
     return {
       integrationId: INTEG,
       manifest: oauth2Manifest(),
       hasSelectedTools: true,
       agentTools: [],
       agentScopes: [],
+      required,
       requiredAuthKey: authKey,
     };
   }
@@ -1140,6 +1209,42 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     expect(err.availableAuthKeys).toEqual(["oauth"]);
   });
 
+  it("a non-required integration binds none on a mismatch, warning with both auth keys", () => {
+    const oauthConn = conn({ authKey: "oauth" });
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("pat", false)],
+      accessibleConnections: [oauthConn],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toEqual([]);
+    const warning = result.warnings[0]!;
+    expect(warning).toMatchObject({
+      code: "integration_unbound",
+      requiredAuthKey: "pat",
+      availableAuthKeys: ["oauth"],
+    });
+    expect(warning.candidateConnections).toBeUndefined();
+    expect(warning.message).toContain("requires auth 'pat'");
+    expect(translateResolutionError(warning)).toMatchObject({
+      field: `integrations.${INTEG}`,
+      code: "integration_unbound",
+      required_auth_key: "pat",
+      available_auth_keys: ["oauth"],
+    });
+  });
+
+  it("a non-required mismatch still yields to an explicit layer: a pin on the off-auth row fails", () => {
+    const oauthConn = conn({ authKey: "oauth" });
+    const result = resolveConnections({
+      requirements: [reqWithAuthKey("pat", false)],
+      accessibleConnections: [oauthConn],
+      pins: [pin(oauthConn.id)],
+    });
+    expect(result.warnings).toEqual([]);
+    expect(result.errors.map((e) => e.code)).toEqual(["pinned_connection_unavailable"]);
+  });
+
   it("surfaces `not_connected` (not auth_key_mismatch) when actor has no connections at all", () => {
     const result = resolveConnections({
       requirements: [reqWithAuthKey("pat")],
@@ -1182,7 +1287,7 @@ describe("resolveConnections — orphaned-auth guard", () => {
     // delivered, so it must NOT be auto-picked — the run reports not_connected.
     const orphan = conn({ authKey: "legacy_primary" });
     const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
+      requirements: [requiredReq(oauth2Manifest())],
       accessibleConnections: [orphan],
       pins: [],
     });
@@ -1338,6 +1443,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       hasSelectedTools: true,
       agentTools: ["t1", "t2"],
       agentScopes: ["user"],
+      required: true,
       requiredAuthKey: authKey,
     };
   }
@@ -1395,7 +1501,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
 
   it("not_connected falls back to the integration's SINGLE oauth2 auth when nothing is pinned", () => {
     const result = resolveConnections({
-      requirements: [req(scopedManifest(), ["t1"], [])],
+      requirements: [requiredReq(scopedManifest(), ["t1"], [])],
       accessibleConnections: [],
       pins: [],
       actorUserId: USER_ID,
@@ -1406,10 +1512,34 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.requiredScopes).toEqual(["repo"]);
   });
 
+  it("integration_unbound carries the connect target not_connected would, on the wire too", () => {
+    const result = resolveConnections({
+      requirements: [req(scopedManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    const warning = result.warnings[0]!;
+    expect(warning).toMatchObject({
+      code: "integration_unbound",
+      authKey: "oauth",
+      requiredScopes: ["repo"],
+    });
+    const item = translateResolutionError(warning);
+    expect(item).toEqual({
+      field: `integrations.${INTEG}`,
+      code: "integration_unbound",
+      title: expect.any(String),
+      message: warning.message,
+      auth_key: "oauth",
+      required_scopes: ["repo"],
+    });
+  });
+
   it("not_connected emits neither field with two oauth2 auths and no pin", () => {
     // Guessing would send the user through the wrong provider's consent.
     const result = resolveConnections({
-      requirements: [req(twoOauthManifest(), ["t1"], [])],
+      requirements: [requiredReq(twoOauthManifest(), ["t1"], [])],
       accessibleConnections: [],
       pins: [],
       actorUserId: USER_ID,
@@ -1422,7 +1552,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
 
   it("not_connected emits auth_key but omits requiredScopes when the selection needs no scopes", () => {
     const result = resolveConnections({
-      requirements: [req(scopedManifest(), [], [])],
+      requirements: [requiredReq(scopedManifest(), [], [])],
       accessibleConnections: [],
       pins: [],
       actorUserId: USER_ID,
@@ -1436,7 +1566,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
 
   it("not_connected on an api_key-only integration emits neither field", () => {
     const result = resolveConnections({
-      requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
+      requirements: [requiredReq(apiKeyOnlyManifest(), ["t1"], [])],
       accessibleConnections: [],
       pins: [],
       actorUserId: USER_ID,
@@ -1782,7 +1912,7 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
   it("fallback with only a non-serving connection is not_connected on a serving auth", () => {
     const b = conn({ authKey: "pat", label: "spare" });
     const result = resolveConnections({
-      requirements: [selecting(serverlessManifest(), ["api_call__oauth"])],
+      requirements: [{ ...selecting(serverlessManifest(), ["api_call__oauth"]), required: true }],
       accessibleConnections: [b],
       pins: [],
       actorUserId: USER_ID,
@@ -1799,7 +1929,7 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
 
   it("names no connect target when the lone serving auth is not oauth2", () => {
     const result = resolveConnections({
-      requirements: [selecting(serverlessManifest(), ["api_call__pat"])],
+      requirements: [{ ...selecting(serverlessManifest(), ["api_call__pat"]), required: true }],
       accessibleConnections: [],
       pins: [],
       actorUserId: USER_ID,
@@ -1881,5 +2011,223 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     });
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([a.id]);
+  });
+});
+
+// ─────────────────── Explicit none (`[]`) vs an absent layer ───────────────────
+
+describe("resolveConnections — explicit none (`[]`) vs an absent layer", () => {
+  type Input = Parameters<typeof resolveConnections>[0];
+  type Layer = {
+    name: string;
+    source: ConnectionResolutionSource;
+    /** The layer's slice of the input; `null` = no row / no key. */
+    input: (ids: string[] | null) => Partial<Input>;
+  };
+
+  const orgDefault = (ids: string[] | null, enforce: boolean): Partial<Input> => ({
+    orgDefaults: ids === null ? {} : { [INTEG]: { connectionIds: ids, enforce } },
+  });
+  const layers: Layer[] = [
+    {
+      name: "admin pin",
+      source: "admin_pin",
+      input: (ids) => ({ pins: ids === null ? [] : [pin(ids)] }),
+    },
+    {
+      name: "enforced org default",
+      source: "org_default_enforced",
+      input: (ids) => orgDefault(ids, true),
+    },
+    {
+      name: "run override",
+      source: "run_override",
+      // Absent = no key for this integration, the map itself present.
+      input: (ids) => ({ launchOverrides: runOverride(ids === null ? {} : { [INTEG]: ids }) }),
+    },
+    {
+      name: "schedule override",
+      source: "schedule_override",
+      input: (ids) => ({
+        launchOverrides: scheduleOverride(ids === null ? {} : { [INTEG]: ids }),
+      }),
+    },
+    {
+      name: "member pin",
+      source: "member_pin",
+      input: (ids) => ({ pins: ids === null ? [] : [memberPin(ids)] }),
+    },
+    { name: "soft org default", source: "org_default", input: (ids) => orgDefault(ids, false) },
+  ];
+
+  /** One own connection: the fallback would bind it, so binding none proves the layer won. */
+  function resolveWith(layerInput: Partial<Input>, required: boolean) {
+    const mine = conn({});
+    const result = resolveConnections({
+      requirements: [{ ...req(oauth2Manifest()), required }],
+      accessibleConnections: [mine],
+      pins: [],
+      ...layerInput,
+    });
+    return { mine, result };
+  }
+
+  for (const layer of layers) {
+    it(`${layer.name} absent → the next layer decides (fallback binds the own row)`, () => {
+      for (const required of [true, false]) {
+        const { mine, result } = resolveWith(layer.input(null), required);
+        expect(result.errors).toEqual([]);
+        expect(result.resolved[INTEG]).toMatchObject([
+          { connectionId: mine.id, source: "fallback_auto" },
+        ]);
+      }
+    });
+
+    it(`${layer.name} \`[]\`, non-required → binds none, no error, no warning`, () => {
+      const { result } = resolveWith(layer.input([]), false);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings).toEqual([]);
+      expect(result.resolved).toEqual({ [INTEG]: [] });
+    });
+
+    it(`${layer.name} \`[]\`, required → required_integration_unbound naming the layer`, () => {
+      const { result } = resolveWith(layer.input([]), true);
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.warnings).toEqual([]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        integrationId: INTEG,
+        code: "required_integration_unbound",
+        source: layer.source,
+        boundConnectionIds: [],
+      });
+      expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+        field: `integrations.${INTEG}`,
+        code: "required_integration_unbound",
+        title: "Required Integration Bound To No Connection",
+      });
+    });
+  }
+
+  it("a higher `[]` outranks a lower non-empty layer, and a higher set outranks a lower `[]`", () => {
+    const c = conn({});
+    const memberNone = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [c],
+      pins: [memberPin([])],
+      orgDefaults: { [INTEG]: { connectionIds: [c.id], enforce: false } },
+    });
+    expect(memberNone.resolved).toEqual({ [INTEG]: [] });
+
+    const adminSet = resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: [c],
+      pins: [pin(c.id), memberPin([])],
+    });
+    expect(adminSet.resolved[INTEG]).toMatchObject([{ connectionId: c.id, source: "admin_pin" }]);
+  });
+
+  describe("a launch override of `[]` under governance", () => {
+    const governed = (c: ConnectionRow): { name: string; input: Partial<Input> }[] => [
+      { name: "admin pin", input: { pins: [pin(c.id)] } },
+      {
+        name: "enforced org default",
+        input: { orgDefaults: { [INTEG]: { connectionIds: [c.id], enforce: true } } },
+      },
+    ];
+
+    for (const launch of [runOverride, scheduleOverride]) {
+      const source = launch({}).source;
+      it(`${source} \`[]\`: none is a subset — non-required binds none`, () => {
+        const c = conn({});
+        for (const g of governed(c)) {
+          const result = resolveConnections({
+            requirements: [req(oauth2Manifest())],
+            accessibleConnections: [c],
+            pins: [],
+            ...g.input,
+            launchOverrides: launch({ [INTEG]: [] }),
+          });
+          expect(result.errors).toEqual([]);
+          expect(result.resolved).toEqual({ [INTEG]: [] });
+        }
+      });
+
+      it(`${source} \`[]\`: required → required_integration_unbound, not override_outranked`, () => {
+        const c = conn({});
+        for (const g of governed(c)) {
+          const result = resolveConnections({
+            requirements: [requiredReq(oauth2Manifest())],
+            accessibleConnections: [c],
+            pins: [],
+            ...g.input,
+            launchOverrides: launch({ [INTEG]: [] }),
+          });
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]).toMatchObject({
+            code: "required_integration_unbound",
+            source,
+          });
+        }
+      });
+    }
+
+    it("an admin pin of `[]` outranks any override that names a connection", () => {
+      const c = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [c],
+        pins: [pin([])],
+        launchOverrides: runOverride({ [INTEG]: [c.id] }),
+      });
+      expect(result.errors.map((e) => e.code)).toEqual(["override_outranked"]);
+    });
+  });
+
+  it("an inert integration stays absent from the map, `[]` layer or not", () => {
+    const result = resolveConnections({
+      requirements: [{ ...req(oauth2Manifest()), hasSelectedTools: false }],
+      accessibleConnections: [],
+      pins: [pin([])],
+    });
+    expect(result).toEqual({ resolved: {}, errors: [], warnings: [] });
+  });
+});
+
+describe("runConnectionsOutcome", () => {
+  it("keeps an all-none snapshot — `[]` is not an empty map — with its wire warnings", () => {
+    const outcome = runConnectionsOutcome(
+      resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [],
+        pins: [],
+      }),
+    );
+    expect(outcome).toMatchObject({ ok: true, resolved: { [INTEG]: [] } });
+    if (!outcome.ok) throw new Error("expected ok");
+    expect(outcome.warnings).toMatchObject([
+      { field: `integrations.${INTEG}`, code: "integration_unbound" },
+    ]);
+  });
+
+  it("is null only when no integration needs a connection", () => {
+    expect(runConnectionsOutcome({ resolved: {}, errors: [], warnings: [] })).toEqual({
+      ok: true,
+      resolved: null,
+      warnings: [],
+    });
+  });
+
+  it("answers the 409 on any error, warnings or not", () => {
+    const outcome = runConnectionsOutcome(
+      resolveConnections({
+        requirements: [requiredReq(oauth2Manifest())],
+        accessibleConnections: [],
+        pins: [],
+      }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("expected 409");
+    expect(outcome.error.status).toBe(409);
   });
 });

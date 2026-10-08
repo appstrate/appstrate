@@ -1470,6 +1470,8 @@ export interface ResolvedConnection {
 /**
  * Snapshot of the resolver output for one run. Persisted on
  * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
+ * A missing key is an inert integration (nothing to start); `[]` is a declared,
+ * usable integration the run is bound to no connection of.
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
@@ -1501,6 +1503,7 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "required_integration_unbound",
 ] as const;
 
 /** Error codes the resolver emits per integration. */
@@ -1534,7 +1537,7 @@ export interface ConnectionCandidate {
 export interface ConnectionResolutionError {
   integrationId: string;
   code: ConnectionResolutionErrorCode;
-  /** Pickable on `must_choose_connection`. */
+  /** Pickable on `must_choose_connection`, and on `integration_unbound` when only others' shared rows serve. */
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
@@ -1565,7 +1568,8 @@ export interface ConnectionResolutionError {
    * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
    * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
    * connection's own auth) and `not_connected` (the dep's `auth_key`, else the single serving
-   * `oauth2` auth; omitted when ambiguous — the user then chooses).
+   * `oauth2` auth; omitted when ambiguous — the user then chooses). The
+   * `integration_unbound` warning carries it on the same terms as `not_connected`.
    */
   authKey?: string;
   /**
@@ -1584,8 +1588,8 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
-   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` (and its
+   * `integration_unbound` counterpart) and on `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
    * agent's configuration must change, no connection clears it).
    */
   requiredAuthKey?: string;
@@ -1598,8 +1602,32 @@ export interface ConnectionResolutionError {
   message: string;
 }
 
+/** The warning codes the resolver emits per integration — the runtime tuple the wire enums derive from. */
+export const CONNECTION_RESOLUTION_WARNING_CODES = ["integration_unbound"] as const;
+
+/** Warning codes the resolver emits per integration. */
+export type ConnectionResolutionWarningCode = (typeof CONNECTION_RESOLUTION_WARNING_CODES)[number];
+
+/**
+ * A non-required integration the run starts without: nothing usable was bound
+ * by the fallback. Each field means what it does on {@link ConnectionResolutionError}.
+ */
+export interface ConnectionResolutionWarning extends Pick<
+  ConnectionResolutionError,
+  | "integrationId"
+  | "authKey"
+  | "requiredScopes"
+  | "requiredAuthKey"
+  | "availableAuthKeys"
+  | "candidateConnections"
+  | "message"
+> {
+  code: ConnectionResolutionWarningCode;
+}
+
 /** Full resolver output. */
 export interface ConnectionResolutionResult {
   resolved: ResolvedConnectionMap;
   errors: ConnectionResolutionError[];
+  warnings: ConnectionResolutionWarning[];
 }

@@ -102,16 +102,32 @@ export const integrationPackageIdParam = {
   name: "integrationPackageId",
 } as const;
 
-/** A connection set as every write takes it and every pin or default returns it. */
+/** A connection set as pins and launch overrides take and return it. */
 export const connectionIdSetJsonSchema = {
   type: "array",
   items: { type: "string", format: "uuid" },
-  minItems: 1,
+  minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+  description:
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`.",
+} as const;
+
+/** The org default's set: never empty — switching the integration off in the space is how to forbid it. */
+const orgDefaultConnectionIdSetJsonSchema = {
+  ...connectionIdSetJsonSchema,
+  minItems: 1,
+  description:
+    "A connection set of 1 or more ids. An org default cannot bind none: deactivate the integration in the space instead.",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
-export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+/** {@link connectionSetRefusals} on a pin write, which knows the agent. */
+export const pinSetRefusals = `${connectionSetRefusals}, or \`[]\` for an integration the agent marks \`required\` (\`invalid_request\`, \`param: connection_ids\`)`;
+
+/** {@link connectionSetRefusals} on an org-default write. */
+const orgDefaultSetRefusals = `an empty set, ${connectionSetRefusals}`;
 
 export const lockedBySchema = {
   type: ["string", "null"],
@@ -128,7 +144,7 @@ const integrationOrgDefaultSchema = {
   required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_ids: connectionIdSetJsonSchema,
+    connection_ids: orgDefaultConnectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -406,7 +422,11 @@ const authStatusSchema = {
       description:
         "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
     },
-    required: { type: "boolean" },
+    required: {
+      type: "boolean",
+      description:
+        "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`.",
+    },
     scopes: { type: "array", items: { type: "string" } },
     resource: {
       type: ["string", "null"],
@@ -1535,7 +1555,7 @@ export const integrationsPaths = {
                 connection_ids: {
                   ...connectionIdSetJsonSchema,
                   description:
-                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
                 },
               },
               additionalProperties: false,
@@ -1553,7 +1573,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${pinSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1640,8 +1660,8 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  ...connectionIdSetJsonSchema,
-                  description: "The WHOLE default set — this write replaces it.",
+                  ...orgDefaultConnectionIdSetJsonSchema,
+                  description: "The WHOLE default set (1 or more ids) — this write replaces it.",
                 },
                 enforce: { type: "boolean", default: false },
               },
@@ -1658,7 +1678,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${orgDefaultSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {

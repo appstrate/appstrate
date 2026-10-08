@@ -8,7 +8,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
-import type { ConnectionOverrides, ConnectionResolutionError } from "@appstrate/core/integration";
+import type {
+  ConnectionOverrides,
+  ConnectionResolutionError,
+  ConnectionResolutionWarning,
+} from "@appstrate/core/integration";
 import { collectAgentReadiness } from "./agent-readiness.ts";
 import {
   launchOverrideLayer,
@@ -18,14 +22,14 @@ import {
   unavailableMemberError,
 } from "./integration-connection-resolver.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
-import type { ValidationFieldError } from "../lib/errors.ts";
+import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 
 /**
  * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, a set
- * an admin pin or enforced default outranks, and a pick on an auth serving no selected tool when
- * the schedule's OWN set bound it.
+ * an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
+ * pick on an auth serving no selected tool or no pick at all for a required integration.
  */
 function isScheduleOwned(e: ConnectionResolutionError): boolean {
   switch (e.code) {
@@ -34,6 +38,7 @@ function isScheduleOwned(e: ConnectionResolutionError): boolean {
     case "override_outranked":
       return true;
     case "auth_serves_no_selected_tool":
+    case "required_integration_unbound":
       return e.source === "schedule_override";
     default:
       return false;
@@ -114,7 +119,8 @@ function sameSet(a: readonly string[], b: readonly string[] | undefined): boolea
  * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
  * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
  * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
- * ({@link scheduleWriteFor}).
+ * ({@link scheduleWriteFor}). Returns the fire's warnings — the integrations it would start
+ * without — for the write's response.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -128,9 +134,9 @@ export async function assertScheduleConnectionsChosen(params: {
   /** The overrides this write stores — already judged by {@link assertScheduleOverridesReachable}. */
   connectionOverrides: ConnectionOverrides | null;
   dependencyOverrides: Record<string, string> | null;
-}): Promise<void> {
+}): Promise<ResolutionFieldError[]> {
   const manifestCache = await seedPinnedIntegrationManifests(params);
-  const { resolutionErrors } = await collectAgentReadiness({
+  const { resolutionErrors, warnings, resolutionWarnings } = await collectAgentReadiness({
     agent: params.agent,
     orgId: params.orgId,
     spaceId: params.spaceId,
@@ -138,9 +144,14 @@ export async function assertScheduleConnectionsChosen(params: {
     launchOverrides: toLaunchOverrides(params.connectionOverrides, "schedule_override"),
     manifestCache,
   });
+  const writeFor = scheduleWriteFor(params.caller, params.actor);
   const unchosen = resolutionErrors.filter(isScheduleOwned);
-  if (unchosen.length === 0) return;
-  switch (scheduleWriteFor(params.caller, params.actor)) {
+  if (unchosen.length === 0) {
+    return writeFor === "member"
+      ? withSharedCandidatesOnly(resolutionWarnings, params.spaceId)
+      : warnings;
+  }
+  switch (writeFor) {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
     case "member":
@@ -162,22 +173,36 @@ export async function assertScheduleConnectionsChosen(params: {
 }
 
 /**
- * The refusal as a caller acting for another member may read it: a choice lists only shared
- * candidates, and an item about an unshared connection names no label or account — only its id,
- * which the schedule's own set already holds.
+ * The refusal or warnings as a caller acting for another member may read them: a choice lists
+ * only shared candidates, an item about an unshared connection names no label or account — only
+ * its id, which the schedule's own set already holds — and no item names the auths the actor's
+ * own connections use.
  */
 async function withSharedCandidatesOnly(
-  errors: ConnectionResolutionError[],
+  items: (ConnectionResolutionError | ConnectionResolutionWarning)[],
   spaceId: string,
-): Promise<ValidationFieldError[]> {
+): Promise<ResolutionFieldError[]> {
   const shared = await sharedConnections(
     spaceId,
-    errors.flatMap((e) => [
+    items.flatMap((e) => [
       ...(e.candidateConnections ?? []).map((c) => c.id),
-      ...(e.connectionId ? [e.connectionId] : []),
+      ...("connectionId" in e && e.connectionId ? [e.connectionId] : []),
     ]),
   );
-  return errors.map((e) => {
+  return items.map((e) => {
+    if (e.code === "integration_unbound") {
+      // Which auths the actor's own rows use is theirs to know: the mismatch detail goes too.
+      const { availableAuthKeys: _auths, requiredAuthKey: _mismatch, ...rest } = e;
+      const candidates = (e.candidateConnections ?? []).filter((c) => shared.has(c.id));
+      return translateResolutionError({
+        ...rest,
+        ...(candidates.length > 0 ? { candidateConnections: candidates } : {}),
+        message:
+          candidates.length > 0
+            ? `Integration '${e.integrationId}' has only shared connections, never bound implicitly — name one in connection_overrides, or the schedule's runs proceed without it.`
+            : `Integration '${e.integrationId}' has no connection the schedule's actor would run with; its runs proceed without it.`,
+      });
+    }
     if (e.code !== "must_choose_connection") {
       if (!e.connectionId || shared.has(e.connectionId)) return translateResolutionError(e);
       return translateResolutionError({

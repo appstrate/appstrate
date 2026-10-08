@@ -25,6 +25,10 @@
  *                                     (`parseRequestInput` cannot own this here:
  *                                     it runs after the preflight on the launch
  *                                     route and not at all on validate)
+ *   - non-required, not connected   → launch 201 / validate 200 with an
+ *                                     `integration_unbound` warning
+ *   - `[]` override                 → binds none on a non-required integration,
+ *                                     400 on a `required` one
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -58,6 +62,8 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
+  auth_key?: string;
+  required_scopes?: string[];
   candidate_connections?: {
     id: string;
     label: string | null;
@@ -228,7 +234,112 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       connection_overrides: { [INTEGRATION]: [picked] },
     });
     expect(withPick.status).toBe(200);
-    expect(await withPick.json()).toEqual({ valid: true });
+    expect(await withPick.json()).toEqual({ valid: true, warnings: [] });
+  });
+
+  // ─── A non-required integration nobody connected ───────────
+  describe("non-required integration with no connection", () => {
+    it("launches with an integration_unbound warning, binding none", async () => {
+      await seedIntegration(INTEGRATION);
+      await seedDefaultModel();
+
+      const res = await post("/api/runs/inline", {
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+      });
+
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
+      expect(created.warnings).toHaveLength(1);
+      expect(created.warnings[0]).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+      });
+      // An api_key auth with no dep `auth_key` is no connect target, as on `not_connected`.
+      expect(created.warnings[0]!.auth_key).toBeUndefined();
+      // No offer without the opt-in header.
+      expect(created.warnings[0]!.connect_url).toBeUndefined();
+      const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+    });
+
+    it("validates with the same warning", async () => {
+      await seedIntegration(INTEGRATION);
+
+      const res = await post("/api/runs/inline/validate", {
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { valid: true; warnings: ValidationFieldError[] };
+      expect(body.valid).toBe(true);
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_unbound"],
+      ]);
+    });
+
+    it("refuses the same agent when it marks the integration required", async () => {
+      await seedIntegration(INTEGRATION);
+
+      const res = await post("/api/runs/inline", {
+        manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+      });
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.errors!.map((e) => e.code)).toEqual(["not_connected"]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  // ─── Explicit none ───────────
+  describe("connection_overrides naming no connection", () => {
+    it("starts a non-required integration with none bound, even with a connection to fall back on", async () => {
+      await seedIntegration(INTEGRATION);
+      await seedDefaultModel();
+      await seedConnection(INTEGRATION);
+
+      const res = await post("/api/runs/inline", {
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+        connection_overrides: { [INTEGRATION]: [] },
+      });
+
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
+      // A deliberate choice is not a warning.
+      expect(created.warnings).toEqual([]);
+      const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+      expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+    });
+
+    it.each(["/api/runs/inline", "/api/runs/inline/validate"])(
+      "400s on %s when the integration is required",
+      async (path) => {
+        await seedIntegration(INTEGRATION);
+        await seedConnection(INTEGRATION);
+
+        const res = await post(path, {
+          manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+          prompt: "do the thing",
+          connection_overrides: { [INTEGRATION]: [] },
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as ProblemDetails;
+        if (path === "/api/runs/inline") {
+          expect(body.code).toBe("invalid_request");
+          expect(body.param).toBe("connection_overrides");
+        } else {
+          const item = body.errors!.find((e) => e.field === "connection_overrides");
+          expect(item?.message).toContain(INTEGRATION);
+        }
+        expect(await db.select().from(runs)).toHaveLength(0);
+      },
+    );
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
@@ -328,12 +439,19 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 
-    async function launch(path: string, headers: Record<string, string>) {
+    async function launch(
+      path: string,
+      headers: Record<string, string>,
+      opts: { required: boolean } = { required: true },
+    ) {
       return app.request(path, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
         body: JSON.stringify({
-          manifest: inlineManifest([OAUTH_INTEGRATION]),
+          manifest: inlineManifest(
+            [OAUTH_INTEGRATION],
+            opts.required ? { required: [OAUTH_INTEGRATION] } : {},
+          ),
           prompt: "do the thing",
         }),
       });
@@ -380,6 +498,32 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.connect_url).toBeUndefined();
+    });
+
+    it("carries connect_url on the integration_unbound warning of a non-required integration", async () => {
+      await seedOauthIntegration();
+      await seedDefaultModel();
+
+      const res = await launch(
+        "/api/runs/inline",
+        { [RUN_CONNECT_OFFERS_HEADER]: "1" },
+        { required: false },
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { warnings: ValidationFieldError[] };
+      const warning = body.warnings.find((w) => w.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(warning).toMatchObject({
+        code: "integration_unbound",
+        auth_key: "primary",
+        required_scopes: ["search.read"],
+      });
+      expect(warning.connect_url).toStartWith("http");
+      const token = new URL(warning.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
     });
 
     it("never mints on /inline/validate, header or not", async () => {

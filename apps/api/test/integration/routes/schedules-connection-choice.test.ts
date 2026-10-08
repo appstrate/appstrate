@@ -6,7 +6,8 @@
  * freezes a pick that actor cannot reach (`override_connection_unavailable`) or
  * that an admin pin or enforced org default outranks (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
  * other connection verdict is accepted — it is repaired without editing the
- * schedule.
+ * schedule — and a non-required integration a fire would start without is
+ * named in the write's `warnings`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -55,6 +56,11 @@ function agentManifest(integrations: boolean): Record<string, unknown> {
         }
       : {}),
   };
+}
+
+interface WriteBody {
+  id: string;
+  warnings: { field: string; code: string; candidate_connections?: { id: string }[] }[];
 }
 
 interface ProblemBody {
@@ -148,12 +154,40 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect(res.status).toBe(201);
   });
 
-  it("accepts a create whose integration is not connected at all", async () => {
+  it("accepts a create whose integration is not connected at all, warning that fires start without it", async () => {
     // Connecting later fixes it without editing the schedule.
     await seedAgentWithIntegration();
 
     const res = await create({});
     expect(res.status).toBe(201);
+    const body = (await res.json()) as WriteBody;
+    expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+      [`integrations.${INTEGRATION}`, "integration_unbound"],
+    ]);
+  });
+
+  it("warns on a patch of an armed schedule, and not once it is disabled", async () => {
+    await seedAgentWithIntegration();
+    const schedule = await seedArmedSchedule();
+
+    const armed = await patch(schedule.id, { name: "Renamed" });
+    expect(armed.status).toBe(200);
+    expect(((await armed.json()) as WriteBody).warnings.map((w) => w.code)).toEqual([
+      "integration_unbound",
+    ]);
+
+    const disabled = await patch(schedule.id, { enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(((await disabled.json()) as WriteBody).warnings).toEqual([]);
+  });
+
+  it("warns of nothing once a connection binds", async () => {
+    await seedAgentWithIntegration();
+    await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const res = await create({});
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as WriteBody).warnings).toEqual([]);
   });
 
   it("does not judge a patch that disables the schedule", async () => {
@@ -227,6 +261,30 @@ describe("schedule writes — the connection choice is made up front", () => {
     const body = (await refused.json()) as ProblemBody;
     expect(body.errors.map((e) => e.code)).toEqual(["override_connection_unavailable"]);
 
+    const repaired = await patch(schedule.id, {
+      name: "renamed",
+      connection_overrides: { [INTEGRATION]: [kept] },
+    });
+    expect(repaired.status).toBe(200);
+  });
+
+  it("refuses any patch of an armed schedule that binds none of an integration the agent now requires", async () => {
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        ...agentManifest(true),
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
+      },
+    });
+    const kept = await seedIntegrationConnection(ctx, INTEGRATION);
+    const schedule = await seedArmedSchedule({ [INTEGRATION]: [] });
+
+    await expectRefusal(await patch(schedule.id, { name: "renamed" }), [
+      "required_integration_unbound",
+    ]);
     const repaired = await patch(schedule.id, {
       name: "renamed",
       connection_overrides: { [INTEGRATION]: [kept] },
@@ -378,6 +436,21 @@ describe("schedule writes for another actor — only what both reach", () => {
       expect(body.errors[0]!.candidate_connections).toBeUndefined();
     }
     expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
+  it("warns, without binding it, when the actor's only reach is a connection someone shared", async () => {
+    const shared = await seedIntegrationConnection(ctx, INTEGRATION);
+    await share(shared);
+
+    const res = await createForMember();
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as WriteBody;
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0]).toMatchObject({
+      field: `integrations.${INTEGRATION}`,
+      code: "integration_unbound",
+    });
+    expect(body.warnings[0]!.candidate_connections!.map((c) => c.id)).toEqual([shared]);
   });
 
   it("offers a shared candidate, and binding it is accepted", async () => {
@@ -617,6 +690,63 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
     expect(body.errors).toEqual([
       expect.objectContaining({ code: "auth_serves_no_selected_tool", connection_id: row!.id }),
     ]);
+  });
+
+  it("names the auths the actor's rows use in a warning to the actor only", async () => {
+    const KEYED = "@schedchoice/keyed-agent";
+    await seedSchedulableAgent({
+      id: KEYED,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        ...agentManifest(false),
+        name: KEYED,
+        dependencies: { integrations: { [API]: "^1.0.0" } },
+        integrations_configuration: {
+          [API]: { tools: ["api_call__primary"], auth_key: "primary" },
+        },
+      },
+    });
+    const member = await memberContext(ctx, "member");
+    await db.insert(integrationConnections).values({
+      integrationId: API,
+      authKey: "backup",
+      accountId: "member-spare",
+      spaceId: ctx.defaultSpaceId,
+      userId: member.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      scopesGranted: [],
+      label: "member-spare",
+    });
+    const createAs = (actor?: string) =>
+      app.request(`/api/agents/${KEYED}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          ...(actor ? { actor: { userId: actor } } : {}),
+        }),
+      });
+
+    // Control: the caller's own fire names the auth its own `backup` row uses.
+    const own = await createAs();
+    expect(own.status).toBe(201);
+    expect(((await own.json()) as WriteBody).warnings).toEqual([
+      expect.objectContaining({
+        code: "integration_unbound",
+        required_auth_key: "primary",
+        available_auth_keys: ["backup"],
+      }),
+    ]);
+
+    const forMember = await createAs(member.user.id);
+    expect(forMember.status).toBe(201);
+    const [warning] = ((await forMember.json()) as WriteBody).warnings as Record<string, unknown>[];
+    expect(warning).toMatchObject({ field: `integrations.${API}`, code: "integration_unbound" });
+    expect(warning!.available_auth_keys).toBeUndefined();
+    expect(warning!.required_auth_key).toBeUndefined();
+    expect(warning!.message).not.toContain("backup");
   });
 
   it("accepts it when an admin pin binds it — the pin, not the schedule, is what to fix", async () => {

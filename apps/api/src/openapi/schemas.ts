@@ -20,6 +20,7 @@ import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
+  CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
 } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
@@ -151,7 +152,7 @@ export const schemas = {
       field: { type: "string" },
       code: {
         type: "string",
-        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code.`,
+        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's \`warnings[]\` item, one of ${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")} (see LaunchWarnings). On any other validation item, the validator's own code.`,
       },
       message: { type: "string" },
       title: {
@@ -189,7 +190,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
+          "Populated on `must_choose_connection`, and on `integration_unbound` when only connections other members share serve — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
@@ -211,29 +212,29 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
+          "Populated on the codes a connect flow can clear (`not_connected`, `integration_unbound`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
       },
       auth_key: {
         type: "string",
         description:
-          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
+          "Populated on the codes a connect flow can clear (`not_connected`, `integration_unbound`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
       },
       required_auth_key: {
         type: "string",
         description:
-          "Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
+          "Populated on `auth_key_mismatch`, its `integration_unbound` counterpart, and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
       },
       available_auth_keys: {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+          "Populated on `auth_key_mismatch` and its `integration_unbound` counterpart. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
       },
       connect_url: {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` / `integration_unbound` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -270,6 +271,30 @@ export const schemas = {
         type: "array",
         description: "Field-level validation errors",
         items: { $ref: "#/components/schemas/ResolutionFieldError" },
+      },
+    },
+  },
+  // Merged via `allOf` into every launch success body (agent run, inline run +
+  // validate, remote run, schedule create/update) so the five cannot drift.
+  LaunchWarnings: {
+    type: "object",
+    required: ["warnings"],
+    properties: {
+      warnings: {
+        type: "array",
+        description:
+          "Declared integrations the run starts without — a non-required integration (`integrations_configuration.<id>.required` absent or false) with nothing usable to bind: no connection on a serving auth, only connections other members share (`candidate_connections`, never bound without a pick), or only connections on another auth (`required_auth_key` + `available_auth_keys`). The run still starts, and its agent is told the integration is unavailable. Always present, empty when nothing is missing. A `required: true` integration in the same state refuses the launch instead (409 `not_connected` / `auth_key_mismatch`). With `X-Appstrate-Connect-Offers` an item carries `connect_url` exactly as a `not_connected` 409 item does.",
+        items: {
+          allOf: [
+            { $ref: "#/components/schemas/ResolutionFieldError" },
+            {
+              type: "object",
+              properties: {
+                code: { type: "string", enum: [...CONNECTION_RESOLUTION_WARNING_CODES] },
+              },
+            },
+          ],
+        },
       },
     },
   },
@@ -796,6 +821,16 @@ export const schemas = {
                   items: { type: "string" },
                   description: "Niveau 2 explicit scope escape hatch (optional)",
                 },
+                auth_key: {
+                  type: "string",
+                  description:
+                    "AFPS §4.4 — which of the integration's `auths` the agent uses (optional; absent lets any serving auth bind).",
+                },
+                required: {
+                  type: "boolean",
+                  description:
+                    "AFPS §4.4 — `true`: a run refuses to start unless a connection binds. Absent or `false`: the run starts without it, reported in the launch response's `warnings`.",
+                },
               },
             },
           },
@@ -1311,7 +1346,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1432,7 +1467,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1896,20 +1931,20 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
-          "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+          "The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`), when the integration resolves to none (`[]` — an explicit-none layer, or a non-required integration with nothing to bind) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_ERROR_CODES, null],
         description:
-          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.",
+          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (an empty set included: a non-required integration the run starts without), and when there is no verdict.",
       },
       resolved_connection_ids: {
         type: "array",
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
         description:
-          "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise.",
+          "The set the next run binds — empty when it binds none. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty on any other error.",
       },
       resolved_missing_scopes: {
         type: "array",
@@ -1918,14 +1953,16 @@ export const schemas = {
           "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise.",
       },
       admin_pinned_connection_ids: {
-        type: "array",
+        type: ["array", "null"],
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "`null` when no admin pin exists; `[]` when it pins none.",
       },
       member_pinned_connection_ids: {
-        type: "array",
+        type: ["array", "null"],
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "`null` when the caller has no member pin; `[]` when it pins none.",
       },
       org_default_connection_ids: {
         type: "array",
@@ -2014,12 +2051,18 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "run_blocking", "resolution"],
+          required: ["integration_package_id", "required", "run_blocking", "resolution"],
           properties: {
             integration_package_id: { type: "string" },
+            required: {
+              type: "boolean",
+              description:
+                "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here.",
+            },
             run_blocking: {
               type: "boolean",
-              description: "True iff this integration is one of the run-blocking `errors`.",
+              description:
+                "True iff this integration is one of the run-blocking `errors`. A non-required integration the run would start without is not blocking: `run_blocking` false, `resolution.error_code` null and `resolution.resolved_connection_ids` empty.",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },
@@ -2096,7 +2139,8 @@ export const schemas = {
       integration_package_id: { type: "string" },
       connection_ids: {
         ...connectionIdSetJsonSchema,
-        description: "The whole pinned set, in the order it was written. A write replaces it.",
+        description:
+          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
