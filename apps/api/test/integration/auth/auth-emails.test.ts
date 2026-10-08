@@ -8,11 +8,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import type { Transporter } from "nodemailer";
-import {
-  _authHookSlotsForTesting,
-  _authLoggerForTesting,
-  withSmtpOverride,
-} from "@appstrate/db/auth";
+import { _authHookSlotsForTesting, withSmtpOverride } from "@appstrate/db/auth";
+import { logger } from "@appstrate/db/logger";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { eq } from "drizzle-orm";
 import { profiles, user as userTable } from "@appstrate/db/schema";
@@ -426,25 +423,36 @@ describe("platform auth e-mails (SMTP on)", () => {
       return postAuth("/request-password-reset", { email, redirectTo: "/reset-password" });
     }
 
-    it("is written in the account's language", async () => {
+    it("follows the account, not the address, through an e-mail change", async () => {
       const account = await createTestUser({ emailVerified: true });
       await speaksEnglish(account.id);
+      const newEmail = `new-${crypto.randomUUID()}@example.test`;
 
-      const mails = await captureMails(() => requestReset(account.email));
+      const [toCurrent] = await captureMails(() =>
+        postAuth("/change-email", { newEmail, callbackURL: "/" }, account.cookie),
+      );
+      expect(toCurrent!.subject).toBe("Confirm the change of your email address");
 
-      expect(mails).toHaveLength(1);
-      expect(mails[0]!.subject).toBe("Reset your password");
+      // The new address has no account of its own: only the id finds the language.
+      const approve = firstLink(toCurrent!);
+      const [toNew] = await captureMails(async () => {
+        await app.request(`${approve.pathname}${approve.search}`, {
+          headers: { Cookie: account.cookie },
+        });
+      });
+      expect(toNew!.to).toBe(newEmail);
+      expect(toNew!.subject).toBe("Verify your email address");
     });
 
     it("a refused mail changes no answer, and the failure is logged", async () => {
       const account = await createTestUser({ emailVerified: true });
       const delivered = await requestReset(account.email);
       const refusing = {
-        sendMail: async () => {
-          throw new Error("SMTP unreachable");
+        sendMail: async (mail: { to: string }) => {
+          throw new Error(`550 5.1.1 <${mail.to.toUpperCase()}>: Recipient address rejected`);
         },
       } as unknown as Transporter;
-      const warn = spyOn(_authLoggerForTesting, "warn").mockImplementation(() => {});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const refused = await withSmtpOverride(
           { transport: refusing, fromAddress: "refusing@appstrate.test", fromName: null },
@@ -455,9 +463,8 @@ describe("platform auth e-mails (SMTP on)", () => {
         expect(await refused.json()).toEqual(await delivered.json());
         expect(warn).toHaveBeenCalledWith("auth: auth e-mail not sent", {
           template: "reset-password",
-          error: "SMTP unreachable",
+          error: "550 5.1.1 <<address>>: Recipient address rejected",
         });
-        expect(JSON.stringify(warn.mock.calls)).not.toContain(account.email);
       } finally {
         warn.mockRestore();
       }

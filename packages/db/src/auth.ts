@@ -15,9 +15,6 @@ import {
   type RenderedEmail,
   type SupportedLocale,
 } from "@appstrate/emails";
-import { createLogger } from "@appstrate/core/logger";
-
-const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema/index.ts";
@@ -35,6 +32,7 @@ import { createBootstrapOrg } from "./bootstrap-org.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./credential-change.ts";
 import { hookSlot } from "./hook-slot.ts";
+import { logger } from "./logger.ts";
 
 export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
 
@@ -289,9 +287,6 @@ export const _authHookSlotsForTesting = {
   magicLinkIssued: magicLinkIssuedHook,
   credentialChange: credentialChangeHook,
 };
-
-/** Test-only: the logger this file writes to, for `spyOn`. */
-export const _authLoggerForTesting = logger;
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
@@ -578,13 +573,18 @@ async function accountLocale(userId: string | undefined, email: string): Promise
   return row?.language === "en" ? "en" : "fr";
 }
 
-// A transport error can quote the recipient ("Recipient address rejected: <addr>").
-function warnAuthMailNotSent(template: EmailType, err: unknown, to: string): void {
+// An error can quote an address in any case ("Recipient address rejected: <addr>"): every
+// token holding an `@` is masked. Split, not a `x+@y+` regex, which backtracks quadratically.
+function redactAddresses(message: string): string {
+  return message
+    .split(/([\s<>"']+)/)
+    .map((token) => (token.includes("@") ? "<address>" : token))
+    .join("");
+}
+
+function warnAuthMailNotSent(template: EmailType, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
-  logger.warn("auth: auth e-mail not sent", {
-    template,
-    error: message.replaceAll(to, "<recipient>"),
-  });
+  logger.warn("auth: auth e-mail not sent", { template, error: redactAddresses(message) });
 }
 
 /** Sends `template` in the account's language. Never throws: no auth flow waits on a mail. */
@@ -597,11 +597,12 @@ async function sendAuthMailQuietly<T extends EmailType>(
   userId?: string,
 ): Promise<void> {
   try {
-    const locale = await accountLocale(userId, to);
+    // A failed lookup costs the language, not the mail.
+    const locale = await accountLocale(userId, to).catch(() => "fr" as const);
     const rendered = renderEmail(template, { ...props, locale } as EmailPropsMap[T]);
     await sendAuthMail(env, smtpTransport, to, rendered);
   } catch (err) {
-    warnAuthMailNotSent(template, err, to);
+    warnAuthMailNotSent(template, err);
   }
 }
 
@@ -625,7 +626,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
             // while closing the replay window.
             expiresIn: MAGIC_LINK_TTL_SECONDS,
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
-              const normalizedEmail = email.toLowerCase().trim();
+              const normalizedEmail = normalizeEmail(email);
               let url: string;
               try {
                 // `EndpointContext.headers` is typed `HeadersInit` — copy
@@ -643,7 +644,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
                   : (magicLinkConfirmPageUrl(rawUrl, "/magic-link/confirm")?.toString() ?? rawUrl);
               } catch (err) {
                 // Fail closed: no link goes out without what the hook records.
-                warnAuthMailNotSent("magic-link", err, email);
+                warnAuthMailNotSent("magic-link", err);
                 return;
               }
 
