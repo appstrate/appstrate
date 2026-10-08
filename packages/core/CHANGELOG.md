@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Requires `@appstrate/afps-shared` `^0.12.0`** (was `^0.10.1`): the
+- **Requires `@appstrate/afps-shared` `^0.12.0`** (14.0.0 declared `^0.10.0`): the
   `authorized_uris` rules moved to its `./authorized-uris` subpath (0.11.0),
   and connection variables arrived (0.12.0). No core export changes. (#1763)
 - **`findUnboundedInjectedCredentials` (`@appstrate/core/integration`)
@@ -50,13 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration
-  binds in a run.
+  binds in a run. (#1804)
 
 - **BREAKING: `ModelSwapBacking` gains a required `dialect`**
   (`PiModelDialect | null`, `@appstrate/core/sidecar-types`): the
   sidecar builds the backing from it and no longer reads a record by
   `providerId`. A producer of `ModelSwap` descriptors must set it, `null`
   when Pi keeps no record of the backing. (#1706)
+- **BREAKING: each `IntegrationSpawnSpec` auth entry gains a required
+  `variables`** (`Record<string, string>`, `@appstrate/core/sidecar-types`):
+  the connection's variables (AFPS §7.12), which the sidecar substitutes for
+  `{$variable.<name>}`. A producer of spawn specs must set it, `{}` when the
+  connection has none. (#1811)
 
 ### Fixed
 
