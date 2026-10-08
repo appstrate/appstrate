@@ -41,7 +41,8 @@ const POPUP_FEATURES = "width=600,height=700";
  * does not close the popup: completion pages close themselves, and one that
  * shows an install block (SSH) stays open until the user dismisses it.
  * `openPopup` resolves `true` once the popup settled AND the integration caches
- * were refetched, `false` after a failure it already toasted.
+ * were invalidated (active queries refetched, inactive ones marked stale),
+ * `false` after a failure it already toasted.
  */
 export function useHostedConnectPopup() {
   const { t } = useTranslation("settings");

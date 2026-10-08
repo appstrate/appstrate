@@ -73,7 +73,7 @@ export interface ConnectionPickerOptions {
 /**
  * What the picker takes from outside React. `openPopup` defaults to the hosted
  * connect popup; tests pass one honouring its contract (resolves `true` once
- * the integration caches were refetched), since the real one needs a browser.
+ * the active integration queries were refetched), since the real one needs a browser.
  */
 export interface ConnectionPickerDeps {
   openPopup?: ReturnType<typeof useHostedConnectPopup>["openPopup"];
@@ -136,10 +136,6 @@ export function useConnectionPicker(
   // this the "add connection" entries offered a flow doomed to 403.
   const connectable = connectableAuthKeys(manifest, authStatuses);
   const authKeys = Object.keys(auths).filter((k) => connectable.has(k));
-  const typeLabel = (authKey: string): string | null => {
-    const type = auths[authKey]?.type;
-    return type ? t(`settings:integration.auth.type.${type}`) : null;
-  };
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
@@ -277,7 +273,7 @@ export function useConnectionPicker(
     setOpen(true);
   };
 
-  // A settled popup has already refetched the integration caches.
+  // A settled popup has already refetched the active integration queries.
   const upgradeScopes = (conn: IntegrationCandidate) =>
     openPopup({
       packageId: integrationId,
@@ -285,25 +281,6 @@ export function useConnectionPicker(
       scopes: conn.missing_scopes,
       connectionId: conn.id,
     });
-
-  const triggerLabel =
-    unavailableIds.length > 0
-      ? setLabel(storedIds, unavailableIds)
-      : displayConns.length === 1
-        ? displayConns[0]!.label
-        : displayConns.length > 1
-          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
-          : overrideMode
-            ? t("detail.integrationMemberPicker.inherit")
-            : emptyPickerPrompt === "choose"
-              ? t("detail.integrationMemberPicker.chooseLabel")
-              : t("detail.integrationMemberPicker.connectLabel");
-  // Amber on exactly the states that gate a run: pin mode reads the server's
-  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
-  const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
-    : (runBlocking ?? false);
 
   return {
     // Verdict
@@ -328,6 +305,7 @@ export function useConnectionPicker(
     // Sets
     explicitIds,
     fromDefault,
+    storedIds,
     unavailableIds,
     checkedIds,
     atCap,
@@ -337,12 +315,9 @@ export function useConnectionPicker(
     deadConns,
     busy,
     canApply,
-    // Labels
-    typeLabel,
+    // Labels shared by several components
     ownerLabel,
     setLabel,
-    triggerLabel,
-    triggerWarn,
     // Menu + actions
     open,
     setOpen,

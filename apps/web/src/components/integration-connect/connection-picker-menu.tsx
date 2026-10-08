@@ -29,11 +29,13 @@ export function PickerMenu({
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
   const {
+    runBlocking,
     candidates,
     resolvedConnectionIds,
     canAddConnection,
     byDefault,
     softDefaultIds,
+    emptyPickerPrompt,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -42,17 +44,18 @@ export function PickerMenu({
     authKeys,
     hasCandidates,
     explicitIds,
+    storedIds,
     unavailableIds,
     checkedIds,
     atCap,
     oneClick,
     displayConns,
+    underScopedConns,
+    deadConns,
     busy,
     canApply,
-    typeLabel,
     ownerLabel,
-    triggerLabel,
-    triggerWarn,
+    setLabel,
     open,
     setOpen,
     onOpenChange,
@@ -61,6 +64,28 @@ export function PickerMenu({
     toggle,
     triggerConnect,
   } = picker;
+  const typeLabel = (authKey: string): string | null => {
+    const type = auths[authKey]?.type;
+    return type ? t(`settings:integration.auth.type.${type}`) : null;
+  };
+  const triggerLabel =
+    unavailableIds.length > 0
+      ? setLabel(storedIds, unavailableIds)
+      : displayConns.length === 1
+        ? displayConns[0]!.label
+        : displayConns.length > 1
+          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
+          : overrideMode
+            ? t("detail.integrationMemberPicker.inherit")
+            : emptyPickerPrompt === "choose"
+              ? t("detail.integrationMemberPicker.chooseLabel")
+              : t("detail.integrationMemberPicker.connectLabel");
+  // Amber on exactly the states that gate a run: pin mode reads the server's
+  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
+  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
+  const triggerWarn = overrideMode
+    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
+    : (runBlocking ?? false);
   const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
 
   return (

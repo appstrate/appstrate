@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The connection picker's read-only states: everything but the dropdown. */
+/** The connection picker's states besides the dropdown, and the warnings shown under it. */
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -66,26 +66,22 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
  */
 export function LockedPicker({
   integrationId,
-  overrideMode,
-  explicitIds,
-  onClear,
-  lockedConnectionIds,
-  lockedBy,
-  candidateIds,
-  runBlocking,
-  setLabel,
+  picker,
 }: {
   integrationId: string;
-  overrideMode: boolean;
-  explicitIds: string[];
-  onClear: () => void;
-  lockedConnectionIds: string[];
-  lockedBy: ConnectionPicker["lockedBy"];
-  candidateIds: string[];
-  runBlocking: boolean | undefined;
-  setLabel: ConnectionPicker["setLabel"];
+  picker: ConnectionPicker;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
+  const {
+    overrideMode,
+    explicitIds,
+    persist,
+    lockedConnectionIds,
+    lockedBy,
+    candidateIds,
+    runBlocking,
+    setLabel,
+  } = picker;
   const storedOverride = overrideMode ? explicitIds : [];
   const outranked = storedOverride.some((id) => !lockedConnectionIds.includes(id));
   const bindingIds = storedOverride.length > 0 && !outranked ? storedOverride : lockedConnectionIds;
@@ -111,7 +107,10 @@ export function LockedPicker({
         </Badge>
       </Button>
       {overrideMode && outranked && (
-        <ClearChoiceButton onClick={onClear} testId={`member-pick-clear-${integrationId}`} />
+        <ClearChoiceButton
+          onClick={() => void persist([])}
+          testId={`member-pick-clear-${integrationId}`}
+        />
       )}
       {lockedUnavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>

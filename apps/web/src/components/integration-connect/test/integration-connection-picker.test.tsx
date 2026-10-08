@@ -426,7 +426,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     return { mounted, picked, picker };
   }
 
-  /** The real popup's contract: `true` once the integration caches were refetched. */
+  /** The real popup's contract: `true` once the active integration queries were refetched. */
   const settles =
     (qc: QueryClient): OpenPopup =>
     async () => {

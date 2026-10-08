@@ -50,12 +50,8 @@ export function IntegrationConnectionPicker({
   if (!picker) return <LoadingPicker integrationId={integrationId} />;
 
   const {
-    runBlocking,
-    candidateIds,
-    overrideMode,
     canAddConnection,
     lockedConnectionIds,
-    lockedBy,
     emptyPickerPrompt,
     canConnect,
     integrationPath,
@@ -67,8 +63,6 @@ export function IntegrationConnectionPicker({
     unavailableIds,
     deadConns,
     underScopedConns,
-    setLabel,
-    persist,
   } = picker;
 
   // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
@@ -78,19 +72,7 @@ export function IntegrationConnectionPicker({
 
   // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
   if (lockedConnectionIds.length > 0) {
-    return (
-      <LockedPicker
-        integrationId={integrationId}
-        overrideMode={overrideMode}
-        explicitIds={explicitIds}
-        onClear={() => void persist([])}
-        lockedConnectionIds={lockedConnectionIds}
-        lockedBy={lockedBy}
-        candidateIds={candidateIds}
-        runBlocking={runBlocking}
-        setLabel={setLabel}
-      />
-    );
+    return <LockedPicker integrationId={integrationId} picker={picker} />;
   }
 
   // Blocked for this member AND nothing to pick → dead end. Show a
