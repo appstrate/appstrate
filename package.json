@@ -150,7 +150,6 @@
     "@electric-sql/pglite": "^0.5.8"
   },
   "overrides": {
-    "@afps-spec/schema": "file:../afps-spec/packages/schema",
     "zod": "4.6.5",
     "jose": "6.2.12",
     "ai": "^7.0.127",
