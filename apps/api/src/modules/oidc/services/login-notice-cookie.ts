@@ -28,7 +28,7 @@
  * The cookie carries NO authority: it is purely display state + a loop guard.
  * Forging it at worst shows a banner (and suppresses one restart bounce) — it
  * grants no access, pins no realm, and is never trusted for any security
- * decision. We still HMAC-sign it (with `BETTER_AUTH_SECRET`) so a malformed /
+ * decision. We still HMAC-sign it (auth keyring, `lib/auth-secrets.ts`) so a malformed /
  * tampered value is cleanly rejected rather than parsed, but unlike the
  * pending-client cookie there is nothing to protect, so we skip the
  * production insecure-`Secure`-flag warning: an unencrypted notice cookie
@@ -36,7 +36,7 @@
  *
  * The email is embedded in the payload, which (because emails contain dots)
  * we serialize as JSON and base64url-encode BEFORE signing. The cookie value
- * is `<base64urlPayload>.<exp>.<sig>` — base64url and the `<kid>$<hmac>` sig
+ * is `<base64urlPayload>.<exp>.<sig>` — base64url and the base64url sig
  * contain no dots, so splitting on `.` still yields exactly 3 parts (same
  * 3-part shape as `pending-client-cookie.ts`).
  *
@@ -145,9 +145,9 @@ export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
 }
 
 function parseAndVerify(raw: string): LoginNotice | null {
-  // Format: `<base64urlPayload>.<exp>.<sig>`. base64url contains no dot and
-  // the `<kid>$<hmac>` sig contains no dot, so a well-formed value splits into
-  // exactly 3 parts.
+  // Format: `<base64urlPayload>.<exp>.<sig>`. Neither base64url payload nor
+  // base64url sig contains a dot, so a well-formed value splits into exactly
+  // 3 parts.
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [encoded, expStr, sig] = parts as [string, string, string];

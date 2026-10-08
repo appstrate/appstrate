@@ -746,10 +746,10 @@ function buildAuth(options: CreateAuthOptions) {
 
     baseURL: env.APP_URL,
     basePath: "/api/auth",
-    // Resolve the secret through the kid map so a deployment that has
-    // already populated `BETTER_AUTH_SECRETS` for cookie rotation feeds
-    // Better Auth the active secret (not the legacy single-value var).
-    secret: env.BETTER_AUTH_SECRETS[env.BETTER_AUTH_ACTIVE_KID] ?? env.BETTER_AUTH_SECRET,
+    // With a keyring, Better Auth encrypts/signs with its first entry and
+    // keeps `secret` to decrypt data written before the keyring existed.
+    secret: env.BETTER_AUTH_SECRET,
+    secrets: env.BETTER_AUTH_SECRETS,
 
     // Route Better Auth's internal logs through our structured pino logger
     // instead of its default console writer (repo rule: no console.*). Only

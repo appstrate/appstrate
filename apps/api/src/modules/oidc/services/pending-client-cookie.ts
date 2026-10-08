@@ -24,8 +24,8 @@
  * request that carries it.
  *
  * Security:
- *   - HMAC-SHA256 signature with `BETTER_AUTH_SECRET` so a client cannot
- *     forge a `clientId`.
+ *   - HMAC-SHA256 under the auth keyring (`lib/auth-secrets.ts`) so a client
+ *     cannot forge a `clientId`.
  *   - `HttpOnly` to keep it out of JS.
  *   - `SameSite=Lax` — MUST NOT be `Strict`, otherwise the cookie is dropped
  *     on the cross-site POST → redirect from BA's social callback.
@@ -165,10 +165,9 @@ export function headersWithAuthoritativePendingClient(source: Headers, clientId:
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 function parseAndVerify(raw: string): string | null {
-  // Format: `<clientId>.<exp>.<sig>`. `clientId` never contains a dot (it
-  // starts with `oauth_` and is base64url) and `sig` is now `<kid>$<hmac>`
-  // — neither contains a dot — so splitting on `.` still yields exactly 3
-  // parts.
+  // Format: `<clientId>.<exp>.<sig>`. `clientId` (`oauth_` + base64url) and
+  // the base64url `sig` contain no dot, so a well-formed value splits into
+  // exactly 3 parts.
   const parts = raw.split(".");
   if (parts.length !== 3) return null;
   const [clientId, expStr, sig] = parts as [string, string, string];
@@ -182,10 +181,8 @@ function parseAndVerify(raw: string): string | null {
  * Minimal cookie-header parser — we can't pull in a heavy dep just to read
  * one cookie out of band. Matches `name=value; name2=value2` format,
  * respects spaces and quoted values (RFC 6265 §5.4). The value is
- * URL-decoded to mirror what hono's `getCookie` does on the context path —
- * Set-Cookie serialization runs every value through `encodeURIComponent`,
- * so the signature's `kid$sig` separator arrives here as `kid%24sig` and
- * would otherwise fail `verifyAuthHmac`'s prefixed-form check.
+ * URL-decoded to mirror what hono's `getCookie` does on the context path:
+ * Set-Cookie serialization runs every value through `encodeURIComponent`.
  */
 function parseCookieHeader(header: string, name: string): string | null {
   const target = `${name}=`;

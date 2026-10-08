@@ -62,8 +62,6 @@ export const CODE_DEFAULTS: Record<string, string> = {
   AUTH_BOOTSTRAP_TOKEN: "",
   AFPS_TRUST_ROOT: "[]",
   AFPS_SIGNATURE_POLICY: "warn",
-  BETTER_AUTH_ACTIVE_KID: "k1",
-  BETTER_AUTH_SECRETS: "{}",
   CONNECTION_ENCRYPTION_KEY_ID: "k1",
   CONNECTION_ENCRYPTION_KEYS: "{}",
   LOG_LEVEL: "info",
@@ -176,11 +174,6 @@ export const ALLOWLIST: Record<string, { yamlDefault: string; reason: string }> 
     yamlDefault: "ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-latest}",
     reason:
       "Override to GHCR registry + APPSTRATE_VERSION coupling (code default points at Docker Hub).",
-  },
-  BETTER_AUTH_SECRETS: {
-    yamlDefault: "",
-    reason:
-      "Empty string (NOT `{}`) is load-bearing — neutralizes better-auth 1.6+'s own CSV parser that crashes boot on a non-CSV `{}` value. See compose comment block.",
   },
 };
 

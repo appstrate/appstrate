@@ -1,114 +1,78 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import {
-  signAuthHmac,
-  verifyAuthHmac,
-  getActiveAuthSecret,
-  _resetAuthSecretsCache,
-} from "../../src/lib/auth-secrets.ts";
+import { createHmac } from "node:crypto";
+import { signAuthHmac, verifyAuthHmac } from "../../src/lib/auth-secrets.ts";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 
-function resetCaches(): void {
-  resetEnvCache();
-  _resetAuthSecretsCache();
+const ENV_KEYS = ["BETTER_AUTH_SECRET", "BETTER_AUTH_SECRETS"] as const;
+
+const SINGLE = "single-secret-32-chars-long-for-hmac";
+const OLD = "old-secret-32-chars-long-for-hmac";
+const NEW = "new-secret-32-chars-long-for-hmac";
+
+function hmac(secret: string, payload: string): string {
+  return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-const ENV_KEYS = ["BETTER_AUTH_SECRET", "BETTER_AUTH_ACTIVE_KID", "BETTER_AUTH_SECRETS"] as const;
-
-function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
-  return Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as Record<
-    (typeof ENV_KEYS)[number],
-    string | undefined
-  >;
-}
-
-function restoreEnv(snap: ReturnType<typeof snapshotEnv>): void {
+function setEnv(vars: Record<(typeof ENV_KEYS)[number], string | undefined>): void {
   for (const k of ENV_KEYS) {
-    if (snap[k] === undefined) delete process.env[k];
-    else process.env[k] = snap[k];
+    if (vars[k] === undefined) delete process.env[k];
+    else process.env[k] = vars[k];
   }
+  resetEnvCache();
 }
 
 describe("auth-secrets", () => {
-  let snap: ReturnType<typeof snapshotEnv>;
+  let snap: Record<(typeof ENV_KEYS)[number], string | undefined>;
 
   beforeEach(() => {
-    snap = snapshotEnv();
+    snap = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as typeof snap;
   });
 
   afterEach(() => {
-    restoreEnv(snap);
-    resetCaches();
+    setEnv(snap);
   });
 
-  describe("single BETTER_AUTH_SECRET", () => {
+  describe("no keyring: BETTER_AUTH_SECRET alone", () => {
     beforeEach(() => {
-      process.env.BETTER_AUTH_SECRET = "legacy-single-secret-32-chars-long";
-      delete process.env.BETTER_AUTH_SECRETS;
-      delete process.env.BETTER_AUTH_ACTIVE_KID;
-      resetCaches();
+      setEnv({ BETTER_AUTH_SECRET: SINGLE, BETTER_AUTH_SECRETS: undefined });
     });
 
-    it("uses BETTER_AUTH_SECRET as the active secret", () => {
-      expect(getActiveAuthSecret()).toBe("legacy-single-secret-32-chars-long");
+    it("signs with BETTER_AUTH_SECRET, as a bare signature", () => {
+      expect(signAuthHmac("payload")).toBe(hmac(SINGLE, "payload"));
     });
 
-    it("signs with prefixed kid format", () => {
-      const sig = signAuthHmac("payload");
-      expect(sig.startsWith("k1$")).toBe(true);
+    it("verifies its own signature", () => {
+      expect(verifyAuthHmac("payload", signAuthHmac("payload"))).toBe(true);
     });
 
-    it("verifies its own prefixed signature", () => {
-      const sig = signAuthHmac("payload");
-      expect(verifyAuthHmac("payload", sig)).toBe(true);
-    });
-
-    it("rejects an un-prefixed signature", () => {
-      const sig = signAuthHmac("payload");
-      const unprefixed = sig.split("$")[1]!;
-      expect(verifyAuthHmac("payload", unprefixed)).toBe(false);
+    it("rejects a signature under an unknown secret", () => {
+      expect(verifyAuthHmac("payload", hmac(NEW, "payload"))).toBe(false);
     });
   });
 
-  describe("rotation: active kid + secrets map", () => {
+  describe("keyring: BETTER_AUTH_SECRETS", () => {
     beforeEach(() => {
-      process.env.BETTER_AUTH_SECRET = "fallback-not-used-32-chars-long";
-      process.env.BETTER_AUTH_ACTIVE_KID = "k2";
-      process.env.BETTER_AUTH_SECRETS = JSON.stringify({
-        k1: "old-secret-32-chars-long-for-hmac",
-        k2: "new-secret-32-chars-long-for-hmac",
-      });
-      resetCaches();
+      setEnv({ BETTER_AUTH_SECRET: SINGLE, BETTER_AUTH_SECRETS: `2:${NEW},1:${OLD}` });
     });
 
-    it("returns the active secret", () => {
-      expect(getActiveAuthSecret()).toBe("new-secret-32-chars-long-for-hmac");
+    it("signs with the first keyring secret", () => {
+      expect(signAuthHmac("payload")).toBe(hmac(NEW, "payload"));
     });
 
-    it("signs with the active kid", () => {
-      const sig = signAuthHmac("payload");
-      expect(sig.startsWith("k2$")).toBe(true);
+    it("verifies a signature under any keyring secret", () => {
+      expect(verifyAuthHmac("payload", hmac(NEW, "payload"))).toBe(true);
+      expect(verifyAuthHmac("payload", hmac(OLD, "payload"))).toBe(true);
     });
 
-    it("verifies signatures from a previous kid", async () => {
-      // Simulate a cookie signed before rotation by k1.
-      const { createHmac } = await import("node:crypto");
-      const hmac = createHmac("sha256", "old-secret-32-chars-long-for-hmac")
-        .update("payload")
-        .digest("base64")
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
-      expect(verifyAuthHmac("payload", `k1$${hmac}`)).toBe(true);
+    it("rejects BETTER_AUTH_SECRET once a keyring is set", () => {
+      expect(verifyAuthHmac("payload", hmac(SINGLE, "payload"))).toBe(false);
     });
 
-    it("rejects an unknown kid", () => {
-      expect(verifyAuthHmac("payload", "k99$ZZZ")).toBe(false);
-    });
-
-    it("rejects a tampered signature under a known kid", () => {
-      expect(verifyAuthHmac("payload", "k1$AAAA")).toBe(false);
+    it("rejects a tampered signature and a signature over another payload", () => {
+      expect(verifyAuthHmac("payload", "AAAA")).toBe(false);
+      expect(verifyAuthHmac("other", hmac(OLD, "payload"))).toBe(false);
     });
   });
 });
