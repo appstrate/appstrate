@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A `400 validation_failed` response reports a missing body field with
+  `errors[].code: "required"`** (#1790), as documented, instead of
+  `invalid_type`, `invalid_value` or `invalid_union`. The dashboard now shows
+  its "field is required" message for it. A missing coerced numeric field,
+  such as `size` on `POST /api/uploads`, still reports `invalid_type`.
 - **A cookie is no longer sent once its `Max-Age` or `Expires` has passed**
   (#1778). The sidecar and the platform credential proxy kept sending a
   cookie set with a positive `Max-Age` or a future `Expires` after it

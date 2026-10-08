@@ -31328,24 +31328,24 @@
                   "type": "https://docs.appstrate.dev/errors/validation-failed",
                   "title": "Validation Failed",
                   "status": 400,
-                  "detail": "name: Required (+2 more)",
+                  "detail": "name: Invalid input: expected string, received undefined (+2 more)",
                   "code": "validation_failed",
                   "request_id": "req_abc123",
                   "errors": [
                     {
                       "field": "name",
-                      "code": "invalid_type",
-                      "message": "Required"
+                      "code": "required",
+                      "message": "Invalid input: expected string, received undefined"
                     },
                     {
                       "field": "email",
                       "code": "invalid_format",
-                      "message": "Invalid email"
+                      "message": "Invalid email address"
                     },
                     {
                       "field": "age",
                       "code": "invalid_type",
-                      "message": "Expected number"
+                      "message": "Invalid input: expected number, received string"
                     }
                   ]
                 }
