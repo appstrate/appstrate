@@ -3083,7 +3083,11 @@ export async function planConnectionForget(
     .where(
       and(eq(integrationPins.userId, owner.id), arrayContains(integrationPins.connectionIds, [id])),
     )
-    .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
+    .orderBy(
+      asc(integrationPins.packageId),
+      asc(integrationPins.integrationId),
+      asc(integrationPins.id),
+    );
   const scheduleQuery = executor
     .select({
       id: schedules.id,
@@ -3094,9 +3098,8 @@ export async function planConnectionForget(
     })
     .from(schedules)
     .where(and(actorFilter(owner, schedules), scheduleOverridesName(id), scheduleFilter))
-    .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
-  // Member pins are a member's own: an end user holds none.
-  const pinRows = owner.type !== "user" ? [] : await (lock ? pinQuery.for("update") : pinQuery);
+    .orderBy(asc(schedules.packageId), asc(schedules.createdAt), asc(schedules.id));
+  const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
   const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
   return {
     pins: pinRows.map((pin) => ({

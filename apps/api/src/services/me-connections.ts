@@ -27,7 +27,7 @@ import {
   schedules,
   spaces,
 } from "@appstrate/db/schema";
-import { actorFilter, actorFromIds, type Actor } from "../lib/actor.ts";
+import { actorFilter, type Actor } from "../lib/actor.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -312,7 +312,8 @@ export interface ConnectionDeleteImpact {
  * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
  * and per (schedule, integration) naming `connectionId`. Empty for an unknown connection, one the
  * caller does not own, or one outside a bound credential's org (and space); a bound credential sees
- * only the schedules of its org (and space). A pinned connection is listed: its delete is a 409.
+ * only the owner's schedules of its org (and space), though the delete rewrites the others too. A
+ * pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
   actor: Actor,
@@ -320,11 +321,7 @@ export async function getConnectionDeleteImpact(
   authority: MeConnectionAuthority,
 ): Promise<ConnectionDeleteImpact> {
   const [row] = await db
-    .select({
-      id: integrationConnections.id,
-      userId: integrationConnections.userId,
-      endUserId: integrationConnections.endUserId,
-    })
+    .select({ id: integrationConnections.id })
     .from(integrationConnections)
     .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
     .where(
@@ -336,12 +333,10 @@ export async function getConnectionDeleteImpact(
     )
     .limit(1);
   if (!row) return { pins: [], schedules: [] };
-  // `integration_connections` holds exactly one owner id.
-  const owner = actorFromIds(row.userId, row.endUserId)!;
   // Member pins need no such filter: a pin write requires its connections in the pin's own space.
   const plan = await planConnectionForget(
     db,
-    { id: row.id, owner },
+    { id: row.id, owner: actor },
     { scheduleFilter: authorityFilter(authority, schedules.orgId, schedules.spaceId) },
   );
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];

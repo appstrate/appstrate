@@ -638,6 +638,7 @@ describe("/api/me/integration-pins", () => {
         .where(eq(schedules.id, alone.id));
       const several = await scheduleFor([web!, gone!], owner, "several");
       await scheduleFor([gone!], owner, "off", false);
+      const unknown = crypto.randomUUID();
       await seedSchedule({
         packageId: AGENT,
         orgId: ctx.orgId,
@@ -647,7 +648,7 @@ describe("/api/me/integration-pins", () => {
         ...owner,
         connectionOverrides: {
           [INTEGRATION]: [gone!],
-          "@pinorg/other-svc": [crypto.randomUUID()],
+          "@pinorg/other-svc": [unknown],
         },
       });
       // A stored empty set (no write accepts one): the delete drops it, so it disables the schedule
@@ -667,6 +668,8 @@ describe("/api/me/integration-pins", () => {
 
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
       const announced = await impactOf(gone!);
+      // An id no connection carries previews nothing, though one of the caller's schedules names it.
+      expect(await impactOf(unknown)).toEqual({ pins: [], schedules: [] });
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
@@ -746,7 +749,6 @@ describe("/api/me/integration-pins", () => {
         connectionOverrides: { [INTEGRATION]: [web!] },
         enabled: false,
       });
-      expect(await impactOf(gone!)).toEqual({ pins: [], schedules: [] });
     });
 
     it("is empty for a colleague's shared connection the caller pinned and scheduled, which the delete refuses", async () => {
@@ -837,20 +839,27 @@ describe("/api/me/integration-pins", () => {
       );
     });
 
-    it("does not announce a disable for a schedule that is already off", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
-      const off = await scheduleFor([connectionId], { userId: ctx.user.id }, null, false);
-      expect((await impactOf(connectionId)).schedules).toEqual([
-        expect.objectContaining({ scheduleId: off.id, connection_count: 1, disables: false }),
-      ]);
-    });
+    it("lists a connection an admin pinned, whose delete answers 409 connection_pinned", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id, { shared: true });
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        createdBy: ctx.user.id,
+        connectionIds: [connectionId],
+      });
+      const schedule = await scheduleFor([connectionId], { userId: ctx.user.id });
 
-    it("leaves out a colleague's schedule, which the delete does not rewrite", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
-      const colleague = await createTestUser();
-      await addOrgMember(ctx.orgId, colleague.id);
-      await scheduleFor([connectionId], { userId: colleague.id });
-      expect(await impactOf(connectionId)).toEqual({ pins: [], schedules: [] });
+      expect((await impactOf(connectionId)).schedules.map((s) => s.scheduleId)).toEqual([
+        schedule.id,
+      ]);
+      const del = await app.request(`/api/me/connections/${connectionId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(409);
+      expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
     });
 
     it("is empty for an id that is not a UUID", async () => {
