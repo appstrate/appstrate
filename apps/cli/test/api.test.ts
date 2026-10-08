@@ -27,7 +27,7 @@
  *      timeout) surface as themselves, never as a re-login 401.
  */
 
-import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   saveTokens,
   loadTokens,
@@ -52,6 +52,7 @@ import {
   useTempConfigHome,
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
+import { holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 
 type FetchCall = { url: string; auth: string | null; body: string | null };
 const configHome = useTempConfigHome("appstrate-cli-api-");
@@ -146,36 +147,11 @@ function peerLogsOut(): void {
   keyring.store.delete("default");
 }
 
-/** Another process's refresh, stuck holding the credentials lock until released. */
-async function holdCredentialsLock(): Promise<() => Promise<void>> {
-  const entered = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  const holder = withCredentialsLock(async () => {
-    entered.resolve();
-    await release.promise;
-  });
-  await entered.promise;
-  return async () => {
-    release.resolve();
-    await holder;
-  };
-}
-
-/**
- * Settle `run` while the clock jumps past any deadline a lock waiter computes,
- * so it gives up on its next poll instead of sitting out the real timeout.
- */
-async function settleWithClockJumping(run: () => Promise<unknown>): Promise<unknown> {
-  const clock = setInterval(() => setSystemTime(new Date(Date.now() + 60_000)), 10);
-  try {
-    return await run().then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-  } finally {
-    clearInterval(clock);
-    setSystemTime();
-  }
+function settle(run: Promise<unknown>): Promise<unknown> {
+  return run.then(
+    () => undefined,
+    (e: unknown) => e,
+  );
 }
 
 describe("apiFetchRaw (issue #165) — proactive refresh", () => {
@@ -633,10 +609,14 @@ describe("apiFetchRaw — credentials lock held by another process", () => {
     installFetch(async () => jsonResponse(200, {}));
     const release = await holdCredentialsLock();
 
+    // The access token is already expired, so nothing the jumps reach can
+    // change the path taken; the refresh token outlives them by days.
+    const stopClock = jumpClock();
     let error: unknown;
     try {
-      error = await settleWithClockJumping(() => apiFetchRaw("default", "/api/data"));
+      error = await settle(apiFetchRaw("default", "/api/data"));
     } finally {
+      stopClock();
       await release();
     }
 
@@ -652,13 +632,21 @@ describe("apiFetchRaw — credentials lock held by another process", () => {
       accessExpiresIn: 5 * 60 * 1000,
       refresh: "r",
     });
-    installFetch(async () => jsonResponse(401, { error: "invalid_token" }));
+    // The clock jumps only once the request is out: started earlier, it
+    // could expire the access token first and send this down the proactive
+    // path instead.
+    const clock: { stop?: () => void } = {};
+    installFetch(async () => {
+      clock.stop ??= jumpClock();
+      return jsonResponse(401, { error: "invalid_token" });
+    });
     const release = await holdCredentialsLock();
 
     let error: unknown;
     try {
-      error = await settleWithClockJumping(() => apiFetchRaw("default", "/api/data"));
+      error = await settle(apiFetchRaw("default", "/api/data"));
     } finally {
+      clock.stop?.();
       await release();
     }
 
@@ -669,7 +657,7 @@ describe("apiFetchRaw — credentials lock held by another process", () => {
 });
 
 describe("apiFetchRaw — a refresh request that never answers", () => {
-  it("is bounded by its own deadline, and its timeout keeps the credentials and is no 401", async () => {
+  it("gets a deadline; its timeout says so, keeps the credentials and is no 401", async () => {
     await seedProfile("default", {
       access: "access-1",
       accessExpiresIn: 5 * 60 * 1000,
@@ -686,14 +674,15 @@ describe("apiFetchRaw — a refresh request that never answers", () => {
       throw new DOMException("The operation timed out.", "TimeoutError");
     });
 
-    const error = await apiFetchRaw("default", "/api/data").then(
-      () => undefined,
-      (e: unknown) => e,
-    );
+    const error = await settle(apiFetchRaw("default", "/api/data"));
 
     expect(signal).toBeInstanceOf(AbortSignal);
-    expect(error).toBeInstanceOf(DOMException);
-    expect((error as DOMException).name).toBe("TimeoutError");
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(AuthError);
+    expect((error as Error).message).toContain("token refresh request");
+    expect((error as Error).message).toContain("timed out after 20 s");
+    expect((error as Error).message).toContain("credentials were kept");
+    expect(((error as Error).cause as DOMException).name).toBe("TimeoutError");
     expect((await loadTokens("default"))?.refreshToken).toBe("r");
     // The lock went with it: the next refresh is not left waiting.
     expect(await withCredentialsLock(async () => "free")).toBe("free");

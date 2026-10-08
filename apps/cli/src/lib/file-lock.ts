@@ -44,7 +44,7 @@ export interface FileLockOptions {
   io?: CommandIO;
   /**
    * False where the user neither starts the locked work nor could avoid the
-   * race it guards (a token refresh): the warning's advice is noise there.
+   * race it guards (a token refresh): the warning is noise there.
    */
   warnUnlocked?: boolean;
   /** Test seam; production resolves the libc binding once per process. */
@@ -94,9 +94,7 @@ export async function withFileLock<T>(
   const tryLock = options.tryLock ?? sharedTryLock();
   const runUnlocked = (reason: string): Promise<T> => {
     if (warnUnlocked) {
-      io.stderr.write(
-        `warning: ${label} lock unavailable (${reason}); continuing unlocked — do not run two ${label}s at once.\n`,
-      );
+      io.stderr.write(`warning: ${label} lock unavailable (${reason}); continuing unlocked.\n`);
     }
     return body();
   };

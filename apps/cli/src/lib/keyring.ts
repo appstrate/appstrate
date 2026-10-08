@@ -388,8 +388,9 @@ export async function deleteTokens(profile: string): Promise<void> {
 //
 // What runs outside that lock — every read, and the expired-entry scrub
 // `loadTokens` performs — relies on atomic renames: a reader sees a whole
-// file, and a write racing another resolves last-write-wins, which is why
-// the scrub deletes only on a compare-and-swap.
+// file, and a write racing another resolves last-write-wins. That is why the
+// scrub checks again before deleting: an exact compare-and-swap in the file
+// store, a best-effort re-read in the keyring (see `deleteFromFile`).
 
 interface FileStore {
   [profile: string]: Tokens;

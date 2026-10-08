@@ -167,8 +167,9 @@ describe("withSyncLock without a working flock", () => {
       tryLock: () => ({ status: "unsupported", reason: "Windows has no flock(2)" }),
     });
     expect(result).toBe("ran");
-    expect(stderr()).toContain("code sync lock unavailable (Windows has no flock(2))");
-    expect(stderr()).toContain("continuing unlocked");
+    expect(stderr()).toBe(
+      "warning: code sync lock unavailable (Windows has no flock(2)); continuing unlocked.\n",
+    );
   });
 
   it("never reports a competing sync that does not exist", async () => {

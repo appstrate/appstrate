@@ -45,7 +45,7 @@ import {
   getProfile,
 } from "../lib/config.ts";
 import { saveTokens } from "../lib/keyring.ts";
-import { withCredentialsLock } from "../lib/api.ts";
+import { withCredentialsLockForUser } from "../lib/api.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
@@ -262,7 +262,7 @@ async function runLogin(
   };
   // Under the credentials lock, so a refresh in flight elsewhere cannot write
   // the old session over this one; it re-reads and adopts the new pair.
-  await withCredentialsLock(() => saveTokens(profileName, tokens));
+  await withCredentialsLockForUser(() => saveTokens(profileName, tokens), io);
 
   // Preserve the previous `orgId` / `spaceId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call

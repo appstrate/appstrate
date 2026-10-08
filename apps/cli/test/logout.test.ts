@@ -22,7 +22,7 @@ import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
-import { credentialsLockHeld } from "./helpers/credentials-lock.ts";
+import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -168,6 +168,25 @@ describe("logout (credentials lock)", () => {
 
     expect(heldAtDelete).toEqual([true]);
     expect(await loadTokens("default")).toBeNull();
+  });
+
+  it("deletes the tokens anyway, with a warning, when the lock stays held past its wait", async () => {
+    await seedLoggedInProfile("default");
+    installFetch(async () => new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+    const release = await holdCredentialsLock();
+
+    const stopClock = jumpClock();
+    const { io, stderr } = createMemoryIO();
+    try {
+      await logoutCommand({ profile: "default" }, io);
+    } finally {
+      stopClock();
+      await release();
+    }
+
+    expect(await loadTokens("default")).toBeNull();
+    expect(await getProfile("default")).toBeNull();
+    expect(stderr()).toContain("held the credentials lock for over 30 s; proceeding without it");
   });
 });
 

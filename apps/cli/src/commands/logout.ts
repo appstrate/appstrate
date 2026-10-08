@@ -16,7 +16,7 @@
 import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
-import { withCredentialsLock } from "../lib/api.ts";
+import { withCredentialsLockForUser } from "../lib/api.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
@@ -49,10 +49,11 @@ export async function logoutCommand(
   // sign-out has happened, and a second attempt would only throw again.
   // The delete waits out any refresh holding the credentials lock, in this
   // process or another, so its trailing save cannot resurrect the tokens; a
-  // refresh still waiting finds them gone.
+  // refresh still waiting finds them gone. A holder stuck past the wait does
+  // not keep the user signed in: the delete then runs anyway.
   const clearCredentials = async (): Promise<void> => {
     try {
-      await withCredentialsLock(() => deleteTokens(profileName));
+      await withCredentialsLockForUser(() => deleteTokens(profileName), io);
     } finally {
       await deleteProfile(profileName);
       credentialsCleared = true;

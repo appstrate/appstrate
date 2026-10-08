@@ -25,7 +25,8 @@
 import { join } from "node:path";
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
 import { getConfigDir, getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
-import { withFileLock } from "./file-lock.ts";
+import { FileLockBusyError, withFileLock } from "./file-lock.ts";
+import { DEFAULT_IO, type CommandIO } from "./io.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
@@ -46,7 +47,8 @@ const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
  * read and write; the margin over it keeps every holder that can still run
  * inside a waiter's patience. A waiter that gives up (`FileLockBusyError`,
  * stored credentials untouched) therefore faces a holder no timeout can end:
- * a stopped or suspended process.
+ * a stopped or suspended process, or one blocked on a macOS keychain access
+ * prompt nobody has answered.
  */
 const REFRESH_REQUEST_TIMEOUT_MS = 20_000;
 const CREDENTIALS_LOCK_TIMEOUT_MS = REFRESH_REQUEST_TIMEOUT_MS + 10_000;
@@ -85,6 +87,28 @@ export function withCredentialsLock<T>(body: () => Promise<T>): Promise<T> {
     pollMs: CREDENTIALS_LOCK_POLL_MS,
     warnUnlocked: false,
   });
+}
+
+/**
+ * {@link withCredentialsLock} for a write the user asked for: login's save,
+ * logout's delete. Past the lock's wait the write runs anyway, after one
+ * warning: discarding tokens the server just issued, or keeping tokens
+ * after a logout, costs more than the race the lock guards. A refresh, which
+ * nobody asked for, keeps failing instead.
+ */
+export async function withCredentialsLockForUser<T>(
+  body: () => Promise<T>,
+  io: CommandIO = DEFAULT_IO,
+): Promise<T> {
+  try {
+    return await withCredentialsLock(body);
+  } catch (err) {
+    if (!(err instanceof FileLockBusyError)) throw err;
+    io.stderr.write(
+      `warning: another appstrate process has held the credentials lock for over ${CREDENTIALS_LOCK_TIMEOUT_MS / 1000} s; proceeding without it.\n`,
+    );
+    return body();
+  }
 }
 
 /**
@@ -334,6 +358,14 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
         );
       }
       throw err;
+    }
+    // Bare, the abort reads "The operation timed out." with nothing to say
+    // what timed out, or that the session survived it.
+    if ((err as { name?: unknown } | null)?.name === "TimeoutError") {
+      throw new Error(
+        `The token refresh request for profile "${profileName}" timed out after ${REFRESH_REQUEST_TIMEOUT_MS / 1000} s; the stored credentials were kept. Try again.`,
+        { cause: err },
+      );
     }
     throw err;
   }
