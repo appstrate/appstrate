@@ -48,7 +48,7 @@ const COOKIE_NAME = "oidc_login_notice";
 const COOKIE_PATH = "/api/oauth";
 const COOKIE_MAX_AGE = 60; // 60 seconds — the authorize→login round-trip is
 // sub-second; 60s absorbs slow redirects without leaving a stale banner.
-export const LOGIN_NOTICE_TOKEN_DOMAIN = "oidc-login-notice.v1.";
+const LOGIN_NOTICE_TOKEN_DOMAIN = "oidc-login-notice.v1.";
 
 /**
  * The known, closed set of notice payloads this cookie can carry.

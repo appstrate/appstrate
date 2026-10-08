@@ -50,7 +50,7 @@ let insecureCookieWarned = false;
 
 const COOKIE_NAME = "oidc_pending_client";
 const COOKIE_MAX_AGE = 10 * 60; // 10 minutes
-export const PENDING_CLIENT_TOKEN_DOMAIN = "oidc-pending-client.v1.";
+const PENDING_CLIENT_TOKEN_DOMAIN = "oidc-pending-client.v1.";
 
 /**
  * Sign `clientId` + `exp` with HMAC-SHA256 and set the cookie. Safe to call
