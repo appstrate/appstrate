@@ -183,7 +183,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
   "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
-  "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
+  "integration.auth.type.", // components/integration-connect/{inline-connect-button,connection-picker-menu}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
