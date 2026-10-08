@@ -4,6 +4,8 @@ import { describe, it, expect } from "bun:test";
 import {
   extractAuthOffers,
   extractRunAndWaitAuthOffers,
+  isStartedRunResult,
+  resumeInstruction,
   encodeResume,
   parseResume,
   INTEGRATION_RESUME_MARKER,
@@ -171,5 +173,29 @@ describe("extractRunAndWaitAuthOffers", () => {
     expect(extractRunAndWaitAuthOffers(step({ status: 409, body: {} }))).toEqual([
       { authUrl: OFFER.connect_url },
     ]);
+  });
+});
+
+describe("resuming after a connect from run_and_wait", () => {
+  const result = (payload: Record<string, unknown>) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+
+  it("tells a started run from a refused launch", () => {
+    expect(isStartedRunResult(result({ id: "run_1", done: true }))).toBe(true);
+    expect(isStartedRunResult(result({ id: "run_1", done: false, error: "timed out" }))).toBe(true);
+    expect(isStartedRunResult(result({ status: 409, body: {} }))).toBe(false);
+  });
+
+  // #1830: a run that already finished without the integration is not re-run on
+  // the model's initiative; a refused launch still continues the task.
+  it("continues the task only after a refused launch", () => {
+    expect(resumeInstruction("Gmail", false)).toBe(
+      "L'intégration Gmail est maintenant connectée. Continue la tâche.",
+    );
+    const afterRun = resumeInstruction("Gmail", true);
+    expect(afterRun).toStartWith("L'intégration Gmail est maintenant connectée.");
+    expect(afterRun).not.toContain("Continue la tâche");
+    expect(afterRun).toContain("Ne relance pas l'agent");
   });
 });

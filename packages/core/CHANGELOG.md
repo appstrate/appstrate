@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`required?: boolean`** on `ManifestIntegrationEntry` and
+  `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
+  afps-spec#28): the agent needs at least one connection of that integration
+  to run. Read by `parseManifestIntegrations`, written by
+  `writeManifestIntegrations`. Unrelated to an integration auth's
+  `_meta["dev.appstrate/auth"].required`. (#1830)
+- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`integration_unbound`,
+  `integration_not_active`), **`ConnectionResolutionWarningCode`** and
+  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a declared,
+  non-required integration the run starts without — nothing usable to bind or
+  a layer bound none, or switched off in the space — with the same
+  `authKey`, `requiredScopes`, `requiredAuthKey`, `availableAuthKeys` and
+  `candidateConnections` an error carries. (#1830)
+- **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
+  the launch's `warnings`** onto every payload it returns (preliminary,
+  terminal and timed out) when the launch reported some; absent otherwise.
+  The documented payload becomes
+  `{ id, packageId, status, done, result?, error?, warnings? }`. (#1830)
+
+### Changed
+
+- **Requires `@afps-spec/schema` `^0.9.0`** (was `^0.8.0`), which declares
+  `integrations_configuration.<id>.required` as a boolean (afps-spec#28): a
+  manifest whose `required` is not a boolean fails validation. (#1830)
+- **BREAKING: `ConnectionResolutionErrorCode` gains
+  `required_integration_unbound`** (`@appstrate/core/integration`): an
+  integration the agent marks `required` whose winning cascade layer binds no
+  connection (`[]`). Exhaustive switches over the union must handle it. (#1830)
+- **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
+  (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
+  `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
+  connection. A missing key still means inert or switched off. A producer of
+  the result must set `warnings`. (#1830)
+- **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
+  configuration onto the one already in the manifest**: keys it does not
+  model (`_meta`, extensions) are kept instead of dropped. (#1830)
+- **`ResolutionFieldError` (`@appstrate/core/api-errors`) also describes a
+  launch response's `warnings` items**: `auth_key`, `required_scopes`,
+  `required_auth_key`, `available_auth_keys`, `candidate_connections` and
+  `connect_url` may ride an `integration_unbound` warning. Documentation only:
+  the type is unchanged. (#1830)
+
 ## [15.0.0] — 2026-10-08
 
 ### Added
@@ -26,20 +70,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
   locale localises the unit names and the decimal separator (`fr` →
   `2,0 Ko`). Without it the output is unchanged.
-- **`CONNECTION_RESOLUTION_WARNING_CODES`**, **`ConnectionResolutionWarningCode`**
-  and **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a
-  declared integration the run starts without (`integration_unbound`), with
-  the same `authKey`, `requiredScopes`, `requiredAuthKey`,
-  `availableAuthKeys` and `candidateConnections` an error carries. (#1830)
-- **`required?: boolean`** on `ManifestIntegrationEntry` and
-  `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4):
-  the agent cannot run without that integration. Read by
-  `parseManifestIntegrations`, written by `writeManifestIntegrations`.
-  Unrelated to an integration auth's `_meta["dev.appstrate/auth"].required`.
-  (#1830, afps-spec#27)
-- **`required_integration_unbound`** in `CONNECTION_RESOLUTION_ERROR_CODES`
-  (`@appstrate/core/integration`): an integration the agent marks `required`
-  whose winning cascade layer binds no connection (`[]`). (#1830)
 
 ### Changed
 
@@ -67,15 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration
   binds in a run. (#1804)
-
-- **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
-  (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
-  `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
-  connection. A missing key still means inert. A producer of the result must
-  set `warnings`. (#1830)
-- **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
-  configuration onto the one already in the manifest**: keys it does not
-  model (`_meta`, extensions) are kept instead of dropped. (#1830)
 
 - **BREAKING: `ModelSwapBacking` gains a required `dialect`**
   (`PiModelDialect | null`, `@appstrate/core/sidecar-types`): the

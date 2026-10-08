@@ -1009,8 +1009,9 @@ describe("runRemote — error paths", () => {
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(RemoteRunError);
     expect((err as RemoteRunError).hint).toBe(
-      "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected); " +
-        "@appstrate/clickup: must_choose_connection (must_choose_connection)",
+      "the launch was refused:\n" +
+        "  @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n" +
+        "  @appstrate/clickup: must_choose_connection (must_choose_connection)",
     );
   });
 

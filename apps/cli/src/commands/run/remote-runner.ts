@@ -49,7 +49,7 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
-import { connectionRefusalSummary, launchEnvelope, launchItemLines } from "./launch-warnings.ts";
+import { announceLaunch, connectionRefusalLines } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
@@ -282,12 +282,15 @@ export async function runRemote(
   // "→ running ... (reporting to ... as run_xxx)" line in both modes.
   // The local path emits this on stderr from runCommandLocal:534 — see
   // also `runCommand.ts` for the source of the format string.
-  if (!opts.json) {
-    writeStderr(`→ running ${opts.bundleLabel} (reporting to ${opts.instance} as ${runId})\n`);
-    for (const line of launchItemLines(warnings)) writeStderr(`⚠ ${line}\n`);
-  } else {
-    writeStdout(launchEnvelope("appstrate.remote.triggered", runId, opts.instance, warnings));
-  }
+  announceLaunch({
+    type: "appstrate.remote.triggered",
+    json: opts.json,
+    bundleLabel: opts.bundleLabel,
+    instance: opts.instance,
+    run: { runId, warnings },
+    writeStdout,
+    writeStderr,
+  });
 
   // ─── 1b. Set up the local console sink ─────────────────────────────
   //
@@ -548,6 +551,14 @@ function apiUrl(opts: RunRemoteOptions, path: string): URL {
   return new URL(path, opts.instance);
 }
 
+/** A 409 `missing_integration_connection` as one indented line per item. */
+function refusalHint(body: unknown): string | undefined {
+  const lines = connectionRefusalLines(body);
+  return lines
+    ? `the launch was refused:${lines.map((line) => `\n  ${line}`).join("")}`
+    : undefined;
+}
+
 /** The created run's id, and the launch `warnings` the 201 carries (wire items). */
 async function triggerRun(
   opts: RunRemoteOptions,
@@ -614,7 +625,7 @@ async function triggerRun(
             "Verify --api-key / `appstrate login` is current and has agents:run + runs:read permissions."
           : res.status === 404
             ? `Agent ${opts.scope}/${opts.name} not found on ${opts.instance}.`
-            : (connectionRefusalSummary(detail) ?? undefined),
+            : refusalHint(detail),
     });
   }
 

@@ -69,7 +69,7 @@ import {
   type ReportSession,
   type ReportSource,
 } from "./run/report.ts";
-import { launchEnvelope, launchItemLines } from "./run/launch-warnings.ts";
+import { announceLaunch } from "./run/launch-warnings.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -449,24 +449,15 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     bridge.writeRaw(chunk);
   };
   const sink: EventSink = bridge.sink;
-  if (!opts.json) {
-    const reportNote = reportSession
-      ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
-      : "";
-    process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
-    for (const line of launchItemLines(reportSession?.warnings)) {
-      process.stderr.write(`⚠ ${line}\n`);
-    }
-  } else if (reportSession) {
-    writeStdout(
-      launchEnvelope(
-        "appstrate.report.started",
-        reportSession.runId,
-        resolverInputsInstance(resolverInputs),
-        reportSession.warnings,
-      ),
-    );
-  }
+  announceLaunch({
+    type: "appstrate.report.started",
+    json: opts.json,
+    bundleLabel,
+    instance: resolverInputsInstance(resolverInputs),
+    run: reportSession,
+    writeStdout,
+    writeStderr: (chunk) => process.stderr.write(chunk),
+  });
 
   // Heartbeat is lifted out of the `try` so the cleanup hook can stop
   // it whether or not the runner ever started. The shutdown coordinator

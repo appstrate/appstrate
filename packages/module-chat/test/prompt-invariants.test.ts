@@ -159,7 +159,10 @@ describe("full persona invariants", () => {
       expect(persona).toMatch(/offer to connect it/);
       expect(persona).toContain("`required_integration_unbound`");
       expect(persona).toContain("`[]` runs without that integration");
+      expect(persona).toContain("`integration_not_active`");
     }
+    // The canonical example's task means nothing without Gmail.
+    expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
   it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {

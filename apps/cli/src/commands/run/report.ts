@@ -28,7 +28,7 @@
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
-import { connectionRefusalSummary } from "./launch-warnings.ts";
+import { connectionRefusalLines } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -298,11 +298,14 @@ function truncateSnapshot(snap: ReportContextSnapshot): Record<string, unknown> 
   return obj;
 }
 
-/** A readable 409 `missing_integration_connection`, or null for any other body. */
+/**
+ * A 409 `missing_integration_connection` one item per line (at the snippet's indent), or null
+ * for any other body.
+ */
 function refusalSummary(snippet: string | null): string | null {
   if (snippet === null) return null;
   try {
-    return connectionRefusalSummary(JSON.parse(snippet));
+    return connectionRefusalLines(JSON.parse(snippet))?.join("\n    ") ?? null;
   } catch {
     return null;
   }

@@ -131,3 +131,19 @@ export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
   if (payload?.done === false && payload.error === undefined) return [];
   return extractAuthOffers(result);
 }
+
+/** Whether a `run_and_wait` result is a run that started (it has an id), not a refused launch. */
+export function isStartedRunResult(result: unknown): boolean {
+  return typeof asRecord(unwrapResult(result))?.id === "string";
+}
+
+/**
+ * The instruction the resume turn carries. After a refused launch the model
+ * continues the task; after a run that started without the integration it only
+ * acknowledges it, since running the agent again is the user's call.
+ */
+export function resumeInstruction(label: string, runStarted: boolean): string {
+  return runStarted
+    ? `L'intégration ${label} est maintenant connectée. Ne relance pas l'agent : propose-le, l'utilisateur décide.`
+    : `L'intégration ${label} est maintenant connectée. Continue la tâche.`;
+}

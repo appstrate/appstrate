@@ -21,9 +21,10 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   ReportStartError,
   startReportSession,
+  type ReportSession,
   type ReportSource,
 } from "../src/commands/run/report.ts";
-import { launchEnvelope } from "../src/commands/run/launch-warnings.ts";
+import { announceLaunch } from "../src/commands/run/launch-warnings.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 
 const REPORT_CTX = {
@@ -215,21 +216,30 @@ describe("startReportSession — integration readiness", () => {
     expect(session.warnings).toEqual([WARNING]);
   });
 
+  /** What `appstrate run --report` prints for this session, per stream. */
+  function announce(session: ReportSession | null, json: boolean) {
+    const out = { stdout: "", stderr: "" };
+    announceLaunch({
+      type: "appstrate.report.started",
+      json,
+      bundleLabel: "@scope/agent@1.0.0",
+      instance: REPORT_CTX.instance,
+      run: session,
+      writeStdout: (chunk) => (out.stdout += chunk),
+      writeStderr: (chunk) => (out.stderr += chunk),
+    });
+    return out;
+  }
+
+  const session = () =>
+    startReportSession(SOURCE, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT);
+
   it("announces the run with its warnings under --json", async () => {
     stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
-    const session = await startReportSession(
-      SOURCE,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
-    const line = launchEnvelope(
-      "appstrate.report.started",
-      session.runId,
-      REPORT_CTX.instance,
-      session.warnings,
-    );
-    expect(JSON.parse(line)).toEqual({
+    const out = announce(await session(), true);
+    expect(out.stderr).toBe("");
+    expect(out.stdout.endsWith("\n")).toBe(true);
+    expect(JSON.parse(out.stdout)).toEqual({
       type: "appstrate.report.started",
       runId: SUCCESS_BODY.id,
       instance: REPORT_CTX.instance,
@@ -239,19 +249,28 @@ describe("startReportSession — integration readiness", () => {
 
   it("announces the run without a warnings key when there are none", async () => {
     stub = installStubFetch(() => ok());
-    const session = await startReportSession(
-      SOURCE,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
+    const out = announce(await session(), true);
+    expect(JSON.parse(out.stdout)).toEqual({
+      type: "appstrate.report.started",
+      runId: SUCCESS_BODY.id,
+      instance: REPORT_CTX.instance,
+    });
+  });
+
+  it("prints one ⚠ line per warning after the preamble in human mode", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const out = announce(await session(), false);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).toBe(
+      `→ running @scope/agent@1.0.0 (reporting to ${REPORT_CTX.instance} as ${SUCCESS_BODY.id})\n` +
+        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (integration_unbound)\n",
     );
-    const line = launchEnvelope(
-      "appstrate.report.started",
-      session.runId,
-      REPORT_CTX.instance,
-      session.warnings,
-    );
-    expect(JSON.parse(line)).not.toHaveProperty("warnings");
+  });
+
+  it("announces nothing on stdout for an unreported local run under --json", () => {
+    stub = installStubFetch(() => ok());
+    expect(announce(null, true)).toEqual({ stdout: "", stderr: "" });
+    expect(announce(null, false).stderr).toBe("→ running @scope/agent@1.0.0\n");
   });
 
   it("summarises a 409 missing_integration_connection by item", async () => {
@@ -261,7 +280,10 @@ describe("startReportSession — integration readiness", () => {
           JSON.stringify({
             status: 409,
             code: "missing_integration_connection",
-            errors: [{ ...WARNING, code: "required_integration_unbound" }],
+            errors: [
+              { ...WARNING, code: "required_integration_unbound" },
+              { field: "integrations.@appstrate/clickup", code: "must_choose_connection" },
+            ],
           }),
           { status: 409, headers: { "Content-Type": "application/problem+json" } },
         ),
@@ -274,7 +296,8 @@ describe("startReportSession — integration readiness", () => {
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ReportStartError);
     expect((err as ReportStartError).responseSnippet).toBe(
-      "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)",
+      "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)" +
+        "\n    @appstrate/clickup: must_choose_connection (must_choose_connection)",
     );
   });
 });

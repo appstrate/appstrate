@@ -50,7 +50,13 @@ import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { orgSpaceFromHeaders } from "./run-events.ts";
-import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
+import {
+  claimResume,
+  encodeResume,
+  resumeInstruction,
+  type CompletionDetail,
+  type ResumeMeta,
+} from "./auth-offer.ts";
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
@@ -124,6 +130,7 @@ export function OAuthConnectCard({
   packageId,
   toolCallId,
   errorText,
+  runStarted = false,
 }: {
   /** Absent while the initiate call is still streaming — renders the preparing state. */
   authUrl?: string;
@@ -137,6 +144,8 @@ export function OAuthConnectCard({
   toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
+  /** The offer came from a run that started without the integration, not a refused launch. */
+  runStarted?: boolean;
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
@@ -217,13 +226,13 @@ export function OAuthConnectCard({
             // raw user bubble; the human sentence is what the model acts on.
             text: encodeResume(
               meta ?? { packageId: packageId ?? "" },
-              `L'intégration ${label} est maintenant connectée. Continue la tâche.`,
+              resumeInstruction(label, runStarted),
             ),
           },
         ],
       });
     },
-    [aui, label, meta, packageId, t, toolCallId],
+    [aui, label, meta, packageId, runStarted, t, toolCallId],
   );
 
   // One waiter for the card's lifetime: an SSE hit parked until the popup
