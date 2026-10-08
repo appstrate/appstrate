@@ -147,6 +147,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The agent detail's integrations carry `required` and `auth_key`** (#1830),
   as the manifest's `integrations_configuration.<id>` declares them.
 
+- **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
+  hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
+  DCR remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`,
+  `mcpemails`): `streamable-http` against `https://mcp.expo.dev/mcp`, DCR as a
+  public client with PKCE (S256) under the single `mcp:access` scope. Its 38
+  tools come from the live server's `tools/list` (Expo's documentation lags
+  it). A read-only agent selects only `build_list`/`_info`/`_logs`,
+  `workflow_list`/`_info`/`_logs`/`_validate`, `workflow_create` (returns
+  YAML), `testflight_crashes`/`_feedback`, `playstore_crashes`, the store
+  reviews, the seven `observe_*` EAS Observe reads, `sandbox_list`,
+  `sandbox_wait` (polls status) and the two documentation tools; the rest
+  change state: builds, workflow runs, cancellations, store submissions and
+  review replies, `learn` memory, `usage_budget_create`, and sandboxes
+  (`sandbox_create` is billable, `sandbox_exec`, `sandbox_write_stdin`,
+  `sandbox_stop`). Expo's local capabilities act on a member's own dev server
+  and are not declared, so the sidecar filters them out. Expo has no userinfo
+  endpoint: unless the token response names the account, connections to
+  different Expo accounts share one account key and a reconnect is unchecked.
+
 ### Fixed
 
 - **Saving an agent in the editor no longer drops the
@@ -154,6 +173,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1830): `writeManifestIntegrations` merges onto the stored configuration.
 - **The agent's system prompt carries one `## Integration` section per
   integration** instead of one per bound connection (#1830).
+
+- **`appstrate api` no longer cuts a response piped into a slower reader**
+  (#1824). Piped into `jq` or a script's `capture_output`, the body stopped at
+  the pipe capacity (64 KiB on macOS) because the CLI exited with bytes still
+  queued; `-o <file>` was unaffected. The CLI now exits only once stdout and
+  stderr have taken everything, the `-w` line included, and so does the
+  failure report of `appstrate code sync`. A reader that stops reading now
+  makes the CLI wait, as curl does, instead of losing the tail.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

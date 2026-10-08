@@ -1,0 +1,90 @@
+{
+  "name": "@appstrate/expo-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Expo",
+  "icon": "simple-icons:expo",
+  "description": "Expo's hosted MCP server (mcp.expo.dev): EAS builds and submissions, EAS Workflows, EAS Observe performance metrics and events, EAS sandboxes, TestFlight and Play Console crashes, App Store and Play Store reviews, and the Expo documentation. Authorization is standards-based OAuth with no app to register: the operator installs the connector and each member connects their own Expo account. `sandbox_create` starts a billable EAS environment. Expo exposes no user profile, so connections to different Expo accounts cannot be told apart.",
+  "keywords": ["developer-tools", "mobile", "ci", "eas", "react-native", "testflight"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://mcp.expo.dev/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "https://mcp.expo.dev",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["mcp:access"],
+      "authorized_uris": ["https://mcp.expo.dev/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "refresh_token_issuance": "default"
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "appstore_delete_review_response": {},
+    "appstore_reply_review": {},
+    "appstore_reviews": {},
+    "build_cancel": {},
+    "build_info": {},
+    "build_list": {},
+    "build_logs": {},
+    "build_run": {},
+    "build_submit": {},
+    "learn": {},
+    "observe_event_names": {},
+    "observe_events": {},
+    "observe_metrics": {},
+    "observe_metrics_summary": {},
+    "observe_routes": {},
+    "observe_session": {},
+    "observe_versions": {},
+    "playstore_crashes": {},
+    "playstore_reply_review": {},
+    "playstore_reviews": {},
+    "read_documentation": {},
+    "sandbox_create": {},
+    "sandbox_exec": {},
+    "sandbox_list": {},
+    "sandbox_stop": {},
+    "sandbox_wait": {},
+    "sandbox_write_stdin": {},
+    "search_documentation": {},
+    "testflight_crashes": {},
+    "testflight_feedback": {},
+    "usage_budget_create": {},
+    "workflow_cancel": {},
+    "workflow_create": {},
+    "workflow_info": {},
+    "workflow_list": {},
+    "workflow_logs": {},
+    "workflow_run": {},
+    "workflow_validate": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
