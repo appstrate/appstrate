@@ -1,0 +1,127 @@
+{
+  "name": "@appstrate/gitlab-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "GitLab",
+  "icon": "logos:gitlab-icon",
+  "description": "GitLab integration backed by GitLab's own MCP server ({instance}/api/v4/mcp), for GitLab.com and for any self-managed or Dedicated instance: the instance URL is a connection variable, so one package serves every instance and each connection reaches only its own. The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …`. Authorization is chosen per connection, against the instance the user named: RFC 9728 protected-resource discovery on the rendered MCP URL, whose advertised authorization server must be the instance URL itself (`issuer: {$variable.base_url}`, so an instance served under a path prefix works too), RFC 8414 metadata, RFC 7591 Dynamic Client Registration as a public client (`token_endpoint_auth_method: none`) and RFC 7636 PKCE (S256), one client per instance and space. No OAuth application is created by hand — and none can be: an instance whose administrator turned dynamic client registration off cannot be connected. The single `mcp` scope covers every tool; GitLab issues a refresh token with every authorization code. MCP access must be allowed for the top-level group on GitLab.com, or for the instance on self-managed. The server returns its default toolsets (core, merge_requests, work_items, repository, ci, duo_agent_platform); the opt-in wikis and code_security toolsets are not requested. The tool set grows with each GitLab release and differs between instances, so the catalogue below is GitLab 19.5's and `allow_undeclared_tools` lets an agent take whatever its instance advertises.",
+  "keywords": ["developer-tools", "git", "ci"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/api/v4/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL de l'instance GitLab",
+          "description": "Racine de votre instance, sans chemin (ex. https://gitlab.example.com) ; gardez https://gitlab.com pour GitLab.com. L'accès au serveur MCP doit y être autorisé : par le groupe de premier niveau sur GitLab.com, par un administrateur sur une instance auto-hébergée, qui doit aussi laisser activé l'enregistrement dynamique des clients OAuth.",
+          "default": "https://gitlab.com"
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "allow_undeclared_tools": true,
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "{$variable.base_url}",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["mcp"],
+      "scope_catalog": [
+        {
+          "value": "mcp",
+          "label": "GitLab MCP server",
+          "description": "Access to the GitLab MCP server with the user's own GitLab permissions. GitLab's only MCP scope: every tool runs under it."
+        }
+      ],
+      "authorized_uris": ["{$variable.base_url}/api/v4/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "refresh_token_issuance": "default"
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "accept_merge_request": {},
+    "add_branch": {},
+    "add_commit": {},
+    "create_issue": {},
+    "fork_repository": {},
+    "get_artifact_file": {},
+    "get_commit": {},
+    "get_duo_session": {},
+    "get_issue": {},
+    "get_job": {},
+    "get_mcp_server_version": {},
+    "get_merge_request": {},
+    "get_merge_request_commits": {},
+    "get_merge_request_conflicts": {},
+    "get_merge_request_diffs": {},
+    "get_merge_request_notes": {},
+    "get_merge_request_pipelines": {},
+    "get_pipeline": {},
+    "get_pipeline_jobs": {},
+    "get_project": {},
+    "get_repository_file": {},
+    "get_saved_view_work_items": {},
+    "get_user": {},
+    "get_work_item": {},
+    "get_work_item_types": {},
+    "get_workitem_notes": {},
+    "link_work_items": {},
+    "list_branches": {},
+    "list_commits": {},
+    "list_duo_agents_and_flows": {},
+    "list_duo_sessions": {},
+    "list_groups": {},
+    "list_merge_requests": {},
+    "list_pipelines": {},
+    "list_project_members": {},
+    "list_projects": {},
+    "list_releases": {},
+    "list_repository_tree": {},
+    "list_tags": {},
+    "list_work_items": {},
+    "manage_pipeline": {},
+    "save_merge_request": {},
+    "save_merge_request_review": {},
+    "save_note": {},
+    "save_pipeline": {},
+    "save_work_item": {},
+    "search": {},
+    "search_labels": {},
+    "semantic_search": {},
+    "send_duo_session_input": {},
+    "start_duo_session": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

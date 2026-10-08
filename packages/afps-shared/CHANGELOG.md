@@ -22,8 +22,7 @@ return a `root` with each field.
 - **`./connection-variables`** (AFPS §7.12): `VARIABLE_REF`, `variableRefs`,
   `isVariableTemplate`, `isUrlTemplate`, and `renderUrlTemplate` /
   `unrenderableUrlTemplateVariables`, which render a URL-valued field
-  (`source.remote.url`, an oauth2 `issuer`, `connect.login.request.url`) for one
-  connection. URL form: the value is an absolute `http`/`https` URL with a host
+  (`source.remote.url`, an oauth2 `issuer`) for one connection. URL form: the value is an absolute `http`/`https` URL with a host
   and no userinfo, query, fragment or `*`; it renders as its serialization, or
   as its origin and path, every trailing `/` removed, then the template's path.
   Host form: `.`-separated labels of 1 to 63 letters, digits and `-`, none
@@ -38,9 +37,6 @@ return a `root` with each field.
   literal labels, before an optional literal port) under the host-form rules;
   any other entry carrying a variable is dropped. `isHostUnboundedUriPattern`
   bounds a variable placeholder like a credential one.
-- **`loginBlockIssues`** (`./runtime-expression`) accepts a
-  `connect.login.request.url` that is a URL template, which then carries no
-  `{{name}}`.
 
 ### Changed
 
