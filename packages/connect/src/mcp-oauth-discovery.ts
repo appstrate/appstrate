@@ -81,7 +81,7 @@ function isHttpUrl(raw: string): boolean {
  * comparison rule); a document for another resource on the same origin must not bind the token's
  * audience.
  */
-export function resourceIdentifierMatches(resource: string, identifier: string): boolean {
+function resourceIdentifierMatches(resource: string, identifier: string): boolean {
   return stripTrailingSlashes(resource) === stripTrailingSlashes(identifier);
 }
 
