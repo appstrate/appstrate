@@ -72,7 +72,7 @@ describe("executeApiCall — structured failures", () => {
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
-  it("refuses unresolved target placeholders as unresolved_placeholder", async () => {
+  it("refuses unresolved target placeholders, with no shared code", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -86,7 +86,6 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
-      code: "unresolved_placeholder",
       error: "Unresolved placeholders in target: {{missing}}",
     });
   });
@@ -118,7 +117,6 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
-      code: "unresolved_placeholder",
       error: 'Unresolved placeholders in header "X-Other": {{nope}}',
     });
     expect(fetchFn).not.toHaveBeenCalled();
@@ -2811,10 +2809,11 @@ describe("executeApiCall — a header value that is no HTTP field value", () => 
     });
   }
 
-  it("refuses a caller's own invalid header value as invalid_request", async () => {
+  it("refuses a caller's own invalid header value, with no shared code", async () => {
     const { result, fetchFn } = callWith("ok", { "X-Note": "a\nb" });
     const out = await result;
-    expect(out).toMatchObject({ ok: false, code: "invalid_request" });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBeUndefined();
     expect(fetchFn).not.toHaveBeenCalled();
   });
 

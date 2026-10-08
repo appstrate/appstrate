@@ -34,7 +34,6 @@ import {
   credentialUrlPolicy,
   fetchApiCall,
   prepareApiCallRequest,
-  PREPARE_REFUSAL_CODE,
   redactionFields,
   templateHost,
   URL_POLICY_REFUSAL_CODE,
@@ -224,7 +223,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     fields,
   });
   if (!prepared.ok) {
-    throw new ProxyCallError(PREPARE_REFUSAL_CODE[prepared.refusal.kind], prepared.refusal.message);
+    const { kind, message } = prepared.refusal;
+    throw new ProxyCallError(kind === "invalid_header" ? "invalid_request" : kind, message);
   }
   const { url: target, templates } = prepared.request;
 

@@ -12,23 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ApiCallFailureCode` (`./resolvers`): the snake_case codes every `api_call`
   path reports (`unauthorized_target`, `blocked_target`,
   `credential_exfiltration_refused`, `upstream_unresolvable`,
-  `credential_unusable`, `upstream_unreachable`, `upstream_timeout`,
-  `unresolved_placeholder`, `invalid_request`), in a leaf module with the
-  maps onto them: `URL_POLICY_REFUSAL_CODE` (each `UrlPolicyRefusal`) and
-  `PREPARE_REFUSAL_CODE` (each `prepareApiCallRequest` refusal).
+  `credential_unusable`, `upstream_unreachable`, `upstream_timeout`), in a
+  leaf module with `URL_POLICY_REFUSAL_CODE` (each `UrlPolicyRefusal` to its
+  code).
 - `classifyApiCallFailure` returns the kind's shared `code`; a transport
   error's own code moves from `code` to `systemCode` (Bun's
   `ConnectionRefused`, Node's `ECONNREFUSED`), and a templated call keeps it.
 - **BREAKING:** `ApiCallFailureError` (`code: ApiCallFailureCode`) replaces
-  `AuthorizedUrisError`. The local resolver raises it for every refusal and
-  outbound failure, under the code the platform proxy answers; `details`
-  holds `integration`, the target as written, the declared allowlist, and for
-  an engine failure `redirect` and `systemCode`. An unresolvable host is
-  `upstream_unresolvable`, a timeout or transport fault is typed instead of
-  rethrown raw, an unresolved placeholder is `unresolved_placeholder` (was
-  `RESOLVER_BODY_INVALID`), an agent header that is no HTTP field value is
-  `invalid_request` on both resolvers, local and remote, and a substituted or
-  injected one is `credential_unusable`. Retired: `RESOLVER_HEADER_INVALID`,
+  `AuthorizedUrisError`. The local resolver raises it for every outbound
+  failure and URL-policy refusal, under the code the platform proxy answers;
+  `details` holds `integration`, the target as written, the declared
+  allowlist, and for an engine failure `redirect` and `systemCode`. An
+  unresolvable host is `upstream_unresolvable`, a timeout or transport fault
+  is typed instead of rethrown raw, and a substituted or injected header
+  value that is no HTTP field value is `credential_unusable`;
+  `RESOLVER_HEADER_INVALID` names the agent's own header only. Retired:
   `RESOLVER_URL_BLOCKED`, `RESOLVER_REDIRECT_BLOCKED`,
   `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, `AUTHORIZED_URIS_MISMATCH`,
   `AUTHORIZED_URIS_EMPTY`.

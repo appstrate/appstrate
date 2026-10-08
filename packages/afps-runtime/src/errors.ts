@@ -44,7 +44,9 @@ export type ResolverErrorCode =
   | "RESOLVER_BODY_INVALID"
   | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
   | "RESOLVER_PATH_SYMLINK_REFUSED"
-  | "RESOLVER_PATH_INVALID";
+  | "RESOLVER_PATH_INVALID"
+  // A header value the caller sent is no HTTP field value.
+  | "RESOLVER_HEADER_INVALID";
 
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =

@@ -16,10 +16,7 @@ import {
   ApiCallRefusedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
-import {
-  PREPARE_REFUSAL_CODE,
-  URL_POLICY_REFUSAL_CODE,
-} from "../../src/resolvers/api-call-failure-codes.ts";
+import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/api-call-failure-codes.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 const publicResolver = async () => ["203.0.113.7"];
@@ -706,10 +703,6 @@ describe("classifyApiCallFailure", () => {
       unrendered: "unauthorized_target",
       unauthorized: "unauthorized_target",
       exfiltration: "credential_exfiltration_refused",
-    });
-    expect(PREPARE_REFUSAL_CODE).toEqual({
-      unresolved_placeholder: "unresolved_placeholder",
-      invalid_header: "invalid_request",
     });
   });
 });

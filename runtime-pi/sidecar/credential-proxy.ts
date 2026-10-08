@@ -42,7 +42,6 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
-  PREPARE_REFUSAL_CODE,
   prepareApiCallRequest,
   redactionFields,
   redactCredentialHost,
@@ -122,7 +121,10 @@ interface ApiCallSuccess {
 
 interface ApiCallFailure {
   ok: false;
-  /** Absent on a failure before the call is judged (bad integration id, credential fetch). */
+  /**
+   * Absent on a failure before the call is judged (bad integration id, credential fetch,
+   * request preparation).
+   */
   code?: ApiCallFailureCode;
   error: string;
 }
@@ -275,13 +277,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) {
-    return {
-      ok: false,
-      code: PREPARE_REFUSAL_CODE[prepared.refusal.kind],
-      error: prepared.refusal.message,
-    };
-  }
+  if (!prepared.ok) return { ok: false, error: prepared.refusal.message };
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.

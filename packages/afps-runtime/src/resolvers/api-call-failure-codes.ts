@@ -12,21 +12,13 @@ export type ApiCallFailureCode =
   | "upstream_unresolvable"
   | "credential_unusable"
   | "upstream_unreachable"
-  | "upstream_timeout"
-  | "unresolved_placeholder"
-  | "invalid_request";
+  | "upstream_timeout";
 
 export const URL_POLICY_REFUSAL_CODE = {
   unrendered: "unauthorized_target",
   unauthorized: "unauthorized_target",
   exfiltration: "credential_exfiltration_refused",
 } as const satisfies Record<UrlPolicyRefusal, ApiCallFailureCode>;
-
-/** `prepareApiCallRequest` judged the caller's own headers: an invalid one is the request's fault. */
-export const PREPARE_REFUSAL_CODE = {
-  unresolved_placeholder: "unresolved_placeholder",
-  invalid_header: "invalid_request",
-} as const satisfies Record<string, ApiCallFailureCode>;
 
 /** `fetchApiCall`'s failure kinds: past preparation, an invalid header value is the credential's. */
 export const ENGINE_FAILURE_CODE = {

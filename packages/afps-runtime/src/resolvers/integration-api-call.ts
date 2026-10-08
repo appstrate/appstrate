@@ -54,12 +54,8 @@ import {
 } from "@appstrate/afps-shared/mcp-naming";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { classifyApiCallFailure, fetchApiCall, forwardableHeaders } from "./api-call-engine.ts";
-import {
-  PREPARE_REFUSAL_CODE,
-  URL_POLICY_REFUSAL_CODE,
-  type ApiCallFailureCode,
-} from "./api-call-failure-codes.ts";
-import { ApiCallFailureError } from "../errors.ts";
+import { URL_POLICY_REFUSAL_CODE, type ApiCallFailureCode } from "./api-call-failure-codes.ts";
+import { ApiCallFailureError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -472,12 +468,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
       if (!prepared.ok) {
         const { kind, message } = prepared.refusal;
-        throw apiCallFailure(
-          PREPARE_REFUSAL_CODE[kind],
-          `Integration ${meta.name}: ${message}`,
-          meta,
-          req.target,
-        );
+        if (kind === "invalid_header") throw headerInvalid(meta.name, message);
+        throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
+          integration: meta.name,
+        });
       }
       const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
@@ -580,6 +574,13 @@ function apiCallFailure(
     target,
     allowlist: meta.authorizedUris,
     ...extra,
+  });
+}
+
+/** An agent header value that is no HTTP field value (the message names the header only). */
+function headerInvalid(integration: string, message: string): ResolverError {
+  return new ResolverError("RESOLVER_HEADER_INVALID", `Integration ${integration}: ${message}`, {
+    integration,
   });
 }
 
@@ -724,14 +725,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       try {
         agentHeaders = forwardableHeaders({ headers: req.headers });
       } catch (err) {
-        if (err instanceof InvalidHeaderValueError) {
-          throw apiCallFailure(
-            PREPARE_REFUSAL_CODE.invalid_header,
-            `Integration ${meta.name}: ${err.message}`,
-            meta,
-            req.target,
-          );
-        }
+        if (err instanceof InvalidHeaderValueError) throw headerInvalid(meta.name, err.message);
         throw err;
       }
       for (const name of RESERVED_TRANSPORT_HEADERS) agentHeaders.delete(name);
