@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
-  hosted MCP server (#1831).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
+  hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
   DCR remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`,
   `mcpemails`): `streamable-http` against `https://mcp.expo.dev/mcp`, RFC 7591
   DCR as a public client with PKCE (S256) under the single `mcp:access` scope.
