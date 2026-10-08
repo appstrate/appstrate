@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Keyring-HMAC capability tokens — the ONE codec behind every short-lived,
- * URL-carried capability the platform mints (filesystem/proxy upload URLs,
- * document previews, hosted connect sessions).
+ * Keyring-HMAC capability tokens — the ONE codec behind every short-lived
+ * signed capability the platform mints (tokens and cookies).
  *
  * Wire format: `base64url(JSON payload).base64url(HMAC-SHA256)`.
  *
@@ -28,9 +27,8 @@
  * claims, so {@link verifyKeyringToken} returns the decoded payload after the
  * signature check and leaves semantics to the caller.
  *
- * Zero-dependency leaf so `@appstrate/core` (storage), the platform API
- * (document previews) and `@appstrate/connect` (hosted connect sessions) can
- * all sit above it without a cycle.
+ * Zero-dependency leaf so every package that mints or verifies one can sit
+ * above it without a cycle.
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";

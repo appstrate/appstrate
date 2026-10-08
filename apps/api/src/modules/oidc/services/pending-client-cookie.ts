@@ -108,13 +108,7 @@ export function hasAuthoritativePendingClient(headers: Headers | null): boolean 
   return headers?.get(AUTHORITATIVE_PENDING_CLIENT_HEADER) === AUTHORITY_PROOF;
 }
 
-/**
- * Build the signed cookie value — the exact string
- * `issuePendingClientCookie` writes to `Set-Cookie`. Exposed so the
- * server-driven OIDC handlers can mint an AUTHORITATIVE binding to feed into a
- * Better-Auth call (see `headersWithAuthoritativePendingClient`) instead of
- * trusting the browser-supplied cookie.
- */
+/** The signed value shared by `issuePendingClientCookie` and `headersWithAuthoritativePendingClient`. */
 function buildSignedPendingClientValue(clientId: string): string {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
   return signKeyringToken(PENDING_CLIENT_TOKEN_DOMAIN, { clientId, exp }, authKeyring());
