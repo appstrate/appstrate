@@ -26,10 +26,13 @@ import {
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import {
   clearNotice,
-  getNoticePath,
+  loginFix,
+  setupNotice,
+  switchFix,
   syncProblemNotice,
   writeNotice,
   type Actionable,
+  type NoticeFix,
   type SessionNotice,
 } from "../lib/skills-sync/notice.ts";
 import {
@@ -52,6 +55,7 @@ import {
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";
 import {
+  getNoticePath,
   readSyncState,
   syncContext,
   sameContext,
@@ -65,7 +69,6 @@ import {
   pluginFixedFiles,
   pluginTreeMatches,
   removeManagedDir,
-  setupNotice,
   setupPluginFiles,
   skillDir,
   SYNC_TARGETS,
@@ -156,8 +159,8 @@ export async function codeSyncCommand(
   // Whether `claude-plugin` ended the run as the server describes it: the
   // `--print-path` verdict, and which of the run's notices stands.
   let pluginOk = false;
-  // Resolved under the lock with everything else; an `AuthError` names it.
-  let activeProfile: string | undefined;
+  // Resolved under the lock with everything else; an `AuthError` notice names it.
+  let activeProfile: ActiveProfile | undefined;
   const fail = (err: unknown): void => {
     pluginOk = false;
     report.run(
@@ -170,9 +173,12 @@ export async function codeSyncCommand(
 
   const sync = async (): Promise<void> => {
     const { profileName, profile } = await resolveActiveProfile(opts.profile);
-    activeProfile = profileName;
+    activeProfile = { name: profileName, instance: profile?.instance };
     const gap = connectionGap(profileName, profile);
-    if (gap && !printPath) throw new Error(remedyLine(gap));
+    if (gap && !printPath) {
+      reportGap(gap, report);
+      return;
+    }
     const { state, corrupt } = await readSyncState();
     if (corrupt) {
       io.stderr.write(
@@ -292,12 +298,18 @@ function remedyLine({ problem, remedy }: Actionable): string {
   return `${problem}. Run: ${remedy}`;
 }
 
+interface ActiveProfile {
+  name: string;
+  instance?: string;
+}
+
 /** Whatever an `AuthError` says went wrong with the session, logging in again fixes it. */
-function signedOut(profileName: string): Actionable {
-  return {
-    problem: `The CLI login for profile "${profileName}" is missing or no longer valid`,
-    remedy: `appstrate login --profile ${profileName}`,
-  };
+function signedOut({ name, instance }: ActiveProfile): NoticeFix {
+  return loginFix(
+    `The CLI login for profile "${name}" is missing or no longer valid`,
+    name,
+    instance,
+  );
 }
 
 interface Notices {
@@ -328,17 +340,30 @@ async function updateNotice(
   }
 }
 
+/** `fix`: the remedy as the notice offers it, which may differ from the stderr one. */
+interface ConnectionGap extends Actionable {
+  fix: NoticeFix;
+}
+
 /** What still separates this profile from a syncable space, if anything. */
-function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
+function connectionGap(profileName: string, profile: Profile | undefined): ConnectionGap | null {
   if (!profile) {
+    const problem = `Profile "${profileName}" not configured`;
     return {
-      problem: `Profile "${profileName}" not configured`,
+      problem,
       remedy: `appstrate login --profile ${profileName}`,
+      fix: loginFix(problem, profileName),
     };
   }
-  if (!profile.orgId) return { problem: "No organization pinned", remedy: "appstrate org switch" };
-  if (!profile.spaceId) return { problem: "No space pinned", remedy: "appstrate space switch" };
-  return null;
+  const pin = !profile.orgId ? "org" : !profile.spaceId ? "space" : null;
+  if (!pin) return null;
+  const problem = pin === "org" ? "No organization pinned" : "No space pinned";
+  return { problem, remedy: `appstrate ${pin} switch`, fix: switchFix(problem, pin) };
+}
+
+/** A gap outside the setup case: the run fails, and the next session is told why. */
+function reportGap(gap: ConnectionGap, report: Report): void {
+  report.run(remedyLine(gap), syncProblemNotice(gap.fix, { stale: true }));
 }
 
 /**
@@ -348,20 +373,19 @@ function connectionGap(profileName: string, profile: Profile | undefined): Actio
  * lapsed login never takes working skills away.
  */
 async function bootstrapPlugin(
-  gap: Actionable,
+  gap: ConnectionGap,
   state: SyncState,
   report: Report,
 ): Promise<boolean> {
-  const message = remedyLine(gap);
   // Connected syncs record a target even with no skills. Setup never records
   // one: a lost profile must preserve an empty plugin's working MCP server too.
   if (state.targets["claude-plugin"]?.root === targetRoot("claude-plugin")) {
-    report.run(message, syncProblemNotice(gap, { stale: true }));
+    reportGap(gap, report);
     return false;
   }
-  report.note(message, setupNotice(gap.problem, gap.remedy));
+  report.note(remedyLine(gap), setupNotice(gap.fix));
   try {
-    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.problem, gap.remedy));
+    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.fix));
     return true;
   } catch (err) {
     report.run(`Failed to write claude-plugin: ${formatError(err)}`);
@@ -770,7 +794,10 @@ async function reachableSpaces(
       problem: `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
       remedy: "appstrate org switch",
     };
-    report.note(remedyLine(revoked), syncProblemNotice(revoked, { stale: false }));
+    report.note(
+      remedyLine(revoked),
+      syncProblemNotice(switchFix(revoked.problem, "org"), { stale: false }),
+    );
     return null;
   }
 }
@@ -811,7 +838,10 @@ async function selectSources(
       problem: `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
       remedy: "appstrate space switch",
     };
-    report.note(remedyLine(deadPin), syncProblemNotice(deadPin, { stale: false }));
+    report.note(
+      remedyLine(deadPin),
+      syncProblemNotice(switchFix(deadPin.problem, "space"), { stale: false }),
+    );
   }
   const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };

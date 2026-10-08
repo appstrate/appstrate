@@ -20,14 +20,14 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getDataDir, homeDir } from "../config.ts";
-import { getNoticePath, type SessionNotice } from "./notice.ts";
+import { getNoticePath } from "./state.ts";
 
 export const SYNC_TARGETS = ["claude-plugin", "codex", "claude-user"] as const;
 export type SyncTarget = (typeof SYNC_TARGETS)[number];
 
 const STAGING_DIR = ".appstrate-staging";
 
-const PLUGIN_NAME = "appstrate";
+export const PLUGIN_NAME = "appstrate";
 
 const MCP_SERVER_NAME = "appstrate";
 
@@ -136,15 +136,24 @@ export interface SkillTree {
   files: Record<string, Uint8Array>;
 }
 
-const SETUP_SLUG = "setup";
+export const SETUP_SLUG = "setup";
 
 /**
  * The plugin a machine gets before the CLI is connected, so the marketplace
  * install succeeds and the remedy sits where the user works: one skill that
- * says how, while {@link setupNotice} says it at every session start. The
- * first connected sync replaces the whole tree.
+ * says how, while `setupNotice` (`notice.ts`) says it at every session start.
+ * The first connected sync replaces the whole tree. The fix is a `NoticeFix`,
+ * typed structurally here because `notice.ts` imports this module.
  */
-export function setupPluginFiles(problem: string, remedy: string): Record<string, Uint8Array> {
+export function setupPluginFiles({
+  problem,
+  remedy,
+  ask,
+}: {
+  problem: string;
+  remedy: string;
+  ask?: string;
+}): Record<string, Uint8Array> {
   const skillMd = [
     "---",
     `name: ${SETUP_SLUG}`,
@@ -158,15 +167,14 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
     `The \`${PLUGIN_NAME}\` plugin syncs your Appstrate organization's skills into Claude Code, ` +
       `but this machine is not connected yet: ${problem}.`,
     "",
-    "1. Run the login. It opens the browser on the device-flow page; the user only has to " +
-      "approve there. Ask for the Appstrate instance URL if unknown (`https://app.appstrate.com` " +
-      "for the hosted service) and pass it as `--instance`:",
+    `1. Run this command${ask ? `, asking the user for ${ask} first` : ""}:`,
     "",
     "   ```sh",
-    `   ${remedy} --instance <url>`,
+    `   ${remedy}`,
     "   ```",
     "",
-    "   With several organizations, add `--org <slug>`.",
+    "   A login opens the browser on the device-flow page; the user only has to approve " +
+      "there. With several organizations, add `--org <slug>` to it.",
     `2. Reload the plugin with \`${PLUGIN_UPDATE_COMMAND}\`, or start a new ` +
       "Claude Code session. The organization's skills then replace this one.",
     "",
@@ -174,26 +182,6 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
   return {
     ...pluginFixedFiles(),
     [`skills/${SETUP_SLUG}/SKILL.md`]: new TextEncoder().encode(skillMd),
-  };
-}
-
-/**
- * What a setup plugin's session start says: to the user, and to the model so it
- * can offer to run the login itself.
- */
-export function setupNotice(problem: string, remedy: string): SessionNotice {
-  return {
-    systemMessage:
-      `Appstrate skills: this machine is not connected (${problem}). ` +
-      `Run \`${remedy}\`, or ask Claude to run it for you.`,
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext:
-        `The ${PLUGIN_NAME} plugin is installed but not connected: ${problem}. ` +
-        `Offer to run \`${remedy} --instance <url>\` for the user (it opens the browser; ` +
-        `they only approve there), then \`${PLUGIN_UPDATE_COMMAND}\`. ` +
-        `The /${PLUGIN_NAME}:${SETUP_SLUG} skill has the details.`,
-    },
   };
 }
 

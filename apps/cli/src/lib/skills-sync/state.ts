@@ -96,6 +96,15 @@ export function getStatePath(): string {
   return join(getDataDir(), "skills-sync", "state.json");
 }
 
+/**
+ * The session notice (`notice.ts`) sits beside the ledger, outside the tree for
+ * the same reason. Its path is here so `targets.ts` can name it in the plugin's
+ * hook without importing `notice.ts`, which imports `targets.ts`.
+ */
+export function getNoticePath(): string {
+  return join(getDataDir(), "skills-sync", "notice.json");
+}
+
 function emptySyncState(): SyncState {
   return { version: STATE_VERSION, targets: {} };
 }
