@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0037-verify-authorized-uri-host-bounds.ts` on a private PGlite replayed to the
- * current schema: the report lists each `authorized_uris` entry whose wildcard is not under a
- * literal registrable domain, on every auth of every org draft and published version, and nothing
- * for a system package; the accepted wildcards, as information; and the Shopify connections of the
- * primary auth. The Shopify check names why a connection's `shop_domain` would not reach its store,
- * never the value.
+ * `scripts/migration/0037-verify-authorized-uri-host-bounds.ts` on a PGlite replayed to the
+ * current schema. The Shopify check never names a `shop_domain` value.
  */
-
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { PGlite } from "@electric-sql/pglite";
 import { journalPGlite } from "../helpers/journal.ts";
@@ -18,10 +13,8 @@ import {
 } from "../../../../scripts/migration/0035-verify-manifest-expressions.ts";
 import {
   SHOPIFY_CONNECTIONS_QUERY,
-  shopDomainCaseNote,
   shopDomainIssue,
   unboundedEntries,
-  wildcardEntries,
 } from "../../../../scripts/migration/0037-verify-authorized-uri-host-bounds.ts";
 
 const TENANT = "@acme0037/tenant";
@@ -105,17 +98,6 @@ describe("0037 — authorized_uris wildcards the release no longer bounds", () =
     ]);
   });
 
-  it("lists every accepted host wildcard, as information on its run-time targets", async () => {
-    const { rows } = await pg.query<StoredManifest>(STORED_MANIFESTS_QUERY);
-    expect(wildcardEntries(rows)).toEqual([
-      `${CUSTOM}@draft auths.c.authorized_uris.1: https://*.amazonaws.com/** (judged when a credential is substituted)`,
-      `${SUFFIX}@draft auths.k.authorized_uris.0: https://*.zendesk.com/**`,
-      `${SUFFIX}@draft auths.k.authorized_uris.1: https://*.example.co.uk/**`,
-      `${TENANT}@draft auths.k.authorized_uris.0: https://*.zendesk.com/**`,
-      `${TENANT}@draft auths.k.authorized_uris.1: https://*.example.co.uk/**`,
-    ]);
-  });
-
   it("leaves an empty list or allow_all_uris to 0035", () => {
     const manifest = JSON.stringify({
       auths: { k: { ...apiKeyAuth([]).auths.k, allow_all_uris: true } },
@@ -133,15 +115,6 @@ describe("0037 — a Shopify shop_domain that would not reach its store", () => 
   it("accepts a <store>.myshopify.com host, in any case", () => {
     for (const shop_domain of ["my-store.myshopify.com", "My-Store.MyShopify.COM"]) {
       expect(shopDomainIssue({ shop_domain, access_token: "t" })).toBeNull();
-    }
-  });
-
-  it("notes a value only its case keeps from the schema pattern, and nothing else", () => {
-    const note = shopDomainCaseNote({ shop_domain: "My-Store.MyShopify.COM" });
-    expect(note).toContain("case fails the schema pattern");
-    expect(note).not.toContain("My-Store");
-    for (const shop_domain of ["my-store.myshopify.com", "my-store"]) {
-      expect(shopDomainCaseNote({ shop_domain })).toBeNull();
     }
   });
 

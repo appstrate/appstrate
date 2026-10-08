@@ -939,10 +939,8 @@ async function forwardInnerRequest(
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
-  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
-  // auth's allowlist names, never to one an entry leaves to the caller nor past the registrable
-  // domain a wildcard sits under. Applied to every build, the first attempt and the post-refresh
-  // replay alike; `null` = refused.
+  // The api_call rule (`credentialUrlPolicy`), applied to every build: the first attempt and the
+  // post-refresh replay alike.
   type PlannedAction = MitmAction & { credentialRevision: string | undefined };
   const buildAction = (): { action: PlannedAction } | { refusal: BoundRefusal } => {
     const ctx: MitmRequestContext = {
@@ -1104,10 +1102,7 @@ const HOST_OPEN: BoundRefusal = {
   reason: "credential not host-bounded",
   body: "MITM listener: credential allowlist leaves the host open",
 };
-/**
- * Why a credential may not go to `url` under `uris` (`credentialUrlPolicy`'s rule), or `null`.
- * The body names the host of `shownUrl`, the request before any login substitution.
- */
+/** `credentialUrlPolicy`'s rule; the body names `shownUrl`'s host, never a substituted one. */
 function credentialBoundRefusal(
   url: string,
   uris: readonly string[],

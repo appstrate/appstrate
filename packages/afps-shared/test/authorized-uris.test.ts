@@ -11,7 +11,6 @@ import {
   parseUrlFormPattern,
   renderAuthorizedUris,
   unrenderableAuthorizedUriFields,
-  wildcardHostLiteral,
   wildcardMatchStaysWithinBound,
 } from "../src/authorized-uris.ts";
 
@@ -372,17 +371,6 @@ describe("isHostUnboundedUriPattern", () => {
       "https://127.1/**",
     ]) {
       expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
-    }
-  });
-});
-
-describe("wildcardHostLiteral", () => {
-  it("is the labels right of the host's last wildcard, null without one", () => {
-    expect(wildcardHostLiteral("https://*.api.crm4.dynamics.com/**")).toBe("api.crm4.dynamics.com");
-    expect(wildcardHostLiteral("HTTPS://api.*.Example.COM./**")).toBe("example.com");
-    expect(wildcardHostLiteral("https://*/**")).toBe("");
-    for (const pattern of ["https://api.example.com/**", "{$credential.site_url}/**", "**"]) {
-      expect([pattern, wildcardHostLiteral(pattern)]).toEqual([pattern, null]);
     }
   });
 });

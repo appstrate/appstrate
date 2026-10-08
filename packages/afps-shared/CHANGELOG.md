@@ -37,9 +37,6 @@ subpath (core raises its range to `^0.11.0`).
   entry's last wildcard. Always true for an entry whose host holds no
   wildcard (a literal, a `{$credential.<field>}` host, the URL form); false
   for an IP target. (#1656)
-- **`wildcardHostLiteral(pattern)`** (`./authorized-uris`): the labels right
-  of the last wildcard of a `scheme://` entry's host, `null` when its host has
-  none — the literal part both host rules judge. (#1656)
 - **`substituteCredentialRefs`** (`./credential-template`): each
   `{$credential.<field>}` to its value, a missing or inherited field empty,
   any other `{$…}` left as is. (#1763)

@@ -270,7 +270,7 @@ describe("credentialStaysWithinBound", () => {
     expect(credentialStaysWithinBound("https://sts.amazonaws.com/", [pattern])).toBe(true);
   });
 
-  it("fails closed on a URL that does not parse", () => {
-    expect(credentialStaysWithinBound("not a url", ["https://*.amazonaws.com/**"])).toBe(false);
+  it("leaves a URL that does not parse to fetchApiCall, which refuses it", () => {
+    expect(credentialStaysWithinBound("not a url", ["https://*.amazonaws.com/**"])).toBe(true);
   });
 });

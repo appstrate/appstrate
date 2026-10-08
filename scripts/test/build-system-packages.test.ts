@@ -7,9 +7,7 @@
  * Driven from synthetic manifests, not the repo's sources: the gate must hold
  * whatever version the tree happens to be at. A guard that stops comparing
  * passes everything, so each rejection is paired with an accepted case. The
- * last block is the exception: it reads the real sources, so a manifest a
- * write path would refuse fails here as well as in the build — in `bun test`,
- * where a `tldts` bump is validated, next to the tenant-host pins below.
+ * last block reads the real sources, so a `tldts` bump fails in `bun test` too.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -98,8 +96,7 @@ describe("system package sources — manifest write-path rules", () => {
     expect(uris).toContain("https://*.salesforce.com/**");
   });
 
-  // Pins the run-time half against a Public Suffix List bump: a tenant host these wildcards
-  // serve must keep its credential. A failure here means the list moved; rerun 0037.
+  // A failure here means the Public Suffix List moved: rerun 0037.
   it.each([
     "https://acme.zendesk.com/api/v2/tickets",
     "https://acme.my.salesforce.com/services/data/v61.0",

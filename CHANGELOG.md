@@ -32,11 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `authorized_uris` the release no longer accepts (below), on any auth; the
   `@appstrate/shopify` connections whose `shop_domain` is not a
   `<store>.myshopify.com` host, by id, never a value, and exits 1 while one
-  remains. It also prints, without counting them, every remaining host
-  wildcard (its targets under a deeper public suffix are refused at run time)
-  and every `shop_domain` whose case the new schema `pattern` refuses on the
-  next update. Run it again after a `tldts` bump. What each line means and how
-  to fix it: `scripts/migration/README.md`.
+  remains. Run it again after a `tldts` bump. What each line means and how to
+  fix it: `scripts/migration/README.md`.
 
 ### Changed
 
