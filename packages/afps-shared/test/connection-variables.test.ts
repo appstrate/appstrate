@@ -6,6 +6,7 @@ import {
   isVariableTemplate,
   parseUrlTemplate,
   renderUrlTemplate,
+  stripTrailingSlashes,
   unrenderableUrlTemplateVariables,
   EXPECTED_HOST_VALUE,
   EXPECTED_URL_VALUE,
@@ -229,5 +230,20 @@ describe("unrenderableUrlTemplateVariables", () => {
         b: "x",
       }).map(({ name }) => name),
     ).toEqual(["a", "b"]);
+  });
+});
+
+describe("stripTrailingSlashes", () => {
+  it("strips every trailing slash and nothing else", () => {
+    expect(stripTrailingSlashes("https://a.example.com/x///")).toBe("https://a.example.com/x");
+    expect(stripTrailingSlashes("///")).toBe("");
+    expect(stripTrailingSlashes("https://a.example.com")).toBe("https://a.example.com");
+  });
+
+  it("stays linear on a long run of slashes", () => {
+    const hostile = `${"/".repeat(100_000)}x`;
+    const started = performance.now();
+    expect(stripTrailingSlashes(hostile)).toBe(hostile);
+    expect(performance.now() - started).toBeLessThan(50);
   });
 });

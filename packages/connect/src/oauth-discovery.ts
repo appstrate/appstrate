@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createCache } from "@appstrate/core/cache";
+import { stripTrailingSlashes } from "@appstrate/afps-shared/connection-variables";
 import { readJsonUnder } from "./bounded-body.ts";
 import { oauthEgressFetch } from "./oauth-egress.ts";
 
@@ -100,7 +101,7 @@ function trimTrailingSlash(url: string): string {
 
 /** AFPS §7.12: two URL identifiers are equal once every trailing `/` is stripped. */
 export function sameUrlIdentifier(a: string, b: string): boolean {
-  return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+  return stripTrailingSlashes(a) === stripTrailingSlashes(b);
 }
 
 /**
@@ -196,7 +197,7 @@ export async function resolveOAuthEndpoints(
       tokenEndpoint: input.tokenEndpoint,
     };
   }
-  const configuredIssuer = issuer.replace(/\/+$/, "");
+  const configuredIssuer = stripTrailingSlashes(issuer);
   const discovered = await discoveryCache.get(configuredIssuer, () =>
     discover(issuer, configuredIssuer, input.fetchImpl),
   );

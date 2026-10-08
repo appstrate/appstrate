@@ -6,6 +6,13 @@
  * connection's upstream from them. A variable is not a secret: its value may be shown and logged.
  */
 
+/** `value` without its trailing `/`s, in linear time: a `/\/+$/` regex backtracks on untrusted input. */
+export function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--;
+  return value.slice(0, end);
+}
+
 /** One `{$variable.<name>}` reference; group 1 is the name (`VARIABLE_NAME_REGEX`, Appendix B). */
 export const VARIABLE_REF = /\{\$variable\.([a-z][a-z0-9_]*)\}/g;
 
@@ -84,7 +91,7 @@ export function renderUrlVariable(
 ): string | null {
   const url = parseUrlVariableValue(variableValue(variables, name));
   if (!url) return null;
-  return path === "" ? url.href : url.origin + url.pathname.replace(/\/+$/, "") + path;
+  return path === "" ? url.href : url.origin + stripTrailingSlashes(url.pathname) + path;
 }
 
 /** The host-form variable `name`, lowercased, followed by `domain`; `null` past 253 characters. */
