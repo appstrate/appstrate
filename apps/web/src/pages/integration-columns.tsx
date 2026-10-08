@@ -23,18 +23,15 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { ArrowUpFromLine, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, Building2, CircleCheck, RotateCcw, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
 import { TableRowActions } from "../components/table-row-actions";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../lib/integration-presentation";
-import type {
-  IntegrationAuthType,
-  IntegrationClient,
-  IntegrationConnection,
-} from "../hooks/use-integrations";
+import type { IntegrationAuthType, IntegrationConnection } from "../hooks/use-integrations";
+import type { ClientRow } from "../lib/integration-clients";
 import {
   AccountCell,
   ConnectionActionsCell,
@@ -47,45 +44,47 @@ import {
 // ─────────────────────────────────────────────
 
 /**
- * The OAuth client column set: which client, whether it is the default, and
- * what may be done to it.
+ * The OAuth client column set: which client, at what level, whether this space
+ * uses it, and what may be done to it.
  *
- * Four columns. Type and `default` wait for a 36rem table because on a phone what
- * matters is which clients exist and how to remove one; which of them connect
- * picks is a setting you come back for.
+ * ONE table for both tiers (`lib/integration-clients.ts` merges the space's and
+ * the organisation's lists): a client appears once, and "used here" is the
+ * single verdict that matters for a new connection. Use waits for a 36rem
+ * table and level for the next tier: on a phone what matters is which clients
+ * exist and how to remove one, and on a narrow table which one is in use.
  *
- * The same set draws both tiers — the space's clients and the organisation's.
- * Only the tier's OWN rows (`ownSource`) can be rotated, promoted or deleted:
- * the space table also lists the org's clients it inherits, read-only there.
+ * What a row offers follows its level: a space's own client can be rotated,
+ * shared with the organisation or deleted by whoever configures the space; an
+ * organisation client only by an org integrations admin; the system's by nobody.
  */
 export function useIntegrationClientColumns({
-  ownSource,
-  tid,
-  canChooseDefault,
+  canUseHere,
+  canManageOrg,
+  canChooseOrgDefault,
   canPromote,
-  settingDefaultClientRef,
-  deletingClientRef,
-  onSetDefault,
+  pendingClientRef,
+  onUseHere,
+  onUseForOrg,
   onRotate,
   onPromote,
   onDelete,
 }: {
-  /** The rows this table's tier owns: `custom` for a space, `org` for the organisation. */
-  ownSource: "custom" | "org";
-  /** An org row shows in both tables on the page: the org table prefixes its test ids. */
-  tid: (id: string) => string;
-  /** Choosing one only means something when more than one client can mint. */
-  canChooseDefault: boolean;
-  /** Moving a space's own client up to the org tier, for an org integrations admin. */
+  /** Choosing one only means something when the space can mint with more than one. */
+  canUseHere: boolean;
+  /** The caller holds `org-integrations:configure`. */
+  canManageOrg: boolean;
+  /** Same rule for the organisation's own choice. */
+  canChooseOrgDefault: boolean;
+  /** Moving a space's own client up to the organisation. */
   canPromote: boolean;
-  settingDefaultClientRef: string | null;
-  /** The delete in flight — only that row shows pending. */
-  deletingClientRef: string | null;
-  onSetDefault: (client: IntegrationClient) => void;
-  onRotate: (client: IntegrationClient) => void;
-  onPromote: (client: IntegrationClient) => void;
-  onDelete: (client: IntegrationClient) => void;
-}): DataColumn<IntegrationClient>[] {
+  /** The row with a write in flight — only that row shows pending. */
+  pendingClientRef: string | null;
+  onUseHere: (row: ClientRow) => void;
+  onUseForOrg: (row: ClientRow) => void;
+  onRotate: (row: ClientRow) => void;
+  onPromote: (row: ClientRow) => void;
+  onDelete: (row: ClientRow) => void;
+}): DataColumn<ClientRow>[] {
   const { t } = useTranslation("settings");
 
   return [
@@ -93,101 +92,116 @@ export function useIntegrationClientColumns({
       id: "client",
       header: t("integration.clients.col.clientId"),
       width: "minmax(200px,2fr)",
-      cell: (client) => (
+      cell: ({ client }) => (
         <span className="text-muted-foreground block truncate text-sm" title={client.client_id}>
           {client.client_id}
         </span>
       ),
     },
     {
-      id: "type",
-      header: t("integration.clients.col.type"),
-      width: "72px",
-      tier: 2,
-      cell: (client) => (
+      id: "level",
+      header: t("integration.clients.col.level"),
+      width: "104px",
+      tier: 3,
+      cell: ({ client, level }) => (
         <span className="text-muted-foreground block truncate text-xs">
-          {client.source === "built-in"
+          {level === "system"
             ? t("source.builtIn")
-            : client.source === "org"
+            : level === "org"
               ? t("source.org")
               : client.auto_provisioned
                 ? t("source.autoProvisioned")
-                : // Beside the org's rows, a space's own client reads as the space's.
-                  t("source.space")}
+                : t("source.space")}
         </span>
       ),
     },
     {
-      id: "default",
-      header: t("integration.clients.col.default"),
-      width: "132px",
+      id: "use",
+      header: t("integration.clients.col.use"),
+      width: "168px",
       tier: 2,
-      cell: (client) => (
-        <DefaultCell
-          isDefault={client.is_default}
-          defaultLabel={t("integration.clients.default")}
-          setLabel={t("integration.clients.setDefault.action")}
-          canSetDefault={false}
-          disabled={settingDefaultClientRef !== null}
-          isPending={settingDefaultClientRef === client.client_ref}
-          onSetDefault={() => onSetDefault(client)}
-          testId={tid(`set-default-client-${client.client_ref}`)}
-        />
-      ),
+      cell: (row) =>
+        row.usedHere ? (
+          <DefaultCell
+            isDefault
+            defaultLabel={t("integration.clients.usedHere")}
+            setLabel={t("integration.clients.useHere")}
+            canSetDefault={false}
+            onSetDefault={() => onUseHere(row)}
+            testId={`client-used-here-${row.client.client_ref}`}
+          />
+        ) : row.orgDefault ? (
+          <span className="text-muted-foreground block truncate text-xs">
+            {t("integration.clients.orgDefault")}
+          </span>
+        ) : null,
     },
     {
       id: "actions",
       header: "",
       width: "80px",
       align: "end",
-      cell: (client) => {
+      cell: (row) => {
+        const { client, level } = row;
         // A system client is the platform's, and an auto-provisioned one was
         // minted by the server at connect time — neither has credentials an
         // admin could rotate here. Deleting the auto-provisioned one is
         // allowed: it re-triggers registration.
-        const deletable = client.source === ownSource;
-        const editable = deletable && !client.auto_provisioned;
-        const promotable = editable && canPromote;
-        const canSetDefault = canChooseDefault && !client.is_default;
-        if (!editable && !deletable && !canSetDefault) return null;
+        const ownLevel = level === "space" || (level === "org" && canManageOrg);
+        const editable = ownLevel && !client.auto_provisioned;
+        const promotable = level === "space" && !client.auto_provisioned && canPromote;
+        const useHere = canUseHere && row.inSpaceList && !row.usedHere;
+        const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
+        if (!ownLevel && !useHere && !useForOrg) return null;
         return (
           <TableRowActions
             menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
-            isPending={deletingClientRef === client.client_ref}
+            isPending={pendingClientRef === client.client_ref}
             pendingLabel={t("common:loading")}
           >
-            {editable && (
+            {useHere && (
               <DropdownMenuItem
-                onSelect={() => onRotate(client)}
-                data-testid={tid(`oauth-client-rotate-${client.client_ref}`)}
+                onSelect={() => onUseHere(row)}
+                disabled={pendingClientRef !== null}
+                data-testid={`set-default-client-${client.client_ref}`}
               >
-                <RotateCcw />
-                {t("integration.oauthClient.btnRotate")}
+                <CircleCheck />
+                {t("integration.clients.useHere")}
               </DropdownMenuItem>
             )}
-            {canSetDefault && (
+            {useForOrg && (
               <DropdownMenuItem
-                onSelect={() => onSetDefault(client)}
-                disabled={settingDefaultClientRef !== null}
-                data-testid={tid(`set-default-client-${client.client_ref}`)}
+                onSelect={() => onUseForOrg(row)}
+                disabled={pendingClientRef !== null}
+                data-testid={`org-set-default-client-${client.client_ref}`}
               >
-                {t("integration.clients.setDefault.action")}
+                <Building2 />
+                {t("integration.clients.useForOrg")}
               </DropdownMenuItem>
             )}
             {promotable && (
               <DropdownMenuItem
-                onSelect={() => onPromote(client)}
+                onSelect={() => onPromote(row)}
                 data-testid={`oauth-client-promote-${client.client_ref}`}
               >
                 <ArrowUpFromLine />
                 {t("integration.clients.promote.action")}
               </DropdownMenuItem>
             )}
-            {deletable && (
+            {editable && (
               <DropdownMenuItem
-                onSelect={() => onDelete(client)}
-                disabled={deletingClientRef === client.client_ref}
-                data-testid={tid(`oauth-client-delete-${client.client_ref}`)}
+                onSelect={() => onRotate(row)}
+                data-testid={`oauth-client-rotate-${client.client_ref}`}
+              >
+                <RotateCcw />
+                {t("integration.oauthClient.btnRotate")}
+              </DropdownMenuItem>
+            )}
+            {ownLevel && (
+              <DropdownMenuItem
+                onSelect={() => onDelete(row)}
+                disabled={pendingClientRef === client.client_ref}
+                data-testid={`oauth-client-delete-${client.client_ref}`}
                 className="text-destructive focus:text-destructive"
               >
                 <Trash2 />

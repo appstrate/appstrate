@@ -219,13 +219,13 @@ const SETS = {
   integrationClients: () =>
     columnsFrom(() =>
       useIntegrationClientColumns({
-        ownSource: "custom",
-        tid: (id) => id,
-        canChooseDefault: true,
+        canUseHere: true,
+        canManageOrg: true,
+        canChooseOrgDefault: true,
         canPromote: true,
-        settingDefaultClientRef: null,
-        deletingClientRef: null,
-        onSetDefault: () => {},
+        pendingClientRef: null,
+        onUseHere: () => {},
+        onUseForOrg: () => {},
         onRotate: () => {},
         onPromote: () => {},
         onDelete: () => {},
