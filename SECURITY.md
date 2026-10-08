@@ -404,7 +404,15 @@ app.use("*", async (c, next) => {
 
 Sessions are managed by Better Auth (email/password + optional Google social login, cookie-based sessions). Account linking uses trusted providers (Google) with verified emails to prevent pre-account takeover. Email verification is opt-in (requires SMTP configuration). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
-Changing or resetting a password ends every other session of the account and invalidates its outstanding password-reset and magic links (`endOtherAccessAfterCredentialChange`, `packages/db/src/credential-change.ts`); a change keeps the session that made it. With the OIDC module, the same step revokes the account's OAuth refresh and access tokens (`offline_access` included), CLI sessions and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`). It runs on `/api/auth/change-password` and on every reset (`/api/auth/reset-password`, the hosted `/api/oauth/reset-password` page). Deliberately not ended: API keys, which authenticate as their creator rather than as a session; SSE streams already open; and emailed verification links, which are signed tokens with nothing stored to delete. Setting a first password on a social-only account (`POST /api/profile/password`) replaces no credential and is not covered. Two delays: an OAuth access token already issued as a JWT stays valid until it expires (one hour by default), and with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 another browser stays signed in until its cached session expires.
+Changing or resetting a password ends every other session of the account and invalidates its stored password-reset links, magic links and in-progress social-account links (`endOtherAccessAfterCredentialChange`, `packages/db/src/credential-change.ts`); a change keeps the session that made it. With the OIDC module, the same step revokes the account's OAuth refresh and access tokens (`offline_access` included), CLI sessions and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`). It runs on `/api/auth/change-password` and on every reset (`/api/auth/reset-password`, the hosted `/api/oauth/reset-password` page). Deliberately not ended:
+
+- API keys, which authenticate as their creator rather than as a session;
+- SSE streams already open;
+- sign-in methods already linked to the account (a social account linked from another session stays linked: review linked accounts in the security settings after a reset);
+- emailed verification and change-email links, signed tokens sent only to the account's address or to an address its owner confirmed, with nothing stored to delete;
+- setting a first password on a social-only account (`POST /api/profile/password`), which replaces no credential;
+- an OAuth access token already issued as a JWT, valid until it expires (one hour by default, Better Auth's `accessTokenExpiresIn`);
+- with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), another browser until its cached session expires, during which it can still approve a device code and so obtain a lasting CLI login.
 
 ### Organization context verification
 

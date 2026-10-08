@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The OIDC module's half of "a password change or reset ends every other way
- * into the account". Installed at `init()` through `setCredentialChangeHook`;
+ * What a password change or reset revokes among the credentials this module
+ * issues. Installed at `init()` through `setCredentialChangeHook`;
  * core (`packages/db/src/credential-change.ts`) calls it once it has ended the
  * other Better Auth sessions, and owns the logging and the error answer.
  *

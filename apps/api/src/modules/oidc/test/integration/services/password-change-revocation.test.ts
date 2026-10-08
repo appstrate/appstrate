@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   CREDENTIAL_CHANGE_REVOCATION_FAILED,
-  setCredentialChangeHook,
+  _swapCredentialChangeHookForTesting,
 } from "@appstrate/db/credential-change";
 import { deviceCode, oauthAccessToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
@@ -39,7 +39,6 @@ import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { upsertSmtpConfig, _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
-import { revokeOidcAccessAfterCredentialChange } from "../../../services/credential-change.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -437,13 +436,14 @@ describe("a password change or reset revokes the account's other access", () => 
   });
 
   describe("when revoking fails", () => {
+    let previousHook: ReturnType<typeof _swapCredentialChangeHookForTesting>;
     beforeEach(() => {
-      setCredentialChangeHook(async () => {
+      previousHook = _swapCredentialChangeHookForTesting(async () => {
         throw new Error("revocation store unavailable");
       });
     });
     afterEach(() => {
-      setCredentialChangeHook(revokeOidcAccessAfterCredentialChange);
+      _swapCredentialChangeHookForTesting(previousHook);
     });
 
     async function expectRevocationFailed(res: Response): Promise<void> {
@@ -493,7 +493,8 @@ describe("a password change or reset revokes the account's other access", () => 
       const res = await resetOnHostedPage(defaultSpaceId, user.email);
 
       expect(res.status).toBe(500);
-      const page = await res.text();
+      // Whitespace-normalised: the copy is reflowed by the formatter.
+      const page = (await res.text()).replace(/\s+/g, " ");
       expect(page).toContain("Demandez un nouveau lien de réinitialisation");
       expect(page).toContain('href="/api/oauth/forgot-password?');
     });

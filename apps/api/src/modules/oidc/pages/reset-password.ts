@@ -80,7 +80,7 @@ export function renderResetPasswordPage(props: ResetPasswordPageProps): RawHtml 
     const bodyHtml = html`
       <h1>Mot de passe mis à jour</h1>
       <p>
-        Votre mot de passe a été réinitialisé et tous vos appareils ont été déconnectés. Vous pouvez
+        Votre mot de passe a été réinitialisé et vos autres connexions révoquées. Vous pouvez
         maintenant vous connecter.
       </p>
       <div class="footer-links">

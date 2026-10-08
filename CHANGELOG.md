@@ -29,25 +29,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Changing or resetting a password ends the account's other sessions and
-  sign-in tokens.** A change ends every other session of the account,
-  invalidates its outstanding password-reset and magic links and, with the
-  OIDC module, revokes its OAuth refresh and access tokens (`offline_access`
-  ones included), its CLI sessions (`revoked_reason: password_changed`) and
-  its device codes, approved or not; the session that made the change stays
-  signed in, whichever client sent it. A reset, through
-  `/api/auth/reset-password` or the hosted `/api/oauth/reset-password` page,
-  does the same and ends every session. The "password changed" email now
-  leaves after the revocation. An MCP client or the CLI signs in again
-  afterwards. Not ended: API keys (they act as their creator), streams already
-  open, an OAuth access token already issued as a JWT (valid until it expires,
-  at most one hour by Better Auth's `accessTokenExpiresIn` default) and, with
-  `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), another browser
-  until its cached session expires; a CLI access token stops at once. If
+  sign-in tokens.** A change ends every other session of the account and
+  invalidates its stored password-reset links, magic links and in-progress
+  social-account links; with the OIDC module it also revokes the account's
+  OAuth refresh and access tokens (`offline_access` ones included), its CLI
+  sessions (`revoked_reason: password_changed`) and its device codes, approved
+  or not. The session that made the change stays signed in, whichever client
+  sent it. A reset, through `/api/auth/reset-password` or the hosted
+  `/api/oauth/reset-password` page, does the same and ends every session. The
+  "password changed" email now leaves after the revocation. An MCP client or
+  the CLI signs in again afterwards; a CLI access token stops at once. If
   revoking fails once the password is written, the error is logged and the
   change or reset answers `500 credential_change_revocation_failed`; the
   dashboard and the hosted page then say the password was changed but not
   every device could be signed out, and the reset pages offer a new reset link
-  instead of reporting an invalid one.
+  instead of reporting an invalid one. Deliberately not ended:
+  - API keys, which authenticate as their creator rather than as a session;
+  - SSE streams already open;
+  - sign-in methods already linked to the account (a social account linked
+    from another session stays linked: review linked accounts in the security
+    settings after a reset);
+  - emailed verification and change-email links, signed tokens sent only to
+    the account's address or to an address its owner confirmed, with nothing
+    stored to delete;
+  - setting a first password on a social-only account
+    (`POST /api/profile/password`), which replaces no credential;
+  - an OAuth access token already issued as a JWT, valid until it expires
+    (one hour by default, Better Auth's `accessTokenExpiresIn`);
+  - with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), another
+    browser until its cached session expires, during which it can still
+    approve a device code and so obtain a lasting CLI login.
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

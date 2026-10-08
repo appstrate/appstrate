@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, CheckCircle } from "lucide-react";
+import { CheckCircle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -12,7 +12,10 @@ import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
-import { ApiError } from "../api/errors";
+import { ResetLinkUnusable } from "../components/reset-link-unusable";
+import { resetFailure } from "../lib/reset-failure";
+
+type ResetState = "form" | "submitting" | "success" | "revocation_failed";
 
 export function ResetPasswordPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -22,24 +25,13 @@ export function ResetPasswordPage() {
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [state, setState] = useState<"form" | "submitting" | "success">("form");
+  const [state, setState] = useState<ResetState>("form");
   const [error, setError] = useState<string | null>(null);
 
   if (!token) {
     return (
       <AuthLayout>
-        <div className="flex flex-col items-center gap-6 text-center">
-          <div className="bg-destructive/10 flex h-16 w-16 items-center justify-center rounded-full">
-            <AlertCircle className="text-destructive h-8 w-8" />
-          </div>
-          <p className="text-muted-foreground text-sm">{t("resetPassword.invalidToken")}</p>
-          <Link
-            to="/forgot-password"
-            className="text-muted-foreground hover:text-primary text-sm underline underline-offset-4"
-          >
-            {t("resetPassword.requestNew")}
-          </Link>
-        </div>
+        <ResetLinkUnusable message={t("resetPassword.invalidToken")} />
       </AuthLayout>
     );
   }
@@ -62,15 +54,22 @@ export function ResetPasswordPage() {
       await resetPassword(token, password);
       setState("success");
     } catch (err) {
-      // The password is written and the link spent: not an invalid link.
-      setError(
-        err instanceof ApiError && err.code === "credential_change_revocation_failed"
-          ? t("resetPassword.revocationFailed")
-          : t("resetPassword.invalidToken"),
-      );
+      if (resetFailure(err) === "revocation_failed") {
+        setState("revocation_failed");
+        return;
+      }
+      setError(t("resetPassword.invalidToken"));
       setState("form");
     }
   };
+
+  if (state === "revocation_failed") {
+    return (
+      <AuthLayout>
+        <ResetLinkUnusable message={t("resetPassword.revocationFailed")} />
+      </AuthLayout>
+    );
+  }
 
   if (state === "success") {
     return (

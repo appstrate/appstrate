@@ -1,24 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Core's half of a password change or reset (no OIDC module routes): the
- * account's other sessions end and its outstanding reset links stop working.
+ * Core's half of a password change or reset, with the OIDC module's hook taken
+ * out: the account's other sessions end, and its stored reset links, magic
+ * links and social-link states stop working.
  * The OAuth tokens, CLI sessions and device codes the OIDC module revokes are
  * covered by
  * `apps/api/src/modules/oidc/test/integration/services/password-change-revocation.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { eq, like } from "drizzle-orm";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
+import { _swapCredentialChangeHookForTesting } from "@appstrate/db/credential-change";
+import { session as sessionTable, verification } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { createTestUser } from "../../helpers/auth.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { createTestUser, SESSION_TTL_MS } from "../../helpers/auth.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite, captureMails, firstLink } from "../../helpers/smtp.ts";
 
 const app = getTestApp({ modules: [] });
 
 const PASSWORD = "TestPassword123!";
 const NEW_PASSWORD = "BrandNewPassword456!";
+
+// Core alone, as on an instance whose `MODULES` omits `oidc`.
+let oidcRevocation: ReturnType<typeof _swapCredentialChangeHookForTesting>;
+beforeAll(() => {
+  oidcRevocation = _swapCredentialChangeHookForTesting(null);
+});
+afterAll(() => {
+  _swapCredentialChangeHookForTesting(oidcRevocation);
+});
 
 function postAuth(path: string, body: unknown, cookie?: string): Promise<Response> {
   return Promise.resolve(
@@ -43,12 +56,28 @@ async function profileStatus(cookie: string): Promise<number> {
   return (await app.request("/api/profile", { headers: { Cookie: cookie } })).status;
 }
 
-async function twoBrowsers(): Promise<{ email: string; a: string; b: string }> {
+async function twoBrowsers(): Promise<{ id: string; email: string; a: string; b: string }> {
   const user = await createTestUser({ emailVerified: true, password: PASSWORD });
   const b = await signIn(user.email);
   expect(await profileStatus(user.cookie)).toBe(200);
   expect(await profileStatus(b)).toBe(200);
-  return { email: user.email, a: user.cookie, b };
+  return { id: user.id, email: user.email, a: user.cookie, b };
+}
+
+/** More sessions than Better Auth lists or plans hooks for in one read (100). */
+async function seedSessions(userId: string, count: number): Promise<void> {
+  await db.insert(sessionTable).values(
+    Array.from({ length: count }, () => ({
+      id: crypto.randomUUID(),
+      token: crypto.randomUUID(),
+      userId,
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+    })),
+  );
+}
+
+async function sessionCount(userId: string): Promise<number> {
+  return (await db.select().from(sessionTable).where(eq(sessionTable.userId, userId))).length;
 }
 
 describe("password change without SMTP", () => {
@@ -68,6 +97,51 @@ describe("password change without SMTP", () => {
     expect(res.status).toBe(200);
     expect(await profileStatus(a)).toBe(200);
     expect(await profileStatus(b)).toBe(401);
+  });
+
+  it("ends every other session, however many there are", async () => {
+    const { id, a } = await twoBrowsers();
+    await seedSessions(id, 120);
+
+    const res = await postAuth(
+      "/change-password",
+      { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+      a,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await sessionCount(id)).toBe(1);
+    expect(await profileStatus(a)).toBe(200);
+  });
+
+  it("drops the account's social-link states, and only those", async () => {
+    const { id, email, a } = await twoBrowsers();
+    const linkState = (userId: string) =>
+      JSON.stringify({ callbackURL: "/", codeVerifier: "v", link: { email, userId } });
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await db.insert(verification).values([
+      { id: crypto.randomUUID(), identifier: "auth-state:own", value: linkState(id), expiresAt },
+      {
+        id: crypto.randomUUID(),
+        identifier: "auth-state:other",
+        value: linkState("someone-else"),
+        expiresAt,
+      },
+      { id: crypto.randomUUID(), identifier: "auth-state:raw", value: "not json", expiresAt },
+    ]);
+
+    const res = await postAuth(
+      "/change-password",
+      { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+      a,
+    );
+
+    expect(res.status).toBe(200);
+    const left = await db
+      .select({ identifier: verification.identifier })
+      .from(verification)
+      .where(like(verification.identifier, "auth-state:%"));
+    expect(left.map((r) => r.identifier).sort()).toEqual(["auth-state:other", "auth-state:raw"]);
   });
 
   it("keeps the session Better Auth hands back when the caller asks it to rotate", async () => {
@@ -123,7 +197,8 @@ describe("password reset links (SMTP on)", () => {
   }
 
   it("a reset ends every session of the account and spends the other links", async () => {
-    const { email, a, b } = await twoBrowsers();
+    const { id, email, a, b } = await twoBrowsers();
+    await seedSessions(id, 120);
     const token = await resetToken(email);
     const other = await resetToken(email);
 
@@ -132,6 +207,7 @@ describe("password reset links (SMTP on)", () => {
     expect(res.status).toBe(200);
     expect(await profileStatus(a)).toBe(401);
     expect(await profileStatus(b)).toBe(401);
+    expect(await sessionCount(id)).toBe(0);
     const replay = await postAuth("/reset-password", { token: other, newPassword: PASSWORD });
     expect(replay.status).toBe(400);
     // The new password signs in; the old sessions are not coming back.
