@@ -5,17 +5,30 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { initialCredentialValues } from "../components/integration-connect/credential-schema";
+import {
+  initialVariableValues,
+  variableFields,
+} from "../components/integration-connect/connection-variables-schema";
+import { VariableFields } from "../components/integration-connect/variable-fields";
 import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
 import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 import { errorMessage } from "../lib/mutation-error";
+import {
+  missingVariables,
+  submitHostedConnect,
+  variableFieldErrors,
+} from "../lib/hosted-connect-submit";
 
 /**
- * Standalone hosted connect form (issue #769) — the non-OAuth half of the
- * unified connect portal. Reached when the dispatch endpoint
- * (`GET /api/integrations/connect/start`) redirects a non-OAuth session here.
+ * Standalone hosted connect form (issue #769) — the form half of the unified
+ * connect portal. Reached when the dispatch endpoint
+ * (`GET /api/integrations/connect/start`) redirects here: a non-OAuth session,
+ * or an OAuth one whose integration declares connection variables (AFPS §7.12)
+ * — the form then collects only the variables and hands the window over to the
+ * authorization server.
  *
  * Authentication is the httpOnly page cookie pinned during dispatch — NOT the
  * platform session — so this page renders standalone (members AND embedded
@@ -55,6 +68,8 @@ export function HostedConnectPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const [variableErrors, setVariableErrors] = useState<Record<string, string>>({});
   // What the user must still do on the target host for a minted credential.
   // Nothing here is secret — the private half never leaves the server.
   const [handoffSteps, setHandoffSteps] = useState<HandoffStep[] | null>(null);
@@ -76,6 +91,7 @@ export function HostedConnectPage() {
         // Seed the defaults the manifest declares, so a value the user can see
         // in the form is a value the form will actually submit.
         setValues(initialCredentialValues(ctx.auth));
+        setVariableValues(initialVariableValues(ctx.variables));
         setPhase("form");
       } catch (err) {
         if (cancelled) return;
@@ -88,6 +104,31 @@ export function HostedConnectPage() {
     };
   }, []);
 
+  // Back from the authorization server restores this page from the bfcache as it
+  // was left — submitting. The page cookie survives until the OAuth callback, so
+  // the form can be submitted again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setPhase((p) => (p === "submitting" ? "form" : p));
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  const fields = context?.variables ? variableFields(context.variables.schema) : [];
+  const variableLabels = Object.fromEntries(fields.map((f) => [f.name, f.title ?? f.name]));
+  const isOAuth = context?.auth.type === "oauth2";
+
+  const changeVariable = (name: string, value: string) => {
+    setVariableValues((prev) => ({ ...prev, [name]: value }));
+    // The refusal was about the previous value.
+    setVariableErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     // A missing CSRF nonce means the page session is broken (cookie cleared or
@@ -96,14 +137,44 @@ export function HostedConnectPage() {
       setError(t("integration.connect.hosted.errorBody"));
       return;
     }
+    const variableNames = context.variables ? fields.map((f) => f.name) : null;
+    // Every variable is required; whatever else a value must be, the server says.
+    const missing = missingVariables(variableNames ?? [], variableValues);
+    if (missing.length > 0) {
+      setVariableErrors(
+        Object.fromEntries(
+          missing.map((name) => [name, t("integration.connect.variables.required")]),
+        ),
+      );
+      return;
+    }
+    const csrf = context.csrf;
     setPhase("submitting");
     setError(null);
+    setVariableErrors({});
     try {
-      // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
-      const { data } = await client.POST("/api/integrations/connect/submit", {
-        params: { header: { "x-connect-csrf": context.csrf } },
-        body: { credentials: values },
-      });
+      const outcome = await submitHostedConnect(
+        {
+          authType: context.auth.type,
+          credentials: values,
+          variableNames,
+          variableValues,
+        },
+        {
+          // Non-2xx throws `ApiError` (RFC 9457 `detail`) via the client middleware.
+          post: async (body) =>
+            (
+              await client.POST("/api/integrations/connect/submit", {
+                params: { header: { "x-connect-csrf": csrf } },
+                body,
+              })
+            ).data,
+          navigate: (url) => window.location.assign(url),
+        },
+      );
+      // The window is leaving for the authorization server: the form stays
+      // disabled until it does, and the OAuth callback announces the result.
+      if (outcome.kind === "redirected") return;
       // The connection exists: announce it now. The popup opener does not close
       // this window, so an install block below stays up until the user is done.
       publishConnectCompletion(
@@ -111,12 +182,14 @@ export function HostedConnectPage() {
         window.opener as Window | null,
         window.location.origin,
       );
-      const minted = data?.handoff_steps;
-      if (minted && minted.length > 0) setHandoffSteps(minted);
+      if (outcome.handoffSteps.length > 0) setHandoffSteps(outcome.handoffSteps);
       else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
-      setError(errorMessage(err));
+      // A refusal naming a variable is shown beside its input.
+      const { byName, complete } = variableFieldErrors(err, variableLabels);
+      setVariableErrors(byName);
+      setError(complete ? null : errorMessage(err));
       setPhase("form");
     }
   };
@@ -193,12 +266,29 @@ export function HostedConnectPage() {
             </div>
             <form className="space-y-4" onSubmit={submit}>
               <p className="text-muted-foreground text-sm">
-                {t("integration.connect.modal.subtitle", { type: context.auth.type })}
+                {isOAuth
+                  ? t("integration.connect.variables.oauthSubtitle")
+                  : t("integration.connect.modal.subtitle", { type: context.auth.type })}
               </p>
-              <CredentialFields auth={context.auth} values={values} onChange={setValues} />
-              {error && <p className="text-sm text-red-400">{error}</p>}
+              <VariableFields
+                fields={fields}
+                values={variableValues}
+                onChange={changeVariable}
+                errors={variableErrors}
+              />
+              {/* oauth2: the credential comes from the authorization server, not this form. */}
+              {!isOAuth && (
+                <CredentialFields auth={context.auth} values={values} onChange={setValues} />
+              )}
+              {error && (
+                <p className="text-sm text-red-400" role="alert">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={phase === "submitting"}>
-                {t("integration.connect.btn.save")}
+                {isOAuth
+                  ? t("integration.connect.variables.continue")
+                  : t("integration.connect.btn.save")}
               </Button>
             </form>
           </>

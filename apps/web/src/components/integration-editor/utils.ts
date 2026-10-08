@@ -12,6 +12,7 @@
  */
 
 import { API_META_KEY } from "@appstrate/core/integration";
+import { isUrlTemplate, variableRefs } from "@appstrate/afps-shared/connection-variables";
 
 type Rec = Record<string, unknown>;
 
@@ -66,8 +67,30 @@ export function getSource(manifest: Rec): SourceState {
   };
 }
 
-/** The allowlist a remote source's own host gives an auth: `<origin>/**`, empty while the URL names no host. */
+/**
+ * Whether `url` is a usable `source.remote.url`: an absolute URL, or a URL
+ * template choosing the server per connection (AFPS §7.12).
+ */
+export function isRemoteSourceUrl(url: string): boolean {
+  // `URL.canParse` takes `https://api.{$variable.x}.com` as a literal host.
+  return url.includes("{$") ? isUrlTemplate(url) : URL.canParse(url);
+}
+
+/**
+ * The allowlist a remote source's own host gives an auth: `<origin>/**`, empty
+ * while the URL names no host. A URL template keeps its placeholder: the URL
+ * form (`{$variable.x}/path`) gives `{$variable.x}/**`, the host form
+ * (`https://{$variable.x}.example.com/path`) gives `https://{$variable.x}.example.com/**`.
+ */
 function sourceHostAllowlist(url: string): string[] {
+  if (url.includes("{$")) {
+    if (!isUrlTemplate(url)) return [];
+    if (url.startsWith("https://")) {
+      const authority = url.slice("https://".length).split("/", 1)[0];
+      return [`https://${authority}/**`];
+    }
+    return [`{$variable.${variableRefs(url)[0]}}/**`];
+  }
   try {
     const { protocol, hostname, origin } = new URL(url);
     return (protocol === "https:" || protocol === "http:") && hostname ? [`${origin}/**`] : [];

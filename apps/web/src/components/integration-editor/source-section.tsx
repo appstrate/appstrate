@@ -32,11 +32,13 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
           <FormField
             id="int-source-url"
             label={t("integrationEditor.source.remoteUrl")}
-            type="url"
+            // Text, not `url`: a URL template (`{$variable.base_url}/mcp`) is
+            // not a URL until a connection's values render it.
             required
             value={source.remoteUrl}
             onChange={(v) => update({ remoteUrl: v })}
             placeholder="https://example.com/mcp/v1"
+            description={t("integrationEditor.source.remoteUrlDesc")}
           />
           <FormField
             id="int-source-transport"

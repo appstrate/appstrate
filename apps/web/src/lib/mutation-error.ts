@@ -89,6 +89,11 @@ function fieldErrors(err: ApiError): Refusal[] {
   });
 }
 
+/** The `errors[]` items of a `validation_failed` refusal; none for any other failure. */
+export function validationFieldErrors(err: unknown): Refusal[] {
+  return err instanceof ApiError && err.code === "validation_failed" ? fieldErrors(err) : [];
+}
+
 /** The request member a refusal blames (`param`, or the first `errors[]` item's `field`). */
 export function errorField(err: unknown): string | undefined {
   if (!(err instanceof ApiError)) return undefined;

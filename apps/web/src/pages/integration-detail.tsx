@@ -102,6 +102,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
+import { ConnectionVariablesLine } from "../components/integration-connect/connection-variables-line";
 import { isQueryInFlight } from "../lib/query-state";
 import { keepAvailable, toggleCapped, unavailableConnectionIds } from "../lib/connection-set";
 import { Modal } from "../components/modal";
@@ -1114,7 +1115,10 @@ function ConnectionSetChecklist({
               onCheckedChange={() => onChange(toggleCapped(value, c.id))}
               data-testid={id}
             />
-            <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+            <label htmlFor={id} className="min-w-0">
+              {connectionOptionLabel(c)}
+              <ConnectionVariablesLine variables={c.variables} />
+            </label>
           </div>
         );
       })}
@@ -1520,6 +1524,10 @@ function ConnectionTableRow({
               )}
             </div>
           )}
+          <ConnectionVariablesLine
+            variables={connection.variables}
+            testId={`connection-variables-${connection.id}`}
+          />
         </TableCell>
 
         {/* Status — connected / needs reconnection (+ renew) + expiry */}
