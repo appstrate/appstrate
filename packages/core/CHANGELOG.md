@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/sidecar-types`): what of a Pi registry record shapes a
   request beyond the resolved values, as the platform hands it to a model
   builder (`name`, `thinkingLevelMap?`, `compat?`), and its shape check. (#1706)
+- **`ModelGenerationCapabilities.reasoning.off`**, **`modelReasoningOffSchema`**,
+  **`MODEL_REASONING_OFF_BEHAVIOURS`** and **`ModelReasoningOff`**
+  (`@appstrate/core/model-generation`): what reasoning level `off` puts on the
+  wire — `disables` (an explicit reasoning-off parameter) or `unsent` (no
+  reasoning parameter; the server keeps its own default, and some models still
+  reason). Optional: absent when the model does not reason or does not take
+  `off`. (#1774)
 - **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
   locale localises the unit names and the decimal separator (`fr` →
   `2,0 Ko`). Without it the output is unchanged.

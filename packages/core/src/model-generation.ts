@@ -78,6 +78,17 @@ export const modelGenerationSettingsSchema = z
 
 export type ModelGenerationSettings = z.infer<typeof modelGenerationSettingsSchema>;
 
+/**
+ * What level `off` puts on the wire. `disables`: an explicit reasoning-off
+ * parameter. `unsent`: no reasoning parameter, so the server keeps its own
+ * default — some models still reason.
+ */
+export const MODEL_REASONING_OFF_BEHAVIOURS = ["disables", "unsent"] as const;
+
+export const modelReasoningOffSchema = z.enum(MODEL_REASONING_OFF_BEHAVIOURS);
+
+export type ModelReasoningOff = z.infer<typeof modelReasoningOffSchema>;
+
 export const modelCapabilitySupportSchema = z.enum(["supported", "unsupported", "unknown"]);
 export type ModelCapabilitySupport = z.infer<typeof modelCapabilitySupportSchema>;
 
@@ -92,6 +103,8 @@ export const modelGenerationCapabilitiesSchema = z
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
           .default({}),
+        /** Absent when the model does not reason or does not take `off`. */
+        off: modelReasoningOffSchema.optional(),
       })
       .default({ supported: "unknown", adaptive: null, levels: {} }),
   })
